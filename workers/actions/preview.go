@@ -38,6 +38,9 @@ func builtinStepRewriter(nonce, dir string) func(*model.Step) error {
 		if err := rewriteBuiltinArtifactStep(step); err != nil {
 			return err
 		}
+		if err := rewriteBuiltinNotificationStep(step, nonce, dir); err != nil {
+			return err
+		}
 		return rewriteBuiltinPreviewStep(step, nonce, dir)
 	}
 }

@@ -369,7 +369,8 @@ pub async fn login(
     axum::Extension(proxies): axum::Extension<TrustedProxies>,
     headers: HeaderMap,
     Json(body): Json<Credentials>,
-) -> Result<impl axum::response::IntoResponse> {
+) -> Result<axum::response::Response> {
+    use axum::response::IntoResponse;
     let email = body.email.trim().to_lowercase();
     let ip = login_ip(peer.ip(), &headers, &proxies).to_string();
     if email.len() > 320 || body.password.len() > 1024 {
@@ -408,6 +409,17 @@ pub async fn login(
     use sea_orm::TransactionTrait;
     let tx = s.db.begin().await?;
     super::platform::lock(&tx).await?;
+    let current = users::Entity::find_by_id(row.id)
+        .one(&tx)
+        .await?
+        .ok_or_else(refused)?;
+    if current.active == 0 || current.password_hash != row.password_hash {
+        return Err(refused());
+    }
+    if let Some(challenge) = super::otp::issue(&s, &tx, &current, &ip).await? {
+        tx.commit().await?;
+        return Ok(([(header::CACHE_CONTROL, "no-store")], Json(challenge)).into_response());
+    }
     super::login_guard::succeeded(&tx, &email).await?;
     let session = start_session(&s, &id, &tx).await?;
     users::Entity::update_many()
@@ -423,7 +435,8 @@ pub async fn login(
     Ok((
         set_cookie(&s, &session, SESSION_MS / 1000),
         Json(json!({"id": id, "email": email})),
-    ))
+    )
+        .into_response())
 }
 
 /// Returns the cookie value. The row keeps only a hash of it, so the secret

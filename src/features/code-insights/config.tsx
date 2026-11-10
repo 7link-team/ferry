@@ -185,17 +185,6 @@ export function codeInsightForm(_workspace: string): FormConfig<Row> {
               "insight-domain:定时更新按计划采集；事件更新在仓库发生变化时采集。",
           },
           {
-            key: "schedule",
-            label: "执行周期",
-            labelKey: "insight-domain:执行周期",
-            type: "cron",
-            required: true,
-            span: 2,
-            when: (row) => row.update_mode === "scheduled",
-            help: "默认每 4 小时更新一次。",
-            helpKey: "insight-domain:默认每 4 小时更新一次。",
-          },
-          {
             key: "timezone",
             label: "时区",
             labelKey: "insight-domain:时区",
@@ -205,6 +194,17 @@ export function codeInsightForm(_workspace: string): FormConfig<Row> {
             help: "留空按 UTC；Cron 按所选时区执行。可填写 IANA 时区，例如 Asia/Shanghai、Asia/Singapore。",
             helpKey:
               "insight-domain:留空按 UTC；Cron 按所选时区执行。可填写 IANA 时区，例如 Asia/Shanghai、Asia/Singapore。",
+          },
+          {
+            key: "schedule",
+            label: "执行周期",
+            labelKey: "insight-domain:执行周期",
+            type: "cron",
+            required: true,
+            span: 2,
+            when: (row) => row.update_mode === "scheduled",
+            help: "默认每 4 小时更新一次。",
+            helpKey: "insight-domain:默认每 4 小时更新一次。",
           },
           {
             key: "enabled",

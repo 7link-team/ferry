@@ -662,6 +662,14 @@ pub async fn report(
     render(s, scope, kind, raw, source_rows, projection).await
 }
 
+/// Report kinds: overview, contributors, ranking, repositories, branches, commits, heatmap, period.
+/// Query: since/until (YYYY-MM-DD inclusive UTC dates or RFC3339 timestamps), page/page_size
+/// (page_size 1..500), repos (comma-separated repository paths, URLs or IDs), authors
+/// (comma-separated contributor IDs, nicknames or emails), branches (comma-separated refs).
+/// Merge commits are excluded by default; isMerge=0,1 includes both. Read coverage before
+/// claiming complete results. Count total, paginate items, and query contributors with repos
+/// to obtain each person's contribution per repository. additions, deletions and effectives
+/// are distinct recorded metrics; do not equate effectives with additions minus deletions.
 pub async fn insight_report(
     State(s): State<AppState>,
     scope: Scope,

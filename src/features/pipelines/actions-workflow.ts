@@ -1,5 +1,5 @@
 import { Document, isAlias, isCollection, isMap, isScalar, isSeq, parseDocument, visit, type YAMLMap } from "yaml";
-import { executionText, workflowText } from "../../shared/i18n/i18n";
+import { commonText, executionText, workflowText } from "../../shared/i18n/i18n";
 
 export type ActionStep = Record<string, unknown> & { name?: string; run?: string; uses?: string; env?: Record<string, string> };
 export interface ActionJob { id: string; name: string; needs: string[]; runsOn: string[]; steps: ActionStep[]; raw: Record<string, unknown> }
@@ -165,11 +165,11 @@ export function addActionJob(source: string, checkout = false, placement?: { job
   document.setIn(["jobs", id], { name: "新任务", needs, "runs-on": "self-hosted", "timeout-minutes": 30, steps: [...(checkout ? [{ name: "步骤1", uses: "actions/checkout@v4" }] : []), { name: checkout ? "步骤2" : "步骤1", run: defaultActionRun(checkout ? 2 : 1) }] });
   return { source: serialize(document), id };
 }
-export function addActionStep(source: string, job: string, kind: "run" | "checkout" | "action" = "run"): string {
+export function addActionStep(source: string, job: string, kind: "run" | "checkout" | "action" | "notification" = "run"): string {
   const { document, jobs } = parseActions(source);
   const row = jobs.find(row => row.id === job); if (!row) throw new Error(executionText("workflow.jobMissing"));
   const name = `步骤${row.steps.length + 1}`;
-  document.addIn(["jobs", job, "steps"], kind === "checkout" ? { name: workflowText("actions.cloneCode"), uses: "actions/checkout@v4" } : kind === "action" ? { name, uses: "actions/setup-node@v4" } : { name, run: defaultActionRun(row.steps.length + 1) });
+  document.addIn(["jobs", job, "steps"], kind === "notification" ? { name: commonText("notifications:send"), uses: "ferry/notify@v1", with: { "channel-id": "", body: "" } } : kind === "checkout" ? { name: workflowText("actions.cloneCode"), uses: "actions/checkout@v4" } : kind === "action" ? { name, uses: "actions/setup-node@v4" } : { name, run: defaultActionRun(row.steps.length + 1) });
   return serialize(document);
 }
 

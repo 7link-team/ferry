@@ -1,0 +1,1 @@
+TC3-HMAC-SHA256 Credential=fixtureAccess/2023-11-14/sms/tc3_request, SignedHeaders=content-type;host, Signature=a853ac5e262bf4e3e69f53c62cda5703d213ba884cb588fc617de97e162bba72

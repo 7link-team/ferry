@@ -1,10 +1,17 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import {
   AtSign,
   ChevronDown,
   Grip,
   Mic,
   Paperclip,
+  Reply,
   Square,
   X,
 } from "lucide-react";
@@ -20,6 +27,14 @@ import {
 } from "../../shared/ui/dropdown-menu";
 import { conversationText as t } from "./resource-config";
 import type { Attachment } from "./AttachmentView";
+import {
+  mentionAt,
+  mentionRanges,
+  selectMentionDeletion,
+  MentionSuggestions,
+  type MentionToken,
+  type MentionOption,
+} from "./MentionSuggestions";
 export interface ComposerDraft {
   prompt: string;
   attachments: Attachment[];
@@ -53,7 +68,11 @@ export function Composer({
   group,
   agents,
   people = [],
+  reply,
+  onCancelReply,
 }: {
+  reply?: { name: string; text: string } | undefined;
+  onCancelReply?: () => void;
   endpoint: string;
   draft: ComposerDraft;
   onChange: (value: ComposerDraft) => void;
@@ -76,10 +95,21 @@ export function Composer({
     ),
   );
   const [dragging, setDragging] = useState(false);
-  const [mention, setMention] = useState(false);
+  const [mention, setMention] = useState<MentionToken | null>(null);
+  const [activeMention, setActiveMention] = useState(0);
+  const dismissedMention = useRef("");
+  const removedMentions = useRef(new Map<string, MentionOption>());
   const [recording, setRecording] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const pendingSelection = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (pendingSelection.current === null || !textarea.current) return;
+    const caret = pendingSelection.current;
+    pendingSelection.current = null;
+    textarea.current.focus();
+    textarea.current.setSelectionRange(caret, caret);
+  });
   const recorder = useRef<MediaRecorder | null>(null);
   const disposed = useRef(false);
   const recordingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -88,6 +118,9 @@ export function Composer({
   const resizing = useRef<{ y: number; height: number } | null>(null);
   const latest = useRef(draft);
   latest.current = draft;
+  useEffect(() => {
+    removedMentions.current.clear();
+  }, [endpoint]);
   useEffect(() => {
     disposed.current = false;
     return () => {
@@ -252,13 +285,85 @@ export function Composer({
   }
   const targets = draft.targets ?? [];
   const mentions = draft.mentions ?? [];
-  const mentionQuery =
-    draft.prompt.match(/(?:^|\s)@([^@\s]*)$/)?.[1]?.toLocaleLowerCase() ?? "";
-  const mentionOptions = [
+  const mentionQuery = mention?.query.toLocaleLowerCase() ?? "";
+  const participants = [
     ...agents.map((a) => ({ ...a, human: false })),
     ...people.map((p) => ({ ...p, state: "active", human: true })),
-  ].filter((a) => a.name.toLocaleLowerCase().includes(mentionQuery));
+  ];
+  const mentionOptions = participants.filter((a) =>
+    a.name.toLocaleLowerCase().includes(mentionQuery),
+  );
+  const selectedParticipants = participants.filter((a) =>
+    (a.human ? mentions : targets).includes(a.id),
+  );
+  useEffect(() => {
+    const input = textarea.current;
+    if (!input || !group || locked || recording) return;
+    const before = (event: InputEvent) => {
+      if (
+        !event.isComposing &&
+        ["deleteContentBackward", "deleteContentForward"].includes(
+          event.inputType,
+        )
+      )
+        selectMentionDeletion(
+          input,
+          selectedParticipants,
+          event.inputType === "deleteContentBackward",
+        );
+    };
+    input.addEventListener("beforeinput", before);
+    return () => input.removeEventListener("beforeinput", before);
+  });
+  function changePrompt(prompt: string, inputType?: string) {
+    if (!group) {
+      onChange({ ...draft, prompt });
+      return;
+    }
+    const previous = mentionRanges(draft.prompt, selectedParticipants);
+    const remaining = mentionRanges(prompt, selectedParticipants);
+    const key = (a: MentionOption) => `${a.human}/${a.id}`;
+    const removed = previous
+      .filter((r) => !remaining.some((n) => key(n.option) === key(r.option)))
+      .map((r) => r.option);
+    for (const option of removed)
+      removedMentions.current.set(key(option), option);
+    const restored =
+      inputType === "historyUndo" || inputType === "historyRedo"
+        ? mentionRanges(
+            prompt,
+            participants.filter((a) => removedMentions.current.has(key(a))),
+          )
+            .map((r) => r.option)
+            .filter((a) => a.state === "active")
+        : [];
+    onChange({
+      ...draft,
+      prompt,
+      targets: [
+        ...new Set([
+          ...targets.filter(
+            (id) => !removed.some((a) => !a.human && a.id === id),
+          ),
+          ...restored.filter((a) => !a.human).map((a) => a.id),
+        ]),
+      ],
+      mentions: [
+        ...new Set([
+          ...mentions.filter(
+            (id) => !removed.some((a) => a.human && a.id === id),
+          ),
+          ...restored.filter((a) => a.human).map((a) => a.id),
+        ]),
+      ],
+    });
+  }
+  const effectiveMention =
+    mentionOptions[activeMention]?.state === "active"
+      ? activeMention
+      : mentionOptions.findIndex((a) => a.state === "active");
   function toggleAgent(id: string) {
+    removedMentions.current.delete(`false/${id}`);
     onChange({
       ...draft,
       targets: targets.includes(id)
@@ -266,34 +371,111 @@ export function Composer({
         : [...targets, id],
     });
   }
-  function pickAgent(a: { id: string; name: string; human?: boolean }) {
-    const selected = (a.human ? mentions : targets).includes(a.id);
+  function updateMention(input: HTMLTextAreaElement, changed = false) {
+    if (!group || locked || recording) return;
+    const token = mentionAt(
+      input.value,
+      input.selectionStart,
+      input.selectionEnd,
+    );
+    if (changed) dismissedMention.current = "";
+    setMention(
+      token && JSON.stringify(token) !== dismissedMention.current
+        ? token
+        : null,
+    );
+    if (changed || token?.query !== mention?.query) setActiveMention(0);
+  }
+  function dismissMention() {
+    dismissedMention.current = JSON.stringify(mention);
+    setMention(null);
+  }
+  function pickAgent(a: MentionOption) {
+    if (!mention || a.state !== "active") return;
+    const after = draft.prompt.slice(mention.end).replace(/^[^\s@]*/u, "");
+    const prefix = draft.prompt.slice(0, mention.start) + `@${a.name}`;
+    pendingSelection.current = prefix.length + 1;
+    onChange({
+      ...draft,
+      prompt: prefix + (after.startsWith(" ") ? "" : " ") + after,
+      ...(a.human
+        ? { mentions: mentions.includes(a.id) ? mentions : [...mentions, a.id] }
+        : { targets: targets.includes(a.id) ? targets : [...targets, a.id] }),
+    });
+    setMention(null);
+  }
+  function openMentions() {
+    const input = textarea.current;
+    if (!input) return;
+    const start = input.selectionStart,
+      end = input.selectionEnd;
+    const existing = mentionAt(draft.prompt, start, end);
+    dismissedMention.current = "";
+    if (existing) {
+      setMention(existing);
+      input.focus();
+      return;
+    }
+    const insert = `${start && !/\s$/.test(draft.prompt.slice(0, start)) ? " " : ""}@`;
     const prompt =
-      !selected && /(?:^|\s)@[^@\s]*$/.test(draft.prompt)
-        ? draft.prompt.replace(/@[^@\s]*$/, `@${a.name} `)
-        : draft.prompt;
+      draft.prompt.slice(0, start) + insert + draft.prompt.slice(end);
+    pendingSelection.current = start + insert.length;
     onChange({
       ...draft,
       prompt,
-      ...(a.human
-        ? {
-            mentions: selected
-              ? mentions.filter((v) => v !== a.id)
-              : [...mentions, a.id],
-          }
-        : {
-            targets: selected
-              ? targets.filter((v) => v !== a.id)
-              : [...targets, a.id],
-          }),
     });
-    setMention(false);
-    textarea.current?.focus();
+    setActiveMention(0);
+    setMention(mentionAt(prompt, start + insert.length));
   }
   function keyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Escape") {
-      setMention(false);
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if (
+      group &&
+      !locked &&
+      !recording &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      (e.key === "Backspace" || e.key === "Delete")
+    ) {
+      selectMentionDeletion(
+        e.currentTarget,
+        selectedParticipants,
+        e.key === "Backspace",
+      );
       return;
+    }
+    if (e.key === "Escape") {
+      if (mention) e.preventDefault();
+      dismissMention();
+      return;
+    }
+    if (
+      mention &&
+      !locked &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !e.shiftKey
+    ) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const available = mentionOptions
+          .map((a, i) => (a.state === "active" ? i : -1))
+          .filter((i) => i >= 0);
+        const index = available.indexOf(effectiveMention),
+          delta = e.key === "ArrowDown" ? 1 : -1;
+        setActiveMention(
+          available[(index + delta + available.length) % available.length] ?? 0,
+        );
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const option = mentionOptions[effectiveMention];
+        if (option) pickAgent(option);
+        return;
+      }
     }
     if (
       e.key !== "Enter" ||
@@ -303,19 +485,6 @@ export function Composer({
     )
       return;
     if (e.shiftKey) return;
-    const availableMention = mentionOptions.find((a) => a.state === "active");
-    if (
-      group &&
-      mention &&
-      !locked &&
-      !e.ctrlKey &&
-      !e.metaKey &&
-      availableMention
-    ) {
-      e.preventDefault();
-      pickAgent(availableMention);
-      return;
-    }
     const modifier = e.ctrlKey || e.metaKey;
     const send = mode === "enter" ? !modifier : modifier;
     if (send) {
@@ -331,13 +500,10 @@ export function Composer({
       const node = e.currentTarget;
       const start = node.selectionStart,
         end = node.selectionEnd;
-      onChange({
-        ...draft,
-        prompt: draft.prompt.slice(0, start) + "\n" + draft.prompt.slice(end),
-      });
-      requestAnimationFrame(() => {
-        node.selectionStart = node.selectionEnd = start + 1;
-      });
+      pendingSelection.current = start + 1;
+      changePrompt(
+        draft.prompt.slice(0, start) + "\n" + draft.prompt.slice(end),
+      );
     }
   }
   function setComposerHeight(value: number) {
@@ -356,7 +522,8 @@ export function Composer({
       className="mx-auto w-full max-w-4xl space-y-2"
     >
       <div
-        className={`relative rounded-xl border bg-background shadow-sm transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/20 ${dragging ? "border-primary bg-muted" : "border-input"}`}
+        data-conversation-composer
+        className={`relative isolate overflow-hidden rounded-xl border bg-background shadow-sm transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/20 ${dragging ? "border-primary bg-muted" : "border-input"}`}
         onDragOver={(e) => {
           if (!locked) {
             e.preventDefault();
@@ -408,6 +575,18 @@ export function Composer({
         >
           <Grip className="size-3.5" />
         </div>
+        {reply && (
+          <div data-conversation-reply className="m-2 mr-9 flex min-w-0 items-center gap-2 rounded-lg border-l-2 border-primary bg-muted/70 pl-3">
+            <Reply aria-hidden="true" className="size-4 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1 py-2 text-sm">
+              <p className="truncate font-medium text-primary">{t("replyingTo")} {reply.name}</p>
+              <p className="line-clamp-2 whitespace-pre-wrap break-words text-muted-foreground">{reply.text}</p>
+            </div>
+            <Button type="button" size="icon" variant="ghost" className="size-11 shrink-0" aria-label={t("cancelReply")} onClick={onCancelReply}>
+              <X className="size-4" />
+            </Button>
+          </div>
+        )}
         <label htmlFor="conversation-message" className="sr-only">
           {t("prompt")}
         </label>
@@ -419,9 +598,40 @@ export function Composer({
           style={{ height, maxHeight: "45dvh" }}
           placeholder={t(group ? "groupPlaceholder" : "messagePlaceholder")}
           onKeyDown={keyDown}
+          role={group ? "combobox" : undefined}
+          aria-haspopup={group ? "listbox" : undefined}
+          aria-autocomplete={group ? "list" : undefined}
+          aria-expanded={group ? !!mention : undefined}
+          aria-controls={mention ? "conversation-mention-options" : undefined}
+          aria-activedescendant={
+            mention && mentionOptions[effectiveMention]
+              ? `conversation-mention-${effectiveMention}`
+              : undefined
+          }
+          onSelect={(e) => updateMention(e.currentTarget)}
+          onBlur={dismissMention}
+          onCompositionStart={() => setMention(null)}
+          onCompositionEnd={(e) => updateMention(e.currentTarget, true)}
+          onCut={(e) => {
+            if (
+              group &&
+              !locked &&
+              !recording &&
+              e.currentTarget.selectionStart !== e.currentTarget.selectionEnd
+            )
+              selectMentionDeletion(
+                e.currentTarget,
+                selectedParticipants,
+                true,
+              );
+          }}
           onChange={(e) => {
-            onChange({ ...draft, prompt: e.target.value });
-            if (group) setMention(/(?:^|\s)@[^@\s]*$/.test(e.target.value));
+            changePrompt(
+              e.target.value,
+              (e.nativeEvent as InputEvent).inputType,
+            );
+            if (!(e.nativeEvent as InputEvent).isComposing)
+              updateMention(e.target, true);
           }}
           onPaste={(e) => {
             const files = Array.from(e.clipboardData.files);
@@ -430,7 +640,7 @@ export function Composer({
               void attach(files);
             }
           }}
-          className="block min-h-20 w-full resize-none rounded-xl bg-transparent px-3 py-3 pr-9 text-sm leading-6 outline-none disabled:opacity-50"
+          className="block min-h-20 w-full resize-none border-0 bg-transparent px-3 py-3 pr-9 text-sm leading-6 shadow-none outline-none focus:ring-0 disabled:opacity-50"
         />
         {!!draft.attachments.length && (
           <div className="flex max-h-36 flex-wrap gap-2 overflow-auto px-3 pb-3">
@@ -466,12 +676,14 @@ export function Composer({
                   type="button"
                   size="sm"
                   variant="secondary"
+                  className="min-w-0 max-w-full"
                   disabled={locked}
                   onClick={() => toggleAgent(a.id)}
                 >
-                  {" "}
-                  @{a.name}
-                  <X className="size-3" />
+                  <span className="truncate" title={a.name}>
+                    @{a.name}
+                  </span>
+                  <X className="size-3 shrink-0" />
                 </Button>
               ))}
             {people
@@ -482,16 +694,28 @@ export function Composer({
                   type="button"
                   size="sm"
                   variant="secondary"
+                  className="min-w-0 max-w-full"
                   disabled={locked}
-                  onClick={() => pickAgent({ ...p, human: true })}
+                  onClick={() => {
+                    removedMentions.current.delete(`true/${p.id}`);
+                    onChange({
+                      ...draft,
+                      mentions: mentions.filter((id) => id !== p.id),
+                    });
+                  }}
                 >
-                  @{p.name}
-                  <X className="size-3" />
+                  <span className="truncate" title={p.name}>
+                    @{p.name}
+                  </span>
+                  <X className="size-3 shrink-0" />
                 </Button>
               ))}
           </div>
         )}
-        <div className="flex items-center gap-1 px-2 pb-2 pt-1">
+        <div
+          data-composer-toolbar
+          className="flex flex-wrap items-center gap-1 border-t border-border/50 bg-muted/20 px-2 py-1.5 [&>button]:size-11"
+        >
           <input
             ref={fileInput}
             aria-label={t("attach")}
@@ -533,7 +757,7 @@ export function Composer({
               variant="ghost"
               disabled={locked}
               aria-label={t("mentionAgent")}
-              onClick={() => setMention(!mention)}
+              onClick={openMentions}
             >
               <AtSign />
             </Button>
@@ -597,29 +821,19 @@ export function Composer({
             </div>
           </div>
         </div>
-        {group && mention && (
-          <div
-            className="max-h-44 overflow-auto border-t p-2"
-            aria-label={t("mentionAgent")}
-          >
-            {mentionOptions.map((a) => (
-              <Button
-                key={`${a.human ? "human" : "agent"}/${a.id}`}
-                type="button"
-                variant="ghost"
-                className="mr-1 mb-1"
-                aria-pressed={(a.human ? mentions : targets).includes(a.id)}
-                disabled={a.state !== "active" || locked}
-                onClick={() => pickAgent(a)}
-              >
-                {" "}
-                @{a.name}
-                {(a.human ? mentions : targets).includes(a.id) ? " ✓" : ""}
-              </Button>
-            ))}
-          </div>
-        )}
       </div>
+      {group && mention && textarea.current && !locked && !recording && (
+        <MentionSuggestions
+          input={textarea.current}
+          token={mention}
+          options={mentionOptions}
+          active={effectiveMention}
+          selected={(a) => (a.human ? mentions : targets).includes(a.id)}
+          onActive={setActiveMention}
+          onPick={pickAgent}
+          onDismiss={dismissMention}
+        />
+      )}
       {(error || uploading || recording) && (
         <p
           role={error ? "alert" : "status"}

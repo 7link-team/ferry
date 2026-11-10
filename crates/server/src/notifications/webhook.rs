@@ -165,7 +165,15 @@ fn lines<'a>(notice: &'a Notice<'_>) -> impl Iterator<Item = (&'a str, String)> 
         .map(|(name, value)| {
             (
                 name.as_str(),
-                link_url(value).unwrap_or_else(|| clean(value, 300)),
+                if name.is_empty() {
+                    value
+                        .chars()
+                        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+                        .take(48000)
+                        .collect()
+                } else {
+                    link_url(value).unwrap_or_else(|| clean(value, 300))
+                },
             )
         })
         .filter(|(_, value)| !value.is_empty())
@@ -230,6 +238,9 @@ fn escape(robot: Robot, value: &str) -> String {
 }
 
 fn formatted_field(robot: Robot, name: &str, value: &str, url: Option<String>) -> String {
+    if name.is_empty() {
+        return escape(robot, value);
+    }
     let name = escape(robot, name);
     if let Some(url) = url {
         let text = escape(robot, value);
@@ -303,7 +314,9 @@ fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, 
     .unwrap_or_else(|| format!("### {}", markdown(&title)));
     let markdown = std::iter::once(heading)
         .chain(lines(notice).map(|(name, value)| {
-            if field_url(notice, name, &value).is_some()
+            if name.is_empty() {
+                markdown(&value)
+            } else if field_url(notice, name, &value).is_some()
                 || notice.field_accents.iter().any(|(key, _)| key == name)
             {
                 format!("> {}", styled_field(robot, notice, name, &value))
@@ -329,7 +342,7 @@ fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, 
             let content: Vec<Value> = lines(notice)
                 .map(|(name, value)| match field_url(notice,name,&value) {
                     Some(url) => json!([{"tag":"text","text":format!("{name}：")},{"tag":"a","text":value,"href":url}]),
-                    None => json!([{"tag":"text","text":format!("{name}：{value}")}]),
+                    None => json!([{"tag":"text","text":if name.is_empty() { value } else { format!("{name}：{value}") }}]),
                 })
                 .collect();
             json!({"msg_type":"post","content":{"post":{"en_us":{"title":title,"content":content}}}})

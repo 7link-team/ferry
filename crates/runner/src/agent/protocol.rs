@@ -20,6 +20,7 @@ struct Pending {
 }
 
 pub(super) struct Protocol {
+    pub(super) mcp_server: Option<Value>,
     request: Request,
     session: Option<String>,
     turn: Option<String>,
@@ -35,6 +36,7 @@ pub(super) struct Protocol {
 impl Protocol {
     pub fn new(request: Request, scope: String) -> Self {
         Self {
+            mcp_server: None,
             request,
             session: None,
             turn: None,

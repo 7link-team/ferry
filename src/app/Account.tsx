@@ -6,6 +6,7 @@ import type { FormConfig } from "../shared/resources/types";
 import { Button } from "../shared/ui/button";
 import { ResourceForm } from "./resources/ResourceForm";
 import { navigate } from "./router";
+import { AccountOtp } from "./AccountOtp";
 
 type Row = Record<string, unknown> & { id: string };
 
@@ -18,6 +19,9 @@ const profile: FormConfig<Row> = {
     ] },
     { title: "修改密码", titleKey: "account.changePassword", fields: [
       { key: "new_password", label: "新密码", labelKey: "account.newPassword", type: "password", help: "留空则不修改；至少 8 个字符。修改后其他设备上的登录会失效。", helpKey: "account.passwordHelp" },
+    ] },
+    { title: "二步验证", titleKey: "otp:title", fields: [
+      { key: "otp", label: "二步验证", labelKey: "otp:title", type: "custom", span: 2, render: () => <AccountOtp /> },
     ] },
     { title: "身份确认", titleKey: "account.verify", fields: [
       { key: "current_password", label: "当前密码", labelKey: "account.currentPassword", type: "password", help: "修改登录邮箱或密码时必须填写；只改姓名可留空。", helpKey: "account.verifyHelp" },

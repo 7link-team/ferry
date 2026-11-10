@@ -73,6 +73,7 @@ export function AutoField({
   const id = useId();
   const errors = useContext(Errors);
   const error = ownError ?? errors[name ?? id];
+  const [controlRequired, setControlRequired] = useState(false);
   return (
     <div
       {...props}
@@ -87,6 +88,11 @@ export function AutoField({
         const controls = element.querySelectorAll<HTMLElement>(
           fieldControls,
         );
+        setControlRequired([...controls].some(control =>
+          control.closest("[data-auto-field]") === element &&
+          !control.hasAttribute("disabled") && !control.hasAttribute("readonly") &&
+          (control.hasAttribute("required") || control.getAttribute("aria-required") === "true"),
+        ));
         const first = [...controls].find(
           (control) => control.closest("[data-auto-field]") === element,
         );
@@ -131,7 +137,7 @@ export function AutoField({
           )}
         >
           <span id={`${id}-label`}>{hideLabel ? label : <FieldCaption label={label} help={help} />}</span>
-          {required && (
+          {(required || controlRequired) && (
             <span className="ml-1 text-destructive" aria-hidden="true">
               *
             </span>

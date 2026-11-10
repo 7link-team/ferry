@@ -2,6 +2,145 @@ use super::*;
 use sea_orm::ConnectionTrait;
 
 #[tokio::test]
+async fn background_notifications_restore_agent_identity_and_recheck_revocation() {
+    use crate::{
+        agents::tests::admin,
+        platform_tools::{
+            delegated_future,
+            tests::{agent, role, setup},
+        },
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let (_dir, s) = setup().await;
+    let count = Arc::new(AtomicUsize::new(0));
+    let observed = count.clone();
+    let receiver = axum::Router::new().route(
+        "/notify",
+        axum::routing::post(move || {
+            let observed = observed.clone();
+            async move {
+                observed.fetch_add(1, Ordering::SeqCst);
+                "{}"
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/notify", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, receiver).await.unwrap();
+    });
+    let role_id = role(
+        &s,
+        1,
+        vec![
+            "workflows.read",
+            "workflows.run",
+            "notifications.read",
+            "notifications.send",
+        ],
+    )
+    .await;
+    let agent = agent(&s, role_id).await;
+    let (_, Json(channel)) = crate::notifications::center::create(
+        State(s.clone()),
+        admin(1),
+        Json(
+            serde_json::from_value(
+                json!({"name":"Background fixture","provider":"Webhook","webhook":url}),
+            )
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    let graph = json!({"engine":"ferry-graph","schema":1,"settings":{"timezone":"UTC"},"nodes":[
+        {"id":"start","name":"Start","type":"core.trigger.manual","type_version":1,"params":{"input_schema":{"type":"object"}},"position":[0,0]},
+        {"id":"send","name":"Send","type":"notification.send","type_version":1,"params":{"channel_id":channel["id"],"subject":"Background","body":"Message"},"position":[300,0]}
+    ],"connections":[{"from":{"node":"start","port":"main","index":0},"to":{"node":"send","port":"main","index":0}}]});
+    let (_, Json(workflow)) = super::super::create(
+        State(s.clone()),
+        admin(1),
+        Json(
+            serde_json::from_value(
+                json!({"name":"Background fixture","definition":graph.to_string()}),
+            )
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    let workflow_id: Id = serde_json::from_value(workflow["id"].clone()).unwrap();
+    let backend = ArtifactStore::for_state(&s).await.unwrap();
+    let (_stop, stop) = tokio::sync::watch::channel(false);
+    for revoked in [false, true] {
+        let (_, Json(created)) = delegated_future(&s, admin(1), agent.id.into(), create(
+            State(s.clone()), admin(1), Path(("1".into(), workflow_id)), Json(
+                serde_json::from_value(json!({"mode":"manual","revision":"draft","version":1,"entry_node_id":"start"})).unwrap()
+            )
+        )).await.unwrap();
+        let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+        let run = current(&s, id.into()).await.unwrap();
+        let context: Value = serde_json::from_str(
+            &s.vault
+                .open_secret(
+                    run.context.as_deref().unwrap(),
+                    &context_aad(run.workspace_id, run.id),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(context["origin_agent_id"], json!(Id::from(agent.id)));
+        if revoked {
+            crate::entities::workspace_roles::Entity::update_many()
+                .col_expr(
+                    crate::entities::workspace_roles::Column::Permissions,
+                    Expr::value(
+                        json!(["workflows.read", "workflows.run", "notifications.read"])
+                            .to_string(),
+                    ),
+                )
+                .filter(crate::entities::workspace_roles::Column::Id.eq(role_id))
+                .exec(&s.db)
+                .await
+                .unwrap();
+        }
+        let lease = claim(&s, "background-fixture").await.unwrap().unwrap();
+        assert_eq!(lease.execution().id, i64::from(id));
+        // No request-local identity survives into this fresh background task.
+        let s2 = s.clone();
+        let backend2 = backend.clone();
+        let stop2 = stop.clone();
+        let result = tokio::spawn(async move {
+            let result = dispatch(&s2, &backend2, &lease, &stop2).await;
+            if let Err(error) = &result {
+                finish(&s2.db, &lease, "failed", failure_reason(error))
+                    .await
+                    .unwrap();
+            }
+            result
+        })
+        .await
+        .unwrap();
+        if revoked {
+            assert_eq!(result.unwrap_err().0, StatusCode::FORBIDDEN);
+        } else {
+            result.unwrap();
+        }
+        let ended = current(&s, id.into()).await.unwrap();
+        assert_eq!(ended.state, if revoked { "failed" } else { "succeeded" });
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "revoked Agent must not deliver"
+        );
+    }
+    server.abort();
+}
+
+#[tokio::test]
 async fn running_cancellation_waits_for_owner_cleanup_and_preserves_successful_nodes() {
     use super::super::journal::tests::{Fixture, activation};
     let fixture = Fixture::new().await;

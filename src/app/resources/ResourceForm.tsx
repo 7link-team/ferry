@@ -25,6 +25,7 @@ import { Dialog } from "radix-ui";
 import { useCallback,useEffect,useId,useRef,useState,type ReactNode } from "react";
 import { toast } from "sonner";
 import { ManifestEditor } from "../../features/deployments/ManifestEditor";
+import { ActionNotification } from "../../features/notifications/ActionNotification";
 import { ActionsEditor } from "../../features/pipelines/ActionsEditor";
 import { findItem } from "../nav";
 import { WorkflowKindChoice } from "../../features/workflows/WorkflowKindChoice";
@@ -51,7 +52,7 @@ function incompleteFields<T>(fields: FormField<T>[], values: Partial<T>) {
   return fields.some(field => {
     const value = values[field.key as keyof T];
     return (!field.when || field.when(values)) && (
-    (field.required && (value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0))) ||
+    ((typeof field.required === "function" ? field.required(values) : field.required) && (value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0))) ||
     (field.type === "number" && value !== undefined && value !== "" && (
       !Number.isFinite(Number(value)) ||
       (field.min !== undefined && Number(value) < field.min) ||
@@ -477,7 +478,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
           {groupContent ?? <>
           {sections.filter(({ section }) => !section.tab).map(({ section, index }) => renderSection(section, index))}
           {tabs.length > 0 && <Tabs key={active} value={tabs.some(({section})=>section.tab===formTab)?formTab:tabs[0]!.section.tab} onValueChange={setFormTab}>
-            <TabsList>{tabs.map(({ section }) => <TabsTrigger key={section.tab} value={section.tab!}>{configText(section.tab, section.tabKey)}</TabsTrigger>)}</TabsList>
+            <div className="min-w-0 overflow-x-auto"><TabsList className="h-auto min-h-11">{tabs.map(({ section }) => <TabsTrigger className="min-h-11" key={section.tab} value={section.tab!}>{configText(section.tab, section.tabKey)}</TabsTrigger>)}</TabsList></div>
             {tabs.map(({ section }) => <TabsContent key={section.tab} value={section.tab!} className="space-y-4 pt-2">{tabSections.filter(item => item.section.tab === section.tab).map(({section, index}) => renderSection(section, index))}</TabsContent>)}
           </Tabs>}
           </>}
@@ -519,11 +520,11 @@ function SecretField<T>({ field, value, stored, creating, asText, readOnly, draf
     {!creating && stored && <label className="flex items-center gap-2 text-sm">
       <Checkbox checked={replacing} disabled={readOnly} onCheckedChange={(checked) => onChange(checked ? "" : undefined)} />
       {commonText("form.replace")}{field.label}{commonText("form.retainValue")}</label>}
-    {replacing && <AutoField label={<>{field.label}</>} className="flex flex-col gap-1.5 text-sm font-medium">
+    {replacing && <AutoField label={<>{field.label}</>} required={typeof field.required === "function" ? field.required(draft) : field.required} className="flex flex-col gap-1.5 text-sm font-medium">
 
       <textarea className="min-h-24 rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} readOnly={readOnly}
-        autoComplete="off" spellCheck={false} placeholder={field.placeholder ?? commonText("form.allowEmpty")} />
+        required={typeof field.required === "function" ? field.required(draft) : field.required} autoComplete="off" spellCheck={false} placeholder={field.placeholder ?? commonText("form.allowEmpty")} />
     </AutoField>}
     {!creating && !field.hideSecretStatus && <p className="text-xs text-muted-foreground">{stored ? commonText("form.secretSet") : commonText("form.secretMissing")}</p>}
     {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
@@ -531,7 +532,7 @@ function SecretField<T>({ field, value, stored, creating, asText, readOnly, draf
 }
 
 function Field<T>({
-  field,
+  field: configuredField,
   workspace = "",
   value,
   readOnly,
@@ -562,6 +563,7 @@ function Field<T>({
   onEditorModeChange?: (mode: "visual" | "yaml") => void;
 }) {
   useCommonTranslation();
+  let field = { ...configuredField, required: !asText && !!(typeof configuredField.required === "function" ? configuredField.required(draft) : configuredField.required) };
   const { options: rawOptions, error: optionsError, loading: optionsLoading, reload: reloadOptions } = useOptions(field.options);
   const suggestionsId = useId();
   const options = rawOptions.filter(option => !field.optionFilter || field.optionFilter(option, draft)).map(option => ({ ...option, label: optionText(option), ...(option.group ? { group: configText(option.group, option.groupKey) } : {}) }));
@@ -622,7 +624,7 @@ function Field<T>({
   if (field.type === "actions-editor" || field.type === "actions-template-editor") {
     const editorDraft = envelope ? { ...envelope, definition: envelope.workflow } : draft;
     const change = (patch: Record<string, unknown>) => onChange(envelope ? patchTemplateWorkflow(envelope, patch) : patch);
-    return <div className={cn("min-w-0 sm:col-span-2", fillHeight && "flex min-h-0 flex-1 flex-col")}><ActionsEditor draft={editorDraft} options={options} readOnly={readOnly} fillHeight={fillHeight} requireExecutorBinding={!envelope} {...(editorMode && onEditorModeChange ? { mode: editorMode, onModeChange: onEditorModeChange } : {})} onChange={change} onValidityChange={reportManifest} renderCheckoutBatch={jobId=><PipelineRepositories canCreateConnection={permissions.has("repositories.create")} key={jobId} workspace={workspace!} draft={editorDraft} jobId={jobId} readOnly={readOnly} onChange={change}/>} renderCheckout={(jobId,stepIndex)=><PipelineRepository canCreateConnection={permissions.has("repositories.create")} key={`${jobId}:${stepIndex}`} workspace={workspace!} draft={editorDraft} jobId={jobId} stepIndex={stepIndex} readOnly={readOnly} onChange={change} onValidityChange={reportCheckout}/>}/></div>;
+    return <div className={cn("min-w-0 sm:col-span-2", fillHeight && "flex min-h-0 flex-1 flex-col")}><ActionsEditor renderNotification={(inputs, onChange) => <ActionNotification workspace={workspace!} inputs={inputs} readOnly={readOnly} onChange={onChange} />} draft={editorDraft} options={options} readOnly={readOnly} fillHeight={fillHeight} requireExecutorBinding={!envelope} {...(editorMode && onEditorModeChange ? { mode: editorMode, onModeChange: onEditorModeChange } : {})} onChange={change} onValidityChange={reportManifest} renderCheckoutBatch={jobId=><PipelineRepositories canCreateConnection={permissions.has("repositories.create")} key={jobId} workspace={workspace!} draft={editorDraft} jobId={jobId} readOnly={readOnly} onChange={change}/>} renderCheckout={(jobId,stepIndex)=><PipelineRepository canCreateConnection={permissions.has("repositories.create")} key={`${jobId}:${stepIndex}`} workspace={workspace!} draft={editorDraft} jobId={jobId} stepIndex={stepIndex} readOnly={readOnly} onChange={change} onValidityChange={reportCheckout}/>}/></div>;
   }
   if (field.type === "marketplace-repository") return <div className="min-w-0 sm:col-span-2"><MarketplaceRepository canCreateConnection={permissions.has("repositories.create")} workspace={workspace} draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 

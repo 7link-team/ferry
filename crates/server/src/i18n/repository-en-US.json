@@ -826,5 +826,7 @@
   "templates.examples.redisStartup": "Startup configuration template name or ID",
   "templates.examples.redisIp": "Reachable host IPv4",
   "templates.examples.redisDataPort": "Data listening and published port",
-  "templates.examples.redisSentinelPort": "Sentinel listening and published port"
+  "templates.examples.redisSentinelPort": "Sentinel listening and published port",
+  "files.permissionInvalid": "Select a valid file path and permission bits from 000 to 777.",
+  "files.permissionUnsupported": "POSIX permission editing is unavailable for Windows files and symbolic links."
 }

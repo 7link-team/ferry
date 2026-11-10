@@ -1,0 +1,489 @@
+{
+  "emailChannels": ["Email", "邮件", "郵件", "メール", "이메일", "E-mel"],
+  "smsChannels": ["SMS", "短信", "簡訊", "SMS", "SMS", "SMS"],
+  "platformChannels": ["Third-party platforms", "第三方平台", "第三方平台", "外部プラットフォーム", "외부 플랫폼", "Platform pihak ketiga"],
+  "smsConfiguration": ["SMS provider", "短信服务配置", "簡訊服務設定", "SMS サービス設定", "SMS 서비스 설정", "Konfigurasi penyedia SMS"],
+  "sms_access_key": ["Access key ID / SecretId", "AccessKey ID / SecretId", "AccessKey ID / SecretId", "AccessKey ID / SecretId", "AccessKey ID / SecretId", "AccessKey ID / SecretId"],
+  "sms_secret_key": ["Access key secret / SecretKey", "AccessKey Secret / SecretKey", "AccessKey Secret / SecretKey", "AccessKey Secret / SecretKey", "AccessKey Secret / SecretKey", "AccessKey Secret / SecretKey"],
+  "sms_region": ["Region", "地域", "地域", "リージョン", "리전", "Wilayah"],
+  "sms_app_id": ["SMS SDK App ID", "短信 SDK App ID", "簡訊 SDK App ID", "SMS SDK App ID", "SMS SDK App ID", "SMS SDK App ID"],
+  "sms_sign_name": ["Approved signature name", "已审核的短信签名", "已核准的簡訊簽名", "承認済み署名", "승인된 SMS 서명", "Nama tandatangan diluluskan"],
+  "sms_template_code": ["Approved provider template ID", "服务商已审核的模板编号", "服務商已核准的範本編號", "承認済みテンプレート ID", "승인된 제공업체 템플릿 ID", "ID templat penyedia diluluskan"],
+  "sms_parameter_names": ["Template parameter names (in order)", "模板参数名称（按顺序）", "範本參數名稱（依序）", "テンプレート変数名（順序付き）", "템플릿 매개변수 이름 (순서대로)", "Nama parameter templat (mengikut urutan)"],
+  "smsParameterNamesHelp": ["One name per line, up to 20, letters/digits/_/-. For Tencent, follow the approved template's parameter order. Aliyun uses named parameters. Subscriptions can map subject and body to the notification title and body.", "每行一个，最多20个，仅字母、数字、_、-。腾讯云按审核模板的参数顺序填写；阿里云使用命名参数。订阅通知可用 subject、body 引用标题和正文。", "每行一個，最多20個，限字母、數字、_、-。騰訊雲依核准範本順序；阿里雲使用命名參數。訂閱通知可用 subject、body 引用標題和內文。", "1行1変数、最大20個。英数字・_・-。Tencent は承認済みテンプレート順、Aliyun は名前で指定。通知では subject、body を利用できます。", "한 줄에 하나, 최대 20개. 영문·숫자·_·-만 사용. Tencent는 승인된 템플릿 순서, Aliyun은 이름을 사용합니다. 알림의 subject, body를 사용할 수 있습니다.", "Satu nama setiap baris, maksimum 20, huruf/nombor/_/-. Tencent mengikut urutan templat diluluskan; Aliyun menggunakan nama. Langganan boleh menggunakan subject dan body."],
+  "smsRecipientsHelp": ["One E.164 phone number per line, e.g. +8613800000000; up to 20. Aliyun supports mainland China numbers here. Leave empty to use channel defaults.", "每行一个带国家码的号码，例如 +8613800000000，最多20个。本接入的阿里云支持中国大陆号码；留空使用渠道默认收件人。", "每行一個含國碼號碼，例如 +8613800000000，最多20個。此阿里雲接入支援中國大陸號碼；留空使用預設收件人。", "国番号付き E.164 形式で1行1番号、最大20件。Aliyun は中国本土の番号に対応。空欄は既定の宛先を使用。", "국가 코드 포함 E.164 번호를 줄마다 입력, 최대 20개. Aliyun은 중국 본토 번호 지원. 비워 두면 채널 기본 수신자를 사용합니다.", "Satu nombor E.164 setiap baris, contoh +8613800000000; maksimum 20. Aliyun menyokong nombor tanah besar China. Kosongkan untuk penerima lalai."],
+  "smsDefaultRecipientsHelp": ["One recipient per line. SMTP uses email addresses; SMS uses E.164 phone numbers with country code. Up to 20 recipients.", "每行一个，最多20个。邮件填写邮箱；短信填写带国家码的 E.164 手机号码。", "每行一個，最多20個。郵件填電子郵件地址；簡訊填含國碼的 E.164 號碼。", "1行1宛先、最大20件。SMTP はメール、SMS は国番号付き E.164 番号。", "한 줄에 하나, 최대 20개. SMTP는 이메일, SMS는 국가 코드 포함 E.164 번호.", "Satu penerima setiap baris, maksimum 20. SMTP menggunakan alamat e-mel; SMS menggunakan nombor E.164 dengan kod negara."],
+  "smsSendHelp": ["The provider sends its approved template with these parameters, not the free-text notification body. Success means accepted by the provider, not delivered to a handset. Ambiguous results are never automatically retried.", "服务商按已审核模板和以下参数发送，通知正文不会作为自由文本发送。成功表示服务商受理，不代表手机已收到；结果不确定时不会自动重发。", "服務商依核准範本及以下參數發送，不發送自由文字內文。成功表示受理，不代表手機已收到；不確定結果不自動重送。", "承認済みテンプレートと変数で送信します。成功は受付を示し、端末への配信確認ではありません。不明な結果は自動再送しません。", "승인된 템플릿과 매개변수로 전송합니다. 성공은 제공업체 접수이며 단말 수신 확인이 아닙니다. 불확실한 결과는 자동 재전송하지 않습니다.", "Penyedia menghantar templat diluluskan dengan parameter ini, bukan teks bebas. Berjaya bermaksud diterima penyedia, bukan dihantar ke telefon. Keputusan tidak pasti tidak dicuba semula secara automatik."],
+  "notification-channels": [
+    "Notifications",
+    "通知",
+    "通知",
+    "通知",
+    "알림",
+    "Pemberitahuan"
+  ],
+  "notification-templates": [
+    "Notification templates",
+    "通知模板",
+    "通知範本",
+    "通知テンプレート",
+    "알림 템플릿",
+    "Templat pemberitahuan"
+  ],
+  "notification-deliveries": [
+    "Delivery history",
+    "发送记录",
+    "傳送記錄",
+    "配信履歴",
+    "전달 기록",
+    "Sejarah penghantaran"
+  ],
+  "name": [
+    "Name",
+    "名称",
+    "名稱",
+    "名前",
+    "이름",
+    "Nama"
+  ],
+  "description": [
+    "Description",
+    "描述",
+    "描述",
+    "説明",
+    "설명",
+    "Penerangan"
+  ],
+  "provider": [
+    "Provider",
+    "通知平台",
+    "通知平台",
+    "サービス",
+    "서비스",
+    "Penyedia"
+  ],
+  "language": [
+    "Language",
+    "通知语言",
+    "通知語言",
+    "言語",
+    "언어",
+    "Bahasa"
+  ],
+  "enabled": [
+    "Enabled",
+    "启用",
+    "啟用",
+    "有効",
+    "활성화",
+    "Didayakan"
+  ],
+  "subject": [
+    "Subject",
+    "主题",
+    "主旨",
+    "件名",
+    "제목",
+    "Subjek"
+  ],
+  "body": [
+    "Message body",
+    "正文",
+    "內文",
+    "本文",
+    "본문",
+    "Kandungan mesej"
+  ],
+  "format": [
+    "Message format",
+    "正文格式",
+    "內文格式",
+    "本文形式",
+    "본문 형식",
+    "Format mesej"
+  ],
+  "rich": [
+    "Rich text",
+    "富文本",
+    "格式文字",
+    "リッチテキスト",
+    "서식 있는 텍스트",
+    "Teks berformat"
+  ],
+  "text": [
+    "Plain text",
+    "纯文本",
+    "純文字",
+    "プレーンテキスト",
+    "일반 텍스트",
+    "Teks biasa"
+  ],
+  "created_at": [
+    "Created",
+    "创建时间",
+    "建立時間",
+    "作成日時",
+    "생성 시간",
+    "Masa dicipta"
+  ],
+  "send": [
+    "Send notification",
+    "发送通知",
+    "傳送通知",
+    "通知を送信",
+    "알림 보내기",
+    "Hantar pemberitahuan"
+  ],
+  "sendHelp": [
+    "This sends a real message. Retrying this request does not send it again; check delivery history if the result is unknown.",
+    "将发送真实消息。同一请求重试不会重复发送；结果未知时请先核对发送记录。",
+    "將傳送真實訊息。同一請求重試不會重複傳送；結果未知時請先核對傳送記錄。",
+    "実際に送信します。同じリクエストの再試行では再送信しません。結果が不明な場合は配信履歴を確認してください。",
+    "실제 메시지를 보냅니다. 같은 요청을 재시도해도 다시 보내지 않습니다. 결과가 불명확하면 전달 기록을 확인하세요.",
+    "Ini menghantar mesej sebenar. Percubaan semula permintaan yang sama tidak menghantarnya lagi; semak sejarah jika hasil tidak diketahui."
+  ],
+  "template_id": [
+    "Template (optional)",
+    "模板（可选）",
+    "範本（選填）",
+    "テンプレート（任意）",
+    "템플릿 (선택)",
+    "Templat (pilihan)"
+  ],
+  "variables": [
+    "Template variables",
+    "模板变量",
+    "範本變數",
+    "テンプレート変数",
+    "템플릿 변수",
+    "Pemboleh ubah templat"
+  ],
+  "noVariables": [
+    "This template has no variables.",
+    "此模板没有变量。",
+    "此範本沒有變數。",
+    "このテンプレートに変数はありません。",
+    "이 템플릿에는 변수가 없습니다.",
+    "Templat ini tiada pemboleh ubah."
+  ],
+  "to_text": [
+    "Recipients (SMTP)",
+    "收件人（SMTP）",
+    "收件人（SMTP）",
+    "宛先（SMTP）",
+    "수신자 (SMTP)",
+    "Penerima (SMTP)"
+  ],
+  "recipients": [
+    "Default recipients",
+    "默认收件人",
+    "預設收件人",
+    "既定の宛先",
+    "기본 수신자",
+    "Penerima lalai"
+  ],
+  "recipientsHelp": [
+    "One recipient email address per line. Empty send recipients use the channel defaults.",
+    "每行一个收件人邮箱；发送时留空则使用渠道默认收件人。",
+    "每行一個收件人信箱；傳送時留空則使用管道預設收件人。",
+    "1行に1つの宛先メールアドレス。送信時に空欄ならチャネルの既定値を使用します。",
+    "한 줄에 수신 이메일 주소 하나를 입력하세요. 전송 시 비워 두면 채널 기본값을 사용합니다.",
+    "Satu alamat e-mel penerima setiap baris. Penerima kosong menggunakan lalai saluran."
+  ],
+  "basics": [
+    "Basic information",
+    "基本信息",
+    "基本資訊",
+    "基本情報",
+    "기본 정보",
+    "Maklumat asas"
+  ],
+  "connection": [
+    "Connection",
+    "连接配置",
+    "連線設定",
+    "接続設定",
+    "연결 설정",
+    "Sambungan"
+  ],
+  "authorization": [
+    "Sending permissions",
+    "发送授权",
+    "傳送授權",
+    "送信権限",
+    "전송 권한",
+    "Kebenaran penghantaran"
+  ],
+  "role_ids": [
+    "Allowed roles",
+    "可发送的角色",
+    "可傳送的角色",
+    "送信可能なロール",
+    "전송 가능한 역할",
+    "Peranan yang dibenarkan"
+  ],
+  "rolesHelp": [
+    "Leave empty to allow workspace roles with notification sending permission. Agents also need their own role to be allowed.",
+    "留空允许本空间具有通知发送权限的角色；智能体还需其自身角色同时获准。",
+    "留空允許本空間具有通知傳送權限的角色；智慧體的自身角色也必須獲准。",
+    "空欄なら通知送信権限のあるワークスペースのロールを許可します。エージェント自身のロールにも許可が必要です。",
+    "비워 두면 알림 전송 권한이 있는 워크스페이스 역할을 허용합니다. 에이전트의 자체 역할도 허용되어야 합니다.",
+    "Kosongkan untuk membenarkan peranan ruang kerja dengan kebenaran menghantar pemberitahuan. Peranan ejen sendiri juga mesti dibenarkan."
+  ],
+  "templateHelp": [
+    "Use {{variable_name}} placeholders. Values are entered separately when sending; HTML values are escaped.",
+    "用 {{变量名}} 插入占位符；发送时逐项填写变量，HTML中的变量会转义。",
+    "用 {{變數名稱}} 插入預留位置；傳送時逐項填寫變數，HTML中的變數會跳脫。",
+    "{{variable_name}} 形式を使用します。送信時に変数を個別入力し、HTML値はエスケープされます。",
+    "{{variable_name}} 자리 표시자를 사용하세요. 전송 시 별도로 입력하며 HTML 값은 이스케이프됩니다.",
+    "Gunakan ruang letak {{variable_name}}. Nilai dimasukkan secara berasingan semasa menghantar; nilai HTML dilepaskan."
+  ],
+  "webhook": [
+    "Webhook URL",
+    "Webhook 地址",
+    "Webhook 位址",
+    "Webhook URL",
+    "Webhook URL",
+    "URL Webhook"
+  ],
+  "bot_token": [
+    "Bot token",
+    "机器人令牌",
+    "機器人權杖",
+    "ボットトークン",
+    "봇 토큰",
+    "Token bot"
+  ],
+  "signing_secret": [
+    "Signing secret",
+    "签名密钥",
+    "簽章密鑰",
+    "署名シークレット",
+    "서명 비밀 키",
+    "Rahsia tandatangan"
+  ],
+  "bearer_token": [
+    "Bearer token",
+    "Bearer 令牌",
+    "Bearer 權杖",
+    "Bearerトークン",
+    "Bearer 토큰",
+    "Token Bearer"
+  ],
+  "chat_id": [
+    "Chat ID",
+    "聊天 ID",
+    "聊天 ID",
+    "チャットID",
+    "채팅 ID",
+    "ID sembang"
+  ],
+  "thread_id": [
+    "Thread ID (optional)",
+    "话题 ID（可选）",
+    "話題 ID（選填）",
+    "スレッドID（任意）",
+    "스레드 ID (선택)",
+    "ID urutan (pilihan)"
+  ],
+  "host": [
+    "SMTP server",
+    "SMTP 服务器",
+    "SMTP 伺服器",
+    "SMTPサーバー",
+    "SMTP 서버",
+    "Pelayan SMTP"
+  ],
+  "port": [
+    "Port",
+    "端口",
+    "連接埠",
+    "ポート",
+    "포트",
+    "Port"
+  ],
+  "security": [
+    "Transport security",
+    "连接安全",
+    "連線安全",
+    "接続のセキュリティ",
+    "연결 보안",
+    "Keselamatan sambungan"
+  ],
+  "noTls": [
+    "No TLS",
+    "不使用 TLS",
+    "不使用 TLS",
+    "TLSなし",
+    "TLS 사용 안 함",
+    "Tanpa TLS"
+  ],
+  "from": [
+    "Sender email",
+    "发件人邮箱",
+    "寄件人信箱",
+    "送信元メール",
+    "발신자 이메일",
+    "E-mel pengirim"
+  ],
+  "username": [
+    "Username",
+    "用户名",
+    "使用者名稱",
+    "ユーザー名",
+    "사용자 이름",
+    "Nama pengguna"
+  ],
+  "password": [
+    "Password",
+    "密码",
+    "密碼",
+    "パスワード",
+    "비밀번호",
+    "Kata laluan"
+  ],
+  "state": [
+    "Delivery status",
+    "投递状态",
+    "投遞狀態",
+    "配信状態",
+    "전달 상태",
+    "Status penghantaran"
+  ],
+  "source": [
+    "Source",
+    "来源",
+    "來源",
+    "送信元",
+    "출처",
+    "Sumber"
+  ],
+  "source_id": [
+    "Source record",
+    "来源记录",
+    "來源記錄",
+    "元の記録",
+    "원본 기록",
+    "Rekod sumber"
+  ],
+  "actor_id": [
+    "Invoking account",
+    "调用账号",
+    "呼叫帳號",
+    "実行アカウント",
+    "호출 계정",
+    "Akaun pemanggil"
+  ],
+  "agent_id": [
+    "Agent",
+    "智能体",
+    "智慧體",
+    "エージェント",
+    "에이전트",
+    "Ejen"
+  ],
+  "result": [
+    "Result",
+    "投递结果",
+    "投遞結果",
+    "配信結果",
+    "전달 결과",
+    "Hasil"
+  ],
+  "sending": [
+    "Sending",
+    "发送中",
+    "傳送中",
+    "送信中",
+    "보내는 중",
+    "Menghantar"
+  ],
+  "succeeded": [
+    "Sent",
+    "发送成功",
+    "傳送成功",
+    "送信済み",
+    "전송됨",
+    "Dihantar"
+  ],
+  "failed": [
+    "Failed",
+    "发送失败",
+    "傳送失敗",
+    "失敗",
+    "실패",
+    "Gagal"
+  ],
+  "unknown": [
+    "Result unknown",
+    "结果未知",
+    "結果未知",
+    "結果不明",
+    "결과 불명",
+    "Hasil tidak diketahui"
+  ],
+  "source.manual": [
+    "Manual",
+    "手动发送",
+    "手動傳送",
+    "手動",
+    "수동",
+    "Manual"
+  ],
+  "source.mcp": [
+    "AI tool",
+    "AI 工具",
+    "AI 工具",
+    "AIツール",
+    "AI 도구",
+    "Alat AI"
+  ],
+  "source.repository": [
+    "Repository monitoring",
+    "仓库监控",
+    "儲存庫監控",
+    "リポジトリ監視",
+    "저장소 모니터링",
+    "Pemantauan repositori"
+  ],
+  "source.workflow": [
+    "Workflow",
+    "节点工作流",
+    "節點工作流程",
+    "ワークフロー",
+    "워크플로",
+    "Aliran kerja"
+  ],
+  "source.pipeline": [
+    "Pipeline",
+    "构建流水线",
+    "建置管線",
+    "パイプライン",
+    "파이프라인",
+    "Saluran binaan"
+  ],
+  "source.alert": [
+    "Alert",
+    "告警",
+    "警示",
+    "アラート",
+    "경고",
+    "Amaran"
+  ],
+  "nativeOnly": [
+    "Build notification steps run in Native jobs. Use a separate Native job after a container build.",
+    "构建通知步骤在 Native 任务中执行；容器构建后可添加独立的 Native 通知任务。",
+    "建置通知步驟在 Native 任務中執行；容器建置後可新增獨立的 Native 通知任務。",
+    "通知ステップは Native ジョブで実行します。コンテナビルド後に独立した Native ジョブを追加してください。",
+    "알림 단계는 Native 작업에서 실행합니다. 컨테이너 빌드 후 별도의 Native 알림 작업을 추가하세요.",
+    "Langkah pemberitahuan binaan dijalankan dalam tugas Native. Tambah tugas Native berasingan selepas binaan kontena."
+  ],
+  "messageRequired": [
+    "Select a channel and complete the message or template variables.",
+    "选择通知渠道并填写正文或模板变量。",
+    "選擇通知管道並填寫內容或範本變數。",
+    "通知チャネルを選択し、本文またはテンプレート変数を入力してください。",
+    "채널을 선택하고 본문 또는 템플릿 변수를 입력하세요.",
+    "Pilih saluran dan lengkapkan mesej atau pemboleh ubah templat."
+  ]
+}

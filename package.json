@@ -1,6 +1,6 @@
 {
   "name": "ferry",
-  "version": "0.3.0-alpha.15",
+  "version": "0.3.0-alpha.16",
   "private": true,
   "type": "module",
   "scripts": {
@@ -23,6 +23,7 @@
     "dompurify": "3.4.17",
     "i18next": "^26.7.1",
     "lucide-react": "^0.468.0",
+    "mermaid": "12.3.0",
     "monaco-editor": "0.54.0",
     "monaco-yaml": "^5.5.1",
     "radix-ui": "^1.8.1",

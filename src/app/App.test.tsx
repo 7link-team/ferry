@@ -6,6 +6,7 @@ import integrationCatalog from "../shared/workflow-contracts/workflow-integratio
 import { i18n, executionText } from "../shared/i18n/i18n";
 import { setLocale } from "../shared/i18n/locale";
 import { App } from "./App";
+import { defaultSiteSettings, SiteSettingsContext } from "../shared/site/settings";
 import { Entry } from "./Entry";
 import { RepositoryMonitor,repositoryEventList } from "./pages/RepositoryMonitor";
 import { navigate } from "./router";
@@ -39,6 +40,52 @@ beforeEach(() => {
   } })));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+it("keeps notification templates and deliveries in tabs under one grouped maintenance menu", async () => {
+  required = false;
+  permissions = ["notifications.read", "members.read", "roles.read", "ai-agents.read", "ai-models.read", "settings.read"];
+  history.replaceState({}, "", "/zh-CN/workspaces/2/notification-templates");
+  await act(async () => root.render(<App />));
+  const sidebar = host.querySelector('nav[aria-label="维护"]')!;
+  expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["邮件", "短信", "第三方平台", "成员", "智能体", "角色", "模型", "配置项"]);
+  expect(sidebar.querySelector('[aria-current="page"]')?.textContent).toBe("邮件");
+  expect(sidebar.querySelector('[role="group"][aria-label="身份与权限"]')?.textContent).toContain("成员智能体角色");
+  const related = host.querySelector('nav[aria-label="通知页面"]')!;
+  expect([...related.querySelectorAll("a")].map(a => a.textContent)).toEqual(["邮件", "通知模板", "发送记录"]);
+  expect(related.querySelector('[aria-current="page"]')?.textContent).toBe("通知模板");
+  await act(async () => related.querySelectorAll<HTMLAnchorElement>("a")[2]!.click());
+  expect(location.pathname).toBe("/zh-CN/workspaces/2/notification-deliveries");
+  expect(host.querySelector('nav[aria-label="通知页面"] [aria-current="page"]')?.textContent).toBe("发送记录");
+});
+it("collapses maintenance groups and opens the notification group when entering SMS", async () => {
+  required = false; permissions = ["notifications.read", "roles.read"];
+  history.replaceState({}, "", "/zh-CN/workspaces/2/roles");
+  await act(async () => root.render(<App />));
+  const group = host.querySelector('[role="group"][aria-label="通知"]')!;
+  const button = group.querySelector("button")!;
+  await act(async () => button.click());
+  expect(button.getAttribute("aria-expanded")).toBe("false");
+  expect(group.querySelector("[hidden]")).not.toBeNull();
+  await act(async () => navigate({group:"ops",item:"notification-sms",mode:"list"}, {}));
+  expect(new URLSearchParams(location.search).get("scope")).toBe("sms");
+  expect(button.getAttribute("aria-expanded")).toBe("true");
+  expect(group.querySelector('[aria-current="page"]')?.textContent).toBe("短信");
+  const calls = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+  expect(calls.some(url => url.includes("notification-channels?") && new URL(url, location.origin).searchParams.get("provider") === "Aliyun SMS,Tencent SMS")).toBe(true);
+});
+it("does not expose unauthorized maintenance sections or notification tabs", async () => {
+  required = false;
+  permissions = ["roles.read"];
+  history.replaceState({}, "", "/zh-CN/workspaces/2/roles");
+  await act(async () => root.render(<App />));
+  const sidebar = host.querySelector('nav[aria-label="维护"]')!;
+  expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["角色"]);
+  expect([...sidebar.querySelectorAll('[role="group"]')].map(e => e.getAttribute("aria-label"))).toEqual(["身份与权限"]);
+});
+it("uses the configured site name in the workspace header", async () => {
+  required = false;
+  await act(async () => root.render(<SiteSettingsContext.Provider value={{...defaultSiteSettings,site_name:"Example Console"}}><App /></SiteSettingsContext.Provider>));
+  expect(host.querySelector("header a")?.textContent?.trim()).toBe("Example Console");
+});
 it("restores login redirect before mounting the user's default workspace", async () => {
   required = false;
   const target="/zh-CN/workspaces/2/nodes?tab=events#latest";

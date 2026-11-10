@@ -46,6 +46,7 @@ fn local() -> String {
 #[serde(default)]
 pub struct Configuration {
     pub mode: String,
+    pub otp_enabled: bool,
     site_key: String,
     secret_key: String,
     hostname: String,
@@ -54,6 +55,7 @@ impl Default for Configuration {
     fn default() -> Self {
         Self {
             mode: local(),
+            otp_enabled: false,
             site_key: String::new(),
             secret_key: String::new(),
             hostname: String::new(),
@@ -74,7 +76,7 @@ impl Configuration {
             .map(|v| v.unwrap_or_default())
     }
     pub fn view(&self) -> Value {
-        json!({"login_guard_mode":self.mode,"login_turnstile_site_key":self.site_key,
+        json!({"otp_enabled":self.otp_enabled,"login_guard_mode":self.mode,"login_turnstile_site_key":self.site_key,
         "login_turnstile_hostname":self.hostname,"login_turnstile_has_secret":!self.secret_key.is_empty()})
     }
     pub fn update(
@@ -82,13 +84,17 @@ impl Configuration {
         value: Option<&str>,
         patch: &Map<String, Value>,
     ) -> Result<Option<String>> {
-        if !patch
-            .keys()
-            .any(|k| k.starts_with("login_guard_") || k.starts_with("login_turnstile_"))
-        {
+        if !patch.keys().any(|k| {
+            k == "otp_enabled" || k.starts_with("login_guard_") || k.starts_with("login_turnstile_")
+        }) {
             return Ok(value.map(str::to_owned));
         }
         let mut config = Self::read(s, value)?;
+        if let Some(value) = patch.get("otp_enabled") {
+            config.otp_enabled = value
+                .as_bool()
+                .ok_or_else(|| error(StatusCode::BAD_REQUEST, "auth.loginGuardInvalid"))?;
+        }
         for (key, target) in [
             ("login_guard_mode", &mut config.mode),
             ("login_turnstile_site_key", &mut config.site_key),
@@ -154,7 +160,7 @@ fn binding(email: &str, ip: &str) -> String {
     fingerprint(&format!("{}:{email}:{ip}", email.len()))
 }
 
-async fn sweep(conn: &impl ConnectionTrait, now: i64) -> Result<()> {
+pub(super) async fn sweep(conn: &impl ConnectionTrait, now: i64) -> Result<()> {
     let rows = guards::Entity::find()
         .filter(guards::Column::ExpiresAt.lte(now))
         .limit(200)
@@ -168,13 +174,17 @@ async fn sweep(conn: &impl ConnectionTrait, now: i64) -> Result<()> {
     }
     Ok(())
 }
-async fn current(conn: &impl ConnectionTrait, id: &str, now: i64) -> Result<Option<guards::Model>> {
+pub(super) async fn current(
+    conn: &impl ConnectionTrait,
+    id: &str,
+    now: i64,
+) -> Result<Option<guards::Model>> {
     Ok(guards::Entity::find_by_id(id)
         .filter(guards::Column::ExpiresAt.gt(now))
         .one(conn)
         .await?)
 }
-async fn save(
+pub(super) async fn save(
     conn: &impl ConnectionTrait,
     id: String,
     count: i64,
@@ -198,7 +208,12 @@ async fn save(
     }
     Ok(())
 }
-async fn rate(conn: &impl ConnectionTrait, id: String, limit: i64, now: i64) -> Result<()> {
+pub(super) async fn rate(
+    conn: &impl ConnectionTrait,
+    id: String,
+    limit: i64,
+    now: i64,
+) -> Result<()> {
     let row = current(conn, &id, now).await?;
     if row.as_ref().is_some_and(|r| r.count >= limit) {
         return Err(limited());

@@ -7,6 +7,99 @@ use tokio::{
 };
 const LEASE: i64 = 30_000;
 
+#[cfg(test)]
+mod platform_tests;
+
+async fn platform_call(
+    s: AppState,
+    row: turns::Model,
+    owner: String,
+    request_id: String,
+    name: String,
+    arguments: Value,
+    approved: Option<bool>,
+) -> (String, Value) {
+    let result: Result<Option<Value>> = async {
+        if request_id.is_empty() || request_id.len() > 128 || !["ferry_discover", "ferry_request"].contains(&name.as_str()) { return Err(invalid()); }
+        let (tx, current, c) = leased(&s, &row, &owner).await?;
+        if current.state != "running" { return Err(conflict()); }
+        let execution = groups::execution(&tx, &current, c).await?;
+        tx.rollback().await?;
+        let scope = actor(&s, &current, &execution).await?;
+        let agent = available(&s.db, &scope, execution.agent_id.into()).await?;
+        let scope = crate::platform_tools::authorized_scope(&s, scope, &agent).await?;
+        if name == "ferry_discover" {
+            return Ok(Some(crate::platform_tools::catalogue(&scope, arguments["search"].as_str().unwrap_or(""), arguments["offset"].as_u64().unwrap_or(0).min(10000) as usize)));
+        }
+        let call: crate::platform_tools::Call = serde_json::from_value(arguments.clone()).map_err(|_| invalid())?;
+        call.validate()?;
+        if !call.read_only() && approved.is_none() {
+            let aad = format!("platform:{}:{}:{}",row.workspace_id,row.id,request_id);
+            let sealed = s.vault.seal(&arguments.to_string(), &aad)?;
+            let mut display = arguments;
+            crate::platform_tools::redact(&mut display);
+            display["_sealed"] = json!(sealed);
+            append(&s, &row, &owner, Event::Approval { request_id:request_id.clone(), tool:"ferry_request".into(), input:display }).await?;
+            return Ok(None);
+        }
+        if approved == Some(false) {
+            return Ok(Some(json!({"status":403,"ok":false,"error":"The user declined this platform operation. No operation was executed."})));
+        }
+        let value = crate::platform_tools::dispatch_as_agent(&s, scope, call, agent.id.into()).await?;
+        Ok(Some(value))
+    }.await;
+    let value = match result {
+        Ok(Some(value)) => value,
+        Ok(None) => return (request_id, Value::Null),
+        Err(error) => json!({"status":error.0.as_u16(),"ok":false,"error":error.1,
+            "guidance":"The platform denied or could not complete this call. No Agent role means no platform access. Check this workspace's current user and Agent role grants. Do not substitute local filesystem searches or invent counts."}),
+    };
+    if let Some(allowed) = approved {
+        let _ = append(
+            &s,
+            &row,
+            &owner,
+            Event::DecisionSent {
+                request_id: request_id.clone(),
+                allowed,
+            },
+        )
+        .await;
+    }
+    let _ = append(
+        &s,
+        &row,
+        &owner,
+        Event::PlatformResult {
+            request_id: request_id.clone(),
+            result: value.clone(),
+        },
+    )
+    .await;
+    (request_id, value)
+}
+
+async fn approved_platform_call(
+    s: &AppState,
+    row: &turns::Model,
+    owner: &str,
+    id: &str,
+) -> Result<Option<Value>> {
+    let (_tx, current, _) = leased(s, row, owner).await?;
+    let decisions: Value = serde_json::from_str(&current.decisions).map_err(|_| invalid())?;
+    let item = &decisions[id];
+    if item["tool"] != "ferry_request" || !item["input"]["_sealed"].is_string() {
+        return Ok(None);
+    }
+    if item["dispatching"] != true || item["sent"] == true {
+        return Err(conflict());
+    }
+    let aad = format!("platform:{}:{}:{}", row.workspace_id, row.id, id);
+    let sealed = item["input"]["_sealed"].as_str().ok_or_else(invalid)?;
+    let plain = s.vault.open_secret(sealed, &aad)?;
+    Ok(Some(serde_json::from_str(&plain).map_err(|_| invalid())?))
+}
+
 pub async fn scheduler(s: AppState, mut stop: watch::Receiver<bool>) {
     let mut tasks = JoinSet::new();
     let mut tick = tokio::time::interval(Duration::from_millis(500));
@@ -150,7 +243,11 @@ pub(super) async fn append(
     owner: &str,
     event: Event,
 ) -> Result<()> {
-    let payload = serde_json::to_string(&event).map_err(|_| invalid())?;
+    let mut public_event = serde_json::to_value(&event).map_err(|_| invalid())?;
+    if let Some(input) = public_event.get_mut("input").and_then(Value::as_object_mut) {
+        input.remove("_sealed");
+    }
+    let payload = serde_json::to_string(&public_event).map_err(|_| invalid())?;
     if payload.len() > 1024 * 1024 {
         return Err(invalid());
     }
@@ -345,6 +442,12 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
         }
         let channel = crate::hosts::remote::open(&s, &scope.workspace_id, &config.host_id).await?;
         let probe = channel.agent_probe(config.runtime, &config.cwd).await?;
+        if !probe.platform_tools {
+            return Err(error(
+                StatusCode::CONFLICT,
+                "conversations.runnerUpgradeRequired",
+            ));
+        }
         if probe.execution_user != binding.execution_user
             || probe.canonical_directory.as_deref() != Some(&binding.canonical_directory)
             || probe.execution_identity != binding.execution_identity
@@ -420,6 +523,7 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
                     .then_some(row.native_session_id.clone()),
                 permission: config.permission,
                 timeout_seconds: 3600,
+                platform_tools: true,
             },
         ))
     };
@@ -455,6 +559,8 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
     let mut failure = String::new();
     let mut stopping = false;
     let mut received = 0usize;
+    let mut platform_calls = 0usize;
+    let mut tool_tasks: JoinSet<(String, Value)> = JoinSet::new();
     // Do a fresh fenced check immediately before the first dispatch poll.
     let (must_stop, _) = heartbeat(&s, &row, &owner).await?;
     if must_stop || *stop.borrow() {
@@ -463,8 +569,15 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
     }
     loop {
         tokio::select! {
+            Some(result)=tool_tasks.join_next(),if !tool_tasks.is_empty()=> {
+                if let Ok((request_id,result))=result {
+                    if !result.is_null() && inputs.try_send(Input::PlatformResult{request_id,result}).is_err() { cancel.send_replace(true);stopping=true; }
+                } else { cancel.send_replace(true);stopping=true; }
+            },
             result=&mut running=>{
                 while let Ok(event)=receiver.try_recv(){
+                    // A finished execution cannot start new calls or persist raw arguments.
+                    if matches!(event, Event::PlatformCall { .. }) { continue; }
                     if let Event::Finished{outcome:value,..}=&event {outcome=Some(*value);}
                     append(&s,&row,&owner,event).await?;
                 }
@@ -472,6 +585,17 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
                 break;
             }
             event=receiver.recv()=>if let Some(event)=event {
+                if let Event::PlatformCall{request_id,name,arguments} = event {
+                    platform_calls+=1;
+                    received+=serde_json::to_vec(&arguments).map_err(|_|invalid())?.len();
+                    if platform_calls>128 || received>18*1024*1024 {
+                        cancel.send_replace(true);failure="conversations.outputLimit".into();stopping=true;continue;
+                    }
+                    if !stopping && tool_tasks.len()<16 {
+                        tool_tasks.spawn(platform_call(s.clone(),row.clone(),owner.clone(),request_id,name,arguments,None));
+                    } else { cancel.send_replace(true);stopping=true; }
+                    continue;
+                }
                 received+=serde_json::to_vec(&event).map_err(|_|invalid())?.len();
                 if received>18*1024*1024 {cancel.send_replace(true);failure="conversations.outputLimit".into();stopping=true;continue;}
                 if let Event::Finished{outcome:value,..}=&event {outcome=Some(*value);}
@@ -485,7 +609,15 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
             _=tick.tick()=>match heartbeat(&s,&row,&owner).await {
                 Ok((must_stop,decisions))=>{
                     if must_stop {cancel.send_replace(true);stopping=true;}
-                    if !stopping {for input in decisions {if inputs.try_send(input).is_err(){cancel.send_replace(true);stopping=true;}}}
+                    if !stopping {for input in decisions {
+                        if let Input::Decision{ref request_id,allow} = input {
+                            if let Some(arguments)=approved_platform_call(&s,&row,&owner,request_id).await? {
+                                tool_tasks.spawn(platform_call(s.clone(),row.clone(),owner.clone(),request_id.clone(),"ferry_request".into(),arguments,Some(allow)));
+                                continue;
+                            }
+                        }
+                        if inputs.try_send(input).is_err(){cancel.send_replace(true);stopping=true;}
+                    }}
                 }
                 Err(_)=>{
                     cancel.send_replace(true);
@@ -495,5 +627,7 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
             }
         }
     }
+    tool_tasks.abort_all();
+    while tool_tasks.join_next().await.is_some() {}
     finish(&s, &row, &owner, outcome, &failure, true).await
 }

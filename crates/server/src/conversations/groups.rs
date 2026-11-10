@@ -241,7 +241,7 @@ pub(super) async fn execution(
         }
         c.agent_id = a.agent_id;
         c.revision_id = a.revision_id;
-        c.config = a.config;
+        c.config = super::appearance::preserve(&c.config, &a.config);
         c.binding = a.binding;
         c.native_session_id = a.native_session_id;
     }

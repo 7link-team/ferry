@@ -113,6 +113,7 @@ export function newNode(graph: Graph, type: string, name: string): GraphNode {
   }
   // The example names a sample host; a new preview must pick its own.
   if (type === "host.preview") defaults.host_id = "";
+  if (type === "notification.send") defaults.channel_id = "";
   if (spec.params_schema.properties?.connection_id && spec.params_schema.properties?.credential_id) {
     delete defaults.credential_id;
     delete defaults.organization_id;

@@ -26,6 +26,7 @@ import {
   ArrowUp,
   Terminal,
   Eye,
+  Bell,
 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { workflowText as t } from "../../shared/i18n/i18n";
@@ -41,6 +42,7 @@ import {
 } from "./integrations";
 
 const builtinCatalog = [
+  { type: "notification.send", key: "notificationSend", group: "data", icon: Bell },
   { type: "host.command", key: "hostCommand", group: "build", icon: Terminal },
   { type: "host.preview", key: "hostPreview", group: "build", icon: Eye },
   { type: "ai.llm.chat", key: "aiChat", group: "ai", icon: Braces },

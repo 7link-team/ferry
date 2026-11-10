@@ -1,5 +1,15 @@
 {
-  "cliPermissionUnsupported": ["This CLI supports read-only conversations only. Choose read-only access.", "此CLI当前仅支持只读会话，请选择只读权限。", "此CLI目前僅支援唯讀會話，請選擇唯讀權限。", "このCLIは読み取り専用の会話にのみ対応しています。", "이 CLI는 읽기 전용 대화만 지원합니다.", "CLI ini hanya menyokong perbualan baca sahaja. Pilih akses baca sahaja."],
+  "emptyConversationTitle": ["A conversation starts here", "从一句话开始", "從一句話開始", "ここから会話を始めましょう", "여기서 대화를 시작하세요", "Perbualan bermula di sini"],
+  "replyingTo": ["Replying to", "回复", "回覆", "返信先", "답장 대상", "Membalas"],
+  "cancelReply": ["Cancel reply", "取消回复", "取消回覆", "返信をキャンセル", "답장 취소", "Batalkan balasan"],
+  "cliPermissionUnsupported": [
+    "This CLI supports read-only conversations only. Choose read-only access.",
+    "此CLI当前仅支持只读会话，请选择只读权限。",
+    "此CLI目前僅支援唯讀會話，請選擇唯讀權限。",
+    "このCLIは読み取り専用の会話にのみ対応しています。",
+    "이 CLI는 읽기 전용 대화만 지원합니다.",
+    "CLI ini hanya menyokong perbualan baca sahaja. Pilih akses baca sahaja."
+  ],
   "executionDetails": [
     "Execution details",
     "执行详情",
@@ -121,20 +131,28 @@
     "Tulis mesej…"
   ],
   "groupPlaceholder": [
-    "Write to the group; use @ to select Agents…",
-    "发送群消息，点击 @ 选择回复的智能体…",
-    "傳送群訊息，點擊 @ 選擇回覆的智慧體…",
-    "グループへ送信。@でエージェントを選択…",
-    "그룹 메시지 입력. @로 에이전트 선택…",
-    "Tulis ke kumpulan; guna @ untuk memilih ejen…"
+    "Write to the group; type @ to find members or Agents…",
+    "发送群消息，输入 @ 搜索成员或智能体…",
+    "傳送群訊息，輸入 @ 搜尋成員或智慧體…",
+    "グループへ送信。@でメンバーやエージェントを検索…",
+    "그룹 메시지 입력. @로 멤버 또는 에이전트 검색…",
+    "Tulis ke kumpulan; taip @ untuk mencari ahli atau ejen…"
   ],
   "mentionAgent": [
-    "Mention Agents",
-    "@ 智能体",
-    "@ 智慧體",
-    "エージェントをメンション",
-    "에이전트 멘션",
-    "Sebut ejen"
+    "Mention a member or Agent",
+    "提及成员或智能体",
+    "提及成員或智慧體",
+    "メンバーやエージェントをメンション",
+    "멤버 또는 에이전트 멘션",
+    "Sebut ahli atau ejen"
+  ],
+  "noMentionResults": [
+    "No matching members or Agents",
+    "未找到匹配的成员或智能体",
+    "找不到相符的成員或智慧體",
+    "一致するメンバーやエージェントがいません",
+    "일치하는 멤버 또는 에이전트가 없습니다",
+    "Tiada ahli atau ejen yang sepadan"
   ],
   "sendShortcut": [
     "Send shortcut",
@@ -673,12 +691,12 @@
     "Cari mesej"
   ],
   "copyMessage": [
-    "Copy message",
-    "复制消息",
-    "複製訊息",
-    "メッセージをコピー",
-    "메시지 복사",
-    "Salin mesej"
+    "Copy source text",
+    "复制原文",
+    "複製原文",
+    "原文をコピー",
+    "원문 복사",
+    "Salin teks asal"
   ],
   "copiedMessage": [
     "Message copied",
@@ -863,5 +881,233 @@
     "該当するメッセージはありません",
     "일치하는 메시지가 없습니다",
     "Tiada mesej sepadan"
+  ],
+  "diagram": [
+    "Mermaid diagram",
+    "Mermaid 图表",
+    "Mermaid 圖表",
+    "Mermaid 図",
+    "Mermaid 다이어그램",
+    "Rajah Mermaid"
+  ],
+  "diagramLoading": [
+    "Rendering diagram",
+    "正在绘制图表",
+    "正在繪製圖表",
+    "図を描画中",
+    "다이어그램 렌더링 중",
+    "Memaparkan rajah"
+  ],
+  "diagramError": [
+    "The diagram cannot be rendered. Its source is shown below.",
+    "图表无法显示，源码如下。",
+    "圖表無法顯示，原始碼如下。",
+    "図を表示できません。以下にソースを表示します。",
+    "다이어그램을 표시할 수 없습니다. 아래 소스를 확인하세요.",
+    "Rajah tidak dapat dipaparkan. Sumbernya ditunjukkan di bawah."
+  ],
+  "diagramSource": [
+    "Diagram source",
+    "图表源码",
+    "圖表原始碼",
+    "図のソース",
+    "다이어그램 소스",
+    "Sumber rajah"
+  ],
+  "platformResult": [
+    "Platform tool result",
+    "平台工具结果",
+    "平台工具結果",
+    "プラットフォームツールの結果",
+    "플랫폼 도구 결과",
+    "Hasil alat platform"
+  ],
+  "runnerUpgradeRequired": [
+    "Upgrade the host Runner to enable platform tools before starting this conversation.",
+    "请先升级主机 Runner 以启用平台工具，再运行此会话。",
+    "請先升級主機 Runner 以啟用平台工具，再執行此會話。",
+    "プラットフォームツールを有効にするには、ホストの Runner を更新してください。",
+    "플랫폼 도구를 사용하려면 먼저 호스트 Runner를 업그레이드하세요.",
+    "Naik taraf Runner hos untuk mendayakan alat platform sebelum menjalankan perbualan ini."
+  ],
+  "expandMessage": [
+    "Show full message",
+    "展开完整消息",
+    "展開完整訊息",
+    "メッセージ全体を表示",
+    "전체 메시지 보기",
+    "Tunjukkan mesej penuh"
+  ],
+  "collapseMessage": [
+    "Collapse message",
+    "收起消息",
+    "收起訊息",
+    "メッセージを折りたたむ",
+    "메시지 접기",
+    "Ringkaskan mesej"
+  ],
+  "chatAppearance": [
+    "Chat appearance",
+    "会话外观",
+    "會話外觀",
+    "チャットの外観",
+    "채팅 모양",
+    "Penampilan perbualan"
+  ],
+  "backgroundScope": [
+    "Wallpaper covers messages and the space around the composer. Saved for this conversation and visible to its participants.",
+    "背景铺满消息和输入栏后方，保存后对当前会话成员生效。",
+    "背景鋪滿訊息和輸入欄後方，儲存後對目前會話成員生效。",
+    "背景はメッセージと入力欄の後ろに表示され、保存後にこの会話の参加者に適用されます。",
+    "배경은 메시지와 입력창 뒤에 표시되며 저장 후 이 대화의 참여자에게 적용됩니다.",
+    "Kertas dinding meliputi mesej dan ruang sekeliling ruang input. Disimpan untuk semua peserta perbualan ini."
+  ],
+  "backgroundCustomColor": [
+    "Choose a custom color", "选择自定义颜色", "選擇自訂顏色", "カスタムカラーを選択", "사용자 지정 색상 선택", "Pilih warna tersuai"
+  ],
+  "backgroundLivePreview": [
+    "Live preview", "实时预览", "即時預覽", "ライブプレビュー", "실시간 미리보기", "Pratonton langsung"
+  ],
+  "backgroundImageSelected": [
+    "Your wallpaper", "已选背景图片", "已選背景圖片", "選択した背景画像", "선택한 배경 이미지", "Kertas dinding anda"
+  ],
+  "backgroundRemoveImage": [
+    "Remove wallpaper image", "移除背景图片", "移除背景圖片", "背景画像を解除", "배경 이미지 제거", "Alih keluar imej latar"
+  ],
+  "backgroundPattern": [
+    "Background texture",
+    "背景纹理",
+    "背景紋理",
+    "背景の模様",
+    "배경 무늬",
+    "Tekstur latar"
+  ],
+  "background_plain": [
+    "Plain",
+    "纯色",
+    "純色",
+    "無地",
+    "단색",
+    "Biasa"
+  ],
+  "background_dots": [
+    "Everyday doodles",
+    "生活涂鸦",
+    "生活塗鴉",
+    "日常の落書き",
+    "일상의 낙서",
+    "Coretan harian"
+  ],
+  "background_grid": [
+    "Cosmic wanderings",
+    "星空漫游",
+    "星空漫遊",
+    "星空の旅",
+    "별빛 산책",
+    "Kembara angkasa"
+  ],
+  "background_diagonal": [
+    "Botanical sketches",
+    "自然手绘",
+    "自然手繪",
+    "植物のスケッチ",
+    "자연 스케치",
+    "Lakaran alam"
+  ],
+  "backgroundColor": [
+    "Background color",
+    "背景颜色",
+    "背景顏色",
+    "背景色",
+    "배경색",
+    "Warna latar"
+  ],
+  "followTheme": [
+    "Follow theme",
+    "跟随主题",
+    "跟隨主題",
+    "テーマに合わせる",
+    "테마 따르기",
+    "Ikut tema"
+  ],
+  "backgroundUpload": [
+    "Upload background image",
+    "上传背景图片",
+    "上傳背景圖片",
+    "背景画像をアップロード",
+    "배경 이미지 업로드",
+    "Muat naik imej latar"
+  ],
+  "backgroundImageLimit": [
+    "PNG, JPEG, WebP or AVIF, up to 5 MB.",
+    "支持 PNG、JPEG、WebP、AVIF，最大 5 MB。",
+    "支援 PNG、JPEG、WebP、AVIF，最大 5 MB。",
+    "PNG・JPEG・WebP・AVIF、最大5 MB。",
+    "PNG, JPEG, WebP, AVIF, 최대 5 MB.",
+    "PNG, JPEG, WebP atau AVIF, maksimum 5 MB."
+  ],
+  "backgroundPreviewUser": [
+    "A clear space for every conversation.",
+    "让每段对话都有自己的空间。",
+    "讓每段對話都有自己的空間。",
+    "会話に合わせた空間。",
+    "대화마다 나만의 공간.",
+    "Ruang tersendiri bagi setiap perbualan."
+  ],
+  "backgroundPreviewAgent": [
+    "Text stays readable in light and dark themes.",
+    "无论明亮或暗夜，内容始终清晰。",
+    "無論明亮或暗夜，內容始終清晰。",
+    "ライトでもダークでも読みやすく。",
+    "밝고 어두운 테마에서도 선명하게.",
+    "Teks jelas dalam tema cerah dan gelap."
+  ],
+  "resetBackground": [
+    "Restore default",
+    "恢复默认",
+    "還原預設",
+    "既定に戻す",
+    "기본값 복원",
+    "Pulihkan lalai"
+  ],
+  "saveBackground": [
+    "Save background",
+    "保存背景",
+    "儲存背景",
+    "背景を保存",
+    "배경 저장",
+    "Simpan latar"
+  ],
+  "reportUnavailable": [
+    "Report unavailable or access denied.",
+    "报告不可用或无权访问。",
+    "報告不可用或無權存取。",
+    "レポートを表示できないか、権限がありません。",
+    "보고서가 없거나 접근 권한이 없습니다.",
+    "Laporan tidak tersedia atau akses ditolak."
+  ],
+  "reportPreviewLimit": [
+    "Preview supports up to 1 MB. Download the full report.",
+    "预览上限为 1 MB，请下载完整报告。",
+    "預覽上限為 1 MB，請下載完整報告。",
+    "プレビューは1 MBまでです。全体をダウンロードしてください。",
+    "미리보기는 최대 1 MB입니다. 전체 보고서를 다운로드하세요.",
+    "Pratonton sehingga 1 MB. Muat turun laporan penuh."
+  ],
+  "reportFile": [
+    "Report · Markdown",
+    "报告 · Markdown",
+    "報告 · Markdown",
+    "レポート · Markdown",
+    "보고서 · Markdown",
+    "Laporan · Markdown"
+  ],
+  "retryReport": [
+    "Retry preview",
+    "重试预览",
+    "重試預覽",
+    "再試行",
+    "미리보기 다시 시도",
+    "Cuba semula pratonton"
   ]
 }

@@ -19,5 +19,6 @@
   "conversations.groupAgentPrivate": "Group conversations require workspace-shared Agents.",
   "conversations.apiPending": "API conversation execution is not available yet.",
   "conversations.noRunner": "No available Runner can execute this model.",
-  "conversations.cliPermissionUnsupported": "This CLI supports read-only conversations only. Choose read-only access."
+  "conversations.cliPermissionUnsupported": "This CLI supports read-only conversations only. Choose read-only access.",
+  "conversations.runnerUpgradeRequired": "Upgrade the host Runner to enable platform tools before starting this conversation."
 }

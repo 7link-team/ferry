@@ -5,6 +5,7 @@
 use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 mod access_addresses;
+mod account_otp;
 mod account_preferences;
 mod agent_models;
 mod ai_agents;
@@ -16,6 +17,7 @@ mod conversations;
 mod holes;
 mod holes_sources;
 mod login_guard;
+mod notification_center;
 mod platform_monitor;
 mod platform_storage;
 mod workflow_node_logs;
@@ -162,7 +164,37 @@ impl MigratorTrait for Migrator {
             Box::new(holes_sources::Migration),
             Box::new(account_preferences::Migration),
             Box::new(access_addresses::Migration),
+            Box::new(PlatformSite),
+            Box::new(notification_center::Migration),
+            Box::new(account_otp::Migration),
         ]
+    }
+}
+
+pub(crate) struct PlatformSite;
+impl MigrationName for PlatformSite {
+    fn name(&self) -> &str {
+        "platform_site_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PlatformSite {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        if !m.has_column("platform_state", "site_config").await? {
+            m.alter_table(
+                Table::alter()
+                    .table(Alias::new("platform_state"))
+                    .add_column(long_text("site_config", m.get_database_backend()).null())
+                    .to_owned(),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Platform site configuration must be retained".into(),
+        ))
     }
 }
 

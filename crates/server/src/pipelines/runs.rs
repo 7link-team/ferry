@@ -33,6 +33,9 @@ use std::{
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct VariableSnapshot {
+    /// Persist delegated identity across background scheduling; never supplied by clients.
+    #[serde(default)]
+    pub(crate) origin_agent_id: Option<Id>,
     pub(crate) values: BTreeMap<String, String>,
     pub(crate) sources: Vec<Value>,
     /// Actions runs: the secrets and vars contexts every job receives,
@@ -676,6 +679,7 @@ pub(crate) async fn trigger_with_analysis_source(
         None => None,
     };
     let mut snapshot = VariableSnapshot::default();
+    snapshot.origin_agent_id = crate::platform_tools::current_agent();
     let environment_id = Id::from(environment.as_ref().map(|e| e.id).unwrap_or(0));
     // Actions: GitHub semantics (dynamic indexing delivers every authorized
     // value; undefined names are "").
@@ -846,7 +850,10 @@ pub(crate) async fn trigger_with_analysis_source(
         }
         snapshot.environments = declared;
     }
-    let variable_snapshot = if snapshot.values.is_empty() && snapshot.secrets.is_none() {
+    let variable_snapshot = if snapshot.values.is_empty()
+        && snapshot.secrets.is_none()
+        && snapshot.origin_agent_id.is_none()
+    {
         None
     } else {
         Some(s.vault.seal(

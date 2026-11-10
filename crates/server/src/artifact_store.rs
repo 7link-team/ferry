@@ -13,6 +13,7 @@ pub(crate) struct Configuration {
     pub kind: String,
     pub endpoint: String,
     pub bucket: String,
+    pub prefix: String,
     pub region: String,
     pub access_key: String,
     pub secret_key: String,
@@ -39,7 +40,7 @@ impl Configuration {
                 value.to_owned()
             }
         };
-        serde_json::json!({"storage_kind":field("FERRY_ARTIFACT_STORE",&self.kind),"storage_endpoint":field("FERRY_ARTIFACT_S3_ENDPOINT",&self.endpoint),"storage_bucket":field("FERRY_ARTIFACT_S3_BUCKET",&self.bucket),"storage_region":field("FERRY_ARTIFACT_S3_REGION",&self.region),"storage_access_key":field("AWS_ACCESS_KEY_ID",&self.access_key),"storage_has_secret_key":if env{std::env::var_os("AWS_SECRET_ACCESS_KEY").is_some()}else{!self.secret_key.is_empty()},"storage_source":if env{"environment"}else{"platform"}})
+        serde_json::json!({"storage_kind":field("FERRY_ARTIFACT_STORE",&self.kind),"storage_endpoint":field("FERRY_ARTIFACT_S3_ENDPOINT",&self.endpoint),"storage_bucket":field("FERRY_ARTIFACT_S3_BUCKET",&self.bucket),"storage_prefix":field("FERRY_ARTIFACT_S3_PREFIX",&self.prefix),"storage_region":field("FERRY_ARTIFACT_S3_REGION",&self.region),"storage_access_key":field("AWS_ACCESS_KEY_ID",&self.access_key),"storage_has_secret_key":if env{std::env::var_os("AWS_SECRET_ACCESS_KEY").is_some()}else{!self.secret_key.is_empty()},"storage_source":if env{"environment"}else{"platform"}})
     }
     fn backend(&self, root: &FsPath) -> anyhow::Result<ArtifactStore> {
         match self.kind.as_str() {
@@ -70,7 +71,7 @@ impl Configuration {
                         .with_access_key_id(&self.access_key)
                         .with_secret_access_key(&self.secret_key);
                 }
-                Ok(ArtifactStore(Arc::new(builder.build()?)))
+                ArtifactStore::prefixed(Arc::new(builder.build()?), &self.prefix)
             }
             _ => anyhow::bail!("invalid storage kind"),
         }
@@ -110,6 +111,7 @@ impl Configuration {
             ("storage_kind", &mut config.kind),
             ("storage_endpoint", &mut config.endpoint),
             ("storage_bucket", &mut config.bucket),
+            ("storage_prefix", &mut config.prefix),
             ("storage_region", &mut config.region),
             ("storage_access_key", &mut config.access_key),
             ("storage_secret_key", &mut config.secret_key),
@@ -123,6 +125,12 @@ impl Configuration {
                 }
             }
         }
+        config.prefix = ArtifactStore::normalize_prefix(&config.prefix).map_err(|_| {
+            crate::error::ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("platform.storagePrefixInvalid"),
+            )
+        })?;
         if config == previous {
             return Ok(sealed.map(str::to_owned));
         }
@@ -139,6 +147,7 @@ impl Configuration {
         if config.kind != previous.kind
             || config.endpoint != previous.endpoint
             || config.bucket != previous.bucket
+            || config.prefix != previous.prefix
         {
             if crate::entities::content_assets::Entity::find()
                 .count(conn)
@@ -186,6 +195,26 @@ impl Configuration {
 pub(crate) struct ArtifactStore(Arc<dyn ObjectStore>);
 
 impl ArtifactStore {
+    fn normalize_prefix(prefix: &str) -> anyhow::Result<String> {
+        let prefix = prefix.trim();
+        anyhow::ensure!(!prefix.starts_with('/'), "S3 prefix must be relative");
+        let prefix = prefix.strip_suffix('/').unwrap_or(prefix);
+        anyhow::ensure!(prefix.len() <= 512, "S3 prefix too long");
+        if !prefix.is_empty() {
+            Self::path(prefix)?;
+        }
+        Ok(prefix.to_owned())
+    }
+    fn prefixed(store: Arc<dyn ObjectStore>, prefix: &str) -> anyhow::Result<Self> {
+        let prefix = Self::normalize_prefix(prefix)?;
+        if prefix.is_empty() {
+            return Ok(Self(store));
+        }
+        Ok(Self(Arc::new(object_store::prefix::PrefixStore::new(
+            store,
+            Path::parse(prefix)?,
+        ))))
+    }
     pub(crate) async fn is_remote(s: &crate::state::State) -> crate::error::Result<bool> {
         Self::is_remote_for_connection(s, &s.db).await
     }
@@ -281,7 +310,10 @@ impl ArtifactStore {
                     .with_allow_http(endpoint.starts_with("http://"))
                     .with_virtual_hosted_style_request(false)
                     .build()?;
-                Ok(Self(Arc::new(store)))
+                Self::prefixed(
+                    Arc::new(store),
+                    &std::env::var("FERRY_ARTIFACT_S3_PREFIX").unwrap_or_default(),
+                )
             }
             _ => anyhow::bail!("invalid FERRY_ARTIFACT_STORE"),
         }
@@ -342,5 +374,94 @@ impl ArtifactStore {
             Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
             Err(error) => Err(error.into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod prefix_tests {
+    use super::*;
+    #[test]
+    fn prefix_is_relative_canonical_and_old_config_remains_readable() {
+        assert_eq!(
+            ArtifactStore::normalize_prefix("  team/production/ ").unwrap(),
+            "team/production"
+        );
+        assert_eq!(ArtifactStore::normalize_prefix("").unwrap(), "");
+        for invalid in [
+            "/",
+            "/team",
+            "team//",
+            "team//files",
+            "team/../other",
+            "./team",
+            "team\\other",
+        ] {
+            assert!(
+                ArtifactStore::normalize_prefix(invalid).is_err(),
+                "{invalid}"
+            );
+        }
+        assert!(ArtifactStore::normalize_prefix(&"x".repeat(513)).is_err());
+        let old: Configuration = serde_json::from_str(r#"{"kind":"s3","bucket":"old"}"#).unwrap();
+        assert_eq!(old.prefix, "");
+    }
+    #[tokio::test]
+    async fn prefix_bounds_create_read_delete_and_preserves_other_businesses() {
+        let raw: Arc<dyn ObjectStore> =
+            if std::env::var("FERRY_TEST_ASSET_S3").as_deref() == Ok("1") {
+                ArtifactStore::configured(FsPath::new("unused-s3-root"))
+                    .unwrap()
+                    .0
+            } else {
+                Arc::new(object_store::memory::InMemory::new())
+            };
+        let root = ArtifactStore::prefixed(raw.clone(), "").unwrap();
+        let first = ArtifactStore::prefixed(raw.clone(), "business/first").unwrap();
+        let second = ArtifactStore::prefixed(raw, "business/second/").unwrap();
+        for (store, value) in [(&root, "original"), (&first, "first"), (&second, "second")] {
+            assert!(store.create("same/key", Bytes::from(value)).await.unwrap());
+            assert!(
+                !store
+                    .create("same/key", Bytes::from_static(b"overwrite"))
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(store.get("same/key", 100).await.unwrap(), value);
+        }
+        assert_eq!(
+            root.get("business/first/same/key", 100).await.unwrap(),
+            "first"
+        );
+        assert!(first.get("same/key", 1).await.is_err());
+        assert!(first.get("../second/same/key", 100).await.is_err());
+        first.delete("same/key").await.unwrap();
+        assert!(first.get("same/key", 100).await.is_err());
+        assert_eq!(root.get("same/key", 100).await.unwrap(), "original");
+        assert_eq!(second.get("same/key", 100).await.unwrap(), "second");
+        root.delete("same/key").await.unwrap();
+        second.delete("same/key").await.unwrap();
+    }
+    #[tokio::test]
+    async fn prefix_change_on_populated_store_is_rejected_before_network_access() {
+        use crate::agents::tests::setup;
+        let (_dir, s) = setup().await;
+        std::fs::create_dir_all(s.data_dir.join("value-files")).unwrap();
+        std::fs::write(s.data_dir.join("value-files/existing"), "existing").unwrap();
+        let sealed = s
+            .vault
+            .seal(
+                &serde_json::to_string(&Configuration {
+                    kind: "s3".into(),
+                    bucket: "bucket".into(),
+                    ..Default::default()
+                })
+                .unwrap(),
+                "platform:file-storage",
+            )
+            .unwrap();
+        let fields = serde_json::json!({"storage_prefix":"another-business"});
+        let result =
+            Configuration::update(&s, &s.db, Some(&sealed), fields.as_object().unwrap()).await;
+        assert_eq!(result.unwrap_err().0, axum::http::StatusCode::CONFLICT);
     }
 }

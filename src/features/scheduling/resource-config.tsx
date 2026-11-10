@@ -356,16 +356,6 @@ export function schedulingForms({
               type: "switch",
             },
             {
-              key: "schedule",
-              label: "执行周期",
-              labelKey: "resource-domain:cron.schedule",
-              type: "cron",
-              required: true,
-              span: 2,
-              help: "停机错过的触发不补跑，同任务重叠时跳过并记录。",
-              helpKey: "resource-domain:cron.scheduleHelp",
-            },
-            {
               key: "timezone",
               label: "时区",
               labelKey: "resource-domain:cron.timezone",
@@ -374,6 +364,16 @@ export function schedulingForms({
               placeholder: "Asia/Shanghai",
               help: "必须明确填写 IANA 时区，例如 Asia/Shanghai、Asia/Singapore、UTC。",
               helpKey: "resource-domain:cron.timezoneHelp",
+            },
+            {
+              key: "schedule",
+              label: "执行周期",
+              labelKey: "resource-domain:cron.schedule",
+              type: "cron",
+              required: true,
+              span: 2,
+              help: "停机错过的触发不补跑，同任务重叠时跳过并记录。",
+              helpKey: "resource-domain:cron.scheduleHelp",
             },
             {
               key: "action",

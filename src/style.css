@@ -5,6 +5,37 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@layer components {
+  .conversation-markdown { @apply min-w-0 text-foreground; }
+  .conversation-markdown p { @apply my-2; }
+  .conversation-markdown > :first-child { margin-top: 0; }
+  .conversation-markdown > :last-child { margin-bottom: 0; }
+  .conversation-markdown :is(h1, h2, h3, h4, h5, h6) {
+    @apply mt-4 mb-2 bg-transparent font-semibold leading-snug text-foreground;
+    overflow-wrap: anywhere;
+  }
+  .conversation-markdown h1 { @apply border-b border-border pb-1.5 text-xl; }
+  .conversation-markdown h2 { @apply text-lg; }
+  .conversation-markdown h3 { @apply text-base; }
+  .conversation-markdown strong { @apply font-semibold; }
+  .conversation-markdown ul { @apply my-2 list-disc space-y-1 pl-6; }
+  .conversation-markdown ol { @apply my-2 list-decimal space-y-1 pl-6; }
+  .conversation-markdown li > p { @apply my-1; }
+  .conversation-markdown a { @apply text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary; }
+  .conversation-markdown [data-report-card] a { text-decoration: none; color: inherit; }
+  .conversation-markdown blockquote { @apply my-3 rounded-r-md border-l-4 border-primary/60 bg-muted/40 px-4 py-1; }
+  .conversation-markdown pre { @apply my-3 max-h-96 max-w-full overflow-auto rounded-lg border border-border bg-muted/60 p-3 font-mono text-xs leading-6 text-foreground; }
+  .conversation-markdown :not(pre) > code { @apply rounded bg-muted px-1.5 py-0.5 font-mono text-[0.875em] text-foreground; }
+  .conversation-markdown pre code { @apply bg-transparent p-0; }
+  .conversation-markdown table { @apply my-3 block max-w-full overflow-auto rounded-lg border border-border text-sm; border-spacing: 0; }
+  .conversation-markdown th { @apply border-b border-border bg-muted px-3 py-2 text-left font-semibold whitespace-nowrap; }
+  .conversation-markdown td { @apply border-b border-border px-3 py-2 whitespace-nowrap; }
+  .conversation-markdown tbody tr:nth-child(even) { @apply bg-muted/25; }
+  .conversation-markdown tbody tr:last-child td { @apply border-b-0; }
+  .conversation-markdown hr { @apply my-3 border-border; }
+  .conversation-diagram .node :is(rect, circle, ellipse, polygon, path) { filter: none !important; }
+}
+
 @layer base {
   :where(h1, h2, h3, h4, h5, h6) {
     background-color: color-mix(in oklab, var(--muted) 70%, var(--background));
@@ -225,4 +256,16 @@
   height: auto;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* The chat editor is one field, including attachments and its toolbar.
+   Theme field treatments belong to its outer shell, not a second textarea box. */
+[data-theme] [data-conversation-composer] textarea,
+[data-theme] [data-conversation-composer] textarea:is(:focus, :disabled) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }

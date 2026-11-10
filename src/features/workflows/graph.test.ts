@@ -25,6 +25,10 @@ function fixture() {
   return graph;
 }
 describe("workflow connection editing", () => {
+  it("requires choosing a real notification channel instead of binding the catalog example", () => {
+    const node = newNode(emptyGraph(), "notification.send", "Notify");
+    expect(node.params.channel_id).toBe("");
+  });
   it("adds successors right or below without moving existing nodes or overlapping them", () => {
     const original = fixture();
     const source = original.nodes[0]!;

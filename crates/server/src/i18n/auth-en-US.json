@@ -1,4 +1,5 @@
 {
+  "platform.siteInvalid": "Invalid site settings: name must be at most 120 characters and each prefix at most 32 characters; control characters are not allowed.",
   "permission.group.code-reviews": "Code reviews",
   "permission.action.generate": "Generate",
   "auth.password_save": "Could not save the password. Please try again.",
@@ -101,5 +102,22 @@
   "auth.captchaRequired": "Complete a new security verification before signing in.",
   "auth.loginRateLimit": "Too many login attempts. Please try again in a minute.",
   "auth.loginGuardInvalid": "Check the verification method, site key, secret key and site hostname.",
-  "auth.captchaUnavailable": "The verification service is unavailable. Please try again later."
+  "auth.captchaUnavailable": "The verification service is unavailable. Please try again later.",
+  "notification.invalid": "Invalid notification configuration or message.",
+  "notification.conflict": "The configuration changed or this request identifier was already used for a different message.",
+  "notification.disabled": "This notification channel is disabled.",
+  "notification.inUse": "This channel is referenced by a notification subscription. Remove the subscription first.",
+  "notification.sendFailed": "The notification could not be sent.",
+  "notification.sent": "Notification sent.",
+  "notification.unknown": "Delivery could not be confirmed. Check the recipient before sending a new message.",
+  "permission.group.notifications": "Notifications",
+  "permission.action.send": "Send",
+  "notification.nativeOnly": "Build notification steps run in Native jobs. Use a separate Native job after a container build.",
+  "notification.smsAccepted": "Accepted by the SMS provider; handset delivery is not confirmed.",
+  "platform.storagePrefixInvalid": "S3 prefix must be a relative path of up to 512 bytes without empty, dot or parent segments.",
+  "auth.otpInvalid": "Invalid or already used code. Enter a fresh authenticator code or an unused recovery code.",
+  "auth.otpExpired": "Verification expired. Start again.",
+  "auth.otpAttempts": "Too many incorrect codes. Sign in again to start a new verification.",
+  "auth.otpUnavailable": "New authenticator bindings are disabled.",
+  "auth.otpAlreadyEnabled": "An authenticator is already bound. Remove it before setting up another."
 }

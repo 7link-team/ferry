@@ -1,3 +1,5 @@
+import { NotificationParameters } from "../notifications/NotificationParameters";
+import { WorkflowAssetContext } from "./WorkflowAssets";
 import { FieldCaption, FieldHelpContext } from "../../shared/forms/FieldHelp";
 import { workflowFieldHelp } from "./workflow-field-help";
 import { Plus, X } from "lucide-react";
@@ -722,6 +724,7 @@ export function WorkflowNodeParameters({
   update: (value: Params) => void;
   invalid: (key: string, value: boolean) => void;
 }) {
+  const { workspace } = useContext(WorkflowAssetContext);
   const p = node.params;
   const patch = (value: Params) => update({ ...p, ...value });
   const text = (key: string, label: TextKey) => (
@@ -807,6 +810,9 @@ export function WorkflowNodeParameters({
   );
   let fields: ReactNode;
   switch (node.type) {
+    case "notification.send":
+      fields = <NotificationParameters workspace={workspace} value={p} readOnly={readOnly} onChange={update} invalid={blocked => invalid("notification", blocked)} />;
+      break;
     case "host.command":
       fields = <>
         <p className="text-sm leading-6 text-muted-foreground">{t("hostCommandHelp")}</p>

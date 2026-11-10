@@ -28,6 +28,9 @@ pub async fn serve_configured(
     let config = crate::accounts::platform_scripts::Configuration::read(
         row.as_ref().and_then(|r| r.page_scripts.as_deref()),
     )?;
+    let site = crate::accounts::site::Configuration::read(
+        row.as_ref().and_then(|r| r.site_config.as_deref()),
+    )?;
     let turnstile = crate::accounts::login_guard::Configuration::read(
         &s,
         row.as_ref().and_then(|r| r.login_security.as_deref()),
@@ -36,7 +39,7 @@ pub async fn serve_configured(
         == "turnstile";
     if let Some((script, policy)) = config.document() {
         if let Some(file) = Web::get("index.html") {
-            let html = localized_html(&file.data, &uri, &headers)
+            let html = localized_html(&file.data, &uri, &headers, Some(&site.site_name))
                 .replace("</head>", &format!("{script}</head>"));
             let mut response =
                 ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response();
@@ -53,7 +56,7 @@ pub async fn serve_configured(
     let mut response = if let Some(file) = Web::get("index.html") {
         (
             [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-            localized_html(&file.data, &uri, &headers),
+            localized_html(&file.data, &uri, &headers, Some(&site.site_name)),
         )
             .into_response()
     } else {
@@ -63,7 +66,12 @@ pub async fn serve_configured(
     Ok(response)
 }
 
-fn localized_html(bytes: &[u8], uri: &Uri, headers: &axum::http::HeaderMap) -> String {
+fn localized_html(
+    bytes: &[u8],
+    uri: &Uri,
+    headers: &axum::http::HeaderMap,
+    site_name: Option<&str>,
+) -> String {
     use crate::i18n::Locale;
     let locale = uri
         .path()
@@ -85,9 +93,10 @@ fn localized_html(bytes: &[u8], uri: &Uri, headers: &axum::http::HeaderMap) -> S
         Locale::MsMy => include_str!("../../../src/shared/i18n/locales/ms-MY.json"),
     };
     let value: serde_json::Value = serde_json::from_str(catalog).expect("UI locale catalog");
-    let title = value["app"]["title"]
-        .as_str()
-        .unwrap_or("Operations Platform")
+    let title = site_name
+        .filter(|name| !name.is_empty())
+        .or_else(|| value["app"]["title"].as_str())
+        .unwrap_or("Application")
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;");
@@ -181,23 +190,35 @@ pub async fn serve(uri: Uri) -> Response {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn configured_site_name_is_escaped_in_initial_html() {
+        let html = b"<html lang=\"en-US\"><head><title>Application</title></head></html>";
+        let uri = "/zh-CN/login".parse().unwrap();
+        let headers = axum::http::HeaderMap::new();
+        let output = super::localized_html(html, &uri, &headers, Some("Example <&>"));
+        assert!(output.contains("<title>Example &lt;&amp;&gt;</title>"));
+        assert!(
+            super::localized_html(html, &uri, &headers, Some(""))
+                .contains("<title>AI 工作台</title>")
+        );
+    }
+    #[test]
     fn first_document_title_uses_url_then_browser_language_then_english() {
         use super::*;
         let html = b"<html lang=\"en-US\"><head><title>Operations platform</title></head></html>";
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(header::ACCEPT_LANGUAGE, "ms-MY".parse().unwrap());
         assert!(
-            localized_html(html, &"/zh-CN/login".parse().unwrap(), &headers)
-                .contains("<title>运维平台</title>")
+            localized_html(html, &"/zh-CN/login".parse().unwrap(), &headers, None)
+                .contains("<title>AI 工作台</title>")
         );
         assert!(
-            localized_html(html, &"/login".parse().unwrap(), &headers)
-                .contains("<title>Platform operasi</title>")
+            localized_html(html, &"/login".parse().unwrap(), &headers, None)
+                .contains("<title>Ruang Kerja AI</title>")
         );
         headers.insert(header::ACCEPT_LANGUAGE, "xx-XX".parse().unwrap());
         assert!(
-            localized_html(html, &"/login".parse().unwrap(), &headers)
-                .contains("<title>Operations platform</title>")
+            localized_html(html, &"/login".parse().unwrap(), &headers, None)
+                .contains("<title>AI Workspace</title>")
         );
     }
     use super::*;

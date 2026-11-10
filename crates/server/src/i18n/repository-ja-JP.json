@@ -826,5 +826,7 @@
   "templates.examples.redisStartup": "起動設定テンプレート名または ID",
   "templates.examples.redisIp": "到達可能なホスト IPv4",
   "templates.examples.redisDataPort": "データ待受・公開ポート",
-  "templates.examples.redisSentinelPort": "Sentinel 待受・公開ポート"
+  "templates.examples.redisSentinelPort": "Sentinel 待受・公開ポート",
+  "files.permissionInvalid": "有効なパスと000〜777の権限を選択してください。",
+  "files.permissionUnsupported": "WindowsファイルとシンボリックリンクのPOSIX権限は編集できません。"
 }

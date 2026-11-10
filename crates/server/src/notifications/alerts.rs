@@ -50,10 +50,12 @@ pub struct Body {
     #[serde(default)]
     clear_webhook: bool,
     #[serde(default)]
+    notification_channel_id: Option<String>,
+    #[serde(default)]
     version: i64,
 }
 fn public(r: rules::Model) -> Value {
-    json!({"id":Id::from(r.id),"name":r.name,"description":r.description,"target_kind":r.target_kind,"target_ref":Id::from(r.target_ref),"metric":r.metric,"threshold":r.threshold,"enabled":r.enabled==1,"has_webhook":!r.webhook.is_empty(),"last_error":crate::i18n::display_stored(&r.last_error),"version":r.version,"created_at":r.created_at,"updated_at":r.updated_at})
+    json!({"id":Id::from(r.id),"name":r.name,"description":r.description,"target_kind":r.target_kind,"target_ref":Id::from(r.target_ref),"metric":r.metric,"threshold":r.threshold,"enabled":r.enabled==1,"has_webhook":!r.webhook.is_empty(),"notification_channel_id":Id::from(r.notification_channel_id),"last_error":crate::i18n::display_stored(&r.last_error),"version":r.version,"created_at":r.created_at,"updated_at":r.updated_at})
 }
 fn event(r: events::Model) -> Value {
     json!({"id":Id::from(r.id),"rule_id":Id::from(r.rule_id),"rule_name":r.rule_name,"target_kind":r.target_kind,"target_ref":Id::from(r.target_ref),"state":r.state,"message":crate::i18n::display_stored(&r.message),"triggered_at":r.triggered_at,"recovered_at":r.recovered_at,"trigger_delivery":crate::i18n::display_stored(&r.trigger_delivery),"recovery_delivery":crate::i18n::display_stored(&r.recovery_delivery),"created_at":r.created_at,"version":r.version})
@@ -145,6 +147,76 @@ async fn validate(conn: &impl ConnectionTrait, scope: &Scope, b: &Body) -> Resul
 fn aad(workspace: Id, id: Id) -> String {
     format!("alert-webhook:{workspace}:{id}")
 }
+async fn notification_channel(
+    _s: &AppState,
+    conn: &impl ConnectionTrait,
+    scope: &Scope,
+    b: &Body,
+    old: i64,
+) -> Result<i64> {
+    let Some(value) = &b.notification_channel_id else {
+        return Ok(old);
+    };
+    let id = if value.is_empty() {
+        Id::default()
+    } else {
+        Id::reference(value)?
+    };
+    if i64::from(id) == 0 || i64::from(id) == old {
+        return Ok(id.into());
+    }
+    let channel = super::center::channel_in(conn, scope.workspace_id, id).await?;
+    super::center::authorize_in(conn, scope, &channel).await?;
+    Ok(id.into())
+}
+
+pub(crate) async fn prepare_channels(s: &AppState) -> Result<()> {
+    for rule in rules::Entity::find()
+        .filter(rules::Column::NotificationChannelId.eq(0))
+        .filter(rules::Column::Webhook.ne(""))
+        .all(&s.db)
+        .await?
+    {
+        let tx = crate::variables::transaction(s, rule.workspace_id.into()).await?;
+        let Some(rule) = rules::Entity::find_by_id(rule.id).one(&tx).await? else {
+            continue;
+        };
+        if rule.notification_channel_id != 0 || rule.webhook.is_empty() {
+            continue;
+        }
+        let url = s.vault.open_secret(
+            &rule.webhook,
+            &aad(rule.workspace_id.into(), rule.id.into()),
+        )?;
+        let parsed = reqwest::Url::parse(&url).map_err(|_| ApiError::missing())?;
+        let provider = super::channel::provider(&parsed).to_owned();
+        let config = super::center::Transport {
+            webhook: url,
+            options: super::channel::Options {
+                provider: provider.clone(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let id = super::center::import_channel(
+            s,
+            &tx,
+            rule.workspace_id.into(),
+            rule.name.clone(),
+            provider,
+            true,
+            config,
+        )
+        .await?;
+        rules::Entity::update_many()
+            .col_expr(rules::Column::NotificationChannelId, Expr::value(id))
+            .filter(rules::Column::Id.eq(rule.id))
+            .exec(&tx)
+            .await?;
+        tx.commit().await?;
+    }
+    Ok(())
+}
 fn webhook(s: &AppState, scope: &Scope, id: Id, b: &Body, old: &str) -> Result<String> {
     if b.clear_webhook {
         return Ok(String::new());
@@ -207,6 +279,7 @@ pub(crate) async fn create_in(
     scope.require("alerts.create")?;
     let id = s.next_id()?;
     validate(tx, &scope, &b).await?;
+    let channel_id = notification_channel(s, tx, scope, &b, 0).await?;
     let now = db::now();
     rules::Entity::insert(rules::ActiveModel {
         id: Set(id.into()),
@@ -220,6 +293,7 @@ pub(crate) async fn create_in(
         enabled: Set(i64::from(b.enabled)),
         run_as: Set(scope.user.id.into()),
         webhook: Set(webhook(&s, &scope, id, &b, "")?),
+        notification_channel_id: Set(channel_id),
         last_error: Set(String::new()),
         version: Set(1),
         created_at: Set(now),
@@ -258,6 +332,7 @@ pub async fn update(
             Message::new("alerts.targetImmutable"),
         ));
     }
+    let channel_id = notification_channel(&s, &tx, &scope, &b, old.notification_channel_id).await?;
     let n = rules::Entity::update_many()
         .col_expr(rules::Column::Name, Expr::value(b.name.trim()))
         .col_expr(
@@ -267,6 +342,10 @@ pub async fn update(
         .col_expr(rules::Column::Threshold, Expr::value(b.threshold))
         .col_expr(rules::Column::Enabled, Expr::value(i64::from(b.enabled)))
         .col_expr(rules::Column::RunAs, Expr::value(scope.user.id))
+        .col_expr(
+            rules::Column::NotificationChannelId,
+            Expr::value(channel_id),
+        )
         .col_expr(
             rules::Column::Webhook,
             Expr::value(webhook(&s, &scope, id, &b, &old.webhook)?),
@@ -445,40 +524,58 @@ async fn deliver(
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
-    let result = match s
-        .vault
-        .open_secret(&r.webhook, &aad(r.workspace_id.into(), r.id.into()))
-    {
-        Ok(url) => {
-            let title = i18n::render(
-                i18n::current_locale(),
-                &Message::new(if recovered {
-                    "alerts.noticeRecovered"
-                } else {
-                    "alerts.noticeTriggered"
-                })
-                .with("name", row.rule_name.clone()),
-            );
-            let (state, kind, message) = (
-                row.state.clone(),
-                row.target_kind.clone(),
-                i18n::display_stored(&row.message),
-            );
-            let notice = crate::notifications::webhook::Notice {
-                title: &title,
-                accent: None,
-                field_links: vec![],
-                field_accents: vec![],
-                fields: vec![
-                    (i18n::message("alerts.stateLabel"), state),
-                    (i18n::message("alerts.kindLabel"), kind),
-                    (i18n::message("alerts.messageLabel"), message),
-                ],
-                generic: json!({"event":if recovered{"recovered"}else{"triggered"},"data":event(row)}),
-            };
-            crate::notifications::webhook::deliver(client, &url, &notice).await
+    let title = i18n::render(
+        i18n::current_locale(),
+        &Message::new(if recovered {
+            "alerts.noticeRecovered"
+        } else {
+            "alerts.noticeTriggered"
+        })
+        .with("name", row.rule_name.clone()),
+    );
+    let (state, kind, message) = (
+        row.state.clone(),
+        row.target_kind.clone(),
+        i18n::display_stored(&row.message),
+    );
+    let notice = crate::notifications::webhook::Notice {
+        title: &title,
+        accent: None,
+        field_links: vec![],
+        field_accents: vec![],
+        fields: vec![
+            (i18n::message("alerts.stateLabel"), state),
+            (i18n::message("alerts.kindLabel"), kind),
+            (i18n::message("alerts.messageLabel"), message),
+        ],
+        generic: json!({"event":if recovered{"recovered"}else{"triggered"},"data":event(row)}),
+    };
+    let result = if r.notification_channel_id != 0 {
+        match crate::notifications::center::send_system_notice(
+            s,
+            r.workspace_id.into(),
+            r.notification_channel_id.into(),
+            format!(
+                "alert:{id}:{}",
+                if recovered { "recovered" } else { "triggered" }
+            ),
+            "alert",
+            &id.to_string(),
+            &notice,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => error.2.as_ref().map(i18n::store_message).unwrap_or(error.1),
         }
-        Err(_) => i18n::store_message(&Message::new("alerts.webhookDecryptFailed")),
+    } else {
+        match s
+            .vault
+            .open_secret(&r.webhook, &aad(r.workspace_id.into(), r.id.into()))
+        {
+            Ok(url) => crate::notifications::webhook::deliver(client, &url, &notice).await,
+            Err(_) => i18n::store_message(&Message::new("alerts.webhookDecryptFailed")),
+        }
     };
     events::Entity::update_many()
         .col_expr(column, Expr::value(result))
@@ -518,7 +615,7 @@ async fn evaluate(s: &AppState, client: &reqwest::Client, r: rules::Model) -> Re
         .one(&tx)
         .await?;
     let now = db::now();
-    let delivery = if current.webhook.is_empty() {
+    let delivery = if current.webhook.is_empty() && current.notification_channel_id == 0 {
         i18n::store_message(&Message::new("alerts.webhookMissing"))
     } else {
         i18n::store_message(&Message::new("alerts.delivering"))
@@ -583,7 +680,7 @@ async fn evaluate(s: &AppState, client: &reqwest::Client, r: rules::Model) -> Re
     }
     tx.commit().await?;
     if let Some((id, recovered)) = transition {
-        if !current.webhook.is_empty() {
+        if !current.webhook.is_empty() || current.notification_channel_id != 0 {
             deliver(s, client, &current, id, recovered).await?;
         }
     }
@@ -814,6 +911,7 @@ mod locale_tests {
             enabled: 1,
             run_as: 1,
             webhook: String::new(),
+            notification_channel_id: 0,
             last_error: i18n::store_message(&Message::new("alerts.targetUnavailable")),
             version: 1,
             created_at: 1,

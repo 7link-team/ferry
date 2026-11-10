@@ -611,6 +611,14 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                             )
                         })?;
                     if step.get("uses").is_some() {
+                        if command == "ferry/notify@v1"
+                            && (container || raw.get("container").is_some())
+                        {
+                            return Err(ApiError::localized(
+                                axum::http::StatusCode::BAD_REQUEST,
+                                crate::i18n::Message::new("notification.nativeOnly"),
+                            ));
+                        }
                         if command.starts_with("docker://") && !container {
                             return Err(ApiError::localized(
                                 axum::http::StatusCode::BAD_REQUEST,
@@ -1217,6 +1225,27 @@ mod tests {
         assert!(parse(&document).is_err());
         document.checkout_bindings.clear();
         assert!(parse(&document).is_ok());
+    }
+
+    #[test]
+    fn notification_action_requires_a_native_job() {
+        let source = "jobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - uses: ferry/notify@v1\n        with: {channel-id: '12', body: 'Report'}\n";
+        assert!(parse(&doc(source)).is_ok());
+        assert!(
+            parse(&doc(&source.replace(
+                "    runs-on:",
+                "    container: alpine\n    runs-on:"
+            )))
+            .is_err()
+        );
+        let mut document = doc(source);
+        document.executor_bindings.push(Binding {
+            job_id: "build".into(),
+            target_kind: "host".into(),
+            target_ref: "1".into(),
+            image: "alpine".into(),
+        });
+        assert!(parse(&document).is_err());
     }
 
     #[test]

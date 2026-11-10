@@ -23,6 +23,27 @@ impl Protocol {
             match method {
                 "session/request_permission" => {
                     ensure!(!value["id"].is_null(), "ACP permission id missing");
+                    let platform = self.request.platform_tools
+                        && params["toolCall"]["title"].as_str().is_some_and(|name| {
+                            [
+                                "ferry_discover",
+                                "ferry_request",
+                                "mcp__ferry__ferry_discover",
+                                "mcp__ferry__ferry_request",
+                            ]
+                            .contains(&name)
+                        });
+                    if platform {
+                        // Approve only this transport call. The server independently authorizes
+                        // its operation and obtains the user's confirmation before any write.
+                        let once = params["options"]
+                            .as_array()
+                            .and_then(|options| options.iter().find(|o| o["kind"] == "allow_once"))
+                            .and_then(|o| o["optionId"].as_str())
+                            .ok_or_else(|| anyhow::anyhow!("ACP requires per-call approval"))?;
+                        step.writes.push(json!({"jsonrpc":"2.0","id":value["id"],"result":{"outcome":{"outcome":"selected","optionId":once}}}));
+                        return Ok(step);
+                    }
                     if self.request.permission == Permission::ReadOnly {
                         step.writes.push(json!({"jsonrpc":"2.0","id":value["id"],"result":{"outcome":{"outcome":"cancelled"}}}));
                     } else {
@@ -79,6 +100,9 @@ impl Protocol {
             Some(0) if !self.ready => {
                 ensure!(result["protocolVersion"] == 1, "unsupported ACP version");
                 let mut params = json!({"cwd":self.request.cwd,"mcpServers":[]});
+                if let Some(mcp) = &self.mcp_server {
+                    params["mcpServers"] = json!([mcp]);
+                }
                 let method = if let Some(session) = &self.request.native_session_id {
                     ensure!(
                         result["agentCapabilities"]["loadSession"] == true,

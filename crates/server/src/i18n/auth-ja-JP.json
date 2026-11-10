@@ -1,4 +1,5 @@
 {
+  "platform.siteInvalid": "サイト設定が無効です。名前は120文字以内、各接頭辞は32文字以内とし、制御文字は使用できません。",
   "permission.group.code-reviews": "コードレビュー",
   "permission.action.generate": "生成",
   "auth.password_save": "パスワードを保存できませんでした。再試行してください。",
@@ -101,5 +102,22 @@
   "auth.captchaRequired": "新しいセキュリティ認証を完了してからログインしてください。",
   "auth.loginRateLimit": "ログイン試行が多すぎます。1分後に再試行してください。",
   "auth.loginGuardInvalid": "認証方法、Site Key、Secret Key、ホスト名を確認してください。",
-  "auth.captchaUnavailable": "認証サービスを利用できません。後で再試行してください。"
+  "auth.captchaUnavailable": "認証サービスを利用できません。後で再試行してください。",
+  "notification.invalid": "通知設定またはメッセージの形式が無効です。",
+  "notification.conflict": "設定が変更されたか、このリクエストIDは別のメッセージに使用されています。",
+  "notification.disabled": "この通知チャネルは無効です。",
+  "notification.inUse": "このチャネルは通知購読で使用されています。先に購読を解除してください。",
+  "notification.sendFailed": "通知を送信できませんでした。",
+  "notification.sent": "通知を送信しました。",
+  "notification.unknown": "配信結果を確認できません。新しいメッセージを送信する前に受信先を確認してください。",
+  "permission.group.notifications": "通知",
+  "permission.action.send": "送信",
+  "notification.nativeOnly": "通知ステップは Native ジョブで実行します。コンテナビルド後に独立した Native ジョブを追加してください。",
+  "notification.smsAccepted": "SMS プロバイダーが受付しました。端末への配信は未確認です。",
+  "platform.storagePrefixInvalid": "S3 プレフィックスは512バイト以内の相対パス。空の区切り、.、.. は使用できません。",
+  "auth.otpInvalid": "コードが無効か使用済みです。新しい認証コードか未使用のリカバリーコードを入力してください。",
+  "auth.otpExpired": "認証期限が切れました。やり直してください。",
+  "auth.otpAttempts": "試行回数の上限です。ログインからやり直してください。",
+  "auth.otpUnavailable": "新規登録は無効です。",
+  "auth.otpAlreadyEnabled": "認証アプリが登録済みです。先に解除してください。"
 }

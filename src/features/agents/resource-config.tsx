@@ -1,4 +1,5 @@
 import { Eye, Pencil } from "lucide-react";
+import { AgentPrompt } from "./AgentPrompt";
 import { useEffect, useState } from "react";
 import { errorText } from "../../shared/api/api";
 import { AutoField } from "../../shared/forms/auto-form";
@@ -28,6 +29,8 @@ interface Agent {
   id: string;
   name: string;
   role: string;
+  platform_role_id: string;
+  platform_role_name?: string;
   description: string;
   owner_id: string;
   owner_name?: string;
@@ -55,6 +58,7 @@ const visibility = choices(["owner", "workspace"]);
 const editable = (row: Agent) => ({
   name: row.name,
   role: row.role,
+  platform_role_id: row.platform_role_id ?? "0",
   owner_id: row.owner_id,
   model_profile_id: row.model_profile_id,
   model: row.model,
@@ -307,6 +311,14 @@ export function agentsForms({
         return items;
     }
   };
+  const roles = async (): Promise<Option[]> => {
+    const items: Option[] = [{ value: "0", label: text("noPlatformRole") }];
+    for (let page=1;;page++) {
+      const result=await listResource<{id:string;name:string}>(workspace,"roles",{page,page_size:200});
+      items.push(...result.items.map(row=>({value:row.id,label:row.name})));
+      if (!result.items.length || page*result.page_size>=result.total) return items;
+    }
+  };
   return {
     "ai-agents": form<Agent>({
       resource: "ai-agents",
@@ -314,6 +326,7 @@ export function agentsForms({
       blank: {
         name: "",
         role: "",
+        platform_role_id: "0",
         model_profile_id: "",
         model: "",
         owner_id: "",
@@ -335,6 +348,13 @@ export function agentsForms({
               required: true,
             },
             { key: "role", label: "Role", labelKey: key("role"), type: "text" },
+            {
+              key: "platform_role_id", label: "Platform role", labelKey: key("platformRole"), type: "select",
+              options: grants?.has("roles.read") ? roles : [],
+              disabled: () => !grants?.has("roles.update"),
+              display: (row) => row.platform_role_id && row.platform_role_id !== "0" ? named(row.platform_role_name,row.platform_role_id) : text("noPlatformRole"),
+              helpKey: key("platformRoleHelp"),
+            },
             {
               key: "owner_id",
               label: "Human",
@@ -376,8 +396,9 @@ export function agentsForms({
               key: "system_prompt",
               label: "Instructions",
               labelKey: key("prompt"),
-              type: "textarea",
+              type: "custom",
               span: 2,
+              render: (props) => <AgentPrompt {...props} />,
             },
           ],
         },

@@ -1,9 +1,10 @@
 //! Private conversations; HTTP owns authorization, the scheduler owns execution.
+mod appearance;
 mod files;
 mod groups;
 mod interactions;
 pub(crate) mod messages;
-mod run;
+pub(crate) mod run;
 #[cfg(test)]
 mod tests;
 use crate::{
@@ -42,6 +43,10 @@ pub fn routes() -> Router<AppState> {
         .merge(files::routes())
         .merge(groups::routes())
         .merge(interactions::routes())
+        .route(
+            "/{workspace}/conversations/{id}/appearance",
+            axum::routing::put(appearance::update),
+        )
         .route("/{workspace}/conversations/{id}/events", get(history))
         .route("/{workspace}/conversations/{id}/turns", post(send))
         .route(
@@ -182,8 +187,16 @@ fn view(c: &conversations::Model) -> Value {
         "version":c.version,"created_at":c.created_at,"updated_at":c.updated_at})
 }
 pub(super) fn view_turn(t: &turns::Model) -> Value {
+    let mut decisions = serde_json::from_str::<Value>(&t.decisions).unwrap_or(json!({}));
+    if let Some(items) = decisions.as_object_mut() {
+        for item in items.values_mut() {
+            if let Some(input) = item.get_mut("input").and_then(Value::as_object_mut) {
+                input.remove("_sealed");
+            }
+        }
+    }
     json!({"id":Id::from(t.id),"state":t.state,"prompt":t.prompt,"attachments":serde_json::from_str::<Value>(&t.attachments).unwrap_or(json!([])),
-        "error":crate::i18n::render_stored(crate::i18n::current_locale(),&t.error),"usage":serde_json::from_str::<Value>(&t.usage).unwrap_or(Value::Null),"decisions":serde_json::from_str::<Value>(&t.decisions).unwrap_or(json!({})),
+        "error":crate::i18n::render_stored(crate::i18n::current_locale(),&t.error),"usage":serde_json::from_str::<Value>(&t.usage).unwrap_or(Value::Null),"decisions":decisions,
         "owner_id":Id::from(t.owner_id),"created_at":t.created_at,"updated_at":t.updated_at})
 }
 async fn list(

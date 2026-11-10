@@ -96,12 +96,21 @@ fn request(runtime: Runtime) -> Request {
         native_session_id: None,
         permission: Permission::OnRequest,
         timeout_seconds: 10,
+        platform_tools: false,
     }
 }
 
 fn acp_ready(runtime: Runtime, permission: Permission) -> protocol::Protocol {
+    acp_ready_platform(runtime, permission, false)
+}
+fn acp_ready_platform(
+    runtime: Runtime,
+    permission: Permission,
+    platform_tools: bool,
+) -> protocol::Protocol {
     let mut r = request(runtime);
     r.permission = permission;
+    r.platform_tools = platform_tools;
     let mut p = protocol::Protocol::new(r, "acp-test".into());
     assert_eq!(p.initial()["params"]["protocolVersion"], 1);
     assert_eq!(
@@ -126,6 +135,21 @@ fn acp_ready(runtime: Runtime, permission: Permission) -> protocol::Protocol {
         "session/prompt"
     );
     p
+}
+
+#[test]
+fn acp_platform_transport_is_per_call_and_does_not_unlock_local_tools() {
+    for runtime in [Runtime::Gemini, Runtime::Qwen, Runtime::Opencode] {
+        let mut p = acp_ready_platform(runtime, Permission::ReadOnly, true);
+        let event = |title: &str| json!({"id":90,"method":"session/request_permission","params":{"sessionId":"native-acp","toolCall":{"title":title},"options":[{"kind":"allow_always","optionId":"forever"},{"kind":"allow_once","optionId":"once"}]}});
+        let step = p.receive(event("ferry_request")).unwrap();
+        assert_eq!(step.writes[0]["result"]["outcome"]["optionId"], "once");
+        assert!(step.events.is_empty());
+        assert_eq!(
+            p.receive(event("Bash")).unwrap().writes[0]["result"]["outcome"]["outcome"],
+            "cancelled"
+        );
+    }
 }
 
 #[test]

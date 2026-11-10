@@ -1,5 +1,8 @@
 {
   "en-US": {
+    "nav.sections.access": "Identity & permissions",
+    "nav.sections.models": "Model services",
+    "nav.sections.configuration": "Configuration & audit",
     "field.text": "Enter the text value for this field.",
     "field.select": "Choose a value from the available options.",
     "field.multiline": "Enter text on one or more lines. Line breaks are preserved.",
@@ -95,7 +98,7 @@
     "nav.dictionaries": "Dictionaries",
     "nav.activity": "Activity log",
     "auth.workspaceIntro": "Create a workspace or join one with an invitation code.",
-    "auth.tagline": "Operations platform with workspaces",
+    "auth.tagline": "AI collaboration and automation platform",
     "auth.checking": "Checking platform initialization…",
     "auth.recheck": "Check again",
     "auth.passwordMismatch": "The passwords do not match.",
@@ -398,9 +401,13 @@
     "form.startHelp": "Choose blank or a template. Fill in template parameters and confirm to enter the editor; nothing is saved or executed yet.",
     "form.startBlank": "Start blank",
     "form.blankHelp": "Start editing with the existing default configuration.",
-    "form.useTemplate": "Use this template"
+    "form.useTemplate": "Use this template",
+    "nav.sections.notifications": "Notifications"
   },
   "zh-CN": {
+    "nav.sections.access": "身份与权限",
+    "nav.sections.models": "模型服务",
+    "nav.sections.configuration": "配置与审计",
     "field.text": "填写此字段的文本值。",
     "field.select": "从下拉列表中选择一个可用值。",
     "field.multiline": "可填写一行或多行文本，换行会保留。",
@@ -496,7 +503,7 @@
     "nav.dictionaries": "字典",
     "nav.activity": "操作记录",
     "auth.workspaceIntro": "创建一个工作空间，或用邀请码加入一个。",
-    "auth.tagline": "工作空间制运维平台",
+    "auth.tagline": "AI 协作与自动化平台",
     "auth.checking": "正在检查平台初始化状态…",
     "auth.recheck": "重新检查",
     "auth.passwordMismatch": "两次输入的密码不一致。",
@@ -799,9 +806,13 @@
     "form.startHelp": "选择空白或模板；使用模板时填写参数并确认，随后进入编辑，不会立即保存或执行。",
     "form.startBlank": "空白创建",
     "form.blankHelp": "使用现有默认配置开始编辑。",
-    "form.useTemplate": "使用此模板"
+    "form.useTemplate": "使用此模板",
+    "nav.sections.notifications": "通知"
   },
   "zh-TW": {
+    "nav.sections.access": "身分與權限",
+    "nav.sections.models": "模型服務",
+    "nav.sections.configuration": "設定與稽核",
     "field.text": "填寫此欄位的文字值。",
     "field.select": "從下拉清單中選擇可用值。",
     "field.multiline": "可填寫一行或多行文字，換行會保留。",
@@ -897,7 +908,7 @@
     "nav.dictionaries": "字典",
     "nav.activity": "操作記錄",
     "auth.workspaceIntro": "建立工作空間，或使用邀請碼加入。",
-    "auth.tagline": "具備工作空間的維運平台",
+    "auth.tagline": "AI 協作與自動化平台",
     "auth.checking": "正在檢查平台初始化狀態…",
     "auth.recheck": "重新檢查",
     "auth.passwordMismatch": "兩次輸入的密碼不一致。",
@@ -1200,9 +1211,13 @@
     "form.startHelp": "選擇空白或範本；使用範本時填寫參數並確認，隨後進入編輯，不會立即儲存或執行。",
     "form.startBlank": "空白建立",
     "form.blankHelp": "使用現有預設設定開始編輯。",
-    "form.useTemplate": "使用此範本"
+    "form.useTemplate": "使用此範本",
+    "nav.sections.notifications": "通知"
   },
   "ja-JP": {
+    "nav.sections.access": "IDと権限",
+    "nav.sections.models": "モデルサービス",
+    "nav.sections.configuration": "設定と監査",
     "field.text": "この項目のテキストを入力します。",
     "field.select": "一覧から値を選択します。",
     "field.multiline": "複数行のテキストを入力できます。改行は保持されます。",
@@ -1297,7 +1312,7 @@
     "nav.dictionaries": "辞書",
     "nav.activity": "操作履歴",
     "auth.workspaceIntro": "ワークスペースを作成するか、招待コードで参加してください。",
-    "auth.tagline": "ワークスペースを備えた運用プラットフォーム",
+    "auth.tagline": "AI コラボレーションと自動化プラットフォーム",
     "auth.checking": "プラットフォームの初期化を確認中…",
     "auth.recheck": "もう一度確認",
     "auth.passwordMismatch": "パスワードが一致しません。",
@@ -1601,9 +1616,13 @@
     "form.startHelp": "空白またはテンプレートを選びます。パラメーターを入力して確定すると編集画面に進みます。保存や実行はまだ行われません。",
     "form.startBlank": "空白から作成",
     "form.blankHelp": "既存の初期設定で編集を開始します。",
-    "form.useTemplate": "このテンプレートを使用"
+    "form.useTemplate": "このテンプレートを使用",
+    "nav.sections.notifications": "通知"
   },
   "ko-KR": {
+    "nav.sections.access": "ID 및 권한",
+    "nav.sections.models": "모델 서비스",
+    "nav.sections.configuration": "설정 및 감사",
     "field.text": "이 필드의 텍스트 값을 입력하세요.",
     "field.select": "목록에서 사용 가능한 값을 선택하세요.",
     "field.multiline": "여러 줄 텍스트를 입력할 수 있으며 줄 바꿈이 유지됩니다.",
@@ -1698,7 +1717,7 @@
     "nav.dictionaries": "사전",
     "nav.activity": "활동 기록",
     "auth.workspaceIntro": "워크스페이스를 만들거나 초대 코드로 참여하세요.",
-    "auth.tagline": "워크스페이스 기반 운영 플랫폼",
+    "auth.tagline": "AI 협업 및 자동화 플랫폼",
     "auth.checking": "플랫폼 초기화 상태 확인 중…",
     "auth.recheck": "다시 확인",
     "auth.passwordMismatch": "비밀번호가 일치하지 않습니다.",
@@ -2002,9 +2021,13 @@
     "form.startHelp": "빈 구성 또는 템플릿을 선택하세요. 매개변수를 입력하고 확인하면 편집기로 이동하며, 아직 저장하거나 실행하지 않습니다.",
     "form.startBlank": "빈 구성으로 시작",
     "form.blankHelp": "기존 기본 구성으로 편집을 시작합니다.",
-    "form.useTemplate": "이 템플릿 사용"
+    "form.useTemplate": "이 템플릿 사용",
+    "nav.sections.notifications": "알림"
   },
   "ms-MY": {
+    "nav.sections.access": "Identiti & kebenaran",
+    "nav.sections.models": "Perkhidmatan model",
+    "nav.sections.configuration": "Konfigurasi & audit",
     "field.text": "Masukkan nilai teks untuk medan ini.",
     "field.select": "Pilih nilai daripada pilihan tersedia.",
     "field.multiline": "Masukkan satu atau beberapa baris teks. Pemisah baris dikekalkan.",
@@ -2099,7 +2122,7 @@
     "nav.dictionaries": "Kamus",
     "nav.activity": "Log aktiviti",
     "auth.workspaceIntro": "Cipta ruang kerja atau sertai menggunakan kod jemputan.",
-    "auth.tagline": "Platform operasi dengan ruang kerja",
+    "auth.tagline": "Platform kerjasama dan automasi AI",
     "auth.checking": "Menyemak permulaan platform…",
     "auth.recheck": "Semak semula",
     "auth.passwordMismatch": "Kata laluan tidak sepadan.",
@@ -2403,6 +2426,7 @@
     "form.startHelp": "Pilih konfigurasi kosong atau templat. Isi parameter dan sahkan untuk membuka editor; tiada yang disimpan atau dilaksanakan lagi.",
     "form.startBlank": "Mulakan kosong",
     "form.blankHelp": "Mula menyunting dengan konfigurasi lalai sedia ada.",
-    "form.useTemplate": "Gunakan templat ini"
+    "form.useTemplate": "Gunakan templat ini",
+    "nav.sections.notifications": "Pemberitahuan"
   }
 }

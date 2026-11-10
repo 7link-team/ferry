@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="440" viewBox="0 0 400 440" fill="none" stroke="#849087" stroke-opacity=".24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <defs><g id="star"><path d="m0-12 3 9 9 3-9 3-3 9-3-9-9-3 9-3Z"/></g><g id="planet"><circle r="17"/><ellipse rx="31" ry="7" transform="rotate(-24)"/><path d="M-7-11c6-4 12-2 15 4"/></g><g id="moon"><path d="M9-22a23 23 0 1 0 10 39A25 25 0 0 1 9-22Z"/></g></defs>
+  <use href="#moon" x="43" y="39" transform="rotate(-12 43 39)"/>
+  <use href="#planet" x="158" y="40"/>
+  <use href="#star" x="252" y="24"/>
+  <g transform="translate(330 34) rotate(24)"><path d="M0 33C-17 3 0-20 0-20S17 3 0 33Z M-6 14l-11 12 2-21 7-6 M6 14l11 12-2-21-7-6 M-4 33v10 M3 34v15"/><circle cy="2" r="5"/></g>
+  <use href="#star" x="20" y="125"/><use href="#star" x="204" y="108" transform="rotate(20 204 108)"/>
+  <g transform="translate(90 134) rotate(-16)"><path d="M-22 4c3-25 41-25 44 0 M-29 4h58c-4 18-54 18-58 0Z M-11 23l-4 8 M0 25v8 M11 23l4 8"/><circle cy="-3" r="4"/></g>
+  <g transform="translate(287 133)"><path d="m0-13 4 9 10 1-8 7 2 10-9-5-8 5 2-10-8-7 11-1Z M-19-11l-22-11 M-20-2l-30-7 M-14-17l-12-14"/></g>
+  <use href="#planet" x="32" y="230" transform="rotate(25 32 230)"/>
+  <g transform="translate(149 217)"><path d="M-22 4c0-29 44-29 44 0 M-28 4h56 M-17 5c0-22 34-22 34 0 M-11 5c0-15 22-15 22 0 M-24 8c-9-2-13 11-2 11h20 M23 8c9-2 13 11 2 11H5"/></g>
+  <use href="#moon" x="249" y="231" transform="rotate(23 249 231)"/>
+  <use href="#star" x="357" y="212"/>
+  <g transform="translate(72 326) rotate(-19)"><path d="M-18-4c-9-8-1-20 8-17 0-15 21-15 23-1 13-3 21 15 9 20H-18Z M-14 3l-7 10 M1 4l-5 12 M15 4l-2 8"/></g>
+  <use href="#star" x="168" y="302"/>
+  <use href="#planet" x="266" y="326" transform="rotate(-14 266 326)"/>
+  <g transform="translate(358 311)"><circle r="15"/><path d="M0-24v-5 M17-17l4-4 M24 0h6 M17 17l4 4 M0 24v6 M-17 17l-4 4 M-24 0h-6 M-17-17l-4-4"/></g>
+  <g transform="translate(31 402)"><path d="m-17 7 12-21 10 13 6-6 13 18h-46 M-11-3l6 3 4-4 M9 1l5 4 3-2"/></g>
+  <use href="#moon" x="153" y="404" transform="rotate(-24 153 404)"/>
+  <use href="#star" x="238" y="396"/>
+  <g transform="translate(327 405) rotate(-12)"><path d="M-28 0c0-12 14-15 20-9 5-15 27-13 30 1 14-3 18 17 5 18h-49c-7 0-9-6-6-10Z"/></g>
+  <path d="M90 74l2 3m0-8 3-1 M216 63l3 3m-1-9 3-1 M378 86l3-3 M147 162l3 4m0-9 4-1 M230 165l5 3 M350 160l3 3m0-8 3-2 M85 264l3-3 M204 271l3 4m-1-8 4-2 M311 266l3-3 M17 358l3 3 M123 362l3-3 M213 369l3 3m-1-8 4-1 M299 370l3-4 M390 390l3 3 M91 425l3-3"/>
+  <g stroke-dasharray="2 6"><path d="m104 96 22-10 19 13 M196 192l19-17 16 13 M91 207l-15-17 12-12 M206 337l13-18 16 9"/></g>
+</svg>

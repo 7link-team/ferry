@@ -19,7 +19,8 @@ base64 = "0.22"
 minisign-verify = "0.3"
 sha2 = "0.10"
 semver = "1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json"] }
+axum = "0.8"
 
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"

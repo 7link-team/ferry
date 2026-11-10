@@ -31,7 +31,9 @@ pub(super) async fn stream_events(
     let mut processing = FuturesUnordered::new();
     let mut checks = FuturesUnordered::new();
     // Preview requests live as long as the worker invocation that made them.
-    let mut previews = FuturesUnordered::new();
+    let mut previews: FuturesUnordered<
+        std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>>,
+    > = FuturesUnordered::new();
     let mut stop_open = true;
     while exit.is_none() || !closed || !lines.is_empty() || !processing.is_empty() {
         if *stop.borrow() {
@@ -53,9 +55,19 @@ pub(super) async fn stream_events(
             {
                 // Not logged: the marker carries the nonce. The step prints
                 // its own progress lines.
-                previews.push(serve_preview(
+                previews.push(Box::pin(serve_preview(
                     s, run, job, seq, ch, preview, request, credential, variables,
-                ));
+                )));
+                continue;
+            }
+            if worker
+                && stream == "stdout"
+                && let Some(preview) = preview
+                && let Some(request) = super::notification::request(&line, preview)
+            {
+                previews.push(Box::pin(super::notification::serve(
+                    s, run, job, ch, preview, request,
+                )));
                 continue;
             }
             let previous = outcome.take();
@@ -288,7 +300,7 @@ struct PreviewRequest {
 
 /// The answer file for request `id`: exactly `<dir>/<id>.json`, with an id
 /// that cannot name any other path.
-fn preview_path(dir: &str, id: &str) -> Option<String> {
+pub(super) fn preview_path(dir: &str, id: &str) -> Option<String> {
     (!id.is_empty()
         && id.len() <= 64
         && id
@@ -359,7 +371,7 @@ async fn open_preview(
     Ok((id, url))
 }
 
-async fn answer_preview(ch: &dyn HostChannel, path: &str, answer: Value) {
+pub(super) async fn answer_preview(ch: &dyn HostChannel, path: &str, answer: Value) {
     if let Err(error) = upload(ch, path, answer.to_string(), 0o600).await {
         // The step gives up at its own deadline; the job's end revokes it.
         tracing::warn!(%error, "预览结果写回失败");

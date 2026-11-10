@@ -1,7 +1,7 @@
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import { Dialog } from "radix-ui";
-import { executionText, workflowText as t } from "../../shared/i18n/i18n";
+import { commonText, executionText, workflowText as t } from "../../shared/i18n/i18n";
 import { AutoField } from "../../shared/forms/auto-form";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
@@ -14,14 +14,16 @@ import { FieldCaption } from "../../shared/forms/FieldHelp";
 import { artifactNames } from "./action-references";
 const YamlEditor = lazy(() => import("./YamlEditor").then(module => ({ default: module.YamlEditor })));
 
-export function WorkflowFragmentEditor({ source, job, index, original, readOnly, checkoutBound = false, checkout, onChange }: {
+export function WorkflowFragmentEditor({ source, job, index, original, readOnly, checkoutBound = false, checkout, onChange, renderNotification }: {
   source: string; job: string; index: number; original: string; readOnly: boolean;
   checkoutBound?: boolean;
   checkout?: ReactNode;
+  renderNotification?: (inputs: Record<string, unknown>, change: (inputs: Record<string, string>) => void) => ReactNode;
   onChange: (source: string) => void;
 }) {
   const { jobs } = parseActions(source);
   const step = jobs.find(row => row.id === job)!.steps[index]!;
+  const isNotification = step.uses === "ferry/notify@v1";
   const isCheckout = /^actions\/checkout@/.test(String(step.uses ?? ""));
   const [formError, setFormError] = useState("");
   const update = (values: Record<string, unknown>) => {
@@ -42,8 +44,8 @@ export function WorkflowFragmentEditor({ source, job, index, original, readOnly,
     </>}
     </ActionsPhase>
     <ActionsPhase phase="run">
-    <AutoField label={executionText("editor.stepType")} className="block space-y-2 text-sm"><select aria-label={executionText("editor.stepType")} className="h-10 w-full rounded-md border border-input bg-background px-3" disabled={readOnly} value={isCheckout ? "checkout" : step.uses !== undefined ? "action" : "run"} onChange={event => update(event.target.value === "checkout" ? { run: null, shell: null, "working-directory": null, with: null, uses: "actions/checkout@v4" } : event.target.value === "action" ? { run: null, shell: null, "working-directory": null, uses: "actions/setup-node@v4" } : { uses: null, with: null, run: defaultActionRun(index + 1) })}><option value="run">{executionText("shared.resource.cron.commandAction")}</option><option value="checkout">{t("actions.cloneCode")}</option><option value="action">{executionText("editor.useAction")}</option></select></AutoField>
-    {isCheckout ? <>
+    <AutoField label={executionText("editor.stepType")} className="block space-y-2 text-sm"><select aria-label={executionText("editor.stepType")} className="h-10 w-full rounded-md border border-input bg-background px-3" disabled={readOnly} value={isNotification ? "notification" : isCheckout ? "checkout" : step.uses !== undefined ? "action" : "run"} onChange={event => update(event.target.value === "notification" ? { run: null, shell: null, "working-directory": null, with: { "channel-id": "", body: "" }, uses: "ferry/notify@v1" } : event.target.value === "checkout" ? { run: null, shell: null, "working-directory": null, with: null, uses: "actions/checkout@v4" } : event.target.value === "action" ? { run: null, shell: null, "working-directory": null, uses: "actions/setup-node@v4" } : { uses: null, with: null, run: defaultActionRun(index + 1) })}><option value="run">{executionText("shared.resource.cron.commandAction")}</option><option value="checkout">{t("actions.cloneCode")}</option><option value="notification">{commonText("notifications:send")}</option><option value="action">{executionText("editor.useAction")}</option></select></AutoField>
+    {isNotification && renderNotification ? renderNotification((step.with ?? {}) as Record<string, unknown>, inputs => update({ with: inputs })) : isCheckout ? <>
       {checkout}
       {!checkoutBound && <details className="space-y-2 rounded-md border p-3"><summary className="cursor-pointer text-sm">{t("actions.nativeCheckout")}</summary><ActionInputs reference={String(step.uses)} value={step.with} readOnly={readOnly} change={value => update({ with: value })} /></details>}
     </> : step.uses !== undefined ? <>

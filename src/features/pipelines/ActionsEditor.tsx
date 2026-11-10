@@ -27,7 +27,7 @@ import { addActionJob,addActionStep,connectActionJobs,duplicateActionJob,duplica
 
 type Binding = { job_id: string; target_kind: string; target_ref: string; image: string };
 type Selection = { job: string; step?: number };
-type JobData = { job: ActionJob; selected?: Selection; readOnly: boolean; canDelete: boolean; missingHost: boolean; select: (value: Selection) => void; addJob: (job: string, mode: "serial" | "parallel") => void; addStep: (job: string, kind?: "run" | "checkout" | "action") => void; removeJob: (job: string) => void };
+type JobData = { job: ActionJob; selected?: Selection; readOnly: boolean; canDelete: boolean; missingHost: boolean; select: (value: Selection) => void; addJob: (job: string, mode: "serial" | "parallel") => void; addStep: (job: string, kind?: "run" | "checkout" | "action" | "notification") => void; removeJob: (job: string) => void };
 type JobNode = Node<JobData, "job">;
 function JobCard({ data }: NodeProps<JobNode>) {
   useCommonTranslation();
@@ -37,7 +37,7 @@ function JobCard({ data }: NodeProps<JobNode>) {
       {!data.readOnly && <Button type="button" variant="ghost" size="icon" className="nodrag nopan size-7" aria-label={executionText("editor.deleteJobName", { name: data.job.name })} title={executionText("editor.deleteJob")} disabled={!data.canDelete} onClick={event => { event.stopPropagation(); data.removeJob(data.job.id); }}><Trash2 className="size-4" /></Button>}
     </div>
     <div className="space-y-1 p-2">{data.missingHost && <button type="button" className="nodrag w-full rounded px-2 py-1 text-left text-xs text-destructive" onClick={() => data.select({ job: data.job.id })}>{executionText("editor.chooseHost")}</button>}{data.job.steps.map((step, index) => <button key={index} data-action-step={index} type="button" className={`nodrag flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring ${data.selected?.job === data.job.id && data.selected?.step === index ? "bg-accent" : ""}`} onClick={() => data.select({ job: data.job.id, step: index })}><span className="text-xs text-muted-foreground">{index + 1}</span><span className="truncate">{step.name || step.uses || executionText("shared.resource.cron.commandAction")}</span></button>)}{data.job.raw["ferry-approval"] === true && <p className="p-2 text-xs text-muted-foreground">{executionText("editor.approvalHelp")}</p>}{!data.job.steps.length && data.job.raw["ferry-approval"] !== true && <p className="p-2 text-xs text-muted-foreground">{executionText("editor.reusableHelp")}</p>}
-      {!data.readOnly && !data.job.raw.uses && data.job.raw["ferry-approval"] !== true && <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="sm" className="nodrag nopan w-full justify-start"><Plus className="size-4" />{executionText("editor.addStep")}</Button></DropdownMenuTrigger><DropdownMenuContent>{(["run", "checkout", "action"] as const).map(kind => <DropdownMenuItem key={kind} onSelect={() => data.addStep(data.job.id, kind)}>{kind === "checkout" ? workflowText("actions.cloneCode") : kind === "run" ? executionText("shared.resource.cron.commandAction") : executionText("editor.useAction")}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
+      {!data.readOnly && !data.job.raw.uses && data.job.raw["ferry-approval"] !== true && <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="sm" className="nodrag nopan w-full justify-start"><Plus className="size-4" />{executionText("editor.addStep")}</Button></DropdownMenuTrigger><DropdownMenuContent>{(["run", "checkout", "action", "notification"] as const).map(kind => <DropdownMenuItem key={kind} onSelect={() => data.addStep(data.job.id, kind)}>{kind === "notification" ? commonText("notifications:send") : kind === "checkout" ? workflowText("actions.cloneCode") : kind === "run" ? executionText("shared.resource.cron.commandAction") : executionText("editor.useAction")}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
     </div>
     {!data.readOnly && <div className="flex gap-1 border-t p-1.5">
       <Button type="button" variant="ghost" size="sm" className="nodrag nopan flex-1" title={executionText("editor.addParallel")} onClick={event => { event.stopPropagation(); data.addJob(data.job.id, "parallel"); }}><GitFork className="size-4" />{executionText("editor.parallel")}</Button>
@@ -51,7 +51,7 @@ const edgeTypes = { insert: InsertEdge };
 const YamlEditor = lazy(() => import("./YamlEditor").then(module => ({ default: module.YamlEditor })));
 const inputClass = "w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
 
-export function ActionsEditor({ draft, options, readOnly, fillHeight = false, requireExecutorBinding = true, mode, onModeChange, onChange, onValidityChange, renderCheckout, renderCheckoutBatch }: {
+export function ActionsEditor({ draft, options, readOnly, fillHeight = false, requireExecutorBinding = true, mode, onModeChange, onChange, onValidityChange, renderCheckout, renderCheckoutBatch, renderNotification }: {
   draft: Record<string, unknown>; options: Option[]; readOnly: boolean;
   fillHeight?: boolean;
   requireExecutorBinding?: boolean;
@@ -59,6 +59,7 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
   onModeChange?: (mode: "visual" | "yaml") => void;
   onChange: (patch: Record<string, unknown>) => void; onValidityChange: (invalid: boolean) => void;
   renderCheckout?: (jobId: string, stepIndex: number) => ReactNode;
+  renderNotification?: (inputs: Record<string, unknown>, change: (inputs: Record<string, string>) => void) => ReactNode;
   renderCheckoutBatch?: (jobId: string) => ReactNode;
 }) {
   const { i18n } = useCommonTranslation();
@@ -175,7 +176,7 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
       setSelection(undefined);
     } });
   }
-  function addStep(id: string, kind: "run" | "checkout" | "action" = "run") {
+  function addStep(id: string, kind: "run" | "checkout" | "action" | "notification" = "run") {
     if (readOnly) return;
     try {
       const index = parsed.jobs.find(row => row.id === id)?.steps.length;
@@ -302,7 +303,7 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
           </ActionsPhase>
           {job.raw["ferry-approval"] !== true && <ActionsPhase phase="after"><StepMap output label={workflowText("actions.jobOutputs")} value={job.raw.outputs} readOnly={readOnly} change={outputs => update({ outputs })} /></ActionsPhase>}
         </> : <>
-          <WorkflowFragmentEditor key={`${job.id}:${selection!.step}`} source={source} job={job.id} index={selection!.step!} original={originalSource.current} readOnly={readOnly} checkoutBound={checkoutBindings.some(binding => binding.job_id === job.id && binding.step_id === step.id)} checkout={/^actions\/checkout@/.test(String(step.uses ?? "")) && selection?.step !== undefined ? renderCheckout?.(job.id, selection.step) : undefined} onChange={definition => change(() => definition)} />
+          <WorkflowFragmentEditor {...(renderNotification ? { renderNotification } : {})} key={`${job.id}:${selection!.step}`} source={source} job={job.id} index={selection!.step!} original={originalSource.current} readOnly={readOnly} checkoutBound={checkoutBindings.some(binding => binding.job_id === job.id && binding.step_id === step.id)} checkout={/^actions\/checkout@/.test(String(step.uses ?? "")) && selection?.step !== undefined ? renderCheckout?.(job.id, selection.step) : undefined} onChange={definition => change(() => definition)} />
         </>}
         {!step && <ActionFragmentYaml key={job.id} source={source} job={job.id} original={originalSource.current} readOnly={readOnly} onChange={definition => change(() => definition)} />}
       </aside>}

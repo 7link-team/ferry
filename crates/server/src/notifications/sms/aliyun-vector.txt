@@ -1,0 +1,1 @@
+ACS3-HMAC-SHA256 Credential=fixtureAccess,SignedHeaders=host;x-acs-action;x-acs-content-sha256;x-acs-date;x-acs-signature-nonce;x-acs-version,Signature=d323d1f96ef8c729183b53bb54f00da2205cafc34462a8be4a7ebf8d295ab2b4

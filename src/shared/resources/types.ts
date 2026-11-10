@@ -152,7 +152,7 @@ export interface FormField<T> {
   /** Explicit message key; raw labels remain stable action/configuration identities. */
   labelKey?: string | undefined;
   type: FieldType;
-  required?: boolean;
+  required?: boolean | ((draft: Partial<T>) => boolean);
   /** Inclusive lower bound for a numeric input. */
   min?: number;
   max?: number;

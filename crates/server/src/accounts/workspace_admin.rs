@@ -92,6 +92,7 @@ pub(crate) async fn authorize(
         },
         permissions,
     };
+    let fresh = crate::platform_tools::restrict(conn, fresh).await?;
     fresh.require(permission)?;
     Ok(fresh)
 }

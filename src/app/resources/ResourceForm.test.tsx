@@ -13,6 +13,18 @@ let root: Root, host: HTMLDivElement, requests: { url: string; method: string | 
 let stored: Record<string, unknown>;
 const perms = new Set(["variables.read", "variables.update", "variables.reveal"]);
 
+it.each([false, true])("matches conditional secret required markers and save validation; enabled=%s", async enabled => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/variables/10/edit");
+  stored = { id: "10", enabled, version: 1 };
+  const config = {resource:"variables",heading:()=>"Conditional secret",blank:{},sections:[{fields:[
+    {key:"token",label:"Token",type:"secret" as const,replaceOnEdit:true,required:(draft:Partial<{enabled:boolean}>)=>!!draft.enabled},
+  ]}]};
+  await act(async()=>root.render(<ResourceForm config={config} workspace="ops" permissions={perms} />));
+  expect(host.querySelector('textarea')!.required).toBe(enabled);
+  expect(!!host.querySelector('[data-auto-label] .text-destructive')).toBe(enabled);
+  expect(host.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(enabled);
+});
+
 it.each([
   { events: [], interval: 1, blocked: true },
   { events: ["push"], interval: 0, blocked: true },

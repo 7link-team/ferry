@@ -181,6 +181,8 @@ struct Config {
     notification_language: String,
     #[serde(default)]
     notification_channels: Option<Vec<NotificationChannel>>,
+    #[serde(default)]
+    notification_channel_ids: Option<Vec<Id>>,
 }
 #[derive(Deserialize)]
 pub struct Body {
@@ -205,9 +207,43 @@ pub struct Body {
     notification_language: Option<String>,
     #[serde(default)]
     notification_channels: Option<Vec<NotificationChannel>>,
+    #[serde(default)]
+    notification_channel_ids: Option<Vec<Id>>,
 }
 fn aad(workspace: i64, id: i64) -> String {
     format!("repository-monitor:{workspace}:{id}")
+}
+
+pub(crate) async fn ensure_channel_unreferenced(
+    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
+    workspace: Id,
+    id: Id,
+) -> Result<()> {
+    let rows = monitors::Entity::find()
+        .filter(monitors::Column::WorkspaceId.eq(workspace))
+        .all(conn)
+        .await?;
+    for row in rows {
+        let value: Value = serde_json::from_str(
+            &s.vault
+                .open_secret(&row.config, &aad(row.workspace_id, row.id))?,
+        )
+        .map_err(|_| ApiError::missing())?;
+        if value["notification_channel_ids"]
+            .as_array()
+            .is_some_and(|ids| {
+                ids.iter()
+                    .any(|value| value.as_str() == Some(&id.to_string()))
+            })
+        {
+            return Err(ApiError::localized(
+                StatusCode::CONFLICT,
+                crate::i18n::Message::new("notification.inUse"),
+            ));
+        }
+    }
+    Ok(())
 }
 fn decode(s: &AppState, row: &monitors::Model) -> Result<Config> {
     serde_json::from_str(
@@ -220,6 +256,68 @@ fn decode(s: &AppState, row: &monitors::Model) -> Result<Config> {
             crate::i18n::Message::new("repository.monitor.configRead"),
         )
     })
+}
+
+/// Convert legacy secrets without changing monitor versions or polling baselines.
+pub(crate) async fn prepare_channels(s: &AppState) -> Result<()> {
+    let rows = monitors::Entity::find().all(&s.db).await?;
+    for row in rows {
+        if decode(s, &row)?.notification_channel_ids.is_some() {
+            continue;
+        }
+        let tx = crate::variables::transaction(s, row.workspace_id.into()).await?;
+        let Some(current) = monitors::Entity::find_by_id(row.id).one(&tx).await? else {
+            continue;
+        };
+        let mut config = decode(s, &current)?;
+        if config.notification_channel_ids.is_some() {
+            continue;
+        }
+        let mut ids = Vec::new();
+        for legacy in channels(&config) {
+            let mut options = legacy.options;
+            let provider = if options.provider.is_empty() || options.provider == "auto" {
+                options
+                    .resolve(&legacy.webhook)
+                    .map(|url| crate::notifications::channel::provider(&url).to_string())
+                    .unwrap_or_else(|_| "Webhook".into())
+            } else {
+                options.provider.clone()
+            };
+            options.provider = provider.clone();
+            let transport = crate::notifications::center::Transport {
+                webhook: legacy.webhook,
+                language: legacy.language,
+                options,
+                ..Default::default()
+            };
+            ids.push(
+                crate::notifications::center::import_channel(
+                    s,
+                    &tx,
+                    row.workspace_id.into(),
+                    legacy.name,
+                    provider,
+                    legacy.enabled,
+                    transport,
+                )
+                .await?,
+            );
+        }
+        config.notification_channel_ids = Some(ids);
+        let encoded = serde_json::to_string(&config).map_err(|_| ApiError::missing())?;
+        monitors::Entity::update_many()
+            .col_expr(
+                monitors::Column::Config,
+                Expr::value(s.vault.seal(&encoded, &aad(row.workspace_id, row.id))?),
+            )
+            .filter(monitors::Column::Id.eq(row.id))
+            .filter(monitors::Column::WorkspaceId.eq(row.workspace_id))
+            .exec(&tx)
+            .await?;
+        tx.commit().await?;
+    }
+    Ok(())
 }
 fn view(row: Option<&monitors::Model>, config: &Config, connection: &connections::Model) -> Value {
     json!({"id":Id::from(connection.id),"name":crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.notificationName")),"provider":connection.provider,"mode":config.mode,"poll_interval_minutes":config.poll_interval_minutes.max(1),"runner_id":config.runner_id,"enabled":config.enabled && config.provider==connection.provider,"all_repositories":config.all_repositories,"repositories":config.repositories.join("\n"),"events":config.events,"has_secret":!config.secret.is_empty(),"has_webhook":!config.webhook.is_empty(),"version":row.map_or(0,|r|r.version),"callback_path":format!("/api/repository-events/{}",connection.id),"provider_changed":row.is_some() && config.provider!=connection.provider,"capability_note":if connection.provider == "git" {crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.gitCapability"))} else if config.mode == Mode::Poll {crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.pollCapability"))} else if connection.provider=="codeup"{crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.codeupCapability"))}else{crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.platformCapability"))}})
@@ -261,8 +359,22 @@ pub async fn get(
     };
     let mut result = view(row.as_ref(), &config, &connection);
     result["notification_language"] = json!(config.notification_language);
+    result["notification_channel_ids"] = json!(config.notification_channel_ids);
+    let mut channel_names = Vec::new();
+    if let Some(ids) = &config.notification_channel_ids {
+        for id in ids {
+            if let Ok(channel) =
+                crate::notifications::center::channel(&s, scope.workspace_id, *id).await
+            {
+                channel_names.push(channel.name);
+            }
+        }
+    }
+    result["notification_channel_names"] = json!(channel_names);
     // Notification URLs can contain credentials; only editors receive the value.
-    if scope.permissions.contains("repositories.update") {
+    if scope.permissions.contains("repositories.update")
+        && config.notification_channel_ids.is_none()
+    {
         result["webhook"] = json!(config.webhook);
         result["notification_channels"] = json!(channels(&config));
     } else {
@@ -517,6 +629,20 @@ pub async fn update(
     if let Some(channels) = &notification_channels {
         validate_channels(channels)?;
     }
+    if let Some(ids) = body
+        .notification_channel_ids
+        .as_ref()
+        .filter(|ids| Some(*ids) != previous.notification_channel_ids.as_ref())
+    {
+        if ids.len() > 20 {
+            return Err(ApiError::missing());
+        }
+        for id in ids {
+            let channel =
+                crate::notifications::center::channel_in(&tx, scope.workspace_id, *id).await?;
+            crate::notifications::center::authorize_in(&tx, &scope, &channel).await?;
+        }
+    }
     let config = Config {
         mode: body.mode,
         poll_interval_minutes: body.poll_interval_minutes,
@@ -534,6 +660,9 @@ pub async fn update(
         webhook,
         notification_language,
         notification_channels,
+        notification_channel_ids: body
+            .notification_channel_ids
+            .or(previous.notification_channel_ids),
     };
     let encoded = serde_json::to_string(&config).map_err(|_| {
         ApiError::localized(
@@ -607,6 +736,7 @@ pub async fn update(
     let mut result = view(Some(&row), &config, &connection);
     result["webhook"] = json!(config.webhook);
     result["notification_language"] = json!(config.notification_language);
+    result["notification_channel_ids"] = json!(config.notification_channel_ids);
     result["runner_name"] = json!(runner_name);
     result["notification_channels"] = json!(channels(&config));
     Ok(Json(result))
@@ -1070,7 +1200,12 @@ async fn record(
         return Ok(None);
     }
     let event_id = s.next_id()?;
-    let delivery = if !channels(config).iter().any(|channel| channel.enabled) {
+    let delivery = if !config
+        .notification_channel_ids
+        .as_ref()
+        .is_some_and(|ids| !ids.is_empty())
+        && !channels(config).iter().any(|channel| channel.enabled)
+    {
         crate::i18n::store_message(&crate::i18n::Message::new(
             "repository.monitor.unconfiguredDelivery",
         ))
@@ -1106,31 +1241,69 @@ async fn deliver(
     event: &Event,
 ) -> Result<()> {
     let mut deliveries = Vec::new();
-    for channel in channels(config)
-        .into_iter()
-        .filter(|channel| channel.enabled)
-    {
-        let locale = crate::i18n::Locale::from_tag(&channel.language).unwrap_or_default();
-        let result = crate::i18n::with_locale(
-            locale,
-            deliver_notice(
-                connection,
-                &channel.webhook,
-                &channel.options,
-                event_id,
-                event,
-            ),
-        )
-        .await?;
-        deliveries.push(ChannelDelivery {
-            name: channel.name,
-            language: channel.language,
-            result,
-        });
+    if let Some(ids) = &config.notification_channel_ids {
+        for id in ids {
+            let channel =
+                crate::notifications::center::channel(s, connection.workspace_id.into(), *id)
+                    .await?;
+            if channel.enabled != 1 {
+                continue;
+            }
+            let transport = crate::notifications::center::decode(s, &channel)?;
+            let locale = crate::i18n::Locale::from_tag(&transport.language).unwrap_or_default();
+            let result = crate::i18n::with_locale(locale, async {
+                let title = detail::label(&event.event);
+                let notice = build_notice(connection, event_id, event, &title);
+                crate::notifications::center::send_system_notice(
+                    s,
+                    connection.workspace_id.into(),
+                    *id,
+                    format!("repository:{event_id}"),
+                    "repository",
+                    &event_id.to_string(),
+                    &notice,
+                )
+                .await
+            })
+            .await;
+            deliveries.push(ChannelDelivery {
+                name: channel.name,
+                language: transport.language,
+                result: match result {
+                    Ok(value) => value,
+                    Err(error) => error.1.to_string(),
+                },
+            });
+        }
+    } else {
+        for channel in channels(config)
+            .into_iter()
+            .filter(|channel| channel.enabled)
+        {
+            let locale = crate::i18n::Locale::from_tag(&channel.language).unwrap_or_default();
+            let result = crate::i18n::with_locale(
+                locale,
+                deliver_notice(
+                    connection,
+                    &channel.webhook,
+                    &channel.options,
+                    event_id,
+                    event,
+                ),
+            )
+            .await?;
+            deliveries.push(ChannelDelivery {
+                name: channel.name,
+                language: channel.language,
+                result,
+            });
+        }
     }
     if !deliveries.is_empty() {
         // Keep the legacy single-channel representation for old consumers.
-        let result = if config.notification_channels.is_none() {
+        let result = if config.notification_channels.is_none()
+            && config.notification_channel_ids.is_none()
+        {
             deliveries.remove(0).result
         } else {
             serde_json::to_string(&deliveries).map_err(|_| ApiError::missing())?

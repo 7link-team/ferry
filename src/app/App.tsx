@@ -2,7 +2,8 @@ import { installIntegrationCatalog, type IntegrationManifest } from "../features
 import { TypedValueList } from "./pages/TypedValueList";
 import { ConversationsWorkspace } from "./pages/ConversationsWorkspace";
 import { cn } from "cn";
-import { LogOut } from "lucide-react";
+import { BrandIcon } from "../shared/site/BrandIcon";
+import { ChevronDown, ChevronRight, LogOut } from "lucide-react";
 import { LoadingSkeleton } from "../shared/ui/loading-skeleton";
 import { useEffect,useMemo,useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -43,10 +44,13 @@ import { formConfigs,listConfigs } from "./resources";
 import { ResourceForm } from "./resources/ResourceForm";
 import { ResourceTable } from "./resources/ResourceTable";
 import { href,isLoginPath,isPublicEntryPath,navigate,navigateToLogin,replacePath,safeLoginRedirect,useRoute } from "./router";
+import { useDocumentTitle } from "./document-title";
+import { useSiteSettings } from "../shared/site/settings";
 
 export function App() {
   useCommonTranslation();
   const route = useRoute();
+  useDocumentTitle(route);
   const [identity, setIdentity] = useState<Identity>();
   useAccountPreferences(identity?.user.id);
   const [error, setError] = useState("");
@@ -144,6 +148,7 @@ export function App() {
 function Workspace({ identity, reload, onSignedOut }: { identity: Identity; reload: () => void; onSignedOut: () => void }) {
   useCommonTranslation();
   const { t } = useTranslation();
+  const site = useSiteSettings();
   const route = useRoute();
 
   const current =
@@ -190,12 +195,17 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
   const permissions = useMemo(() => new Set(current?.permissions ?? []), [current?.permissions]);
   const lists = useMemo(() => listConfigs(workspaceId, permissions, reload, undefined, preferences?.dictionaries), [workspaceId, permissions, reload, preferences]);
   const forms = useMemo(() => formConfigs(workspaceId, permissions), [workspaceId, permissions, nodeCatalogWorkspace]);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    const section = findItem(route.group, route.item)?.section;
+    if (section) setCollapsedSections(previous => previous[section] ? { ...previous, [section]: false } : previous);
+  }, [route.group, route.item, route.workspace]);
 
   // Keep the form configuration stable while background preferences refresh.
   // ResourceForm reloads its draft when its configuration changes.
   const formConfig = useMemo(() => {
     const item = findItem(route.group, route.item);
-    const config = item && forms[item.key === "workflow-templates" ? "workflow-templates" : item.resource];
+    const config = item && (forms[item.key] ?? forms[item.resource]);
     return config ? { ...config, blank: { ...config.blank, ...(route.group === "workflow" && item?.key === "credentials" ? {scope:"integration",kind:"token"} : {}), ...item?.params } } : undefined;
   }, [forms, route.group, route.item]);
 
@@ -225,8 +235,11 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
   });
 
   const parentItem = item.parent ? findItem(group.key, item.parent)! : item;
-  const relatedItems = group.items.filter(i => i.resource !== "pipeline-groups" && i.resource !== "host-groups" && i.resource !== "holes" && (i.key === parentItem.key || i.parent === parentItem.key) && (!i.permission || permissions.has(i.permission)));
-  const listConfig = lists[item.key === "workflow-templates" ? "workflow-templates" : item.resource];
+  const visibleMenu = group.items.filter(i => menuVisible(group, i));
+  const menuSections = [...new Set(visibleMenu.map(i => i.section ?? ""))].map(section => ({ section, items: visibleMenu.filter(i => (i.section ?? "") === section) }));
+  const notificationArea = item.resource.startsWith("notification-");
+  const relatedItems = group.items.filter(i => i.resource !== "pipeline-groups" && i.resource !== "host-groups" && i.resource !== "holes" && (notificationArea ? (i.key === (item.resource === "notification-channels" ? item.key : "notification-channels") || ["notification-templates", "notification-deliveries"].includes(i.key)) : (i.key === parentItem.key || i.parent === parentItem.key)) && (!i.permission || permissions.has(i.permission)));
+  const listConfig = (lists[item.key] ?? lists[item.resource]);
   const nodeCatalogPending = needsNodeCatalog && nodeCatalogWorkspace !== workspaceId;
   const nodeCatalogFeedback = nodeCatalogError
     ? <div className="space-y-3 p-4"><p role="alert">{nodeCatalogError}</p><Button variant="outline" onClick={() => setNodeCatalogRetry(value => value + 1)}>{commonText("common.retry")}</Button></div>
@@ -243,8 +256,8 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
   return (
     <div className="grid h-full min-w-0 grid-cols-1 grid-rows-[auto_1fr]">
       <header className="flex min-h-12 min-w-0 flex-wrap items-center gap-x-5 gap-y-1 border-b border-border bg-background px-4 py-1">
-        <a className="font-semibold tracking-tight" {...to(nav[0]!.key, nav[0]!.items[0]!.key)}>
-          Ferry
+        <a className="flex min-w-0 max-w-full items-center gap-2 font-semibold tracking-tight sm:max-w-xs" {...to(nav[0]!.key, nav[0]!.items[0]!.key)}>
+          <BrandIcon /><span className="min-w-0 break-words [overflow-wrap:anywhere]">{site.site_name || t("app.title")}</span>
         </a>
         <nav className="flex min-w-0 max-w-full gap-1 overflow-x-auto" aria-label={t("app.modules")}>
           {groups.map((g) => (
@@ -272,21 +285,25 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
           className="flex flex-col gap-0.5 overflow-y-auto border-r border-sidebar-border bg-sidebar text-sidebar-foreground p-3 max-sm:flex-row max-sm:overflow-x-auto max-sm:border-r-0 max-sm:border-b"
           aria-label={group.label}
         >
-          {group.items
-            .filter((i) => menuVisible(group, i))
-            .map((i) => (
+          {menuSections.map(({ section, items }) => <div key={section} role={section ? "group" : undefined} aria-label={section ? commonText(section) : undefined} className={cn("flex flex-col gap-1", section && "mb-3 shrink-0 last:mb-0 max-sm:mr-4 max-sm:mb-0")}>
+            {section && <button type="button" aria-expanded={!collapsedSections[section]} aria-controls={`menu-${section}`} onClick={() => setCollapsedSections(previous => ({ ...previous, [section]: !previous[section] }))} className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold text-sidebar-foreground hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring max-sm:min-w-32">{commonText(section)}{collapsedSections[section] ? <ChevronRight className="size-4 shrink-0" /> : <ChevronDown className="size-4 shrink-0" />}</button>}
+            <div id={section ? `menu-${section}` : undefined} hidden={!!section && !!collapsedSections[section]} className={cn("flex flex-col gap-0.5 max-sm:flex-row", section && "pl-2 max-sm:pl-0", section && collapsedSections[section] && "hidden")}>
+            {items.map((i) => (
               <a
                 key={i.key}
                 {...to(group.key, menuTarget(group, i).key, menuTarget(group, i).params)}
                 aria-current={i.key === parentItem.key ? "page" : undefined}
                 className={cn(
                   "rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap transition-colors",
+                  section && "max-sm:inline-flex max-sm:min-h-11 max-sm:items-center",
                   i.key === parentItem.key ? "sidebar-active-item bg-sidebar-primary font-medium text-sidebar-primary-foreground" : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 )}
               >
                 {i.label}
               </a>
             ))}
+            </div>
+          </div>)}
         </nav>
 
         {/* auto breadcrumbs / auto title / 1fr content — min-h-0 is what lets
@@ -338,7 +355,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
             {route.mode === "edit" && commonText("shell.editSuffix")}
           </h1>
 
-          {relatedItems.length > 1 && !["pipelines", "workflows", "credentials"].includes(parentItem.key) && <nav aria-label={commonText("shell.relatedPages", { name: parentItem.label })} className="mb-3 flex flex-wrap gap-3">
+          {relatedItems.length > 1 && !["pipelines", "workflows", "credentials"].includes(parentItem.key) && <nav aria-label={commonText("shell.relatedPages", { name: notificationArea ? commonText("notifications:notification-channels") : parentItem.label })} className="mb-3 flex flex-wrap gap-3">
             {relatedItems.map(i => <a key={i.key} {...to(group.key, i.key, i.params)} aria-current={i.key === item.key ? "page" : undefined} className={cn("border-b-2 px-1 py-2 text-sm", i.key === item.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{i.label}</a>)}
           </nav>}
           {item.description && <p className="mb-3 max-w-4xl text-sm text-muted-foreground">{item.description}</p>}
@@ -361,7 +378,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
                 permissions={permissions}
               /> : ["settings", "dictionaries"].includes(item.resource) ? <TypedValueList key={`${current.id}/${item.resource}`} config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20 }} workspace={current.id} permissions={permissions} /> : <ResourceTable
                 key={`${current.id}/${item.resource}/${JSON.stringify(item.params ?? {})}`}
-                config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20, ...(item.params ? { fixed: item.params } : {}) }}
+                config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20, ...(notificationArea ? { fixed: listConfig.fixed } : item.params ? { fixed: item.params } : {}) }}
                 workspace={current.id}
                 permissions={permissions}
               /> : <LoadingSkeleton label={commonText("shell.loadingPreferences")} />}

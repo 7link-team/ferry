@@ -272,7 +272,7 @@ pub(crate) async fn backfill(conn: &impl ConnectionTrait) -> std::result::Result
                     .await?
                 {
                     c.agent_id = snapshot.agent_id;
-                    c.config = snapshot.config;
+                    c.config = super::appearance::preserve(&c.config, &snapshot.config);
                 }
             }
             let mut parts = vec![];

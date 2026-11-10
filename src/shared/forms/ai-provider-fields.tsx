@@ -97,11 +97,12 @@ export function ProviderFields({
     <div className="grid min-w-0 gap-4 sm:grid-cols-2 [&_button[role=combobox]]:min-h-11">
       <label className="block min-w-0 space-y-2 text-sm">
         <span>
-          <FieldCaption label={<>{t("aiProtocol")}</>} />
+          <FieldCaption label={<>{t("aiProtocol")}</>} required />
         </span>
         <select
           className={control}
           aria-label={t("aiProtocol")}
+          required
           disabled={readOnly}
           value={draft.protocol}
           onChange={(e) =>
@@ -119,26 +120,11 @@ export function ProviderFields({
           <option value="anthropic">Anthropic</option>
         </select>
       </label>
-      <label className="block min-w-0 space-y-2 text-sm">
-        <span>
-          <FieldCaption
-            label="API Key"
-            help={commonText("resource-domain:credential.secretHelp")}
-          />
-        </span>
-        <Input
-          type="password"
-          autoComplete="new-password"
-          className={control}
-          aria-label="API Key"
-          value={draft.api_key ?? ""}
-          onChange={(e) => onChange({ ...draft, api_key: e.target.value })}
-        />
-      </label>
       {(
         [
           ["name", "name"],
           ["base_url", "aiBaseURL"],
+          ["api_key", "API Key"],
           ["currency", "aiCurrency"],
           ["timezone", "aiTimezone"],
           ["monthly_limit_micros", "aiMonthlyBudget"],
@@ -151,23 +137,24 @@ export function ProviderFields({
           <label
             key={key}
             className={
-              key === "base_url"
+              key === "base_url" || key === "api_key"
                 ? "col-span-full block min-w-0 space-y-2 text-sm"
                 : "block min-w-0 space-y-2 text-sm"
             }
           >
             <span>
               <FieldCaption
+                required={key !== "api_key" || !draft.id}
                 help={
                   key === "timezone"
                     ? commonText("models:detectedTimezone", {
                         timezone:
                           Intl.DateTimeFormat().resolvedOptions().timeZone,
                       })
-                    : undefined
+                    : key === "api_key" ? commonText("resource-domain:credential.secretHelp") : undefined
                 }
                 label={
-                  <>{key === "name" ? commonText("common.name") : t(label)}</>
+                  <>{key === "name" ? commonText("common.name") : key === "api_key" ? "API Key" : t(label)}</>
                 }
               />
             </span>
@@ -202,12 +189,14 @@ export function ProviderFields({
               <Input
                 className="min-h-11"
                 aria-label={
-                  key === "name" ? commonText("common.name") : t(label)
+                  key === "name" ? commonText("common.name") : key === "api_key" ? "API Key" : t(label)
                 }
                 disabled={readOnly || (!!draft.id && key === "currency")}
-                type={typeof draft[key] === "number" ? "number" : "text"}
+                type={key === "api_key" ? "password" : typeof draft[key] === "number" ? "number" : "text"}
+                autoComplete={key === "api_key" ? "new-password" : undefined}
+                required={key !== "api_key" || !draft.id}
                 min={0}
-                value={draft[key]}
+                value={draft[key] ?? ""}
                 onChange={(e) =>
                   onChange({
                     ...draft,
@@ -228,11 +217,12 @@ export function ProviderFields({
         >
           <label className="block min-w-0 space-y-2 text-sm">
             <span>
-              <FieldCaption label={<>{t("aiOperation")}</>} />
+              <FieldCaption label={<>{t("aiOperation")}</>} required />
             </span>
             <select
               className={control}
               aria-label={t("aiOperation")}
+              required
               disabled={readOnly}
               value={price.operation}
               onChange={(e) =>
@@ -259,11 +249,12 @@ export function ProviderFields({
           ).map(([key, label]) => (
             <label key={key} className="block space-y-2 text-sm">
               <span>
-                <FieldCaption label={<>{t(label)}</>} help={t("aiPriceHelp")} />
+                <FieldCaption label={<>{t(label)}</>} help={t("aiPriceHelp")} required />
               </span>
               <Input
                 className="min-h-11"
                 aria-label={t(label)}
+                required
                 disabled={readOnly}
                 type={key === "model" ? "text" : "number"}
                 min={key === "unit_size" ? 1 : 0}

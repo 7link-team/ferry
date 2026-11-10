@@ -1,5 +1,7 @@
 import { AutoField,AutoForm } from "../shared/forms/auto-form";
-import { commonText,useCommonTranslation } from "../shared/i18n/i18n";
+import { commonText,i18n,useCommonTranslation } from "../shared/i18n/i18n";
+import { useSiteSettings } from "../shared/site/settings";
+import { BrandIcon } from "../shared/site/BrandIcon";
 /**
  * Register / sign in / create or join a workspace.
  *
@@ -15,6 +17,7 @@ import { Button } from "../shared/ui/button";
 import { Input } from "../shared/ui/input";
 import { navigate,useRoute } from "./router";
 import { LoginChallenge, type LoginChallengeData, type LoginProof } from "./LoginChallenge";
+import { OtpLogin } from "./AccountOtp";
 
 type Step = "setup" | "sign-in" | "register" | "workspace";
 
@@ -25,6 +28,7 @@ if (desktopSetupToken) history.replaceState(history.state, "", location.pathname
 
 export function Entry({ onReady, error: outerError, signedIn = false, initialize = false }: { onReady: () => void; error: string; signedIn?: boolean; initialize?: boolean }) {
   useCommonTranslation();
+  const site = useSiteSettings();
   const route = useRoute();
   const [step, setStepState] = useState<Step>(initialize || route.workspace === "_initialize" ? "setup" : signedIn ? "workspace" : route.workspace === "_register" ? "register" : "sign-in");
   const setStep = (value: Step) => {
@@ -46,6 +50,7 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
     return () => { live = false; };
   }, [signedIn, initialize, attempt]);
   const [busy, setBusy] = useState(false);
+  const [otpToken, setOtpToken] = useState("");
   const [challenge,setChallenge]=useState<LoginChallengeData>();
   const [proof,setProof]=useState<LoginProof>({});
   const [loginEmail,setLoginEmail]=useState("");
@@ -84,8 +89,10 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
   const closeChallenge=()=>{setChallenge(undefined);setPendingLogin(undefined);setProof({});setVerificationError("");setVerified(false);};
   const signIn=async(body:Record<string,string>,verificationToken?:string)=>{
     try {
-      await api("/sessions",{method:"POST",body:JSON.stringify({...body,...(verificationToken?{login_verification_token:verificationToken}:{})})});
-      closeChallenge();onReady();
+      const result = await api<{otp_required?:boolean;otp_token?:string}>("/sessions",{method:"POST",body:JSON.stringify({...body,...(verificationToken?{login_verification_token:verificationToken}:{})})});
+      closeChallenge();
+      if (result.otp_required && result.otp_token) { setOtpToken(result.otp_token); return; }
+      onReady();
     }catch(cause){
       if(cause instanceof ApiError && cause.status===428){
         const value=await refreshChallenge(body.email??"");
@@ -115,10 +122,11 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
   };
 
   return (
-    <div className="grid h-full place-items-center p-6">
-      <div className="w-full max-w-sm space-y-5">
+    <div className="grid h-full min-w-0 grid-cols-1 place-items-center p-6">
+      <div className="min-w-0 w-full max-w-sm space-y-5">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Ferry</h1>
+          <BrandIcon className="mx-auto mb-5 size-32 sm:size-40" />
+          <h1 className="break-words text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]">{site.site_name || i18n.t("app.title")}</h1>
           <p className="text-sm text-muted-foreground">
             {step === "workspace"
               ? commonText("auth.workspaceIntro")
@@ -227,6 +235,8 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
             </div>
           </Dialog.Content>
         </Dialog.Portal></Dialog.Root>}
+
+        {otpToken && <OtpLogin key={otpToken} token={otpToken} onReady={() => { setOtpToken(""); onReady(); }} onCancel={() => setOtpToken("")} />}
 
         {step === "register" && (
           <AutoForm

@@ -319,6 +319,7 @@ pub mod platform_state {
         pub file_storage: Option<String>,
         pub footer_html: Option<String>,
         pub page_scripts: Option<String>,
+        pub site_config: Option<String>,
         pub mail_config: Option<String>,
         pub monitor_config: Option<String>,
         pub login_security: Option<String>,
@@ -380,6 +381,24 @@ pub mod users {
         pub active: i64,
         pub created_at: i64,
         pub updated_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod user_otp {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "user_otp")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub user_id: i64,
+        pub payload: String,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub updated_at: i64,
+        pub updated_by: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}
@@ -1274,6 +1293,7 @@ pub mod alert_rules {
         pub enabled: i64,
         pub run_as: i64,
         pub webhook: String,
+        pub notification_channel_id: i64,
         pub last_error: String,
         pub version: i64,
         pub created_at: i64,
@@ -2137,6 +2157,84 @@ pub mod asset_gc_jobs {
         pub updated_at: i64,
         pub updated_by: i64,
         pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod notification_channels {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "notification_channels")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub name: String,
+        pub description: String,
+        pub provider: String,
+        pub enabled: i64,
+        pub config: String,
+        pub role_ids: String,
+        pub version: i64,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub updated_at: i64,
+        pub updated_by: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod notification_templates {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "notification_templates")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub name: String,
+        pub language: String,
+        pub subject: String,
+        pub body: String,
+        pub format: String,
+        pub version: i64,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub updated_at: i64,
+        pub updated_by: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod notification_deliveries {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "notification_deliveries")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub channel_id: i64,
+        pub template_id: i64,
+        pub actor_id: i64,
+        pub agent_id: i64,
+        pub source: String,
+        pub source_id: String,
+        pub client_id: String,
+        pub request_hash: String,
+        pub state: String,
+        pub subject: String,
+        pub body: String,
+        pub result: String,
+        pub version: i64,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub updated_at: i64,
+        pub updated_by: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

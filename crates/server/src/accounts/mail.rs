@@ -291,7 +291,7 @@ fn plain_html(value: &str) -> String {
         .map(|line| format!("<p>{}</p>", escape_html(line)))
         .collect::<String>()
 }
-fn html_text(value: &str) -> String {
+pub(crate) fn html_text(value: &str) -> String {
     let mut text = String::new();
     let mut inside = false;
     let mut head = false;

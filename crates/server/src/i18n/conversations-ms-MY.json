@@ -19,5 +19,6 @@
   "conversations.groupAgentPrivate": "Kumpulan memerlukan ejen yang dikongsi dalam ruang kerja.",
   "conversations.apiPending": "Pelaksanaan perbualan API belum tersedia.",
   "conversations.noRunner": "Tiada Runner tersedia untuk melaksanakan model ini.",
-  "conversations.cliPermissionUnsupported": "CLI ini hanya menyokong perbualan baca sahaja. Pilih akses baca sahaja."
+  "conversations.cliPermissionUnsupported": "CLI ini hanya menyokong perbualan baca sahaja. Pilih akses baca sahaja.",
+  "conversations.runnerUpgradeRequired": "Naik taraf Runner hos untuk mendayakan alat platform sebelum menjalankan perbualan ini."
 }

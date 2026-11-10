@@ -4587,6 +4587,121 @@
       ],
       "default_cache": "off",
       "source_ids": []
+    },
+    {
+      "type": "notification.send",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S1",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "channel_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 48000
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "html"
+            ]
+          },
+          "to": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "maxLength": 320
+            }
+          },
+          "template_id": {
+            "type": "string"
+          },
+          "variables": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 48000
+            }
+          }
+        },
+        "required": [
+          "channel_id"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "channel_id",
+        "subject",
+        "body",
+        "to",
+        "template_id",
+        "variables"
+      ],
+      "semantic_rule": "Use a workspace notification channel. Recheck actor and channel permissions on each send; credentials remain on the server. Persist idempotency before delivery; unknown results are never automatically replayed.",
+      "example_params": {
+        "channel_id": "1",
+        "subject": "",
+        "body": "",
+        "format": "text",
+        "to": [],
+        "variables": {}
+      },
+      "required_evidence": [
+        "success",
+        "permission_denied",
+        "workspace_denied",
+        "idempotency",
+        "unknown_not_replayed"
+      ],
+      "default_cache": "off",
+      "source_ids": [],
+      "search_aliases": [
+        "notification",
+        "SMTP",
+        "email",
+        "WeCom",
+        "DingTalk",
+        "Feishu",
+        "Lark",
+        "Slack",
+        "Telegram",
+        "Discord",
+        "Webhook"
+      ]
     }
   ],
   "source_mapping": [

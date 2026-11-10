@@ -6,6 +6,7 @@ import {AutoField} from "../shared/forms/auto-form";
 import {sanitizeRichText} from "../features/maintenance/value-content";
 import {Tabs, TabsList, TabsTrigger} from "../shared/ui/tabs";
 import {typedText} from "../shared/i18n/i18n";
+import {defaultSiteSettings, SiteSettingsContext, type SiteSettings} from "../shared/site/settings";
 
 const RichTextEditor = lazy(() => import("../features/maintenance/RichTextValueEditor"));
 export const FOOTER_UPDATED = "platform:footer-updated";
@@ -19,13 +20,20 @@ export function FooterContent({value}: {value: string}) {
 /** A normal layout row: footer content never covers controls or the canvas. */
 export function PlatformFrame({children}: {children: ReactNode}) {
   const [content, setContent] = useState("");
+  const [site, setSite] = useState(defaultSiteSettings);
   useEffect(() => {
     let active = true;
     let generation = 0;
     const read = () => {
       const current = ++generation;
-      void api<{content: string}>("/platform/footer", {cache:"no-store"}).then(row => {
-        if (active && current === generation) setContent(row.content);
+      void api<{content: string} & Partial<SiteSettings>>("/platform/footer", {cache:"no-store"}).then(row => {
+        if (active && current === generation) {
+          setContent(row.content);
+          setSite({site_name:row.site_name ?? defaultSiteSettings.site_name,
+            site_title_prefix_enabled:row.site_title_prefix_enabled ?? defaultSiteSettings.site_title_prefix_enabled,
+            site_title_visible_prefix:row.site_title_visible_prefix ?? defaultSiteSettings.site_title_visible_prefix,
+            site_title_hidden_prefix:row.site_title_hidden_prefix ?? defaultSiteSettings.site_title_hidden_prefix});
+        }
       }).catch(() => { /* Keep the last known footer if the service is temporarily unavailable. */ });
     };
     read();
@@ -34,10 +42,10 @@ export function PlatformFrame({children}: {children: ReactNode}) {
   }, []);
   const clean = useMemo(() => sanitizeRichText(content), [content]);
   const visible = clean.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim() || /<img\b/i.test(clean);
-  return <div className="flex h-full min-h-0 min-w-0 flex-col">
+  return <SiteSettingsContext.Provider value={site}><div className="flex h-full min-h-0 min-w-0 flex-col">
     <div data-platform-content className="min-h-0 min-w-0 flex-1 overflow-auto">{children}</div>
     {visible && <footer data-platform-footer className="max-h-[25vh] shrink-0 overflow-auto border-t bg-background px-4 py-2"><FooterContent value={clean} /></footer>}
-  </div>;
+  </div></SiteSettingsContext.Provider>;
 }
 
 export function PlatformFooterEditor({value, readOnly, onChange}: {value:string; readOnly:boolean; onChange:(value:string)=>void}) {

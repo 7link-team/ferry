@@ -11,6 +11,8 @@ export interface NavItem {
   hidden?: boolean;
   /** Related page shown inside this parent menu entry. */
   parent?: string;
+  /** Optional translated sidebar section; empty sections are not rendered. */
+  section?: string;
   description?: string;
   /** Resource page this item opens. Several items may share one resource. */
   resource: string;
@@ -104,14 +106,19 @@ export const nav: NavGroup[] = [
     key: "ops",
     get label() { return commonText("nav.maintenance"); },
     items: [
-      { key: "ai-agents", get label() { return commonText("agents:title"); }, resource: "ai-agents", permission: "ai-agents.read" },
-      { key: "ai-models", get label() { return commonText("models:title"); }, resource: "ai-models", permission: "ai-models.read" },
-      { key: "members", get label() { return commonText("nav.members"); }, resource: "members", permission: "members.read" },
-      { key: "roles", get label() { return commonText("nav.roles"); }, resource: "roles", permission: "roles.read" },
-      { key: "variables", get label() { return commonText("nav.variables"); }, resource: "variables", params: { scope: "global" }, permission: "variables.read" },
-      { key: "settings", get label() { return commonText("nav.settings"); }, resource: "settings", permission: "settings.read" },
-      { key: "dictionaries", get label() { return commonText("nav.dictionaries"); }, resource: "dictionaries", permission: "dictionaries.read" },
-      { key: "activity", get label() { return commonText("nav.activity"); }, resource: "activity", permission: "activity.read" },
+      { key: "notification-channels", get label() { return commonText("notifications:emailChannels"); }, resource: "notification-channels", permission: "notifications.read", params: {scope:"email"}, section:"nav.sections.notifications" },
+      { key: "notification-sms", get label() { return commonText("notifications:smsChannels"); }, resource: "notification-channels", permission: "notifications.read", params: {scope:"sms"}, section:"nav.sections.notifications" },
+      { key: "notification-platforms", get label() { return commonText("notifications:platformChannels"); }, resource: "notification-channels", permission: "notifications.read", params: {scope:"platforms"}, section:"nav.sections.notifications" },
+      { key: "notification-templates", get label() { return commonText("notifications:notification-templates"); }, resource: "notification-templates", permission: "notifications.read", hidden: true, parent: "notification-channels", section:"nav.sections.notifications" },
+      { key: "notification-deliveries", get label() { return commonText("notifications:notification-deliveries"); }, resource: "notification-deliveries", permission: "notifications.read", hidden: true, parent: "notification-channels", section:"nav.sections.notifications" },
+      { key: "members", get label() { return commonText("nav.members"); }, resource: "members", permission: "members.read", section: "nav.sections.access" },
+      { key: "ai-agents", get label() { return commonText("agents:title"); }, resource: "ai-agents", permission: "ai-agents.read", section: "nav.sections.access" },
+      { key: "roles", get label() { return commonText("nav.roles"); }, resource: "roles", permission: "roles.read", section: "nav.sections.access" },
+      { key: "ai-models", get label() { return commonText("models:title"); }, resource: "ai-models", permission: "ai-models.read", section: "nav.sections.models" },
+      { key: "variables", get label() { return commonText("nav.variables"); }, resource: "variables", params: { scope: "global" }, permission: "variables.read", section: "nav.sections.configuration" },
+      { key: "settings", get label() { return commonText("nav.settings"); }, resource: "settings", permission: "settings.read", section: "nav.sections.configuration" },
+      { key: "dictionaries", get label() { return commonText("nav.dictionaries"); }, resource: "dictionaries", permission: "dictionaries.read", section: "nav.sections.configuration" },
+      { key: "activity", get label() { return commonText("nav.activity"); }, resource: "activity", permission: "activity.read", section: "nav.sections.configuration" },
     ],
   },
 ];

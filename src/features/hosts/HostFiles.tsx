@@ -1,3 +1,6 @@
+import { HostUpload } from "./HostUpload";
+import { HostPermissions } from "./HostPermissions";
+import { droppedFiles, type UploadSelection } from "./host-upload";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { decodeTextFile, encodeTextFile, textFileLanguage, type TextEncoding } from "./text-file";
 import { AutoField,AutoForm } from "../../shared/forms/auto-form";
@@ -9,7 +12,7 @@ import { AutoTable } from "../../shared/tables/auto-table";
  *
  * Downloads and uploads both stream through the server without being buffered
  * there, so this deliberately uses a plain `<a download>` for the download and
- * a raw `fetch(PUT)` with the File as the body — not FormData, which would
+ * a raw XHR PUT with upload progress and the File as the body — not FormData, which would
  * force the whole file into memory on both ends.
  */
 import {
@@ -36,6 +39,7 @@ Link as LinkIcon,
 Loader2,
 RefreshCw,
 Save,
+ShieldCheck,
 SquareTerminal,
 Trash2,
 Upload,
@@ -131,6 +135,7 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
   const [preview, setPreview] = useState<Preview>();
   const [previewing, setPreviewing] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Entry>();
+  const [permissionsEntry,setPermissionsEntry] = useState<Entry>();
   const [creating, setCreating] = useState<"file" | "directory">();
   const [newName, setNewName] = useState("");
   const [showHidden, setShowHidden] = useState(false);
@@ -142,7 +147,7 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
   const virtualRoot = fileSystems?.platform === "windows" && path === "/";
   const entryPath = (entry: Entry) => entry.path ?? join(path, entry.name);
   useEffect(() => () => { if (preview?.url) URL.revokeObjectURL(preview.url); }, [preview?.url]);
-  const picker = useRef<HTMLInputElement>(null);
+  const [uploading,setUploading] = useState<{directory:string;selection?:Promise<UploadSelection[]>}>();
   const openTerminal = (directory: string) => {
     if (/[\x00-\x1f\x7f]/.test(directory)) { setError(hostRepositoryText("host-files.001")); return; }
     if (onOpenTerminal) onOpenTerminal(directory);
@@ -243,28 +248,6 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
     const index = trail.index + offset;
     const target = trail.paths[index];
     if (target) history.go(offset);
-  };
-
-  const upload = async (file: File) => {
-    setBusy(hostRepositoryText("host-files.005", {value1: file.name}));
-    setError("");
-    try {
-      // The File is the body directly: the browser streams it, and the server
-      // streams it on to the host. FormData would buffer it twice.
-      const response = await localizedFetch(
-        `${endpoint}/content?path=${encodeURIComponent(join(path, file.name))}`,
-        { method: "PUT", headers: { "X-Ferry-Request": "1" }, body: file },
-      );
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.error ?? hostRepositoryText("host-files.006", {value1: response.status}));
-      }
-      await load(path);
-    } catch (cause) {
-      setError(errorText(cause));
-    } finally {
-      setBusy("");
-    }
   };
 
   const remove = async (entry: Entry) => {
@@ -371,6 +354,8 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
 
   return (
     <div className="flex h-full min-h-0 min-w-0 gap-3 max-lg:flex-col">
+    {uploading && <HostUpload endpoint={endpoint} directory={uploading.directory} {...(uploading.selection ? {initialSelection:uploading.selection} : {})} onClose={()=>setUploading(undefined)} onComplete={()=>void load(path)} />}
+    {permissionsEntry && <HostPermissions endpoint={endpoint} path={entryPath(permissionsEntry)} initialMode={permissionsEntry.mode} onClose={()=>setPermissionsEntry(undefined)} onSaved={()=>{setPermissionsEntry(undefined);void load(path);}} />}
     {pendingDelete && <DeleteConfirmDialog target={join(path, pendingDelete.name)} onClose={() => setPendingDelete(undefined)} onConfirm={() => remove(pendingDelete)} />}
     <Dialog.Root open={!!creating} onOpenChange={open => { if (!open && !busy) { setCreating(undefined); setError(""); } }}>
       <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
@@ -390,8 +375,7 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault();
-        const file = event.dataTransfer.files[0];
-        if (file) void upload(file);
+        if (!virtualRoot && !uploading) setUploading({directory:path,selection:droppedFiles(event.dataTransfer)});
       }}
     >
       <AutoForm
@@ -425,17 +409,7 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
         {canTerminal && <Button type="button" variant="outline" size="icon" disabled={virtualRoot} aria-label={hostRepositoryText("host-files.041")} title={hostRepositoryText("host-files.042", {value1: path})} onClick={() => openTerminal(path)}><SquareTerminal /></Button>}
         <Button type="button" variant="outline" size="icon" disabled={virtualRoot} aria-label={hostRepositoryText("host-files.043")} title={hostRepositoryText("host-files.043")} onClick={() => { setCreating("directory"); setNewName(""); setError(""); }}><FolderPlus /></Button>
         <Button type="button" variant="outline" size="icon" disabled={virtualRoot} aria-label={hostRepositoryText("host-files.044")} title={hostRepositoryText("host-files.044")} onClick={() => { setCreating("file"); setNewName(""); setError(""); }}><FilePlus2 /></Button>
-        <Button type="button" variant="outline" size="icon" aria-label={hostRepositoryText("host-files.045")} title={hostRepositoryText("host-files.045")} onClick={() => picker.current?.click()} disabled={!!busy || virtualRoot}><Upload /></Button>
-        <input
-          ref={picker}
-          type="file"
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void upload(file);
-            event.target.value = "";
-          }}
-        />
+        <Button type="button" variant="outline" size="icon" aria-label={hostRepositoryText("host-files.045")} title={hostRepositoryText("host-files.045")} onClick={() => setUploading({directory:path})} disabled={!!busy || virtualRoot}><Upload /></Button>
       </AutoForm>
       <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -485,9 +459,10 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
 { field: 'modified_at', name: hostRepositoryText("host-files.051"), width: "176px", render: (_value, entry) => <>
                   {entry.modified_at ? new Date(entry.modified_at).toLocaleString(currentLocale()) : "—"}
                 </> }
-        ]} actionWidth={virtualRoot ? 60 : 144} actionsContent={entry => <>
+        ]} actionWidth={virtualRoot ? 60 : 180} actionsContent={entry => <>
                   {canTerminal && entry.kind === "directory" && <Button type="button" variant="ghost" size="icon" className="size-7" aria-label={hostRepositoryText("host-files.042", {value1: entry.name})} title={virtualRoot ? hostRepositoryText("host-files.052") : hostRepositoryText("host-files.053")} onClick={() => openTerminal(entryPath(entry))}><SquareTerminal className="size-4" /></Button>}
                   {!virtualRoot && <>
+                  {fileSystems && fileSystems.platform !== "windows" && entry.kind !== "symlink" && <Button type="button" variant="ghost" size="icon" className="size-7" aria-label={hostRepositoryText("host-files.permissionsFor",{name:entry.name})} title={hostRepositoryText("host-files.permissions")} onClick={()=>setPermissionsEntry(entry)}><ShieldCheck className="size-4" /></Button>}
                   {entry.kind === "file" && <Button type="button" variant="ghost" size="icon" className="size-7" aria-label={hostRepositoryText("host-files.054", {value1: entry.name})} title={hostRepositoryText("host-files.055")} disabled={!!previewing} onClick={() => void openPreview(entry)}>{previewing === entry.name ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}</Button>}
                   {entry.kind !== "directory" && (
                     // A real link so the browser streams the download itself.

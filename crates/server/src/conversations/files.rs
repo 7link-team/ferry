@@ -184,7 +184,15 @@ async fn remove(
     scope.require("conversations.run")?;
     let backend = ArtifactStore::for_state(&s).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
-    find(&tx, &scope, id).await?;
+    let conversation = find(&tx, &scope, id).await?;
+    if serde_json::from_str::<Value>(&conversation.config)
+        .ok()
+        .and_then(|v| v["appearance"]["image"].as_str().map(str::to_owned))
+        .as_deref()
+        == Some(file.to_string().as_str())
+    {
+        return Err(conflict());
+    }
     let f = resolve(&tx, scope.workspace_id, id, file).await?;
     if f.owner_id != i64::from(scope.user.id) {
         return Err(ApiError::missing());

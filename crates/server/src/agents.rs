@@ -71,6 +71,8 @@ pub struct Body {
     #[serde(default)]
     role: String,
     #[serde(default)]
+    platform_role_id: String,
+    #[serde(default)]
     description: String,
     #[serde(default)]
     runtime: String,
@@ -113,6 +115,7 @@ impl Body {
                 "host_name",
                 "owner_name",
                 "model_profile_name",
+                "platform_role_name",
                 "effective_model",
                 "revision_id",
                 "created_at",
@@ -123,6 +126,31 @@ impl Body {
             return Err(invalid());
         }
         self.name = self.name.trim().into();
+        if self.platform_role_id.is_empty() {
+            if let Some(old) = old {
+                self.platform_role_id =
+                    crate::platform_tools::role_id(conn, old).await?.to_string();
+            }
+        }
+        let role_id = Id::reference(&self.platform_role_id)?;
+        self.platform_role_id = role_id.to_string();
+        let old_role = if let Some(old) = old {
+            crate::platform_tools::role_id(conn, old).await?
+        } else {
+            Id::default()
+        };
+        if role_id != old_role {
+            scope.require("roles.update")?;
+        }
+        if i64::from(role_id) != 0 {
+            crate::entities::workspace_roles::Entity::find_by_id(role_id)
+                .filter(
+                    crate::entities::workspace_roles::Column::WorkspaceId.eq(scope.workspace_id),
+                )
+                .one(conn)
+                .await?
+                .ok_or_else(invalid)?;
+        }
         let profile_id = Id::reference(&self.model_profile_id)?;
         self.model_profile_id = profile_id.to_string();
         if i64::from(profile_id) != 0 {
@@ -249,7 +277,24 @@ async fn views(
     rows: Vec<agents::Model>,
 ) -> Result<Vec<Value>> {
     use crate::resources::names::{self, Kind, of};
-    let mut values = rows.into_iter().map(json).collect::<Vec<_>>();
+    let mut values = Vec::with_capacity(rows.len());
+    for row in rows {
+        let role_id = crate::platform_tools::role_id(conn, &row).await?;
+        let mut value = json(row);
+        value["platform_role_id"] = json!(role_id);
+        if i64::from(role_id) != 0 {
+            if let Some(role) = crate::entities::workspace_roles::Entity::find_by_id(role_id)
+                .filter(
+                    crate::entities::workspace_roles::Column::WorkspaceId.eq(scope.workspace_id),
+                )
+                .one(conn)
+                .await?
+            {
+                value["platform_role_name"] = json!(role.name);
+            }
+        }
+        values.push(value);
+    }
     names::attach(
         conn,
         scope.workspace_id,

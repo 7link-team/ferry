@@ -1,4 +1,5 @@
 {
+  "platform.siteInvalid": "網站設定無效：名稱最多 120 個字元，每個前綴最多 32 個字元，均不得包含控制字元。",
   "permission.group.code-reviews": "程式碼審查",
   "permission.action.generate": "產生",
   "auth.password_save": "無法儲存密碼，請重試。",
@@ -101,5 +102,22 @@
   "auth.captchaRequired": "請完成新的安全驗證後再登入。",
   "auth.loginRateLimit": "登入請求過於頻繁，請一分鐘後再試。",
   "auth.loginGuardInvalid": "請檢查驗證碼方式、Site Key、Secret Key 與網站網域。",
-  "auth.captchaUnavailable": "驗證服務暫時無法使用，請稍後重試。"
+  "auth.captchaUnavailable": "驗證服務暫時無法使用，請稍後重試。",
+  "notification.invalid": "通知設定或訊息格式無效。",
+  "notification.conflict": "設定已變更，或此請求識別碼已用於其他訊息。",
+  "notification.disabled": "此通知管道已停用。",
+  "notification.inUse": "此管道正被通知訂閱引用，請先解除訂閱。",
+  "notification.sendFailed": "通知傳送失敗。",
+  "notification.sent": "通知已傳送。",
+  "notification.unknown": "無法確認投遞結果，請核對接收方後再傳送新訊息。",
+  "permission.group.notifications": "通知",
+  "permission.action.send": "傳送",
+  "notification.nativeOnly": "建置通知步驟在 Native 任務中執行；容器建置後可新增獨立的 Native 通知任務。",
+  "notification.smsAccepted": "簡訊服務商已受理，不代表手機已收到。",
+  "platform.storagePrefixInvalid": "S3 前綴須為不超過512位元組的相對路徑，不允許空路徑段、. 或 ..。",
+  "auth.otpInvalid": "驗證碼無效或已使用，請輸入新的動態碼或未用復原碼。",
+  "auth.otpExpired": "驗證已過期，請重新開始。",
+  "auth.otpAttempts": "錯誤次數過多，請重新登入以開始新驗證。",
+  "auth.otpUnavailable": "平台未開放新的驗證器綁定。",
+  "auth.otpAlreadyEnabled": "帳號已綁定驗證器，請先解除舊綁定。"
 }

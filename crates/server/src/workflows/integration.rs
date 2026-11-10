@@ -54,6 +54,7 @@ fn catalog() -> &'static Value {
 
 pub(super) fn supports(node: &Value) -> bool {
     node["type"] == "host.command"
+        || node["type"] == "notification.send"
         || graph::manifest(node)
             .is_some_and(|spec| spec["http"].is_object() || spec["git"].is_object())
 }
@@ -611,6 +612,9 @@ pub(super) async fn execute(
     items: &[Item],
     params: &[Value],
 ) -> Result<Vec<Item>> {
+    if node["type"] == "notification.send" {
+        return execute_notification(s, run, node_run, items, params).await;
+    }
     let manifest = graph::manifest(node).ok_or_else(invalid)?;
     let http = &manifest["http"];
     let git = manifest["git"]["operation"].as_str();
@@ -788,6 +792,67 @@ pub(super) async fn execute(
         let mut result_item = item.clone();
         result_item.json = result?.as_object().ok_or_else(invalid)?.clone();
         output.push(result_item);
+    }
+    Ok(output)
+}
+
+async fn execute_notification(
+    s: &AppState,
+    run: &workflow_executions::Model,
+    node_run: i64,
+    items: &[Item],
+    params: &[Value],
+) -> Result<Vec<Item>> {
+    if items.len() != params.len() {
+        return Err(invalid());
+    }
+    let mut output = Vec::new();
+    for (index, (item, params)) in items.iter().zip(params).enumerate() {
+        let scope = Scope::for_actor(s, run.workspace_id.into(), run.triggered_by.into()).await?;
+        scope.require("workflows.run")?;
+        let workflow = super::scoped(&s.db, scope.workspace_id, run.workflow_id.into()).await?;
+        access::require(&s.db, &scope, &workflow, Operation::Run).await?;
+        let current = workflow_executions::Entity::find_by_id(run.id)
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        if workflow.lifecycle != "active" || current.state != "running" {
+            return Err(ApiError::forbidden());
+        }
+        let channel_id = Id::reference(params["channel_id"].as_str().ok_or_else(invalid)?)?;
+        let mut body = params.clone();
+        body.as_object_mut()
+            .ok_or_else(invalid)?
+            .remove("channel_id");
+        if body["template_id"] == "" {
+            body.as_object_mut().unwrap().remove("template_id");
+        }
+        body["client_id"] = json!(format!("workflow:{}:{node_run}:{index}", run.id));
+        let body = serde_json::from_value(body).map_err(|_| invalid())?;
+        let result = crate::notifications::center::send_message(
+            s,
+            &scope,
+            channel_id,
+            body,
+            "workflow",
+            &run.id.to_string(),
+        )
+        .await?;
+        if result["state"] != "succeeded" {
+            return Err(ApiError::localized(
+                StatusCode::CONFLICT,
+                Message::new(if result["state"] == "unknown" {
+                    "notification.unknown"
+                } else {
+                    "notification.sendFailed"
+                }),
+            ));
+        }
+        output.push(Item {
+            json: serde_json::from_value(result).map_err(|_| invalid())?,
+            binary: item.binary.clone(),
+            paired: item.paired.clone(),
+        });
     }
     Ok(output)
 }

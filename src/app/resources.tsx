@@ -1,3 +1,4 @@
+import { notificationForms, notificationLists } from "../features/notifications/resource-config";
 import { workflowsForms, workflowsLists } from "../features/workflows/resource-config";
 import { activityLists } from "../features/activity/resource-config";
 import { agentsForms, agentsLists } from "../features/agents/resource-config";
@@ -77,6 +78,7 @@ export function listConfigs(
   const configs = {
     ...marketplaceLists(context),
     ...alertsLists(context),
+    ...notificationLists(context),
     ...repositoriesLists(context),
     ...schedulingLists(context),
     ...maintenanceLists(context),
@@ -121,6 +123,7 @@ export function formConfigs(
   return {
     ...marketplaceForms(context),
     ...alertsForms(context),
+    ...notificationForms(context),
     ...repositoriesForms(context),
     ...schedulingForms(context),
     ...maintenanceForms(context),

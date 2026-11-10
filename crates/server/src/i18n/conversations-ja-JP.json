@@ -19,5 +19,6 @@
   "conversations.groupAgentPrivate": "グループにはワークスペース共有のエージェントが必要です。",
   "conversations.apiPending": "API 会話の実行はまだ利用できません。",
   "conversations.noRunner": "このモデルを実行できる Runner がありません。",
-  "conversations.cliPermissionUnsupported": "このCLIは読み取り専用の会話にのみ対応しています。"
+  "conversations.cliPermissionUnsupported": "このCLIは読み取り専用の会話にのみ対応しています。",
+  "conversations.runnerUpgradeRequired": "プラットフォームツールを有効にするには、ホストの Runner を更新してください。"
 }

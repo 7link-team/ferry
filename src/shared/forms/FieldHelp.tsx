@@ -28,7 +28,7 @@ export function FieldHelp({ label, children }: { label?: ReactNode; children: Re
   </Popover.Root>;
 }
 
-export function FieldCaption({ label, help }: { label: ReactNode; help?: ReactNode }) {
+export function FieldCaption({ label, help, required = false }: { label: ReactNode; help?: ReactNode; required?: boolean }) {
   const resolve = useContext(FieldHelpContext);
   const id = useId();
   const frame = useRef<HTMLSpanElement>(null);
@@ -53,5 +53,5 @@ export function FieldCaption({ label, help }: { label: ReactNode; help?: ReactNo
     setHint(current => current === next ? current : next);
   });
   const content = help ?? resolve(label) ?? hint;
-  return <span ref={frame} className="inline-flex max-w-full items-center"><span id={id} data-field-caption-text>{label}</span>{content && <FieldHelp label={label}>{content}</FieldHelp>}</span>;
+  return <span ref={frame} className="inline-flex max-w-full items-center"><span id={id} data-field-caption-text>{label}</span>{required && <span className="ml-1 text-destructive" aria-hidden="true">*</span>}{content && <FieldHelp label={label}>{content}</FieldHelp>}</span>;
 }

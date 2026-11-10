@@ -28,6 +28,7 @@ mod checkout;
 mod context;
 mod events;
 mod job;
+mod notification;
 mod scheduler;
 
 use checkout::checkout_workflow;

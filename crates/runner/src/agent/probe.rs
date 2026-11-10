@@ -170,6 +170,7 @@ pub(crate) async fn probe(runtime: Runtime, cwd: &str) -> Result<Probe> {
     );
     let directory_exists = tokio::fs::metadata(cwd).await.is_ok_and(|m| m.is_dir());
     let mut status = Probe {
+        platform_tools: true,
         runtime,
         execution_identity: format!("{:x}", identity.finalize()),
         execution_user: std::env::var("USERNAME")

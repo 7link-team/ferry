@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="440" viewBox="0 0 400 440" fill="none" stroke="#849087" stroke-opacity=".24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <defs><g id="leaf"><path d="M0 25C-32 13-20-12 14-25 28 8 25 25 0 25Z M0 25 13-17 M4 12l12-5 M7 0 1-10"/></g><g id="flower"><path d="M0-8c-15-21-27 1-10 8-22 7-7 28 7 12-1 22 23 16 15-2 21 2 24-22 3-18C24-26 0-30 0-8Z"/><circle cx="3" cy="2" r="5"/></g><g id="sprig"><path d="M0 27C2 8-3-10 0-26 M0 10c-15 0-18-9-16-17C-3-8 1 0 0 10Z M0-2c13 0 17-11 15-18C2-20-1-12 0-2Z M1-13c-11-3-12-11-9-18 10 2 12 10 9 18Z"/></g></defs>
+  <use href="#sprig" x="35" y="37" transform="rotate(-28 35 37)"/>
+  <use href="#flower" x="137" y="29" transform="rotate(20 137 29)"/>
+  <use href="#leaf" x="239" y="39" transform="rotate(24 239 39)"/>
+  <g transform="translate(338 35) rotate(-17)"><path d="M-22 0c-5-18 16-18 22-4 6-14 27-14 22 4L0 21Z M0 21v22 M0 32l-12-9 M0 38l12-9"/></g>
+  <g transform="translate(87 130) rotate(12)"><path d="M-16 2c-8-18 14-24 17-6 10-15 27 0 13 12L0 19Z M0 19c2 13-5 17-12 24 M-2 25c-15-10-19-4-19-4 4 10 10 10 19 4Z"/></g>
+  <use href="#sprig" x="192" y="137" transform="rotate(31 192 137)"/>
+  <g transform="translate(299 133) rotate(-12)"><path d="M0-14C-21-36-37-4-8 4-29 26-1 40 5 14 25 30 42 4 16 0 35-24 7-37 0-14Z"/><circle cx="4" r="5"/><path d="M4 19v18 M4 31l11-7"/></g>
+  <use href="#leaf" x="374" y="128" transform="rotate(-28 374 128)"/>
+  <use href="#flower" x="32" y="227" transform="rotate(-20 32 227)"/>
+  <g transform="translate(142 224)"><path d="M0 28C-3 6 4-9 1-28 M0 19c-14 2-24-8-21-21 15 1 22 10 21 21Z M2 3c16 4 26-7 25-19C10-17 2-9 2 3Z M1-12C-10-13-16-21-12-31 0-29 4-22 1-12Z"/></g>
+  <use href="#leaf" x="251" y="229" transform="rotate(59 251 229)"/>
+  <g transform="translate(346 223) rotate(15)"><path d="M0-12c-16-25-28-3-14 4-21 2-13 25 3 17-7 22 16 25 18 5 16 14 32-6 12-14 24-7 8-29-5-12Z M0 20v22 M0 32l-10-7"/><circle cx="1" cy="2" r="5"/></g>
+  <g transform="translate(80 324) rotate(-15)"><path d="M0 25C-3 5 6-9 0-28 M-1 5C-23 9-30-2-28-13-8-15 0-5-1 5Z M1-4C23 0 29-13 24-22 7-22 0-15 1-4Z M0 25c9-3 16-10 18-18-11-3-18 6-18 18Z"/></g>
+  <use href="#flower" x="190" y="326" transform="rotate(30 190 326)"/>
+  <use href="#sprig" x="291" y="328" transform="rotate(-30 291 328)"/>
+  <use href="#leaf" x="374" y="337" transform="rotate(13 374 337)"/>
+  <use href="#leaf" x="30" y="408" transform="rotate(-40 30 408)"/>
+  <use href="#sprig" x="134" y="415" transform="rotate(26 134 415)"/>
+  <use href="#flower" x="239" y="408" transform="rotate(-17 239 408)"/>
+  <g transform="translate(340 408)"><path d="M0 23c-12-14-9-36 10-49 14 22 10 40-10 49Z M0 23 8-16 M3 5l10-5 M5-6l-6-6"/></g>
+  <path d="M79 67c-7-6-12 4-4 6 M187 69l3 4m0-9 4-1 M290 71c3-4 8-3 9 0 M24 162l4-3 M136 166c4 4 8 4 11 0 M244 176l3 3m-1-9 4-2 M333 177l4-3 M81 265l3 4m0-9 4-1 M195 270c4-5 9-3 9 1 M300 271l4-3 M15 354l3 4m0-9 4-2 M135 361c5-5 10-1 7 4 M244 365l3 3 M328 370l4-3 M80 435l4-3 M194 432l3 3"/>
+</svg>

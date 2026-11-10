@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api, errorText } from "../../shared/api/api";
 import { base } from "../../shared/api/resource";
 import { AlertDialog, Dialog } from "radix-ui";
+import { toast } from "sonner";
 import {
   Trash2,
   Bot,
@@ -19,11 +20,12 @@ import {
   Undo2,
   RotateCcw,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { ConversationMessage } from "./ConversationMarkdown";
+import { CollapsibleMessage } from "./CollapsibleMessage";
+import { ConversationAppearance, conversationBackground, type ChatAppearance } from "./ConversationAppearance";
 import { AttachmentView, type Attachment } from "./AttachmentView";
 import { Composer, type ComposerDraft } from "./Composer";
-import { i18n, useCommonTranslation } from "../../shared/i18n/i18n";
+import { commonText, i18n, useCommonTranslation } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
@@ -78,7 +80,7 @@ interface ConversationData {
   title: string;
   state: string;
   revision_id: string;
-  config: { name: string; runtime: string; model: string; cwd: string };
+  config: { name: string; runtime: string; model: string; cwd: string; appearance?: ChatAppearance };
   binding: { execution_user: string; canonical_directory: string };
   turns: Turn[];
   version: number;
@@ -95,6 +97,8 @@ interface Event {
     replace?: boolean;
     name?: string;
     state?: string;
+    request_id?: string;
+    result?: unknown;
   };
 }
 const active = (value: string) =>
@@ -147,15 +151,17 @@ function CopyMessage({ text }: { text: string }) {
       variant="ghost"
       className="size-7"
       aria-label={t(copied ? "copiedMessage" : "copyMessage")}
-      onClick={() => {
-        void navigator.clipboard
-          .writeText(text)
-          .then(() => {
-            setCopied(true);
-            clearTimeout(timer.current);
-            timer.current = setTimeout(() => setCopied(false), 1800);
-          })
-          .catch(() => {});
+      title={t(copied ? "copiedMessage" : "copyMessage")}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          clearTimeout(timer.current);
+          timer.current = setTimeout(() => setCopied(false), 1800);
+        } catch {
+          setCopied(false);
+          toast.error(commonText("common.copyFailed"));
+        }
       }}
     >
       {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
@@ -405,6 +411,7 @@ export function Conversation({
         setAttachments([]);
         setTargets([]);
         setMentions([]);
+        setThread("");
       }
       pending.current = undefined;
       follow.current = true;
@@ -559,6 +566,7 @@ export function Conversation({
             </div>
           </button>
           <div className="flex shrink-0 items-center gap-1">
+            {data.can_manage && permissions.has("conversations.update") && <ConversationAppearance endpoint={endpoint} value={data.config.appearance} canUpload={permissions.has("conversations.run") && data.state === "active"} onSaved={appearance => setData(old => old ? { ...old, config: { ...old.config, appearance } } : old)} />}
             <Button
               variant="ghost"
               size="icon"
@@ -656,24 +664,6 @@ export function Conversation({
           </Button>
         )}
       </div>
-      {thread && (
-        <div className="flex shrink-0 items-center gap-2 border-b bg-muted/30 px-4 py-2 text-sm">
-          <MessageSquare className="size-4" />
-          <span className="shrink-0 font-medium">{t("thread")}</span>
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">
-            {data.messages.find((m) => m.id === thread)?.prompt ||
-              t("retracted")}
-          </span>
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label={t("closeThread")}
-            onClick={() => setThread("")}
-          >
-            <X />
-          </Button>
-        </div>
-      )}
       <Dialog.Root open={infoOpen} onOpenChange={setInfoOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
@@ -747,6 +737,7 @@ export function Conversation({
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+      <div data-conversation-canvas className="relative flex min-h-0 flex-1 flex-col" style={conversationBackground(data.config.appearance, endpoint)}>
       {connection && (
         <p role="status" className="text-sm text-destructive">
           {t("reconnecting")} {connection}
@@ -760,10 +751,10 @@ export function Conversation({
             node.scrollHeight - node.scrollTop - node.clientHeight < 80;
           if (follow.current) setNewBelow(false);
         }}
-        className="min-h-0 flex-1 overflow-auto overscroll-contain px-2 pb-6 pt-3 sm:px-6"
+        className="conversation-feed min-h-0 flex-1 overflow-auto overscroll-contain px-2 pb-6 pt-3 sm:px-6"
         aria-label={t("messages")}
       >
-        <div className="mx-auto w-full max-w-4xl">
+        <div className={`mx-auto w-full max-w-4xl ${!data.turns.length && !data.messages.length ? "flex min-h-full flex-col" : ""}`}>
           {activity !== "allMessages" &&
             !data.messages.some((m) =>
               activity === "unread"
@@ -779,35 +770,25 @@ export function Conversation({
                 {t("noFilteredMessages")}
               </p>
             )}
-          {!data.turns.length && !data.messages?.length && (
-            <p className="py-8 text-sm text-muted-foreground">
-              {t("noMessages")}
-            </p>
+          {activity === "allMessages" && !data.turns.length && !data.messages.length && (
+            <div data-conversation-empty className="flex flex-1 flex-col items-center justify-center px-4 py-8 text-center">
+              <div className="flex max-w-sm flex-col items-center rounded-2xl bg-background/90 px-6 py-5 text-foreground shadow-sm">
+              <svg aria-hidden="true" viewBox="0 0 160 120" className="mb-4 h-24 w-32 shrink-0 text-primary">
+                <ellipse cx="80" cy="108" rx="47" ry="5" fill="currentColor" opacity=".06" />
+                <path d="M47 19h59a17 17 0 0 1 17 17v30a17 17 0 0 1-17 17H77L54 99V83h-7a17 17 0 0 1-17-17V36a17 17 0 0 1 17-17Z" fill="currentColor" opacity=".09" />
+                <path d="M47 19h59a17 17 0 0 1 17 17v30a17 17 0 0 1-17 17H77L54 99V83h-7a17 17 0 0 1-17-17V36a17 17 0 0 1 17-17Z" fill="none" stroke="currentColor" strokeWidth="1.7" opacity=".55" />
+                <path d="M51 43h48M51 55h34M51 67h20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" opacity=".4" />
+                <path d="m113 29 27-12-9 28-6-10-12-6Z M125 35l15-18" fill="var(--background)" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+                <path d="m17 54 2-5 2 5 5 2-5 2-2 5-2-5-5-2 5-2Z M130 78l2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5Z" fill="none" stroke="currentColor" strokeWidth="1.3" opacity=".4" />
+              </svg>
+              <h2 className="text-base font-semibold tracking-tight">{t("emptyConversationTitle")}</h2>
+              <p className="mt-2 max-w-64 text-sm leading-relaxed text-muted-foreground">{t("noMessages")}</p>
+              </div>
+            </div>
           )}
           {conversationTimeline(data.messages, data.turns)
             .filter((entry) => {
               const m = entry.message;
-              if (thread) {
-                let id = m?.id;
-                const seen = new Set<string>();
-                while (id && !seen.has(id)) {
-                  if (id === thread) return true;
-                  seen.add(id);
-                  id =
-                    data.messages.find((v) => v.id === id)?.reply_to ??
-                    undefined;
-                }
-                return (
-                  !m &&
-                  entry.turn &&
-                  data.messages.some(
-                    (v) =>
-                      v.id === thread &&
-                      (v.turn_id === entry.turn?.id ||
-                        v.id === entry.turn?.message_id),
-                  )
-                );
-              }
               if (activity === "unread") return !!m?.unread;
               if (activity === "saved") return !!m?.saved;
               if (activity === "mentions")
@@ -863,17 +844,22 @@ export function Conversation({
                     name: event.name,
                     state: event.state,
                   });
+                if (event.type === "platform_result" && event.request_id)
+                  items.set(event.request_id, {
+                    name: t("platformResult"),
+                    text: JSON.stringify(event.result, null, 2),
+                  });
               }
               return (
                 <Fragment key={m?.id ?? `turn-${turn!.id}`}>
                   {newDay && (
                     <div
-                      className="flex items-center gap-3 py-4"
+                      className="flex items-center gap-3 py-3"
                       role="separator"
                     >
                       <div className="h-px flex-1 bg-border" />
                       <time
-                        className="shrink-0 text-xs text-muted-foreground"
+                        className="shrink-0 rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground"
                         dateTime={date.toISOString()}
                       >
                         {date.toLocaleDateString(i18n.language, {
@@ -888,7 +874,7 @@ export function Conversation({
                   <article
                     data-message-id={m?.id}
                     data-turn-id={m?.role === "user" ? undefined : turn?.id}
-                    className="group/message relative flex min-w-0 flex-wrap gap-x-3 gap-y-2 rounded-lg px-2 py-4 hover:bg-muted/35 sm:px-3"
+                    className="group/message relative my-2 flex min-w-0 flex-wrap gap-x-2.5 gap-y-2 rounded-lg px-1 py-1.5 sm:px-3"
                   >
                     <div
                       aria-hidden
@@ -900,7 +886,7 @@ export function Conversation({
                         <Bot className="size-4" />
                       )}
                     </div>
-                    <div className="min-w-0 flex-1">
+                    <div className={`min-w-0 flex-1 rounded-xl border px-3 py-2.5 shadow-xs sm:px-4 ${m?.role === "user" ? "rounded-tl-sm border-primary/20 bg-muted text-foreground" : "rounded-tl-sm bg-card text-card-foreground"}`}>
                       <div className="mb-1 flex min-h-6 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                         <span className="font-semibold text-foreground">
                           {name}
@@ -945,9 +931,9 @@ export function Conversation({
                                   ?.prompt || t("retracted")}
                               </button>
                             )}
-                            <p className="whitespace-pre-wrap break-words text-sm leading-7">
+                            <CollapsibleMessage><p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
                               {m.prompt}
-                            </p>
+                            </p></CollapsibleMessage>
                             {!!m.targets.length && (
                               <p className="text-xs text-primary">
                                 {m.targets
@@ -991,35 +977,38 @@ export function Conversation({
                         {reply && !reply.retracted_at && (
                           <div
                             data-agent-text
-                            className="min-w-0 text-sm leading-7 break-words [&_pre]:my-3 [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:text-xs [&_p]:my-2 [&_p:first-child]:mt-0 [&_h1]:mb-3 [&_h1]:mt-6 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:font-semibold [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_hr]:my-4 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-primary [&_a]:underline [&_table]:block [&_table]:overflow-auto [&_th]:border [&_th]:p-2 [&_td]:border [&_td]:p-2"
+                            className="min-w-0 text-sm leading-relaxed break-words"
                           >
-                            <ReactMarkdown
-                              remarkPlugins={[remarkGfm]}
-                              components={{
-                                img: ({ alt }) => <span>{alt}</span>,
-                              }}
-                            >
+                            <ConversationMessage streaming={!!turn && active(turn.state)} endpoint={endpoint}>
                               {reply.prompt}
-                            </ReactMarkdown>
+                            </ConversationMessage>
                           </div>
                         )}
-                        {!!items.size && (
-                          <details className="text-xs text-muted-foreground">
-                            <summary className="cursor-pointer">
+                        {(!!items.size || (turn && m?.role !== "user" && (turn.usage || Object.values(turn.decisions).some(decision => decision.decision !== null || turn.state !== "running")))) && (
+                          <details data-execution-details className="text-xs text-muted-foreground">
+                            <summary className="min-h-11 cursor-pointer py-3">
                               {t("executionDetails")}
                             </summary>
                             <div className="mt-2 space-y-1">
                               {[...items].map(([key, item]) => (
-                                <p key={key}>
-                                  {item.name} · {item.state}
-                                </p>
+                                <div key={key} className="min-w-0 rounded border p-2">
+                                  <p>{item.name}{item.state ? ` · ${item.state}` : ""}</p>
+                                  {item.text && <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all">{item.text}</pre>}
+                                </div>
                               ))}
+                              {turn && m?.role !== "user" && Object.entries(turn.decisions).filter(([, decision]) => decision.decision !== null || turn.state !== "running").map(([request, decision]) => (
+                                <details key={request} className="rounded-md border p-2">
+                                  <summary className="min-h-11 cursor-pointer break-words py-2">{decision.tool} · {decision.sent ? t("decisionSent") : decision.decision !== null ? t("decisionQueued") : t("decisionExpired")}</summary>
+                                  <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(decision.input, null, 2)}</pre>
+                                </details>
+                              ))}
+                              {turn?.usage && <p className="py-2">{t(turn.state)} · {t("inputTokens")}: {turn.usage.input_tokens} · {t("outputTokens")}: {turn.usage.output_tokens}</p>}
                             </div>
                           </details>
                         )}
                         {turn && m?.role !== "user" && (
                           <>
-                            {Object.entries(turn.decisions).map(
+                            {Object.entries(turn.decisions).filter(([, decision]) => decision.decision === null && turn.state === "running").map(
                               ([request, decision]) => (
                                 <div
                                   key={request}
@@ -1087,19 +1076,6 @@ export function Conversation({
                                 {t(turn.state)}
                               </p>
                             )}
-                            {turn.usage && (
-                              <details className="text-xs text-muted-foreground">
-                                <summary className="cursor-pointer">
-                                  {t("executionDetails")}
-                                </summary>
-                                <p className="mt-2">
-                                  {t(turn.state)} · {t("inputTokens")}:{" "}
-                                  {turn.usage.input_tokens} ·{" "}
-                                  {t("outputTokens")}:{" "}
-                                  {turn.usage.output_tokens}
-                                </p>
-                              </details>
-                            )}
                             {(["failed", "interrupted", "timed_out", "cancelled"].includes(turn.state) || turn.error) && (
                               <div data-turn-failure={turn.id} className="space-y-1.5">
                                 <p role="status" className="break-words text-sm text-destructive">
@@ -1132,12 +1108,10 @@ export function Conversation({
                           disabled={!runnable}
                           onClick={() => {
                             setThread(m.id);
-                            setActivity("allMessages");
-                            follow.current = true;
                             requestAnimationFrame(() =>
                               document
-                                .querySelector<HTMLTextAreaElement>("textarea")
-                                ?.focus(),
+                                .querySelector<HTMLTextAreaElement>("#conversation-message")
+                                ?.focus({ preventScroll: true }),
                             );
                           }}
                         >
@@ -1274,6 +1248,14 @@ export function Conversation({
             setTargets(value.targets ?? []);
             setMentions(value.mentions ?? []);
           }}
+          reply={thread ? (() => {
+            const message = data.messages.find((m) => m.id === thread);
+            return {
+              name: message?.sender_name || data.agents?.find((a) => a.id === message?.agent_id)?.name || t("agent"),
+              text: message?.retracted_at || !message ? t("retracted") : message.prompt || message.attachments?.map((a) => a.name).join(", ") || t("attach"),
+            };
+          })() : undefined}
+          onCancelReply={() => setThread("")}
           onSend={() => send()}
           disabled={!runnable}
           busy={busy}
@@ -1285,6 +1267,7 @@ export function Conversation({
             if (current) void act(`/turns/${current.id}/cancellations`);
           }}
         />
+      </div>
       </div>
       <Dialog.Root
         open={!!messageAction}

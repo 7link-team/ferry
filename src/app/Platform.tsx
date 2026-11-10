@@ -1,4 +1,5 @@
 import { LogIn } from "lucide-react";
+import { BrandIcon } from "../shared/site/BrandIcon";
 import { useEffect,type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -93,10 +94,11 @@ const forms: Record<string, FormConfig<Row>> = {
     {key:"mail_templates",label:"邮件模板",labelKey:"resource-domain:platform.mailTemplates",type:"custom",span:2,render:({draft,readOnly,onPatch})=><PlatformMailTemplates draft={draft} readOnly={readOnly} onPatch={onPatch}/>},
   ]},
 { title: "登录防护", titleKey:"resource-domain:loginGuard.settings",group:"登录防护",groupKey:"resource-domain:loginGuard.settings",fields:[
+    {key:"otp_enabled",label:"允许绑定 OTP 验证器",labelKey:"otp:enableFeature",type:"switch",span:2,helpKey:"otp:featureHelp"},
     {key:"login_guard_mode",label:"验证码方式",labelKey:"resource-domain:loginGuard.mode",type:"select",options:[{value:"local",label:"本地随机验证码",labelKey:"resource-domain:loginGuard.local"},{value:"turnstile",label:"Cloudflare Turnstile"}],helpKey:"resource-domain:loginGuard.help"},
-    {key:"login_turnstile_site_key",label:"Site Key",type:"text",when:d=>d.login_guard_mode==="turnstile"},
-    {key:"login_turnstile_secret_key",label:"Secret Key",type:"secret",stored:"login_turnstile_has_secret",replaceOnEdit:true,when:d=>d.login_guard_mode==="turnstile"},
-    {key:"login_turnstile_hostname",label:"Turnstile 站点域名",labelKey:"resource-domain:loginGuard.hostname",type:"text",when:d=>d.login_guard_mode==="turnstile",helpKey:"resource-domain:loginGuard.hostnameHelp"},
+    {key:"login_turnstile_hostname",label:"Turnstile 站点域名",labelKey:"resource-domain:loginGuard.hostname",type:"text",required:true,when:d=>d.login_guard_mode==="turnstile",helpKey:"resource-domain:loginGuard.hostnameHelp"},
+    {key:"login_turnstile_site_key",label:"Site Key",type:"text",required:true,when:d=>d.login_guard_mode==="turnstile"},
+    {key:"login_turnstile_secret_key",label:"Secret Key",type:"secret",required:d=>!d.login_turnstile_has_secret,stored:"login_turnstile_has_secret",replaceOnEdit:true,when:d=>d.login_guard_mode==="turnstile"},
   ] },
 {title:"监控采集",titleKey:"resource-domain:platform.monitorCollection",group:"监控采集",groupKey:"resource-domain:platform.monitorCollection",fields:[
     {key:"monitor_retention_days",label:"明细保留天数",labelKey:"resource-domain:platform.monitorRetentionDays",type:"number",min:1,max:365,helpKey:"resource-domain:platform.monitorRetentionHelp"},
@@ -106,26 +108,25 @@ const forms: Record<string, FormConfig<Row>> = {
     { key: "runner_auto_update", label: "Runner 默认自动升级", labelKey: "resource-domain:runner.defaultAutoUpdate", type: "switch", help: "空闲时升级到当前服务版本；主机可单独覆盖此默认值。", helpKey: "resource-domain:runner.defaultAutoHelp" },
   ] },
 {title:"邮箱配置",titleKey:"resource-domain:platform.mailSettings",group:"邮箱配置",groupKey:"resource-domain:platform.mailSettings",tab:"connection",tabKey:"resource-domain:platform.mailConnection",fields:[
-    {key:"mail_enabled",label:"启用邮箱",labelKey:"resource-domain:platform.mailEnabled",type:"switch",helpKey:"resource-domain:platform.mailHelp"},
-    {key:"mail_security",label:"传输加密",labelKey:"resource-domain:platform.mailSecurity",type:"select",options:[{value:"starttls",label:"STARTTLS (587)"},{value:"tls",label:"TLS (465)"},{value:"none",label:"不加密",labelKey:"resource-domain:platform.mailPlain"}]},
-    {key:"mail_host",label:"SMTP 服务器",labelKey:"resource-domain:platform.mailHost",type:"text",placeholder:"smtp.example.com"},
-    {key:"mail_port",label:"SMTP 端口",labelKey:"resource-domain:platform.mailPort",type:"number",min:1,max:65535},
+    {key:"mail_enabled",label:"启用邮箱",labelKey:"resource-domain:platform.mailEnabled",type:"switch",span:2,helpKey:"resource-domain:platform.mailHelp"},
+    {key:"mail_host",label:"SMTP 服务器",labelKey:"resource-domain:platform.mailHost",type:"text",required:d=>!!d.mail_enabled,placeholder:"smtp.example.com"},
+    {key:"mail_port",label:"SMTP 端口",labelKey:"resource-domain:platform.mailPort",type:"number",required:true,min:1,max:65535},
+    {key:"mail_from",label:"发件人邮箱",labelKey:"resource-domain:platform.mailFrom",type:"text",required:d=>!!d.mail_enabled,placeholder:"noreply@example.com"},
+    {key:"mail_security",label:"传输加密",labelKey:"resource-domain:platform.mailSecurity",type:"select",required:true,options:[{value:"starttls",label:"STARTTLS (587)"},{value:"tls",label:"TLS (465)"},{value:"none",label:"不加密",labelKey:"resource-domain:platform.mailPlain"}]},
     {key:"mail_username",label:"SMTP 用户名",labelKey:"resource-domain:platform.mailUsername",type:"text"},
     {key:"mail_password",label:"SMTP 密码 / 授权码",labelKey:"resource-domain:platform.mailPassword",type:"secret",stored:"mail_has_password",replaceOnEdit:true,hideSecretStatus:true},
-    {key:"mail_from",label:"发件人邮箱",labelKey:"resource-domain:platform.mailFrom",type:"text",placeholder:"noreply@example.com"},
     {key:"mail_verified_at",label:"发送验证时间",labelKey:"resource-domain:platform.mailVerified",type:"custom",render:({draft})=><AutoField label={commonText("resource-domain:platform.mailVerified")}><p role="status" className="text-sm text-muted-foreground">{draft.mail_verified_at?new Date(Number(draft.mail_verified_at)).toLocaleString():commonText("resource-domain:platform.mailUnverified")}</p></AutoField>},
     {key:"mail_test",label:"发送验证",labelKey:"resource-domain:platform.mailTest",type:"custom",span:2,render:({draft,readOnly,onPatch})=><PlatformMailTest draft={draft} readOnly={readOnly} onVerified={onPatch}/>},
   ]},
 { title: "文件存储", titleKey: "resource-domain:platform.fileStorage", group: "文件存储", groupKey: "resource-domain:platform.fileStorage", fields: [
     {key:"storage_kind",label:"文件存储",labelKey:"resource-domain:platform.fileStorage",type:"select",options:[{value:"local",label:"本地文件（仅单机）",labelKey:"resource-domain:platform.storageLocal"},{value:"s3",label:"S3（单机或集群）",labelKey:"resource-domain:platform.storageS3"}],helpKey:"resource-domain:platform.storageHelp",disabled:d=>d.storage_source==="environment"},
-    {key:"storage_source",label:"配置来源",labelKey:"resource-domain:platform.configSource",type:"text",immutable:true},
+    {key:"storage_source",label:"配置来源",labelKey:"resource-domain:platform.configSource",type:"text",immutable:true,span:2},
     {key:"storage_local_path",label:"本机存储路径",labelKey:"resource-domain:platform.storageLocalPath",type:"custom",span:2,when:d=>d.storage_kind==="local",render:({draft})=><code className="block select-all whitespace-normal break-all rounded border bg-muted/30 p-3 text-sm">{String(draft.storage_local_path??"")}</code>,helpKey:"resource-domain:platform.storageLocalPathHelp"},
-    ...([ ["endpoint","S3 Endpoint"], ["bucket","Bucket"], ["region","Region"], ["access_key","Access Key ID"] ] as const).map(([key,label])=>({key:`storage_${key}`,label,type:"text" as const,when:(d:Partial<Row>)=>d.storage_kind==="s3",disabled:(d:Partial<Row>)=>d.storage_source==="environment"})),
-    {key:"storage_secret_key",label:"Secret Access Key",type:"secret",stored:"storage_has_secret_key",replaceOnEdit:true,when:d=>d.storage_kind==="s3",disabled:d=>d.storage_source==="environment",helpKey:"resource-domain:platform.storageSecretHelp"},
-  ] },
-{ title: "访问地址", titleKey: "resource-domain:platform.accessAddresses", group: "访问地址", groupKey: "resource-domain:platform.accessAddresses", fields: [
-    { key: "public_url", label: "平台公开访问地址", labelKey: "resource-domain:platform.publicUrl", type: "text", placeholder: "https://console.example.com", helpKey: "resource-domain:platform.publicAddressHelp" },
-    { key: "preview_domain", label: "预览根域名", labelKey: "resource-domain:platform.previewDomain", type: "text", placeholder: "preview.example.com", helpKey: "resource-domain:platform.previewDomainHelp" },
+    ...([ ["endpoint","S3 Endpoint"], ["bucket","Bucket"] ] as const).map(([key,label])=>({key:`storage_${key}`,label,type:"text" as const,required:true,when:(d:Partial<Row>)=>d.storage_kind==="s3",disabled:(d:Partial<Row>)=>d.storage_source==="environment"})),
+    {key:"storage_region",label:"Region",type:"text",required:true,span:2,when:d=>d.storage_kind==="s3",disabled:d=>d.storage_source==="environment"},
+    {key:"storage_access_key",label:"Access Key ID",type:"text",when:d=>d.storage_kind==="s3",disabled:d=>d.storage_source==="environment"},
+    {key:"storage_secret_key",label:"Secret Access Key",type:"secret",required:d=>!!d.storage_access_key&&!d.storage_has_secret_key,stored:"storage_has_secret_key",replaceOnEdit:true,when:d=>d.storage_kind==="s3",disabled:d=>d.storage_source==="environment",helpKey:"resource-domain:platform.storageSecretHelp"},
+    {key:"storage_prefix",label:"S3 路径前缀",labelKey:"resource-domain:platform.storagePrefix",type:"text",span:2,max:512,placeholder:"ferry/production",helpKey:"resource-domain:platform.storagePrefixHelp",when:d=>d.storage_kind==="s3",disabled:d=>d.storage_source==="environment"},
   ] },
 { title: "公共配置", titleKey: "resource-domain:platform.publicConfig", group: "仓库关联", groupKey: "resource-domain:platform.repositoryIntegration", fields: [
     { key: "oauth_callback_url", label: "当前回调地址", labelKey: "resource-domain:platform.callbackUrl", type: "text", immutable: true, copyable: true, span: 2, help: "将此地址登记到代码平台的 OAuth 应用。修改公开访问地址并保存后，这里会显示新的回调地址。", helpKey: "resource-domain:platform.callbackHelp" },
@@ -133,15 +134,27 @@ const forms: Record<string, FormConfig<Row>> = {
   ] },
 ...([ ["github", "GitHub"], ["gitlab", "GitLab"], ["gitee", "Gitee"], ["gitea", "Gitea"] ] as const).map(([key, label]) => ({ title: `${label} OAuth 应用`, titleKey: `resource-domain:platform.${key}App`, group: "仓库关联", groupKey: "resource-domain:platform.repositoryIntegration", tab: label, fields: [
     { key: `oauth_${key}_enabled`, label: `启用 ${label} 网页授权`, labelKey: `resource-domain:platform.${key}Enable`, type: "switch" as const, span: 2 as const, help: "关闭后不再使用该平台的网页授权凭据；已保存的应用配置保留。Codeup 使用个人访问令牌，无需配置 OAuth 应用。", helpKey: "resource-domain:platform.oauthDisableHelp" },
-    { key: `oauth_${key}_client_id`, label: `${label} ${key === "gitlab" ? "Application ID" : "Client ID"}`, labelKey: `resource-domain:platform.${key}Id`, type: "text" as const },
-    { key: `oauth_${key}_client_secret`, label: `${label} ${key === "gitlab" ? "Secret" : "Client Secret"}`, labelKey: `resource-domain:platform.${key}Secret`, type: "secret" as const, stored: `oauth_${key}_has_client_secret`, replaceOnEdit: true, placeholder: "留空保留已有应用密钥", placeholderKey: "resource-domain:platform.keepSecret", help: "加密保存，不回显；留空保留已有密钥。修改应用 ID 或接入点后，原账号需重新授权。", helpKey: "resource-domain:platform.secretHelp" },
-    { key: `oauth_${key}_base_url`, label: `${label} 网站地址`, labelKey: `resource-domain:platform.${key}Website`, type: "text" as const, placeholder: key === "gitea" ? "https://git.example.com" : `https://${key}.com`, help: "留空使用官方地址；自建 GitLab／GitHub Enterprise 可填写自己的地址。", helpKey: "resource-domain:platform.baseUrlHelp" },
+    { key: `oauth_${key}_client_id`, label: `${label} ${key === "gitlab" ? "Application ID" : "Client ID"}`, labelKey: `resource-domain:platform.${key}Id`, type: "text" as const, required: (d: Partial<Row>) => !!d[`oauth_${key}_enabled`] },
+    { key: `oauth_${key}_client_secret`, label: `${label} ${key === "gitlab" ? "Secret" : "Client Secret"}`, labelKey: `resource-domain:platform.${key}Secret`, type: "secret" as const, required: (d: Partial<Row>) => !!d[`oauth_${key}_enabled`] && !d[`oauth_${key}_has_client_secret`], stored: `oauth_${key}_has_client_secret`, replaceOnEdit: true, placeholder: "留空保留已有应用密钥", placeholderKey: "resource-domain:platform.keepSecret", help: "加密保存，不回显；留空保留已有密钥。修改应用 ID 或接入点后，原账号需重新授权。", helpKey: "resource-domain:platform.secretHelp" },
+    { key: `oauth_${key}_base_url`, label: `${label} 网站地址`, labelKey: `resource-domain:platform.${key}Website`, type: "text" as const, required: (d: Partial<Row>) => key === "gitea" && !!d[`oauth_${key}_enabled`], placeholder: key === "gitea" ? "https://git.example.com" : `https://${key}.com`, help: "留空使用官方地址；自建 GitLab／GitHub Enterprise 可填写自己的地址。", helpKey: "resource-domain:platform.baseUrlHelp" },
     { key: `oauth_${key}_api_url`, label: `${label} API 地址`, labelKey: `resource-domain:platform.${key}Api`, type: "text" as const, help: "通常留空，由网站地址自动推导；仅在使用自定义 API 接入点时填写。", helpKey: "resource-domain:platform.apiUrlHelp" },
   ] })),
-{title:"页脚设置",titleKey:"resource-domain:platform.footerSettings",group:"页脚设置",groupKey:"resource-domain:platform.footerSettings",fields:[
+{ title: "访问地址", titleKey: "resource-domain:platform.accessAddresses", group: "访问地址", groupKey: "resource-domain:platform.accessAddresses", fields: [
+    { key: "public_url", label: "平台公开访问地址", labelKey: "resource-domain:platform.publicUrl", type: "text", placeholder: "https://console.example.com", helpKey: "resource-domain:platform.publicAddressHelp" },
+    { key: "preview_domain", label: "预览根域名", labelKey: "resource-domain:platform.previewDomain", type: "text", placeholder: "preview.example.com", helpKey: "resource-domain:platform.previewDomainHelp" },
+  ] },
+{title:"Basic information",titleKey:"resource-domain:platform.siteBasic",group:"site",groupKey:"resource-domain:platform.siteSettings",tab:"basic",tabKey:"resource-domain:platform.siteBasic",fields:[
+    {key:"site_name",label:"Site name",labelKey:"resource-domain:platform.siteName",type:"text",span:2,helpKey:"resource-domain:platform.siteNameHelp"},
+  ]},
+{title:"Browser tabs",titleKey:"resource-domain:platform.siteTabs",group:"site",groupKey:"resource-domain:platform.siteSettings",tab:"tabs",tabKey:"resource-domain:platform.siteTabs",fields:[
+    {key:"site_title_prefix_enabled",label:"Enable title prefixes",labelKey:"resource-domain:platform.sitePrefixEnabled",type:"switch"},
+    {key:"site_title_visible_prefix",label:"Visible tab prefix",labelKey:"resource-domain:platform.siteVisiblePrefix",type:"text",when:d=>d.site_title_prefix_enabled===true,helpKey:"resource-domain:platform.sitePrefixHelp"},
+    {key:"site_title_hidden_prefix",label:"Hidden tab prefix",labelKey:"resource-domain:platform.siteHiddenPrefix",type:"text",when:d=>d.site_title_prefix_enabled===true,helpKey:"resource-domain:platform.sitePrefixHelp"},
+  ]},
+{title:"页脚设置",titleKey:"resource-domain:platform.footerSettings",group:"site",groupKey:"resource-domain:platform.siteSettings",tab:"footer",tabKey:"resource-domain:platform.footerSettings",fields:[
     {key:"footer_html",label:"页脚内容",labelKey:"resource-domain:platform.footerContent",type:"custom",span:2,render:({draft,readOnly,onPatch})=><PlatformFooterEditor value={String(draft.footer_html??"")} readOnly={readOnly} onChange={value=>onPatch({footer_html:value})}/>},
   ]},
-{title:"页面脚本",titleKey:"resource-domain:platform.scripts",group:"页面脚本",groupKey:"resource-domain:platform.scripts",fields:[
+{title:"页面脚本",titleKey:"resource-domain:platform.scripts",group:"site",groupKey:"resource-domain:platform.siteSettings",tab:"scripts",tabKey:"resource-domain:platform.scripts",fields:[
     {key:"analytics_enabled",label:"启用页面脚本",labelKey:"resource-domain:platform.scriptsEnabled",type:"switch",helpKey:"resource-domain:platform.scriptsHelp"},
     {key:"analytics_ga_id",label:"Google Analytics 测量 ID（可选）",labelKey:"resource-domain:platform.gaId",type:"text",placeholder:"G-XXXXXXXXXX",helpKey:"resource-domain:platform.gaHelp"},
     {key:"analytics_js",label:"自定义 JavaScript",labelKey:"resource-domain:platform.customJs",type:"textarea",span:2,helpKey:"resource-domain:platform.jsHelp"},
@@ -153,21 +166,26 @@ const forms: Record<string, FormConfig<Row>> = {
 export function Platform({ identity, reload, headerActions }: { identity: Identity; reload: () => void; onSignedOut: () => void; headerActions?: ReactNode }) {
   useTranslation("resource-domain");
   const route = useRoute();
+  const legacySiteSection = route.item === "settings" ? new URLSearchParams(location.search).get("section") : null;
   const legacyServerNodes = route.item === "settings" && new URLSearchParams(location.search).get("section") === "server-nodes";
   const serverNodes = route.item === "monitor" && (!route.id || route.id === "server-nodes");
   const item = route.workspace === "_platform" ? route.item : "workspaces";
   useEffect(() => {
+    if (legacySiteSection === "页脚设置" || legacySiteSection === "页面脚本") {
+      navigate(route, {...Object.fromEntries(new URLSearchParams(location.search)), section:"site", form_tab:legacySiteSection === "页脚设置" ? "footer" : "scripts"}, {replace:true});
+      return;
+    }
     if (route.workspace !== "_platform") navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {}, { replace: true });
     else if (item === "server-nodes" || legacyServerNodes) navigate({ workspace: "_platform", item: "monitor", id: "server-nodes", mode: "view" }, {}, { replace: true });
     else if (item === "monitor" && !route.id) navigate({ ...route, id: "server-nodes", mode: "view" }, {}, { replace: true });
     else if (item === "settings" && !route.id) navigate({ ...route, id: "1", mode: "edit" }, {}, { replace: true });
-  }, [route.workspace, route.id, item, legacyServerNodes]);
+  }, [route.workspace, route.id, item, legacyServerNodes, legacySiteSection]);
   if (!identity.user.is_superadmin) return <div className="p-6 space-y-4"><div className="flex justify-end">{headerActions}</div><p>{commonText("resource-domain:platform.forbidden")}</p><Button onClick={() => navigate({ workspace: identity.workspaces[0]?.id ?? "", mode: "list" }, {})}>{commonText("common-domain:shell.backWorkspace")}</Button></div>;
   if (item === "server-nodes" || legacyServerNodes) return null;
   const form = forms[item]!;
   return <div className="flex h-full flex-col">
     <header className="flex flex-wrap items-center gap-4 border-b px-5 py-3">
-      <h1 className="font-semibold">{commonText("resource-domain:platform.management")}</h1>
+      <h1 className="flex items-center gap-2 font-semibold"><BrandIcon />{commonText("resource-domain:platform.management")}</h1>
       <nav aria-label={commonText("resource-domain:platform.management")} className="flex flex-wrap gap-2">
         {Object.entries(labels).map(([key, label]) => <a key={key} href={href({ workspace: "_platform", item: key, mode: key === "settings" ? "edit" : key === "monitor" ? "view" : "list", ...(key === "settings" ? { id: "1" } : key === "monitor" ? { id: "server-nodes" } : {}) }, {})}
           aria-current={key === item ? "page" : undefined} className={`rounded px-3 py-2 text-sm ${key === item ? "bg-accent" : "text-muted-foreground"}`}

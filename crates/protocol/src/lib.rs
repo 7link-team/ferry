@@ -527,6 +527,7 @@ mod tests {
                     native_session_id: Some("native-a".into()),
                     permission: agent::Permission::OnRequest,
                     timeout_seconds: 60,
+                    platform_tools: false,
                 },
             },
             Session::AgentInput {

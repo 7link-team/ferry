@@ -1,3 +1,4 @@
+import { namedOptions } from "../../shared/resources/config";
 import { NotificationChannels, type NotificationChannel } from "../../features/repositories/NotificationChannels";
 import { Checkbox } from "../../shared/ui/checkbox";
 import { Bell } from "lucide-react";
@@ -25,19 +26,28 @@ export function RepositoryMonitor({ workspace, connectionId, permissions, provid
     }
     return options;
   }, [workspace, canSelectRunner]);
-  const channelField = {
+  const legacyChannelField = {
+    when: (draft: Record<string, unknown>) => draft.notification_channel_ids == null,
     key: "notification_channels", label: hostRepositoryText("repository-monitor.channels"), type: "custom" as const, span: 2 as const,
     render: ({ draft, readOnly, onPatch, onValidityChange }: { draft: Record<string, unknown>; readOnly: boolean; onPatch: (patch: Record<string, unknown>) => void; onValidityChange: (blocked: boolean) => void }) => <NotificationChannels endpoint={`/workspaces/${workspace}/code-connection-monitors/${connectionId}`} channels={Array.isArray(draft.notification_channels) ? draft.notification_channels as NotificationChannel[] : []} readOnly={readOnly} onChange={notification_channels => onPatch({ notification_channels })} onValidityChange={onValidityChange} />,
   };
+  const channelField = {
+    key: "notification_channel_ids", label: hostRepositoryText("repository-monitor.channels"), type: "multiselect" as const,
+    span: 2 as const, searchable: true,
+    when: (draft: Record<string, unknown>) => draft.notification_channel_ids != null,
+    options: permissions.has("notifications.read") ? namedOptions(workspace, "notification-channels") : [],
+    display: (draft: Record<string, unknown>) => Array.isArray(draft.notification_channel_names) ? draft.notification_channel_names.join("\n") : "",
+    disabled: () => !permissions.has("notifications.send"),
+  };
   const form = useMemo<FormConfig<Record<string, unknown>>>(() => {
-    const editValues = (row: Record<string, unknown>) => ({ notification_channels: row.notification_channels ?? (row.webhook ? [{ name: "Webhook", webhook: row.webhook, language: row.notification_language || "en-US", enabled: true }] : []), notification_language: row.notification_language || "en-US", webhook: row.webhook ?? "", clear_webhook: false, enabled: row.enabled, mode: row.provider === "git" ? "poll" : row.mode ?? "push", ...(row.provider === "git" ? { runner_id: row.runner_id ?? "" } : {}), poll_interval_minutes: row.poll_interval_minutes ?? 1, all_repositories: row.provider === "git" ? false : row.all_repositories, repositories: Array.isArray(row.repositories) ? row.repositories.join("\n") : row.repositories, events: Array.isArray(row.events) ? row.events.filter(event => ![...repositoryEventOptions, ...gitRepositoryEventOptions].some(option => option.value === event) || (row.provider === "git" ? gitRepositoryEventOptions.some(option => option.value === event) : row.mode === "poll" || row.provider !== "codeup" || !String(event).startsWith("repository."))) : [] });
+    const editValues = (row: Record<string, unknown>) => ({ notification_channel_ids: row.notification_channel_ids, notification_channel_names: row.notification_channel_names, notification_channels: row.notification_channels ?? (row.webhook ? [{ name: "Webhook", webhook: row.webhook, language: row.notification_language || "en-US", enabled: true }] : []), notification_language: row.notification_language || "en-US", webhook: row.webhook ?? "", clear_webhook: false, enabled: row.enabled, mode: row.provider === "git" ? "poll" : row.mode ?? "push", ...(row.provider === "git" ? { runner_id: row.runner_id ?? "" } : {}), poll_interval_minutes: row.poll_interval_minutes ?? 1, all_repositories: row.provider === "git" ? false : row.all_repositories, repositories: Array.isArray(row.repositories) ? row.repositories.join("\n") : row.repositories, events: Array.isArray(row.events) ? row.events.filter(event => ![...repositoryEventOptions, ...gitRepositoryEventOptions].some(option => option.value === event) || (row.provider === "git" ? gitRepositoryEventOptions.some(option => option.value === event) : row.mode === "poll" || row.provider !== "codeup" || !String(event).startsWith("repository."))) : [] });
     const editFields = (row: Record<string, unknown>): FormConfig<Record<string, unknown>>["sections"][number]["fields"] => row.provider === "git" ? [
         { key: "runner_id", label: hostRepositoryText("repository-monitor.062"), type: "select", required: true, options: runnerOptions, help: hostRepositoryText("repository-monitor.076") },
         { key: "poll_interval_minutes", label: hostRepositoryText("repository-monitor.058"), type: "number", min: 1, required: true, help: hostRepositoryText("repository-monitor.077") },
         { key: "enabled", label: hostRepositoryText("repository-monitor.061"), type: "switch" },
         { key: "repositories", label: hostRepositoryText("repository-monitor.078"), type: "textarea", required: true, help: hostRepositoryText("repository-monitor.079") },
         { key: "events", label: hostRepositoryText("repository-monitor.067"), type: "multiselect", options: gitRepositoryEventOptions, required: true },
-      channelField,
+      channelField, legacyChannelField,
       ] : [
         { key: "mode", label: hostRepositoryText("repository-monitor.057"), type: "select", required: true, options: [{ value: "push", label: hostRepositoryText("repository-monitor.020") }, { value: "poll", label: hostRepositoryText("repository-monitor.021") }], resetOnChange: ["events"], help: hostRepositoryText("repository-monitor.083") },
         { key: "poll_interval_minutes", label: hostRepositoryText("repository-monitor.058"), type: "number", min: 1, required: true, when: value => value.mode === "poll", help: hostRepositoryText("repository-monitor.084") },
@@ -48,7 +58,7 @@ export function RepositoryMonitor({ workspace, connectionId, permissions, provid
         { key: "events", label: hostRepositoryText("repository-monitor.067"), type: "multiselect", options: repositoryEventOptions, required: true, when: value => value.mode === "poll" },
         { key: "secret", label: hostRepositoryText("repository-monitor.071"), type: "password", when: value => value.mode !== "poll" && !value.has_secret, required: true, help: hostRepositoryText("repository-monitor.087") },
         { key: "secret", label: hostRepositoryText("repository-monitor.071"), type: "password", when: value => value.mode !== "poll" && !!value.has_secret, help: hostRepositoryText("repository-monitor.087") },
-      channelField,
+      channelField, legacyChannelField,
       ];
     return ({
     resource: "code-connection-monitors", permissionResource: "repositories", width: "full", blank: {}, heading: () => hostRepositoryText("repository-monitor.055"), readOnly: row => row.provider === "git" && !canSelectRunner,
@@ -75,7 +85,7 @@ export function RepositoryMonitor({ workspace, connectionId, permissions, provid
       { key: "capability_note", label: hostRepositoryText("repository-monitor.068"), type: "text", span: 2 },
       { key: "callback_path", when: row => row.provider !== "git" && row.mode !== "poll", label: hostRepositoryText("repository-monitor.069"), type: "text", span: 2, help: hostRepositoryText("repository-monitor.070", { origin: location.origin }) },
       { key: "secret", label: hostRepositoryText("repository-monitor.071"), type: "secret", stored: "has_secret", when: row => row.provider !== "git" && row.mode !== "poll" },
-      channelField,
+      channelField, legacyChannelField,
       { key: "provider_changed", label: hostRepositoryText("repository-monitor.073"), type: "switch", when: row => !!row.provider_changed },
     ] }],
 

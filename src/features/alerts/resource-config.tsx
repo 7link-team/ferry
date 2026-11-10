@@ -21,6 +21,7 @@ export interface AlertRule {
   threshold: number;
   enabled: boolean;
   has_webhook: boolean;
+  notification_channel_id?: string;
   webhook?: string;
   clear_webhook?: boolean;
   last_error: string;
@@ -268,6 +269,7 @@ export function alertsLists({
 
 export function alertsForms({
   workspace,
+  permissions,
 }: ResourceConfigContext): Record<string, FormConfig<AnyRow>> {
   return {
     "alert-rules": form<AlertRule>({
@@ -282,7 +284,7 @@ export function alertsForms({
         metric: "offline",
         threshold: 0,
         enabled: false,
-        webhook: "",
+        notification_channel_id: "",
         clear_webhook: false,
       },
       viewActions: [alertEventLink],
@@ -366,20 +368,8 @@ export function alertsForms({
               helpKey: "resource-domain:alert.thresholdHelp",
             },
             {
-              key: "webhook",
-              label: "Webhook 地址",
-              labelKey: "resource-domain:alert.webhook",
-              type: "password",
-              stored: "has_webhook",
-              help: "可选HTTP(S)地址；加密保存、不回显。编辑留空保留原地址。触发和恢复各尝试一次，失败不自动重试。",
-              helpKey: "resource-domain:alert.webhookHelp",
-            },
-            {
-              key: "clear_webhook",
-              label: "清除已有 Webhook",
-              labelKey: "resource-domain:alert.clearWebhook",
-              type: "switch",
-              when: (d) => !!d.has_webhook,
+              key: "notification_channel_id", label: "", labelKey: "notifications:notification-channels",
+              type: "select", options: permissions?.has("notifications.read") ? namedOptions(workspace,"notification-channels") : [], width: "full",
             },
             {
               key: "description",

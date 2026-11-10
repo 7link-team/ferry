@@ -715,11 +715,15 @@ impl HostChannel for SshChannel {
             .await
             .map_err(|error| sftp_failed(path, error))?;
         while let Some(chunk) = body.next().await {
-            file.write_all(&chunk?).await?;
+            file.write_all(&chunk?)
+                .await
+                .map_err(|error| sftp_io_failed(path, error))?;
         }
         // `close` 会等所有在途的写回执，少了它就无法区分「写完了」和
         // 「前面某一块其实失败了」。
-        file.close().await?;
+        file.close()
+            .await
+            .map_err(|error| sftp_io_failed(path, error))?;
         Ok(())
     }
 
@@ -878,9 +882,61 @@ fn sftp_failed(path: &str, error: SftpError) -> ApiError {
     }
 }
 
+fn sftp_io_failed(path: &str, error: std::io::Error) -> ApiError {
+    if let Some(error) = error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<SftpError>())
+    {
+        return sftp_failed(path, error.clone());
+    }
+    ApiError::localized(
+        StatusCode::BAD_GATEWAY,
+        crate::i18n::Message::new("ssh.fileOperation")
+            .with("path", path)
+            .with("error", error.to_string()),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sftp_write_errors_keep_permission_path_and_io_diagnostics() {
+        for (code, status, key) in [
+            (
+                SftpStatus::PermissionDenied,
+                StatusCode::FORBIDDEN,
+                "ssh.pathForbidden",
+            ),
+            (
+                SftpStatus::NoSuchFile,
+                StatusCode::NOT_FOUND,
+                "ssh.pathMissing",
+            ),
+        ] {
+            let error = SftpError::Status(russh_sftp::protocol::Status {
+                id: 1,
+                status_code: code,
+                error_message: "fixture".into(),
+                language_tag: "en".into(),
+            });
+            let mapped = sftp_io_failed("/fixture/blocked", std::io::Error::other(error));
+            assert_eq!(mapped.0, status);
+            assert_eq!(mapped.2.as_ref().unwrap().key, key);
+            assert!(
+                mapped
+                    .render(crate::i18n::Locale::EnUs)
+                    .contains("/fixture/blocked")
+            );
+        }
+        let mapped = sftp_io_failed(
+            "/fixture/full",
+            std::io::Error::other("disk quota exceeded"),
+        );
+        let text = mapped.render(crate::i18n::Locale::EnUs);
+        assert!(text.contains("/fixture/full") && text.contains("disk quota exceeded"));
+    }
 
     #[test]
     fn connection_errors_keep_raw_diagnostics_literal_for_every_reader() {

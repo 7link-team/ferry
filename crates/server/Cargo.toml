@@ -67,6 +67,8 @@ jsonschema = { version = "0.60.2", default-features = false }
 object_store = { version = "0.12", default-features = false, features = ["aws", "fs", "tls-webpki-roots"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system", "disk", "network"] }
 redis = { version = "0.32", default-features = false, features = ["tokio-rustls-comp", "tls-rustls-webpki-roots"] }
+totp-rs = { version = "5", features = ["otpauth"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_System_SystemInformation"] }

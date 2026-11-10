@@ -338,7 +338,7 @@ pub async fn create(
     let number = executions::next_workflow_number(&tx, scope.workspace_id).await?;
     let now = db::now();
     let context = s.vault.seal(
-        &json!({"version":1,"start_asset":asset.id}).to_string(),
+        &json!({"version":1,"start_asset":asset.id,"origin_agent_id":crate::platform_tools::current_agent()}).to_string(),
         &context_aad(workflow.workspace_id, execution),
     )?;
     let run = runs::Model {
@@ -880,6 +880,36 @@ async fn current_in(tx: &sea_orm::DatabaseTransaction, lease: &Lease) -> Result<
 }
 
 async fn dispatch(
+    s: &AppState,
+    backend: &ArtifactStore,
+    lease: &Lease,
+    stop: &tokio::sync::watch::Receiver<bool>,
+) -> Result<()> {
+    let run = current(s, lease.execution().id).await?;
+    let context: Value = serde_json::from_str(&s.vault.open_secret(
+        run.context.as_deref().ok_or_else(ApiError::missing)?,
+        &context_aad(run.workspace_id, run.id),
+    )?)
+    .map_err(|_| ApiError::missing())?;
+    if let Some(id) = context
+        .get("origin_agent_id")
+        .filter(|value| !value.is_null())
+    {
+        let agent_id: Id = serde_json::from_value(id.clone()).map_err(|_| ApiError::forbidden())?;
+        let scope = Scope::for_actor(s, run.workspace_id.into(), run.triggered_by.into()).await?;
+        crate::platform_tools::delegated_future(
+            s,
+            scope,
+            agent_id,
+            dispatch_inner(s, backend, lease, stop),
+        )
+        .await
+    } else {
+        dispatch_inner(s, backend, lease, stop).await
+    }
+}
+
+async fn dispatch_inner(
     s: &AppState,
     backend: &ArtifactStore,
     lease: &Lease,

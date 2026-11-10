@@ -20,6 +20,9 @@ mod update;
 use clap::Parser;
 
 fn main() -> anyhow::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("platform-mcp") {
+        return tokio::runtime::Runtime::new()?.block_on(agent::platform::stdio());
+    }
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(

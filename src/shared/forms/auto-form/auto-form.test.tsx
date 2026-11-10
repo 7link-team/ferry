@@ -3,6 +3,13 @@ import { createRoot,type Root } from "react-dom/client";
 import { afterEach,beforeEach,expect,it,vi } from "vitest";
 import { i18n } from "../../i18n/i18n";
 import { AutoField,AutoForm,FieldControl,selectDisplay } from "./auto-form";
+
+it("shows a red required marker for native constraints and removes it when optional", async () => {
+  for (const required of [true, false, true]) {
+    await act(async () => root.render(<AutoField label="Value"><input required={required} /></AutoField>));
+    expect(host.querySelector('[data-auto-label] .text-destructive')?.textContent?.trim() === "*").toBe(required);
+  }
+});
 import type { FormConfig } from "./types";
 
 let root: Root, host: HTMLDivElement;

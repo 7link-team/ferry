@@ -31,6 +31,20 @@ function read(): ThemeState {
 }
 const prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
 
+/** Canvas resolves modern CSS colors to the literal sRGB values required by renderers. */
+export function createThemeColorReader(element: Element) {
+  const style = getComputedStyle(element);
+  const canvas = document.createElement("canvas"); canvas.width = canvas.height = 1;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  return (name: string, fallback: string) => {
+    const value = style.getPropertyValue(name).trim() || fallback;
+    if (!context) return fallback;
+    context.clearRect(0, 0, 1, 1); context.fillStyle = fallback; context.fillStyle = value; context.fillRect(0, 0, 1, 1);
+    const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+    return `#${[r, g, b].map(channel => channel!.toString(16).padStart(2, "0")).join("")}`;
+  };
+}
+
 /** Apply before React mounts, including custom colors, to avoid a first-paint flash. */
 export function applyTheme(palette: Palette, mode: Mode) {
   const root = document.documentElement;

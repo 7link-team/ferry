@@ -8,7 +8,7 @@ import {Button} from "../shared/ui/button";
 /** Tests the saved configuration, then reloads its verification state/version. */
 export function PlatformMailTest({readOnly,onVerified,draft,locale,template}:{readOnly:boolean;draft:Record<string,unknown>;onVerified:(value:Record<string,unknown>)=>void;locale?:string;template?:{subject:string;body:string;html:string}}) {
   const [email,setEmail]=useState("");const [busy,setBusy]=useState(false);const [message,setMessage]=useState("");const [success,setSuccess]=useState(false);
-  return <AutoField label={t("resource-domain:platform.mailTestRecipient")} help={t(template?"resource-domain:platform.mailTemplateTestHelp":"resource-domain:platform.mailTestHelp")}><div className="space-y-2">
+  return <AutoField label={t("resource-domain:platform.mailTestRecipient")} required={!readOnly} help={t(template?"resource-domain:platform.mailTemplateTestHelp":"resource-domain:platform.mailTestHelp")}><div className="space-y-2">
     <div className="flex flex-wrap gap-2"><Input aria-label={t("resource-domain:platform.mailTestRecipient")} className="min-w-0 flex-1" type="email" value={email} disabled={readOnly||busy} onChange={e=>setEmail(e.target.value)}/>
     <Button type="button" variant="outline" disabled={readOnly||busy||!email.trim()} onClick={async()=>{
       setBusy(true);setMessage("");setSuccess(false);try {

@@ -703,6 +703,14 @@ pub async fn get_settings(State(s): State<AppState>, _: Admin) -> Result<Json<Va
     view["runner_auto_update"] = json!(row.runner_auto_update != 0);
     view["footer_html"] = json!(row.footer_html.as_deref().unwrap_or_default());
     view.as_object_mut().unwrap().extend(
+        json!(super::site::Configuration::read(
+            row.site_config.as_deref()
+        )?)
+        .as_object()
+        .unwrap()
+        .clone(),
+    );
+    view.as_object_mut().unwrap().extend(
         crate::platform_monitor::retention::Limits::read(row.monitor_config.as_deref())?
             .view()
             .as_object()
@@ -825,6 +833,7 @@ pub async fn update_settings(
         .filter(|content| !content.trim().is_empty());
     let page_scripts =
         super::platform_scripts::Configuration::update(row.page_scripts.as_deref(), &body.oauth)?;
+    let site_config = super::site::Configuration::update(row.site_config.as_deref(), &body.oauth)?;
     let mail_config =
         super::mail::Configuration::update(&s, row.mail_config.as_deref(), &body.oauth)?;
     let login_security =
@@ -868,6 +877,7 @@ pub async fn update_settings(
             Expr::value(access_config),
         )
         .col_expr(platform_state::Column::FooterHtml, Expr::value(footer_html))
+        .col_expr(platform_state::Column::SiteConfig, Expr::value(site_config))
         .col_expr(
             platform_state::Column::LoginSecurity,
             Expr::value(login_security),
@@ -911,7 +921,7 @@ pub async fn update_settings(
         "update",
         "platform-settings",
         Id::from(1),
-        json!({"registration_enabled": body.registration_enabled, "runner_auto_update":runner_auto_update != 0, "repository_oauth_updated": oauth_changed, "footer_updated":body.footer_html.is_some(), "scripts_updated":body.oauth.keys().any(|key|key.starts_with("analytics_"))}),
+        json!({"registration_enabled": body.registration_enabled, "runner_auto_update":runner_auto_update != 0, "repository_oauth_updated": oauth_changed, "footer_updated":body.footer_html.is_some(), "scripts_updated":body.oauth.keys().any(|key|key.starts_with("analytics_")), "site_updated":body.oauth.keys().any(|key|key.starts_with("site_")), "otp_settings_updated":body.oauth.contains_key("otp_enabled")}),
     )
     .await?;
     tx.commit().await?;
@@ -927,8 +937,9 @@ pub async fn footer(State(s): State<AppState>) -> Result<impl axum::response::In
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
-    Ok((
-        [(header::CACHE_CONTROL, "no-store")],
-        Json(json!({"content":row.footer_html.unwrap_or_default()})),
-    ))
+    let mut view = json!(super::site::Configuration::read(
+        row.site_config.as_deref()
+    )?);
+    view["content"] = json!(row.footer_html.unwrap_or_default());
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(view)))
 }

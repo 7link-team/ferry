@@ -4,6 +4,13 @@ import { artifactNames, outputSources } from "./action-references";
 import { addActionCheckouts,addActionStep,actionFragment,editActionFragment,addActionJob,connectActionJobs,DEFAULT_ACTIONS,duplicateActionJob,duplicateActionStep,editActionJob,editActionStep,editActionWorkflow,ensureActionCheckout,formatActionYaml,insertActionJob,parseActions,removeActionJob,setActionJobApproval } from "./actions-workflow";
 beforeEach(() => { localStorage.setItem("ui.locale", "zh-CN"); void i18n.changeLanguage("zh-CN"); });
 
+it("adds a notification action and keeps message expressions through YAML round trips", () => {
+ const source = addActionStep(DEFAULT_ACTIONS, "build", "notification");
+ expect(parseActions(source).jobs[0]!.steps.at(-1)?.uses).toBe("ferry/notify@v1");
+ const updated = editActionStep(source, "build", 1, { with: { "channel-id": "12", body: '${{ steps.build.outputs.report }}', "variable-recipient": "Example" } });
+ expect(parseActions(formatActionYaml(updated)).jobs[0]!.steps[1]?.with).toEqual({ "channel-id": "12", body: '${{ steps.build.outputs.report }}', "variable-recipient": "Example" });
+});
+
 it("replaces the selected checkout in place with a batch before build, preserving its ID and controls", () => {
  const source = '# retain\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - id: source\n        uses: actions/checkout@v4\n        if: success()\n        env: &checkout_env\n          CI_TEST: yes\n        with:\n          fetch-depth: 5\n          repository: old/app\n      - run: make test\n        env: *checkout_env\n';
  const a={connection_id:'7',url:'https://git.example/team/app.git',name:'app',default_branch:'main'};

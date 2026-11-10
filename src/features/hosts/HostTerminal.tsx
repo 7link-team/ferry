@@ -15,7 +15,7 @@ import "@xterm/xterm/css/xterm.css";
 import { useEffect,useRef,useState } from "react";
 import { api,ApiError } from "../../shared/api/api";
 import { currentLocale } from "../../shared/i18n/locale";
-import { useTheme } from "../../shared/theme/theme";
+import { createThemeColorReader, useTheme } from "../../shared/theme/theme";
 import { TerminalMetrics } from "./HostTelemetry";
 
 export function terminalStartCommand(os: string, directory?: string, agentVersion?: string) {
@@ -42,16 +42,7 @@ type Status = "connecting" | "open" | "closed" | "error";
 
 /** xterm needs literal colors, so the CSS tokens are read off the element. */
 function paletteFrom(element: HTMLElement) {
-  const style = getComputedStyle(element);
-  const canvas = document.createElement("canvas"); canvas.width = canvas.height = 1;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  const read = (name: string, fallback: string) => {
-    const value = style.getPropertyValue(name).trim() || fallback;
-    if (!context) return fallback;
-    context.clearRect(0, 0, 1, 1); context.fillStyle = fallback; context.fillStyle = value; context.fillRect(0, 0, 1, 1);
-    const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
-    return `#${[r, g, b].map(channel => channel!.toString(16).padStart(2, "0")).join("")}`;
-  };
+  const read = createThemeColorReader(element);
   return {
     background: read("--color-card", "#161a21"),
     foreground: read("--color-foreground", "#e6e9ee"),

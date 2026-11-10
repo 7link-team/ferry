@@ -382,6 +382,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) == 2 && os.Args[1] == "notify" {
+		if err := runNotificationHelper(os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "Notification error:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	path := flag.String("request", "", "private execution request JSON file")
 	version := flag.Bool("version", false, "print pinned engine version")
 	flag.Parse()

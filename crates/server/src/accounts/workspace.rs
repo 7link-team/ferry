@@ -29,6 +29,31 @@ use std::collections::HashSet;
 /// `{resource}.{action}` where the resource is the REST resource name.
 pub const PERMISSIONS: &[(&str, &str, &str)] = &[
     (
+        "notifications.read",
+        "permission.group.notifications",
+        "permission.action.read",
+    ),
+    (
+        "notifications.create",
+        "permission.group.notifications",
+        "permission.action.create",
+    ),
+    (
+        "notifications.update",
+        "permission.group.notifications",
+        "permission.action.update",
+    ),
+    (
+        "notifications.delete",
+        "permission.group.notifications",
+        "permission.action.delete",
+    ),
+    (
+        "notifications.send",
+        "permission.group.notifications",
+        "permission.action.send",
+    ),
+    (
         "ai-models.read",
         "permission.group.ai-models",
         "permission.action.read",
@@ -855,6 +880,7 @@ pub async fn prepare_permissions(s: &AppState) -> Result<()> {
             .into_iter()
             .filter(|p| {
                 p.starts_with("marketplace-sources.")
+                    || p.starts_with("notifications.")
                     || p.starts_with("ai-agents.")
                     || p.starts_with("holes.")
                     || p.starts_with("ai-models.")
@@ -937,6 +963,22 @@ impl FromRequestParts<AppState> for Scope {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, s: &AppState) -> Result<Self> {
+        if let Some(delegated) = parts
+            .extensions
+            .get::<crate::platform_tools::DelegatedScope>()
+            .cloned()
+        {
+            let Path(params) =
+                Path::<std::collections::HashMap<String, String>>::from_request_parts(parts, s)
+                    .await
+                    .map_err(|_| ApiError::missing())?;
+            if params.get("workspace").and_then(|v| v.parse::<Id>().ok())
+                != Some(delegated.0.workspace_id)
+            {
+                return Err(ApiError::missing());
+            }
+            return Ok(delegated.0);
+        }
         let account = Account::from_request_parts(parts, s).await?;
         let Path(params) =
             Path::<std::collections::HashMap<String, String>>::from_request_parts(parts, s)
@@ -981,6 +1023,14 @@ impl Scope {
         .await
     }
     async fn for_user(
+        db: &impl sea_orm::ConnectionTrait,
+        workspace: Id,
+        user: crate::accounts::auth::User,
+    ) -> Result<Self> {
+        crate::platform_tools::restrict(db, Self::resolve_user(db, workspace, user).await?).await
+    }
+
+    async fn resolve_user(
         db: &impl sea_orm::ConnectionTrait,
         workspace: Id,
         user: crate::accounts::auth::User,
@@ -1287,9 +1337,14 @@ mod tests {
         for (index, (key, label)) in BUILTIN.iter().enumerate() {
             let mut permissions = builtin_permissions(key);
             permissions.retain(|permission| {
-                !["code-insights.", "insight-reports.", "code-reviews."]
-                    .iter()
-                    .any(|prefix| permission.starts_with(prefix))
+                ![
+                    "code-insights.",
+                    "insight-reports.",
+                    "code-reviews.",
+                    "notifications.",
+                ]
+                .iter()
+                .any(|prefix| permission.starts_with(prefix))
             });
             permissions.push("legacy.existing.read".into());
             let role = workspace_roles::ActiveModel {
@@ -1332,6 +1387,11 @@ mod tests {
                 .unwrap();
             let permissions: Vec<String> = serde_json::from_str(&row.permissions).unwrap();
             let mut expected = old_permissions.clone();
+            expected.extend(
+                builtin_permissions(key)
+                    .into_iter()
+                    .filter(|p| p.starts_with("notifications.")),
+            );
             match *key {
                 "owner" | "admin" | "developer" => expected.extend(
                     ["read", "create", "update", "delete", "sync"]

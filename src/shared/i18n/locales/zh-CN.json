@@ -1,5 +1,5 @@
 {
-  "app": { "title": "运维平台", "modules": "模块", "platform": "平台管理", "account": "个人资料", "signOut": "退出登录", "workspaces": "创建/加入工作空间" },
+  "app": { "title": "AI 工作台", "modules": "模块", "platform": "平台管理", "account": "个人资料", "signOut": "退出登录", "workspaces": "创建/加入工作空间" },
   "language": { "label": "语言", "changed": "语言已切换为{{language}}" },
   "common": { "loading": "正在加载…", "back": "返回", "close": "关闭", "save": "保存", "cancel": "取消", "edit": "编辑", "delete": "删除", "create": "新建", "search": "搜索", "refresh": "刷新", "retry": "重试" },
   "errors": { "network": "无法连接服务，请检查网络后重试。", "operation": "操作失败，请重试。" }

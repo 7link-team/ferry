@@ -1,4 +1,5 @@
 {
+  "platform.siteInvalid": "站点配置无效：名称最多 120 个字符，每个前缀最多 32 个字符，均不能包含控制字符。",
   "permission.group.code-reviews": "代码走查",
   "permission.action.generate": "生成",
   "auth.password_save": "无法保存密码，请重试。",
@@ -101,5 +102,22 @@
   "auth.captchaRequired": "请完成新的安全验证后再登录。",
   "auth.loginRateLimit": "登录请求过于频繁，请一分钟后再试。",
   "auth.loginGuardInvalid": "请检查验证码方式、Site Key、Secret Key 和站点域名。",
-  "auth.captchaUnavailable": "验证服务暂不可用，请稍后重试。"
+  "auth.captchaUnavailable": "验证服务暂不可用，请稍后重试。",
+  "notification.invalid": "通知配置或消息格式无效。",
+  "notification.conflict": "配置已变更，或此请求标识已用于其他消息。",
+  "notification.disabled": "此通知渠道已禁用。",
+  "notification.inUse": "此渠道正在被通知订阅引用，请先解除订阅。",
+  "notification.sendFailed": "通知发送失败。",
+  "notification.sent": "通知已发送。",
+  "notification.unknown": "无法确认投递结果，请核对接收方后再发送新消息。",
+  "permission.group.notifications": "通知",
+  "permission.action.send": "发送",
+  "notification.nativeOnly": "构建通知步骤在 Native 任务中执行；容器构建后可添加独立的 Native 通知任务。",
+  "notification.smsAccepted": "短信服务商已受理，不代表手机已收到。",
+  "platform.storagePrefixInvalid": "S3 前缀须为不超过512字节的相对路径，不允许空路径段、. 或 ..。",
+  "auth.otpInvalid": "验证码无效或已使用，请输入新的动态码或尚未使用的恢复码。",
+  "auth.otpExpired": "验证已过期，请重新开始。",
+  "auth.otpAttempts": "错误次数过多，请重新登录以开始新的验证。",
+  "auth.otpUnavailable": "平台未开放新的验证器绑定。",
+  "auth.otpAlreadyEnabled": "账号已绑定验证器，请先解除旧绑定。"
 }

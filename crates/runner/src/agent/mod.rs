@@ -1,5 +1,6 @@
 //! Structured native CLI execution. The caller owns authorization, persistence,
 //! directory exclusion and host/user/native-session binding; no shell is used.
+pub(crate) mod platform;
 mod probe;
 mod protocol;
 pub(super) use probe::probe;
@@ -126,13 +127,15 @@ fn command(request: &Request) -> Command {
             // tools; on-request has no pre-approved tools or session-wide grant.
             c.args([
                 "--tools",
-                if request.permission == Permission::ReadOnly {
+                if request.permission == Permission::ReadOnly && !request.platform_tools {
                     ""
+                } else if request.permission == Permission::ReadOnly {
+                    "mcp__ferry__ferry_discover,mcp__ferry__ferry_request"
                 } else {
-                    "Read,Glob,Grep,Edit,Write,Bash"
+                    "Read,Glob,Grep,Edit,Write,Bash,mcp__ferry__ferry_discover,mcp__ferry__ferry_request"
                 },
                 "--allowedTools",
-                "",
+                if request.platform_tools { "mcp__ferry__ferry_discover,mcp__ferry__ferry_request" } else { "" },
             ]);
             if let Some(model) = &request.model {
                 c.arg("--model").arg(model);
@@ -330,6 +333,7 @@ async fn drive(
     stdout: tokio::process::ChildStdout,
     events: &mpsc::Sender<Event>,
     mut inputs: mpsc::Receiver<Input>,
+    bridge: Option<&platform::Bridge>,
 ) -> Result<Outcome> {
     write(stdin, driver.initial()).await?;
     let mut reader = BufReader::new(stdout);
@@ -344,6 +348,10 @@ async fn drive(
                 driver.receive(value)?
             }
             input=inputs.recv()=>match input {
+                Some(Input::PlatformResult{request_id,result})=>{
+                    if let Some(bridge)=bridge { bridge.resolve(&request_id,result); }
+                    protocol::Step::default()
+                },
                 Some(Input::Cancel)|None=>return Ok(Outcome::Cancelled),
                 Some(input)=>driver.input(input)?,
             },
@@ -378,6 +386,69 @@ async fn run_command(
     if *cancel.borrow() || events.is_closed() {
         return Ok(Outcome::Cancelled);
     }
+    let bridge = if request.platform_tools {
+        Some(platform::Bridge::start(events.clone()).await?)
+    } else {
+        None
+    };
+    let mut mcp = None;
+    let mut _extension = None;
+    if let Some(bridge) = &bridge {
+        command
+            .env("FERRY_PLATFORM_BRIDGE_URL", &bridge.url)
+            .env("FERRY_PLATFORM_BRIDGE_TOKEN", &bridge.token);
+        let executable = std::env::current_exe()?
+            .to_string_lossy()
+            .replace('\\', "/");
+        mcp = Some(
+            serde_json::json!({"name":"ferry","command":executable,"args":["platform-mcp"],"env":[
+            {"name":"FERRY_PLATFORM_BRIDGE_URL","value":bridge.url}, {"name":"FERRY_PLATFORM_BRIDGE_TOKEN","value":bridge.token}]}),
+        );
+        match request.runtime {
+            Runtime::Codex => {
+                for (key, value) in [
+                    ("command", serde_json::json!(executable)),
+                    ("args", serde_json::json!(["platform-mcp"])),
+                    (
+                        "env_vars",
+                        serde_json::json!([
+                            "FERRY_PLATFORM_BRIDGE_URL",
+                            "FERRY_PLATFORM_BRIDGE_TOKEN"
+                        ]),
+                    ),
+                    ("required", serde_json::json!(true)),
+                    // Only the Ferry transport is pre-approved. The server performs
+                    // live RBAC and its own one-time confirmation for every write.
+                    (
+                        "tools.ferry_discover.approval_mode",
+                        serde_json::json!("approve"),
+                    ),
+                    (
+                        "tools.ferry_request.approval_mode",
+                        serde_json::json!("approve"),
+                    ),
+                    ("tool_timeout_sec", serde_json::json!(3600)),
+                ] {
+                    command
+                        .arg("-c")
+                        .arg(format!("mcp_servers.ferry.{key}={value}"));
+                }
+            }
+            Runtime::Claude => {
+                command.arg("--mcp-config").arg(serde_json::json!({"mcpServers":{"ferry":{"command":executable,"args":["platform-mcp"]}}}).to_string());
+            }
+            Runtime::Pi => {
+                let file = tempfile::Builder::new()
+                    .prefix("platform-tools-")
+                    .suffix(".mjs")
+                    .tempfile()?;
+                tokio::fs::write(file.path(), platform::PI_EXTENSION).await?;
+                command.arg("--extension").arg(file.path());
+                _extension = Some(file);
+            }
+            _ => {}
+        }
+    }
     command
         .current_dir(&request.cwd)
         .stdin(Stdio::piped())
@@ -404,8 +475,16 @@ async fn run_command(
         tokio::spawn(async move { tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await });
     let scope = uuid::Uuid::new_v4().to_string();
     let mut driver = protocol::Protocol::new(request.clone(), scope);
+    driver.mcp_server = mcp;
     let result = {
-        let execution = drive(&mut driver, &mut stdin, stdout, &events, inputs);
+        let execution = drive(
+            &mut driver,
+            &mut stdin,
+            stdout,
+            &events,
+            inputs,
+            bridge.as_ref(),
+        );
         tokio::pin!(execution);
         tokio::select! {
             result=&mut execution=>result,

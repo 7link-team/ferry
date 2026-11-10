@@ -29,6 +29,9 @@ impl Runtime {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Probe {
+    /// This Runner can transport per-turn platform tool calls and results.
+    #[serde(default)]
+    pub platform_tools: bool,
     pub runtime: Runtime,
     pub execution_user: String,
     #[serde(default)]
@@ -76,11 +79,17 @@ pub struct Request {
     pub native_session_id: Option<String>,
     pub permission: Permission,
     pub timeout_seconds: u64,
+    #[serde(default)]
+    pub platform_tools: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Input {
+    PlatformResult {
+        request_id: String,
+        result: Value,
+    },
     Cancel,
     /// The token is scoped to this invocation; no session-wide grants.
     Decision {
@@ -107,6 +116,15 @@ pub struct Usage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    PlatformCall {
+        request_id: String,
+        name: String,
+        arguments: Value,
+    },
+    PlatformResult {
+        request_id: String,
+        result: Value,
+    },
     Session {
         native_session_id: String,
     },

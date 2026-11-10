@@ -1,4 +1,5 @@
 {
+  "platform.siteInvalid": "Tetapan laman tidak sah: nama maksimum 120 aksara dan setiap awalan maksimum 32 aksara; aksara kawalan tidak dibenarkan.",
   "permission.group.code-reviews": "Semakan kod",
   "permission.action.generate": "Jana",
   "auth.password_save": "Kata laluan tidak dapat disimpan. Sila cuba lagi.",
@@ -101,5 +102,22 @@
   "auth.captchaRequired": "Lengkapkan pengesahan keselamatan baharu sebelum log masuk.",
   "auth.loginRateLimit": "Terlalu banyak percubaan log masuk. Cuba lagi selepas seminit.",
   "auth.loginGuardInvalid": "Semak kaedah pengesahan, Site Key, Secret Key dan nama hos laman.",
-  "auth.captchaUnavailable": "Perkhidmatan pengesahan tidak tersedia. Cuba lagi kemudian."
+  "auth.captchaUnavailable": "Perkhidmatan pengesahan tidak tersedia. Cuba lagi kemudian.",
+  "notification.invalid": "Konfigurasi pemberitahuan atau format mesej tidak sah.",
+  "notification.conflict": "Konfigurasi telah berubah atau pengecam permintaan ini telah digunakan untuk mesej lain.",
+  "notification.disabled": "Saluran pemberitahuan ini dinyahdayakan.",
+  "notification.inUse": "Saluran ini dirujuk oleh langganan pemberitahuan. Alih keluar langganan dahulu.",
+  "notification.sendFailed": "Pemberitahuan tidak dapat dihantar.",
+  "notification.sent": "Pemberitahuan dihantar.",
+  "notification.unknown": "Penghantaran tidak dapat disahkan. Semak penerima sebelum menghantar mesej baharu.",
+  "permission.group.notifications": "Pemberitahuan",
+  "permission.action.send": "Hantar",
+  "notification.nativeOnly": "Langkah pemberitahuan binaan dijalankan dalam tugas Native. Tambah tugas Native berasingan selepas binaan kontena.",
+  "notification.smsAccepted": "Diterima oleh penyedia SMS; penghantaran ke telefon belum disahkan.",
+  "platform.storagePrefixInvalid": "Awalan S3 mestilah laluan relatif sehingga 512 bait tanpa segmen kosong, titik atau induk.",
+  "auth.otpInvalid": "Kod tidak sah atau sudah digunakan. Masukkan kod pengesah baharu atau kod pemulihan yang belum digunakan.",
+  "auth.otpExpired": "Pengesahan tamat tempoh. Mulakan semula.",
+  "auth.otpAttempts": "Terlalu banyak kod salah. Log masuk semula untuk memulakan pengesahan baharu.",
+  "auth.otpUnavailable": "Pendaftaran pengesah baharu dinyahaktifkan.",
+  "auth.otpAlreadyEnabled": "Aplikasi pengesah sudah didaftarkan. Nyahdaftar sebelum mendaftar yang lain."
 }

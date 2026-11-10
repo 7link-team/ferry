@@ -1,0 +1,3760 @@
+[
+  {
+    "path": "/activity",
+    "method": "GET",
+    "handler": "hosts::list_activity",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list_activity(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "activity.read"
+    ],
+    "permission": "activity.read"
+  },
+  {
+    "path": "/ai-agents",
+    "method": "GET",
+    "handler": "list",
+    "source": "crates/server/src/agents.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(mut raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "ai-agents.read",
+      "ai-agents.use"
+    ],
+    "permission": "ai-agents.read"
+  },
+  {
+    "path": "/ai-agents",
+    "method": "POST",
+    "handler": "create",
+    "source": "crates/server/src/agents.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(mut body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    #[serde(flatten, default, skip_serializing)]\n    metadata: HashMap<String, Value>,\n    name: String,\n    #[serde(default)]\n    role: String,\n    #[serde(default)]\n    platform_role_id: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    model_profile_id: String,\n    #[serde(default)]\n    model: String,\n    #[serde(default)]\n    host_id: Id,\n    owner_id: Id,\n    #[serde(default)]\n    cwd: String,\n    #[serde(default)]\n    system_prompt: String,\n    #[serde(default = \"default_permission\")]\n    permission: String,\n    visibility: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "ai-agents.create",
+      "ai-models.read",
+      "hosts.update",
+      "roles.update"
+    ],
+    "permission": "ai-agents.create"
+  },
+  {
+    "path": "/ai-agents/{id}",
+    "method": "GET",
+    "handler": "detail",
+    "source": "crates/server/src/agents.rs",
+    "signature": "async fn detail(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "ai-agents.read"
+    ]
+  },
+  {
+    "path": "/ai-agents/{id}",
+    "method": "PATCH",
+    "handler": "update",
+    "source": "crates/server/src/agents.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(mut body): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    #[serde(flatten, default, skip_serializing)]\n    metadata: HashMap<String, Value>,\n    name: String,\n    #[serde(default)]\n    role: String,\n    #[serde(default)]\n    platform_role_id: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    model_profile_id: String,\n    #[serde(default)]\n    model: String,\n    #[serde(default)]\n    host_id: Id,\n    owner_id: Id,\n    #[serde(default)]\n    cwd: String,\n    #[serde(default)]\n    system_prompt: String,\n    #[serde(default = \"default_permission\")]\n    permission: String,\n    visibility: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "ai-agents.read",
+      "ai-agents.update",
+      "ai-models.read",
+      "hosts.update",
+      "roles.update"
+    ],
+    "permission": "ai-agents.update"
+  },
+  {
+    "path": "/ai-agents/{id}/probes",
+    "method": "POST",
+    "handler": "probe",
+    "source": "crates/server/src/agents.rs",
+    "signature": "async fn probe(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "ai-agents.probe",
+      "ai-agents.read"
+    ],
+    "permission": "ai-agents.probe"
+  },
+  {
+    "path": "/ai-agents/{id}/revisions",
+    "method": "GET",
+    "handler": "revisions",
+    "source": "crates/server/src/agents.rs",
+    "signature": "async fn revisions(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "ai-agents.read",
+      "ai-agents.use"
+    ]
+  },
+  {
+    "path": "/ai-calls",
+    "method": "GET",
+    "handler": "list_calls",
+    "source": "crates/server/src/workflows/ai.rs",
+    "signature": "async fn list_calls(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "credentials.update_budget"
+    ]
+  },
+  {
+    "path": "/ai-calls/{id}/reconcile",
+    "method": "POST",
+    "handler": "reconcile",
+    "source": "crates/server/src/workflows/ai.rs",
+    "signature": "async fn reconcile(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Reconciliation>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Reconciliation {\n    actual_micros: i64,\n    reason: String,\n}"
+    ],
+    "permission_checks": [
+      "credentials.update_budget"
+    ],
+    "permission": "credentials.update_budget"
+  },
+  {
+    "path": "/ai-models",
+    "method": "GET",
+    "handler": "list",
+    "source": "crates/server/src/models.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "ai-models.read"
+    ],
+    "permission": "ai-models.read"
+  },
+  {
+    "path": "/ai-models",
+    "method": "POST",
+    "handler": "create",
+    "source": "crates/server/src/models.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n}"
+    ],
+    "permission_checks": [
+      "ai-models.create",
+      "ai-models.update"
+    ]
+  },
+  {
+    "path": "/ai-models/model-discoveries",
+    "method": "POST",
+    "handler": "discover",
+    "source": "crates/server/src/models.rs",
+    "signature": "async fn discover(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Discovery>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Discovery {\n    #[serde(default)]\n    provider_id: Id,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    host_id: Id,\n    #[serde(default)]\n    connection: Option<crate::workflows::ai::Body>,\n}",
+      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n}"
+    ],
+    "permission_checks": [
+      "ai-agents.probe",
+      "ai-models.create",
+      "ai-models.update",
+      "credentials.read",
+      "credentials.use",
+      "hosts.read"
+    ]
+  },
+  {
+    "path": "/ai-models/{id}",
+    "method": "GET",
+    "handler": "detail",
+    "source": "crates/server/src/models.rs",
+    "signature": "async fn detail(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "ai-models.read",
+      "credentials.read"
+    ]
+  },
+  {
+    "path": "/ai-models/{id}",
+    "method": "PATCH",
+    "handler": "update",
+    "source": "crates/server/src/models.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n}"
+    ],
+    "permission_checks": [
+      "ai-models.create",
+      "ai-models.update"
+    ]
+  },
+  {
+    "path": "/ai-providers",
+    "method": "GET",
+    "handler": "list",
+    "source": "crates/server/src/workflows/ai.rs",
+    "signature": "async fn list(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "credentials.read"
+    ],
+    "permission": "credentials.read"
+  },
+  {
+    "path": "/ai-providers",
+    "method": "POST",
+    "handler": "create",
+    "source": "crates/server/src/workflows/ai.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    pub(crate) name: String,\n    #[serde(default)]\n    pub(crate) credential_id: Id,\n    /// Input only: never serialize into revisions, audit or responses.\n    #[serde(default, skip_serializing)]\n    pub(crate) api_key: Option<String>,\n    pub(crate) base_url: String,\n    pub(crate) protocol: String,\n    currency: String,\n    timezone: String,\n    monthly_limit_micros: i64,\n    qps: i64,\n    concurrency: i64,\n    prices: Vec<Price>,\n    #[serde(default)]\n    version: i64,\n}",
+      "struct Price {\n    model: String,\n    operation: String,\n    input_micros: i64,\n    output_micros: i64,\n    unit_size: i64,\n}"
+    ],
+    "permission_checks": [
+      "credentials.create",
+      "credentials.update",
+      "credentials.update_budget",
+      "credentials.update_price"
+    ]
+  },
+  {
+    "path": "/ai-providers/{id}",
+    "method": "PUT",
+    "handler": "update",
+    "source": "crates/server/src/workflows/ai.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    pub(crate) name: String,\n    #[serde(default)]\n    pub(crate) credential_id: Id,\n    /// Input only: never serialize into revisions, audit or responses.\n    #[serde(default, skip_serializing)]\n    pub(crate) api_key: Option<String>,\n    pub(crate) base_url: String,\n    pub(crate) protocol: String,\n    currency: String,\n    timezone: String,\n    monthly_limit_micros: i64,\n    qps: i64,\n    concurrency: i64,\n    prices: Vec<Price>,\n    #[serde(default)]\n    version: i64,\n}",
+      "struct Price {\n    model: String,\n    operation: String,\n    input_micros: i64,\n    output_micros: i64,\n    unit_size: i64,\n}"
+    ],
+    "permission_checks": [
+      "credentials.create",
+      "credentials.update",
+      "credentials.update_budget",
+      "credentials.update_price"
+    ]
+  },
+  {
+    "path": "/alert-events",
+    "method": "GET",
+    "handler": "notifications::alerts::history",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn history(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "alerts.read"
+    ],
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/alert-events/{id}",
+    "method": "GET",
+    "handler": "notifications::alerts::detail",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn detail(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "alerts.read"
+    ],
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/alert-rules",
+    "method": "GET",
+    "handler": "notifications::alerts::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "alerts.read"
+    ],
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/alert-rules",
+    "method": "POST",
+    "handler": "notifications::alerts::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(b): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    target_kind: String,\n    target_ref: String,\n    metric: String,\n    #[serde(default)]\n    threshold: i64,\n    #[serde(default)]\n    enabled: bool,\n    #[serde(default)]\n    webhook: Option<String>,\n    #[serde(default)]\n    clear_webhook: bool,\n    #[serde(default)]\n    notification_channel_id: Option<String>,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "alerts.create"
+    ]
+  },
+  {
+    "path": "/alert-rules/{id}",
+    "method": "DELETE",
+    "handler": "notifications::alerts::delete",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "alerts.delete"
+    ],
+    "permission": "alerts.delete"
+  },
+  {
+    "path": "/alert-rules/{id}",
+    "method": "GET",
+    "handler": "notifications::alerts::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "alerts.read"
+    ],
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/alert-rules/{id}",
+    "method": "PATCH",
+    "handler": "notifications::alerts::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(b): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    target_kind: String,\n    target_ref: String,\n    metric: String,\n    #[serde(default)]\n    threshold: i64,\n    #[serde(default)]\n    enabled: bool,\n    #[serde(default)]\n    webhook: Option<String>,\n    #[serde(default)]\n    clear_webhook: bool,\n    #[serde(default)]\n    notification_channel_id: Option<String>,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "alerts.update"
+    ],
+    "permission": "alerts.update"
+  },
+  {
+    "path": "/app-templates",
+    "method": "GET",
+    "handler": "templates::apps::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(State(s):State<AppState>,scope:Scope,Query(raw):Query<HashMap<String,String>>) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "app-templates.read"
+    ],
+    "permission": "app-templates.read"
+  },
+  {
+    "path": "/app-templates",
+    "method": "POST",
+    "handler": "templates::apps::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(State(s):State<AppState>,scope:Scope,Json(body):Json<Body>) -> Result<(StatusCode,Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    content: String,\n    parameters: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "app-templates.create"
+    ]
+  },
+  {
+    "path": "/app-templates/{id}",
+    "method": "DELETE",
+    "handler": "templates::apps::delete",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "app-templates.delete"
+    ],
+    "permission": "app-templates.delete"
+  },
+  {
+    "path": "/app-templates/{id}",
+    "method": "GET",
+    "handler": "templates::apps::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "app-templates.read"
+    ],
+    "permission": "app-templates.read"
+  },
+  {
+    "path": "/app-templates/{id}",
+    "method": "PATCH",
+    "handler": "templates::apps::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>,Json(body):Json<Body>) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    content: String,\n    parameters: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "app-templates.update"
+    ],
+    "permission": "app-templates.update"
+  },
+  {
+    "path": "/app-templates/{id}/renderings",
+    "method": "POST",
+    "handler": "templates::apps::render",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn render(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>,Json(body):Json<RenderBody>) -> Result<Json<Value>>",
+    "definitions": [
+      "struct RenderBody {\n    version: i64,\n    #[serde(default)]\n    values: BTreeMap<String, Value>,\n}"
+    ],
+    "permission_checks": [
+      "app-templates.read"
+    ],
+    "permission": "app-templates.read"
+  },
+  {
+    "path": "/code-connection-analyses/{id}",
+    "method": "GET",
+    "handler": "repositories::analysis::flat_get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn flat_get(\n    state: State<AppState>,\n    scope: Scope,\n    path: Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.read"
+    ]
+  },
+  {
+    "path": "/code-connection-monitors/{id}",
+    "method": "GET",
+    "handler": "repositories::monitor::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.read",
+      "repositories.update"
+    ],
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connection-monitors/{id}",
+    "method": "PATCH",
+    "handler": "repositories::monitor::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    #[serde(default)]\n    mode: Mode,\n    #[serde(default = \"default_poll_minutes\")]\n    poll_interval_minutes: u32,\n    #[serde(default)]\n    runner_id: String,\n    version: i64,\n    enabled: bool,\n    all_repositories: bool,\n    repositories: String,\n    events: Vec<String>,\n    #[serde(default)]\n    secret: String,\n    #[serde(default)]\n    webhook: String,\n    #[serde(default)]\n    clear_webhook: bool,\n    #[serde(default)]\n    notification_language: Option<String>,\n    #[serde(default)]\n    notification_channels: Option<Vec<NotificationChannel>>,\n    #[serde(default)]\n    notification_channel_ids: Option<Vec<Id>>,\n}",
+      "enum Mode {\n    #[default]\n    Push,\n    Poll,\n}",
+      "struct NotificationChannel {\n    name: String,\n    #[serde(default)]\n    webhook: String,\n    language: String,\n    #[serde(default = \"channel_enabled\")]\n    enabled: bool,\n    #[serde(default, flatten)]\n    options: crate::notifications::channel::Options,\n}"
+    ],
+    "permission_checks": [
+      "credentials.read",
+      "hosts.terminal",
+      "repositories.update"
+    ],
+    "permission": "repositories.update"
+  },
+  {
+    "path": "/code-connection-monitors/{id}/notification-previews",
+    "method": "POST",
+    "handler": "repositories::monitor::notification_preview",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn notification_preview(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_workspace, id)): Path<(Id, Id)>,\n    Json(body): Json<PreviewRequest>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct PreviewRequest {\n    provider: String,\n    language: String,\n}"
+    ],
+    "permission_checks": [
+      "repositories.read"
+    ],
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connection-monitors/{id}/notification-tests",
+    "method": "POST",
+    "handler": "repositories::monitor::notification_test",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn notification_test(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_workspace, id)): Path<(Id, Id)>,\n    Json(body): Json<NotificationChannel>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct NotificationChannel {\n    name: String,\n    #[serde(default)]\n    webhook: String,\n    language: String,\n    #[serde(default = \"channel_enabled\")]\n    enabled: bool,\n    #[serde(default, flatten)]\n    options: crate::notifications::channel::Options,\n}"
+    ],
+    "permission_checks": [
+      "repositories.update"
+    ],
+    "permission": "repositories.update"
+  },
+  {
+    "path": "/code-connections",
+    "method": "GET",
+    "handler": "repositories::auth::list_connections",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list_connections(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<std::collections::HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.read"
+    ],
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connections",
+    "method": "POST",
+    "handler": "repositories::auth::create_connection",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create_connection(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<ConnectionBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct ConnectionBody {\n    name: String,\n    provider: String,\n    #[serde(default)]\n    credential_id: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    base_url: String,\n    #[serde(default)]\n    api_url: String,\n    #[serde(default)]\n    organization: String,\n    #[serde(default)]\n    url: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "credentials.read",
+      "repositories.create"
+    ],
+    "permission": "repositories.create"
+  },
+  {
+    "path": "/code-connections/{id}",
+    "method": "DELETE",
+    "handler": "repositories::auth::delete_connection",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete_connection(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.delete"
+    ],
+    "permission": "repositories.delete"
+  },
+  {
+    "path": "/code-connections/{id}",
+    "method": "GET",
+    "handler": "repositories::auth::get_connection",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get_connection(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.read"
+    ],
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connections/{id}",
+    "method": "PATCH",
+    "handler": "repositories::auth::update_connection",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update_connection(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(body): Json<ConnectionBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct ConnectionBody {\n    name: String,\n    provider: String,\n    #[serde(default)]\n    credential_id: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    base_url: String,\n    #[serde(default)]\n    api_url: String,\n    #[serde(default)]\n    organization: String,\n    #[serde(default)]\n    url: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "credentials.read",
+      "repositories.update"
+    ],
+    "permission": "repositories.update"
+  },
+  {
+    "path": "/code-connections/{id}/analysis",
+    "method": "GET",
+    "handler": "repositories::analysis::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.read"
+    ],
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connections/{id}/analysis",
+    "method": "PATCH",
+    "handler": "repositories::analysis::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(mut body): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    pub config: Config,\n    pub version: i64,\n}",
+      "struct Config {\n    /// Connection-level collector demand is owned by standalone insights.\n    pub insights_managed: bool,\n    pub pipeline_bindings: BTreeMap<String, String>,\n    pub coverage_starts: BTreeMap<String, i64>,\n    /// Local identity projection migration version.\n    pub identity_version: u32,\n    /// Internal collector fence; independent of local identity edits.\n    pub collection_version: i64,\n    pub enabled: bool,\n    pub all_repositories: bool,\n    /// Exact paths/URLs, or platform group selectors ending in `/*`.\n    pub repositories: Vec<String>,\n    /// None preserves legacy event delivery for every selected repository.\n    /// Some contains event-mode paths; an empty path selects every repository.\n    pub event_repositories: Option<Vec<String>>,\n    pub full_history: bool,\n    pub initial_days: u32,\n    pub reconcile_minutes: u32,\n    pub pipeline_id: String,\n    pub aliases: Vec<Alias>,\n}"
+    ],
+    "permission_checks": [
+      "credentials.read",
+      "pipelines.run",
+      "repositories.update"
+    ],
+    "permission": "repositories.update"
+  },
+  {
+    "path": "/code-connections/{id}/analysis-runs",
+    "method": "POST",
+    "handler": "repositories::analysis::retry",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn retry(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.update"
+    ],
+    "permission": "repositories.update"
+  },
+  {
+    "path": "/code-connections/{id}/branches",
+    "method": "GET",
+    "handler": "repositories::auth::connection_branches",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn connection_branches(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Query(query): Query<BranchQuery>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct BranchQuery {\n    url: String,\n    #[serde(default = \"first_page\")]\n    page: u32,\n}"
+    ],
+    "permission_checks": [
+      "credentials.read",
+      "repositories.read"
+    ],
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connections/{id}/events",
+    "method": "GET",
+    "handler": "repositories::monitor::history",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn history(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.read"
+    ],
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connections/{id}/repositories",
+    "method": "GET",
+    "handler": "repositories::auth::connection_repositories",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn connection_repositories(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Query(page): Query<RepositoryPage>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct RepositoryPage {\n    #[serde(default = \"first_page\")]\n    page: u32,\n}"
+    ],
+    "permission_checks": [
+      "credentials.read",
+      "repositories.read"
+    ],
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-contributions/{kind}",
+    "method": "GET",
+    "handler": "repositories::analysis::report",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn report(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, kind)): Path<(String, String)>,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.read"
+    ],
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-insights",
+    "method": "GET",
+    "handler": "repositories::analysis::insights::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(mut raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "code-insights.read"
+    ],
+    "permission": "code-insights.read"
+  },
+  {
+    "path": "/code-insights",
+    "method": "POST",
+    "handler": "repositories::analysis::insights::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    pub name: String,\n    #[serde(default)]\n    pub description: String,\n    #[serde(default)]\n    pub version: i64,\n    #[serde(flatten)]\n    pub config: InsightConfig,\n    #[serde(default)]\n    pub repositories: Vec<Selection>,\n}",
+      "struct InsightConfig {\n    /// Server-maintained local projection status; never a collection error.\n    pub identity_error: String,\n    pub schedule_error: String,\n    pub enabled: bool,\n    pub update_mode: String,\n    pub schedule: String,\n    pub timezone: String,\n    pub full_history: bool,\n    pub initial_days: u32,\n    pub reconcile_minutes: u32,\n    pub aliases: Vec<Alias>,\n}",
+      "struct Selection {\n    pub connection_id: String,\n    pub repository: String,\n    pub all_repositories: bool,\n    pub pipeline_id: String,\n}"
+    ],
+    "permission_checks": [
+      "code-insights.create"
+    ],
+    "permission": "code-insights.create"
+  },
+  {
+    "path": "/code-insights/{id}",
+    "method": "DELETE",
+    "handler": "repositories::analysis::insights::delete",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "code-insights.delete"
+    ],
+    "permission": "code-insights.delete"
+  },
+  {
+    "path": "/code-insights/{id}",
+    "method": "GET",
+    "handler": "repositories::analysis::insights::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "code-insights.read"
+    ],
+    "permission": "code-insights.read"
+  },
+  {
+    "path": "/code-insights/{id}",
+    "method": "PATCH",
+    "handler": "repositories::analysis::insights::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    pub name: String,\n    #[serde(default)]\n    pub description: String,\n    #[serde(default)]\n    pub version: i64,\n    #[serde(flatten)]\n    pub config: InsightConfig,\n    #[serde(default)]\n    pub repositories: Vec<Selection>,\n}",
+      "struct InsightConfig {\n    /// Server-maintained local projection status; never a collection error.\n    pub identity_error: String,\n    pub schedule_error: String,\n    pub enabled: bool,\n    pub update_mode: String,\n    pub schedule: String,\n    pub timezone: String,\n    pub full_history: bool,\n    pub initial_days: u32,\n    pub reconcile_minutes: u32,\n    pub aliases: Vec<Alias>,\n}",
+      "struct Selection {\n    pub connection_id: String,\n    pub repository: String,\n    pub all_repositories: bool,\n    pub pipeline_id: String,\n}"
+    ],
+    "permission_checks": [
+      "code-insights.update"
+    ],
+    "permission": "code-insights.update"
+  },
+  {
+    "path": "/code-insights/{id}/reports/{kind}",
+    "method": "GET",
+    "handler": "repositories::analysis::insight_report",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn insight_report(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, kind)): Path<(String, Id, String)>,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "code-insights.read",
+      "repositories.read"
+    ],
+    "documentation": "Report kinds: overview, contributors, ranking, repositories, branches, commits, heatmap, period.\nQuery: since/until (YYYY-MM-DD inclusive UTC dates or RFC3339 timestamps), page/page_size\n(page_size 1..500), repos (comma-separated repository paths, URLs or IDs), authors\n(comma-separated contributor IDs, nicknames or emails), branches (comma-separated refs).\nMerge commits are excluded by default; isMerge=0,1 includes both. Read coverage before\nclaiming complete results. Count total, paginate items, and query contributors with repos\nto obtain each person's contribution per repository. additions, deletions and effectives\nare distinct recorded metrics; do not equate effectives with additions minus deletions.",
+    "permission": "code-insights.read"
+  },
+  {
+    "path": "/code-insights/{id}/sync",
+    "method": "POST",
+    "handler": "repositories::analysis::insights::retry",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn retry(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "code-insights.sync",
+      "credentials.read"
+    ],
+    "permission": "code-insights.sync"
+  },
+  {
+    "path": "/config-templates",
+    "method": "GET",
+    "handler": "templates::configs::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(State(s):State<AppState>,scope:Scope,Query(raw):Query<HashMap<String,String>>) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "config-templates.read"
+    ],
+    "permission": "config-templates.read"
+  },
+  {
+    "path": "/config-templates",
+    "method": "POST",
+    "handler": "templates::configs::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(State(s):State<AppState>,scope:Scope,Json(body):Json<Body>) -> Result<(StatusCode,Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    content: String,\n    parameters: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "config-templates.create"
+    ]
+  },
+  {
+    "path": "/config-templates/{id}",
+    "method": "DELETE",
+    "handler": "templates::configs::delete",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "config-templates.delete"
+    ],
+    "permission": "config-templates.delete"
+  },
+  {
+    "path": "/config-templates/{id}",
+    "method": "GET",
+    "handler": "templates::configs::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "config-templates.read"
+    ],
+    "permission": "config-templates.read"
+  },
+  {
+    "path": "/config-templates/{id}",
+    "method": "PATCH",
+    "handler": "templates::configs::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>,Json(body):Json<Body>) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    content: String,\n    parameters: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "config-templates.update"
+    ],
+    "permission": "config-templates.update"
+  },
+  {
+    "path": "/config-templates/{id}/renderings",
+    "method": "POST",
+    "handler": "templates::configs::render",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn render(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>,Json(body):Json<RenderBody>) -> Result<Json<Value>>",
+    "definitions": [
+      "struct RenderBody {\n    version: i64,\n    #[serde(default)]\n    values: BTreeMap<String, Value>,\n}"
+    ],
+    "permission_checks": [
+      "config-templates.read"
+    ],
+    "permission": "config-templates.read"
+  },
+  {
+    "path": "/conversation-participants",
+    "method": "GET",
+    "handler": "participants",
+    "source": "crates/server/src/conversations/groups.rs",
+    "signature": "async fn participants(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "conversations.create",
+      "conversations.update"
+    ]
+  },
+  {
+    "path": "/conversations",
+    "method": "GET",
+    "handler": "list",
+    "source": "crates/server/src/conversations.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "conversations.read"
+    ],
+    "permission": "conversations.read"
+  },
+  {
+    "path": "/conversations",
+    "method": "POST",
+    "handler": "create",
+    "source": "crates/server/src/conversations.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Create>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Create {\n    #[serde(default)]\n    host_id: Option<Id>,\n    #[serde(default)]\n    agent_id: String,\n    #[serde(default)]\n    title: String,\n    #[serde(default)]\n    cwd: Option<String>,\n    #[serde(default)]\n    permission: Option<ferry_protocol::agent::Permission>,\n    #[serde(default = \"private_kind\")]\n    kind: String,\n    #[serde(default)]\n    member_ids: Vec<Id>,\n    #[serde(default)]\n    agent_ids: Vec<Id>,\n}"
+    ],
+    "permission_checks": [
+      "conversations.create",
+      "hosts.update"
+    ],
+    "permission": "conversations.create"
+  },
+  {
+    "path": "/conversations/{id}",
+    "method": "DELETE",
+    "handler": "remove",
+    "source": "crates/server/src/conversations.rs",
+    "signature": "async fn remove(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "conversations.read",
+      "conversations.update"
+    ],
+    "permission": "conversations.update"
+  },
+  {
+    "path": "/conversations/{id}",
+    "method": "GET",
+    "handler": "detail",
+    "source": "crates/server/src/conversations.rs",
+    "signature": "async fn detail(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "conversations.read",
+      "conversations.update"
+    ]
+  },
+  {
+    "path": "/conversations/{id}",
+    "method": "PATCH",
+    "handler": "update",
+    "source": "crates/server/src/conversations.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Update>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Update {\n    title: String,\n    state: String,\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "conversations.read",
+      "conversations.run",
+      "conversations.update"
+    ],
+    "permission": "conversations.update"
+  },
+  {
+    "path": "/conversations/{id}/appearance",
+    "method": "PUT",
+    "handler": "appearance::update",
+    "source": "crates/server/src/conversations.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Appearance>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Appearance {\n    pub pattern: String,\n    pub color: String,\n    pub image: Option<Id>,\n}"
+    ],
+    "permission_checks": [
+      "conversations.update"
+    ],
+    "permission": "conversations.update"
+  },
+  {
+    "path": "/conversations/{id}/events",
+    "method": "GET",
+    "handler": "history",
+    "source": "crates/server/src/conversations.rs",
+    "signature": "async fn history(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Query(cursor): Query<Cursor>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Cursor {\n    #[serde(default)]\n    after: i64,\n}"
+    ],
+    "permission_checks": [
+      "conversations.read"
+    ]
+  },
+  {
+    "path": "/conversations/{id}/files",
+    "method": "POST",
+    "handler": "upload",
+    "source": "crates/server/src/conversations/files.rs",
+    "signature": "async fn upload(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    mut data: Multipart,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [],
+    "permission_checks": [
+      "conversations.run"
+    ],
+    "permission": "conversations.run"
+  },
+  {
+    "path": "/conversations/{id}/files/{file}",
+    "method": "DELETE",
+    "handler": "remove",
+    "source": "crates/server/src/conversations/files.rs",
+    "signature": "async fn remove(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, file)): Path<(String, Id, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "conversations.run"
+    ],
+    "permission": "conversations.run"
+  },
+  {
+    "path": "/conversations/{id}/files/{file}",
+    "method": "GET",
+    "handler": "download",
+    "source": "crates/server/src/conversations/files.rs",
+    "signature": "async fn download(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, file)): Path<(String, Id, Id)>,\n    Query(query): Query<Download>,\n    headers: HeaderMap,\n) -> Result<Response>",
+    "definitions": [
+      "struct Download {\n    #[serde(default)]\n    download: bool,\n}"
+    ],
+    "permission_checks": []
+  },
+  {
+    "path": "/conversations/{id}/members",
+    "method": "PUT",
+    "handler": "members",
+    "source": "crates/server/src/conversations/interactions.rs",
+    "signature": "async fn members(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(mut body): Json<Members>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Members {\n    version: Id,\n    member_ids: Vec<Id>,\n    agent_ids: Vec<Id>,\n}"
+    ],
+    "permission_checks": [
+      "conversations.update"
+    ]
+  },
+  {
+    "path": "/conversations/{id}/messages",
+    "method": "POST",
+    "handler": "send_message",
+    "source": "crates/server/src/conversations/groups.rs",
+    "signature": "async fn send_message(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(mut body): Json<MessageBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct MessageBody {\n    prompt: String,\n    client_id: String,\n    #[serde(default)]\n    attachments: Vec<Attachment>,\n    #[serde(default)]\n    targets: Vec<Id>,\n    #[serde(default)]\n    reply_to: Option<Id>,\n    #[serde(default)]\n    mentions: Vec<Id>,\n}"
+    ],
+    "permission_checks": [
+      "conversations.run"
+    ],
+    "permission": "conversations.run"
+  },
+  {
+    "path": "/conversations/{id}/messages/{message}",
+    "method": "DELETE",
+    "handler": "retract",
+    "source": "crates/server/src/conversations/interactions.rs",
+    "signature": "async fn retract(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, msg)): Path<(String, Id, Id)>,\n    Json(body): Json<Version>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Version {\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "conversations.run"
+    ]
+  },
+  {
+    "path": "/conversations/{id}/messages/{message}",
+    "method": "PATCH",
+    "handler": "edit",
+    "source": "crates/server/src/conversations/interactions.rs",
+    "signature": "async fn edit(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, msg)): Path<(String, Id, Id)>,\n    Json(body): Json<Edit>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Edit {\n    prompt: String,\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "conversations.run"
+    ]
+  },
+  {
+    "path": "/conversations/{id}/messages/{message}/saved",
+    "method": "DELETE",
+    "handler": "unsave",
+    "source": "crates/server/src/conversations/interactions.rs",
+    "signature": "async fn unsave(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, msg)): Path<(String, Id, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": []
+  },
+  {
+    "path": "/conversations/{id}/messages/{message}/saved",
+    "method": "PUT",
+    "handler": "save",
+    "source": "crates/server/src/conversations/interactions.rs",
+    "signature": "async fn save(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, msg)): Path<(String, Id, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": []
+  },
+  {
+    "path": "/conversations/{id}/read",
+    "method": "POST",
+    "handler": "mark_read",
+    "source": "crates/server/src/conversations/interactions.rs",
+    "signature": "async fn mark_read(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Read>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Read {\n    message_id: Id,\n}"
+    ],
+    "permission_checks": []
+  },
+  {
+    "path": "/conversations/{id}/turns",
+    "method": "POST",
+    "handler": "send",
+    "source": "crates/server/src/conversations.rs",
+    "signature": "async fn send(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(mut body): Json<Send>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Send {\n    prompt: String,\n    client_id: String,\n    #[serde(default)]\n    attachments: Vec<Attachment>,\n    #[serde(default)]\n    reply_to: Option<Id>,\n}",
+      "struct Attachment {\n    name: String,\n    #[serde(default)]\n    text: String,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    file_id: Option<Id>,\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    mime: String,\n    #[serde(default, skip_serializing_if = \"is_zero\")]\n    size: u64,\n}"
+    ],
+    "permission_checks": [
+      "conversations.read",
+      "conversations.run",
+      "conversations.update"
+    ],
+    "permission": "conversations.run"
+  },
+  {
+    "path": "/conversations/{id}/turns/{turn}/cancellations",
+    "method": "POST",
+    "handler": "cancel",
+    "source": "crates/server/src/conversations.rs",
+    "signature": "async fn cancel(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, turn)): Path<(String, Id, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "conversations.read",
+      "conversations.run",
+      "conversations.update"
+    ],
+    "permission": "conversations.run"
+  },
+  {
+    "path": "/conversations/{id}/turns/{turn}/decisions",
+    "method": "POST",
+    "handler": "decide",
+    "source": "crates/server/src/conversations.rs",
+    "signature": "async fn decide(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, turn)): Path<(String, Id, Id)>,\n    Json(body): Json<Decision>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Decision {\n    request_id: String,\n    allow: bool,\n}"
+    ],
+    "permission_checks": [
+      "ai-agents.read",
+      "ai-agents.use",
+      "conversations.read",
+      "conversations.run",
+      "conversations.update"
+    ],
+    "permission": "conversations.run"
+  },
+  {
+    "path": "/credentials",
+    "method": "GET",
+    "handler": "credentials::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "credentials.read"
+    ],
+    "permission": "credentials.read"
+  },
+  {
+    "path": "/credentials",
+    "method": "POST",
+    "handler": "credentials::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    #[serde(default)]\n    scope: Option<String>,\n    name: String,\n    #[serde(default)]\n    kind: String,\n    #[serde(default)]\n    username: String,\n    #[serde(default)]\n    description: String,\n    /// Absent on an edit means \"leave the stored secret alone\", which is what\n    /// lets the edit form round-trip without ever holding the real value.\n    #[serde(default)]\n    secret: Option<String>,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "credentials.create"
+    ]
+  },
+  {
+    "path": "/credentials/{id}",
+    "method": "DELETE",
+    "handler": "credentials::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "credentials.delete"
+    ]
+  },
+  {
+    "path": "/credentials/{id}",
+    "method": "GET",
+    "handler": "credentials::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "credentials.read"
+    ]
+  },
+  {
+    "path": "/credentials/{id}",
+    "method": "PATCH",
+    "handler": "credentials::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(body): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    #[serde(default)]\n    scope: Option<String>,\n    name: String,\n    #[serde(default)]\n    kind: String,\n    #[serde(default)]\n    username: String,\n    #[serde(default)]\n    description: String,\n    /// Absent on an edit means \"leave the stored secret alone\", which is what\n    /// lets the edit form round-trip without ever holding the real value.\n    #[serde(default)]\n    secret: Option<String>,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "credentials.update"
+    ]
+  },
+  {
+    "path": "/cron-jobs",
+    "method": "GET",
+    "handler": "cron_jobs::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "cron-jobs.read"
+    ],
+    "permission": "cron-jobs.read"
+  },
+  {
+    "path": "/cron-jobs",
+    "method": "POST",
+    "handler": "cron_jobs::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(b): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    pub name: String,\n    #[serde(default)]\n    pub description: String,\n    pub scope: String,\n    pub schedule: String,\n    pub timezone: String,\n    #[serde(default)]\n    pub enabled: bool,\n    pub action: String,\n    pub target_kind: String,\n    pub target_ref: String,\n    #[serde(default)]\n    pub environment_id: String,\n    #[serde(default)]\n    pub command: String,\n    pub timeout_seconds: u64,\n    #[serde(default)]\n    pub max_retries: u32,\n    #[serde(default = \"retry_delay\")]\n    pub retry_delay_seconds: u64,\n    #[serde(default)]\n    pub version: i64,\n}"
+    ],
+    "permission_checks": [
+      "cron-jobs.create"
+    ]
+  },
+  {
+    "path": "/cron-jobs/{id}",
+    "method": "DELETE",
+    "handler": "cron_jobs::delete",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "cron-jobs.delete"
+    ],
+    "permission": "cron-jobs.delete"
+  },
+  {
+    "path": "/cron-jobs/{id}",
+    "method": "GET",
+    "handler": "cron_jobs::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "cron-jobs.read"
+    ],
+    "permission": "cron-jobs.read"
+  },
+  {
+    "path": "/cron-jobs/{id}",
+    "method": "PATCH",
+    "handler": "cron_jobs::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(b): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    pub name: String,\n    #[serde(default)]\n    pub description: String,\n    pub scope: String,\n    pub schedule: String,\n    pub timezone: String,\n    #[serde(default)]\n    pub enabled: bool,\n    pub action: String,\n    pub target_kind: String,\n    pub target_ref: String,\n    #[serde(default)]\n    pub environment_id: String,\n    #[serde(default)]\n    pub command: String,\n    pub timeout_seconds: u64,\n    #[serde(default)]\n    pub max_retries: u32,\n    #[serde(default = \"retry_delay\")]\n    pub retry_delay_seconds: u64,\n    #[serde(default)]\n    pub version: i64,\n}"
+    ],
+    "permission_checks": [
+      "cron-jobs.run",
+      "cron-jobs.update",
+      "deployments.apply",
+      "host-groups.read",
+      "hosts.terminal",
+      "marketplace-sources.sync",
+      "pipelines.run"
+    ],
+    "permission": "cron-jobs.update"
+  },
+  {
+    "path": "/cron-jobs/{id}/runs",
+    "method": "GET",
+    "handler": "cron_jobs::history",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn history(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Query(mut raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "cron-jobs.read"
+    ],
+    "permission": "cron-jobs.read"
+  },
+  {
+    "path": "/cron-jobs/{id}/runs",
+    "method": "POST",
+    "handler": "cron_jobs::run_now",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn run_now(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [],
+    "permission_checks": [
+      "cron-jobs.run",
+      "deployments.apply",
+      "host-groups.read",
+      "hosts.terminal",
+      "marketplace-sources.sync",
+      "pipelines.run"
+    ],
+    "permission": "cron-jobs.run"
+  },
+  {
+    "path": "/cron-runs",
+    "method": "GET",
+    "handler": "cron_jobs::list_runs",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list_runs(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "cron-jobs.read"
+    ],
+    "permission": "cron-jobs.read"
+  },
+  {
+    "path": "/cron-runs/{id}",
+    "method": "GET",
+    "handler": "cron_jobs::get_run",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get_run(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "cron-jobs.read"
+    ],
+    "permission": "cron-jobs.read"
+  },
+  {
+    "path": "/cron-runs/{id}/acknowledgements",
+    "method": "POST",
+    "handler": "cron_jobs::acknowledge",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn acknowledge(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(b): Json<Review>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Review {\n    version: i64,\n    note: String,\n}"
+    ],
+    "permission_checks": [
+      "cron-jobs.run"
+    ],
+    "permission": "cron-jobs.run"
+  },
+  {
+    "path": "/dashboard",
+    "method": "GET",
+    "handler": "hosts::dashboard",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn dashboard(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "activity.read",
+      "alerts.read",
+      "credentials.read",
+      "cron-jobs.read",
+      "dashboard.read",
+      "deployments.read",
+      "host-groups.read",
+      "hosts.read",
+      "members.read",
+      "pipelines.read",
+      "repositories.read",
+      "roles.read",
+      "tags.read"
+    ],
+    "documentation": "Resource counts and state distribution for the dashboard, in one round trip.",
+    "permission": "dashboard.read"
+  },
+  {
+    "path": "/deployment-capabilities",
+    "method": "POST",
+    "handler": "deployments::capabilities",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn capabilities(scope: Scope, Json(body): Json<CapabilityBody>) -> Result<Json<Value>>",
+    "definitions": [
+      "struct CapabilityBody {\n    manifest: String,\n}"
+    ],
+    "permission_checks": [
+      "deployments.read"
+    ],
+    "documentation": "Pure capability checks: no host commands, credentials, or cross-tenant lookups.",
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployment-revisions",
+    "method": "GET",
+    "handler": "deployments::revision_list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn revision_list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "deployments.read"
+    ],
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployment-revisions/{id}",
+    "method": "GET",
+    "handler": "deployments::revision_get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn revision_get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "deployments.delete",
+      "deployments.read"
+    ],
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployments",
+    "method": "GET",
+    "handler": "deployments::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "deployments.read"
+    ],
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployments",
+    "method": "POST",
+    "handler": "deployments::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(b): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    category: Option<String>,\n    manifest: String,\n    mode: String,\n    target_kind: String,\n    target_ref: String,\n    workdir: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "deployments.create"
+    ]
+  },
+  {
+    "path": "/deployments/{id}",
+    "method": "DELETE",
+    "handler": "deployments::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "deployments.delete"
+    ],
+    "permission": "deployments.delete"
+  },
+  {
+    "path": "/deployments/{id}",
+    "method": "GET",
+    "handler": "deployments::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "deployments.delete",
+      "deployments.read"
+    ],
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployments/{id}",
+    "method": "PATCH",
+    "handler": "deployments::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(b): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    category: Option<String>,\n    manifest: String,\n    mode: String,\n    target_kind: String,\n    target_ref: String,\n    workdir: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "config-templates.read",
+      "deployments.update",
+      "pipelines.read"
+    ],
+    "permission": "deployments.update"
+  },
+  {
+    "path": "/deployments/{id}/acknowledgements",
+    "method": "POST",
+    "handler": "deployments::acknowledge",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn acknowledge(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(b): Json<ReviewBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct ReviewBody {\n    version: i64,\n    note: String,\n}"
+    ],
+    "permission_checks": [
+      "deployments.apply"
+    ],
+    "permission": "deployments.apply"
+  },
+  {
+    "path": "/deployments/{id}/executions",
+    "method": "POST",
+    "handler": "deployments::apply",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn apply(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(b): Json<RunBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct RunBody {\n    version: i64,\n    expected_hash: String,\n    preview_token: String,\n    #[serde(default)]\n    target_hashes: BTreeMap<String, String>,\n    #[serde(default)]\n    revision_id: String,\n}"
+    ],
+    "permission_checks": [
+      "config-templates.read",
+      "deployments.apply",
+      "deployments.rollback"
+    ]
+  },
+  {
+    "path": "/deployments/{id}/previews",
+    "method": "POST",
+    "handler": "deployments::preview",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn preview(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(b): Json<PreviewBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct PreviewBody {\n    #[serde(default)]\n    revision_id: Option<String>,\n}"
+    ],
+    "permission_checks": [
+      "config-templates.read",
+      "deployments.read",
+      "pipelines.read"
+    ],
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployments/{id}/renderings",
+    "method": "POST",
+    "handler": "deployments::render",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn render(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "deployments.read"
+    ],
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployments/{id}/revisions",
+    "method": "GET",
+    "handler": "deployments::revisions_for_deployment",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn revisions_for_deployment(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Query(mut raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "deployments.read"
+    ],
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployments/{id}/rollbacks",
+    "method": "POST",
+    "handler": "deployments::rollback",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn rollback(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(b): Json<RunBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct RunBody {\n    version: i64,\n    expected_hash: String,\n    preview_token: String,\n    #[serde(default)]\n    target_hashes: BTreeMap<String, String>,\n    #[serde(default)]\n    revision_id: String,\n}"
+    ],
+    "permission_checks": [
+      "config-templates.read",
+      "deployments.apply",
+      "deployments.rollback"
+    ]
+  },
+  {
+    "path": "/dictionaries",
+    "method": "GET",
+    "handler": "maintenance::list_dictionaries",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list_dictionaries(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "dictionaries.read"
+    ],
+    "permission": "dictionaries.read"
+  },
+  {
+    "path": "/dictionaries",
+    "method": "POST",
+    "handler": "maintenance::create_dictionary",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create_dictionary(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<DictionaryBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct DictionaryBody {\n    key: String,\n    name: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    items: Option<String>,\n    #[serde(default = \"default_category\")]\n    category: String,\n    #[serde(default = \"default_dictionary_type\")]\n    value_type: String,\n    #[serde(default)]\n    value_json: Option<String>,\n    #[serde(default)]\n    schema_json: Option<String>,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "dictionaries.create"
+    ]
+  },
+  {
+    "path": "/dictionaries/categories",
+    "method": "GET",
+    "handler": "maintenance::dictionary_categories",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn dictionary_categories(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "dictionaries.read"
+    ],
+    "permission": "dictionaries.read"
+  },
+  {
+    "path": "/dictionaries/{id}",
+    "method": "DELETE",
+    "handler": "maintenance::delete_dictionary",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete_dictionary(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "dictionaries.delete"
+    ],
+    "permission": "dictionaries.delete"
+  },
+  {
+    "path": "/dictionaries/{id}",
+    "method": "GET",
+    "handler": "maintenance::get_dictionary",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get_dictionary(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "dictionaries.read"
+    ],
+    "permission": "dictionaries.read"
+  },
+  {
+    "path": "/dictionaries/{id}",
+    "method": "PATCH",
+    "handler": "maintenance::update_dictionary",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update_dictionary(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<DictionaryBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct DictionaryBody {\n    key: String,\n    name: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    items: Option<String>,\n    #[serde(default = \"default_category\")]\n    category: String,\n    #[serde(default = \"default_dictionary_type\")]\n    value_type: String,\n    #[serde(default)]\n    value_json: Option<String>,\n    #[serde(default)]\n    schema_json: Option<String>,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "dictionaries.update"
+    ],
+    "permission": "dictionaries.update"
+  },
+  {
+    "path": "/holes",
+    "method": "GET",
+    "handler": "list",
+    "source": "crates/server/src/holes.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(mut raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "holes.delete",
+      "holes.read"
+    ],
+    "permission": "holes.read"
+  },
+  {
+    "path": "/holes",
+    "method": "POST",
+    "handler": "create",
+    "source": "crates/server/src/holes.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<CreateBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct CreateBody {\n    name: String,\n    host_id: Id,\n    target_port: i64,\n    #[serde(default = \"default_strip\")]\n    strip_prefix: bool,\n    ttl_hours: i64,\n}"
+    ],
+    "permission_checks": [
+      "holes.create"
+    ],
+    "permission": "holes.create"
+  },
+  {
+    "path": "/holes/{id}",
+    "method": "DELETE",
+    "handler": "remove",
+    "source": "crates/server/src/holes.rs",
+    "signature": "async fn remove(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "holes.delete",
+      "holes.read"
+    ],
+    "permission": "holes.delete"
+  },
+  {
+    "path": "/holes/{id}",
+    "method": "GET",
+    "handler": "detail",
+    "source": "crates/server/src/holes.rs",
+    "signature": "async fn detail(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": []
+  },
+  {
+    "path": "/holes/{id}",
+    "method": "PATCH",
+    "handler": "update",
+    "source": "crates/server/src/holes.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<UpdateBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct UpdateBody {\n    version: i64,\n    name: Option<String>,\n    strip_prefix: Option<bool>,\n    /// Present means \"extend\": the new expiry counts from now.\n    ttl_hours: Option<i64>,\n}"
+    ],
+    "permission_checks": [
+      "holes.read",
+      "holes.update"
+    ],
+    "permission": "holes.update"
+  },
+  {
+    "path": "/holes/{id}/probes",
+    "method": "POST",
+    "handler": "probe_now",
+    "source": "crates/server/src/holes.rs",
+    "signature": "async fn probe_now(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "holes.read",
+      "holes.update"
+    ],
+    "permission": "holes.update"
+  },
+  {
+    "path": "/holes/{id}/reviews",
+    "method": "POST",
+    "handler": "owned::review",
+    "source": "crates/server/src/holes.rs",
+    "signature": "async fn review(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<ReviewBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct ReviewBody {\n    decision: String,\n}"
+    ],
+    "permission_checks": [
+      "pipelines.run",
+      "workflows.run"
+    ],
+    "documentation": "`POST .../holes/{id}/reviews`: approve or reject a preview that waits for\nreview. Reviewing a run's preview needs the same right as running it."
+  },
+  {
+    "path": "/holes/{id}/revocations",
+    "method": "POST",
+    "handler": "revoke",
+    "source": "crates/server/src/holes.rs",
+    "signature": "async fn revoke(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "holes.read",
+      "holes.update"
+    ],
+    "permission": "holes.update"
+  },
+  {
+    "path": "/marketplace",
+    "method": "GET",
+    "handler": "marketplace::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "marketplace.read"
+    ],
+    "permission": "marketplace.read"
+  },
+  {
+    "path": "/marketplace-sources",
+    "method": "GET",
+    "handler": "marketplace::list_sources",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list_sources(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "marketplace-sources.read"
+    ],
+    "permission": "marketplace-sources.read"
+  },
+  {
+    "path": "/marketplace-sources",
+    "method": "POST",
+    "handler": "marketplace::create_source",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create_source(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(b): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    repository_id: String,\n    #[serde(default)]\n    repository_selection: Option<RepositorySelection>,\n    #[serde(flatten)]\n    source: Source,\n    #[serde(default)]\n    version: i64,\n}",
+      "struct RepositorySelection {\n    connection_id: Id,\n    name: String,\n    url: String,\n    #[serde(default)]\n    default_branch: String,\n}",
+      "struct Source {\n    pub provider: String,\n    pub api_base: String,\n    pub project: String,\n    #[serde(default)]\n    pub organization: String,\n    pub branch: String,\n    pub index_path: String,\n}"
+    ],
+    "permission_checks": [
+      "marketplace-sources.create"
+    ]
+  },
+  {
+    "path": "/marketplace-sources/{id}",
+    "method": "DELETE",
+    "handler": "marketplace::delete_source",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete_source(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "marketplace-sources.delete"
+    ],
+    "permission": "marketplace-sources.delete"
+  },
+  {
+    "path": "/marketplace-sources/{id}",
+    "method": "GET",
+    "handler": "marketplace::get_source",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get_source(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "marketplace-sources.read"
+    ],
+    "permission": "marketplace-sources.read"
+  },
+  {
+    "path": "/marketplace-sources/{id}",
+    "method": "PATCH",
+    "handler": "marketplace::update_source",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update_source(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(mut b): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    repository_id: String,\n    #[serde(default)]\n    repository_selection: Option<RepositorySelection>,\n    #[serde(flatten)]\n    source: Source,\n    #[serde(default)]\n    version: i64,\n}",
+      "struct RepositorySelection {\n    connection_id: Id,\n    name: String,\n    url: String,\n    #[serde(default)]\n    default_branch: String,\n}",
+      "struct Source {\n    pub provider: String,\n    pub api_base: String,\n    pub project: String,\n    #[serde(default)]\n    pub organization: String,\n    pub branch: String,\n    pub index_path: String,\n}"
+    ],
+    "permission_checks": [
+      "marketplace-sources.update",
+      "repositories.read"
+    ],
+    "permission": "marketplace-sources.update"
+  },
+  {
+    "path": "/marketplace-sources/{id}/synchronizations",
+    "method": "POST",
+    "handler": "marketplace::sync",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn sync(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "marketplace-sources.sync",
+      "repositories.read"
+    ]
+  },
+  {
+    "path": "/marketplace/{id}",
+    "method": "GET",
+    "handler": "marketplace::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "marketplace.read"
+    ],
+    "permission": "marketplace.read"
+  },
+  {
+    "path": "/marketplace/{id}/installations",
+    "method": "POST",
+    "handler": "marketplace::install",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn install(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(b): Json<Install>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Install {\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "marketplace.install"
+    ],
+    "permission": "marketplace.install"
+  },
+  {
+    "path": "/members",
+    "method": "GET",
+    "handler": "accounts::workspace_admin::members",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn members(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "members.read"
+    ],
+    "permission": "members.read"
+  },
+  {
+    "path": "/members/invitation",
+    "method": "GET",
+    "handler": "accounts::workspace_admin::invitation",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn invitation(\n    State(s): State<AppState>,\n    scope: Scope,\n) -> Result<impl axum::response::IntoResponse>",
+    "definitions": [],
+    "permission_checks": [
+      "members.create"
+    ],
+    "permission": "members.create"
+  },
+  {
+    "path": "/members/invitation",
+    "method": "POST",
+    "handler": "accounts::workspace_admin::rotate_invitation",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn rotate_invitation(\n    State(s): State<AppState>,\n    scope: Scope,\n) -> Result<impl axum::response::IntoResponse>",
+    "definitions": [],
+    "permission_checks": [
+      "members.create"
+    ]
+  },
+  {
+    "path": "/members/role-options",
+    "method": "GET",
+    "handler": "accounts::workspace_admin::role_options",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn role_options(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "members.update"
+    ],
+    "permission": "members.update"
+  },
+  {
+    "path": "/members/{id}",
+    "method": "DELETE",
+    "handler": "accounts::workspace_admin::delete_member",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete_member(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "members.delete"
+    ]
+  },
+  {
+    "path": "/members/{id}",
+    "method": "GET",
+    "handler": "accounts::workspace_admin::get_member",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get_member(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "members.read"
+    ],
+    "permission": "members.read"
+  },
+  {
+    "path": "/members/{id}",
+    "method": "PATCH",
+    "handler": "accounts::workspace_admin::update_member",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update_member(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<MemberUpdate>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct MemberUpdate {\n    role_id: Id,\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "members.update"
+    ]
+  },
+  {
+    "path": "/node-groups",
+    "method": "GET",
+    "handler": "hosts::list_groups",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list_groups(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "host-groups.read"
+    ],
+    "permission": "host-groups.read"
+  },
+  {
+    "path": "/node-groups",
+    "method": "POST",
+    "handler": "hosts::create_group",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create_group(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<GroupBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct GroupBody {\n    name: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    parent_id: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "host-groups.create"
+    ]
+  },
+  {
+    "path": "/node-groups/ordering",
+    "method": "PATCH",
+    "handler": "hosts::reorder_groups",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn reorder_groups(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<ReorderGroupsBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct ReorderGroupsBody {\n    parent_id: String,\n    ids: Vec<String>,\n}"
+    ],
+    "permission_checks": [
+      "host-groups.update"
+    ],
+    "permission": "host-groups.update"
+  },
+  {
+    "path": "/node-groups/{id}",
+    "method": "DELETE",
+    "handler": "hosts::delete_group",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete_group(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "host-groups.delete"
+    ]
+  },
+  {
+    "path": "/node-groups/{id}",
+    "method": "GET",
+    "handler": "hosts::get_group",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get_group(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "host-groups.read"
+    ]
+  },
+  {
+    "path": "/node-groups/{id}",
+    "method": "PATCH",
+    "handler": "hosts::update_group",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update_group(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(body): Json<GroupBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct GroupBody {\n    name: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    parent_id: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "host-groups.update"
+    ]
+  },
+  {
+    "path": "/nodes",
+    "method": "DELETE",
+    "handler": "hosts::bulk_delete_hosts",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn bulk_delete_hosts(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<BulkBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct BulkBody {\n    ids: Vec<Id>,\n}"
+    ],
+    "permission_checks": [
+      "hosts.delete"
+    ],
+    "documentation": "Batch delete as an action, not a `DELETE` with a body — proxies drop the\nbody of a DELETE, which turns \"delete these three\" into \"delete nothing\".",
+    "permission": "hosts.delete"
+  },
+  {
+    "path": "/nodes",
+    "method": "GET",
+    "handler": "hosts::list_hosts",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list_hosts(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(mut raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "hosts.read"
+    ],
+    "permission": "hosts.read"
+  },
+  {
+    "path": "/nodes",
+    "method": "POST",
+    "handler": "hosts::create_host",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create_host(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<HostBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct HostBody {\n    name: String,\n    #[serde(default)]\n    execution: Option<execution::Policy>,\n    #[serde(default)]\n    runner_auto_update: Option<String>,\n    #[serde(default)]\n    tag_ids: Option<Vec<Id>>,\n    #[serde(default)]\n    connection: String,\n    #[serde(default)]\n    address: String,\n    #[serde(default)]\n    port: i64,\n    #[serde(default)]\n    username: String,\n    #[serde(default)]\n    group_id: String,\n    #[serde(default)]\n    credential_id: String,\n    #[serde(default)]\n    jump_host_id: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "hosts.create"
+    ]
+  },
+  {
+    "path": "/nodes/{id}",
+    "method": "DELETE",
+    "handler": "hosts::delete_host",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete_host(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "hosts.delete"
+    ]
+  },
+  {
+    "path": "/nodes/{id}",
+    "method": "GET",
+    "handler": "hosts::get_host",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get_host(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "hosts.read"
+    ]
+  },
+  {
+    "path": "/nodes/{id}",
+    "method": "PATCH",
+    "handler": "hosts::update_host",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update_host(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(body): Json<HostBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct HostBody {\n    name: String,\n    #[serde(default)]\n    execution: Option<execution::Policy>,\n    #[serde(default)]\n    runner_auto_update: Option<String>,\n    #[serde(default)]\n    tag_ids: Option<Vec<Id>>,\n    #[serde(default)]\n    connection: String,\n    #[serde(default)]\n    address: String,\n    #[serde(default)]\n    port: i64,\n    #[serde(default)]\n    username: String,\n    #[serde(default)]\n    group_id: String,\n    #[serde(default)]\n    credential_id: String,\n    #[serde(default)]\n    jump_host_id: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "hosts.update"
+    ]
+  },
+  {
+    "path": "/nodes/{id}/commands",
+    "method": "POST",
+    "handler": "hosts::remote::execute_command",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn execute_command(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<CommandRequest>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct CommandRequest {\n    command: String,\n    timeout_seconds: u64,\n}"
+    ],
+    "permission_checks": [
+      "hosts.terminal"
+    ],
+    "documentation": "Non-interactive counterpart of the terminal, sharing its permission and host channel.",
+    "permission": "hosts.terminal"
+  },
+  {
+    "path": "/nodes/{id}/connection-credentials",
+    "method": "GET",
+    "handler": "hosts::runner::connection_command",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn connection_command(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    headers: HeaderMap,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "hosts.enroll"
+    ]
+  },
+  {
+    "path": "/nodes/{id}/connection-credentials",
+    "method": "POST",
+    "handler": "hosts::runner::reset_connection_command",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn reset_connection_command(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    headers: HeaderMap,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "hosts.enroll"
+    ]
+  },
+  {
+    "path": "/nodes/{id}/connection-tests",
+    "method": "POST",
+    "handler": "hosts::remote::test_connection",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn test_connection(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "hosts.read"
+    ],
+    "documentation": "`POST .../nodes/{id}/connection-tests` — proves the stored details\nactually reach the machine, before anyone relies on them."
+  },
+  {
+    "path": "/nodes/{id}/file-systems",
+    "method": "GET",
+    "handler": "hosts::remote::file_systems",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn file_systems(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "hosts.files"
+    ],
+    "documentation": "Discover mounted filesystems through the existing host channel.",
+    "permission": "hosts.files"
+  },
+  {
+    "path": "/nodes/{id}/files",
+    "method": "DELETE",
+    "handler": "hosts::remote::delete_file",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete_file(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Query(query): Query<PathQuery>,\n) -> Result<StatusCode>",
+    "definitions": [
+      "struct PathQuery {\n    path: String,\n    #[serde(default)]\n    show_hidden: bool,\n}"
+    ],
+    "permission_checks": [
+      "hosts.files"
+    ]
+  },
+  {
+    "path": "/nodes/{id}/files",
+    "method": "GET",
+    "handler": "hosts::remote::list_dir",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list_dir(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Query(query): Query<PathQuery>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct PathQuery {\n    path: String,\n    #[serde(default)]\n    show_hidden: bool,\n}"
+    ],
+    "permission_checks": [
+      "hosts.files"
+    ]
+  },
+  {
+    "path": "/nodes/{id}/files",
+    "method": "POST",
+    "handler": "hosts::remote::create_entry",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create_entry(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(body): Json<CreateEntryBody>,\n) -> Result<StatusCode>",
+    "definitions": [
+      "struct CreateEntryBody {\n    path: String,\n    kind: String,\n}"
+    ],
+    "permission_checks": [
+      "hosts.files"
+    ]
+  },
+  {
+    "path": "/nodes/{id}/files/content",
+    "method": "GET",
+    "handler": "hosts::remote::download",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn download(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Query(query): Query<PathQuery>,\n) -> Result<Response>",
+    "definitions": [
+      "struct PathQuery {\n    path: String,\n    #[serde(default)]\n    show_hidden: bool,\n}"
+    ],
+    "permission_checks": [
+      "hosts.files"
+    ]
+  },
+  {
+    "path": "/nodes/{id}/files/content",
+    "method": "PUT",
+    "handler": "hosts::remote::upload",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn upload(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Query(query): Query<PathQuery>,\n    body: Body,\n) -> Result<StatusCode>",
+    "definitions": [
+      "struct PathQuery {\n    path: String,\n    #[serde(default)]\n    show_hidden: bool,\n}"
+    ],
+    "permission_checks": [
+      "hosts.files"
+    ]
+  },
+  {
+    "path": "/nodes/{id}/files/permissions",
+    "method": "PATCH",
+    "handler": "hosts::remote::set_file_permissions",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn set_file_permissions(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<PermissionsBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct PermissionsBody {\n    path: String,\n    mode: u32,\n}"
+    ],
+    "permission_checks": [
+      "hosts.files"
+    ],
+    "documentation": "POSIX rwx only, non-recursive and without elevation. Existing special bits remain intact.",
+    "permission": "hosts.files"
+  },
+  {
+    "path": "/nodes/{id}/metrics",
+    "method": "GET",
+    "handler": "hosts::monitor::read",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn read(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Query(query): Query<MonitorQuery>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct MonitorQuery {\n    pub window_seconds: Option<u32>,\n    pub step_seconds: Option<u32>,\n}"
+    ],
+    "permission_checks": [
+      "hosts.read"
+    ],
+    "permission": "hosts.read"
+  },
+  {
+    "path": "/nodes/{id}/runner-updates",
+    "method": "GET",
+    "handler": "hosts::runner::update_status",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update_status(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_workspace, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "hosts.read"
+    ],
+    "permission": "hosts.read"
+  },
+  {
+    "path": "/nodes/{id}/runner-updates",
+    "method": "POST",
+    "handler": "hosts::runner::start_update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn start_update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_workspace, id)): Path<(String, Id)>,\n    Json(mut body): Json<UpdateBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct UpdateBody {\n    #[serde(default)]\n    pub(super) version: String,\n    #[serde(default)]\n    pub(super) manifest: String,\n    #[serde(default)]\n    pub(super) signature: String,\n}"
+    ],
+    "permission_checks": [
+      "hosts.update"
+    ],
+    "permission": "hosts.update"
+  },
+  {
+    "path": "/nodes/{id}/terminal-sessions",
+    "method": "GET",
+    "handler": "hosts::remote::terminal",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn terminal(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Query(raw): Query<HashMap<String, String>>,\n    upgrade: WebSocketUpgrade,\n) -> Result<Response>",
+    "definitions": [],
+    "permission_checks": [
+      "hosts.terminal"
+    ],
+    "documentation": "`GET .../nodes/{id}/terminal-sessions` upgraded to a WebSocket.\n\nBrowser -> server: binary frames are keystrokes, text frames are JSON\ncontrol (`{\"type\":\"resize\",\"cols\":120,\"rows\":40}`).\nServer -> browser: binary frames are terminal output, text frames are JSON\nstatus (`{\"type\":\"error\"|\"closed\"}`)."
+  },
+  {
+    "path": "/notification-channels",
+    "method": "GET",
+    "handler": "notifications::center::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "notifications.read"
+    ],
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/notification-channels",
+    "method": "POST",
+    "handler": "notifications::center::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<ChannelBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct ChannelBody {\n    pub name: String,\n    #[serde(default)]\n    pub description: String,\n    pub provider: String,\n    #[serde(default = \"enabled\")]\n    pub enabled: bool,\n    #[serde(default)]\n    pub role_ids: Vec<Id>,\n    #[serde(default)]\n    pub version: i64,\n    #[serde(flatten)]\n    pub config: Transport,\n}",
+      "struct Transport {\n    /// Flat SMS fields: sms_access_key, sms_secret_key, sms_region,\n    /// sms_app_id, sms_sign_name, sms_template_code (strings), and\n    /// sms_parameter_names (ordered string array). Recipients use E.164.\n    /// The provider sends its approved template, not arbitrary body text.\n    #[serde(flatten)]\n    pub sms: super::sms::Config,\n    pub language: String,\n    pub recipients: Vec<String>,\n    pub webhook: String,\n    pub host: String,\n    pub port: u16,\n    pub security: String,\n    pub username: String,\n    pub password: String,\n    pub from: String,\n    #[serde(flatten)]\n    pub options: super::channel::Options,\n}"
+    ],
+    "permission_checks": [
+      "notifications.create"
+    ],
+    "permission": "notifications.create"
+  },
+  {
+    "path": "/notification-channels/{id}",
+    "method": "DELETE",
+    "handler": "notifications::center::delete",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "notifications.delete"
+    ],
+    "permission": "notifications.delete"
+  },
+  {
+    "path": "/notification-channels/{id}",
+    "method": "GET",
+    "handler": "notifications::center::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "notifications.read"
+    ],
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/notification-channels/{id}",
+    "method": "PATCH",
+    "handler": "notifications::center::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<ChannelBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct ChannelBody {\n    pub name: String,\n    #[serde(default)]\n    pub description: String,\n    pub provider: String,\n    #[serde(default = \"enabled\")]\n    pub enabled: bool,\n    #[serde(default)]\n    pub role_ids: Vec<Id>,\n    #[serde(default)]\n    pub version: i64,\n    #[serde(flatten)]\n    pub config: Transport,\n}",
+      "struct Transport {\n    /// Flat SMS fields: sms_access_key, sms_secret_key, sms_region,\n    /// sms_app_id, sms_sign_name, sms_template_code (strings), and\n    /// sms_parameter_names (ordered string array). Recipients use E.164.\n    /// The provider sends its approved template, not arbitrary body text.\n    #[serde(flatten)]\n    pub sms: super::sms::Config,\n    pub language: String,\n    pub recipients: Vec<String>,\n    pub webhook: String,\n    pub host: String,\n    pub port: u16,\n    pub security: String,\n    pub username: String,\n    pub password: String,\n    pub from: String,\n    #[serde(flatten)]\n    pub options: super::channel::Options,\n}"
+    ],
+    "permission_checks": [
+      "notifications.read",
+      "notifications.update"
+    ],
+    "permission": "notifications.update"
+  },
+  {
+    "path": "/notification-channels/{id}/deliveries",
+    "method": "POST",
+    "handler": "notifications::center::send",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn send(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<SendBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct SendBody {\n    pub client_id: String,\n    #[serde(default)]\n    pub subject: String,\n    #[serde(default)]\n    pub body: String,\n    #[serde(default = \"text\")]\n    pub format: String,\n    #[serde(default)]\n    pub to: Vec<String>,\n    #[serde(default)]\n    pub template_id: Option<Id>,\n    #[serde(default)]\n    pub variables: std::collections::BTreeMap<String, String>,\n}"
+    ],
+    "permission_checks": [
+      "notifications.send"
+    ],
+    "permission": "notifications.send"
+  },
+  {
+    "path": "/notification-channels/{id}/previews",
+    "method": "POST",
+    "handler": "notifications::center::preview",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn preview(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<SendBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct SendBody {\n    pub client_id: String,\n    #[serde(default)]\n    pub subject: String,\n    #[serde(default)]\n    pub body: String,\n    #[serde(default = \"text\")]\n    pub format: String,\n    #[serde(default)]\n    pub to: Vec<String>,\n    #[serde(default)]\n    pub template_id: Option<Id>,\n    #[serde(default)]\n    pub variables: std::collections::BTreeMap<String, String>,\n}"
+    ],
+    "permission_checks": [
+      "notifications.read"
+    ],
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/notification-deliveries",
+    "method": "GET",
+    "handler": "notifications::center::list_deliveries",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list_deliveries(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "notifications.read"
+    ],
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/notification-deliveries/{id}",
+    "method": "GET",
+    "handler": "notifications::center::get_delivery",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get_delivery(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "notifications.read"
+    ],
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/notification-templates",
+    "method": "GET",
+    "handler": "notifications::center::list_templates",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list_templates(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "notifications.read"
+    ],
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/notification-templates",
+    "method": "POST",
+    "handler": "notifications::center::create_template",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create_template(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<TemplateBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct TemplateBody {\n    pub name: String,\n    pub language: String,\n    pub subject: String,\n    pub body: String,\n    pub format: String,\n    #[serde(default)]\n    pub version: i64,\n}"
+    ],
+    "permission_checks": [
+      "notifications.create"
+    ],
+    "permission": "notifications.create"
+  },
+  {
+    "path": "/notification-templates/{id}",
+    "method": "DELETE",
+    "handler": "notifications::center::delete_template",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete_template(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "notifications.delete"
+    ],
+    "permission": "notifications.delete"
+  },
+  {
+    "path": "/notification-templates/{id}",
+    "method": "GET",
+    "handler": "notifications::center::get_template",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get_template(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "notifications.read"
+    ],
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/notification-templates/{id}",
+    "method": "PATCH",
+    "handler": "notifications::center::update_template",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update_template(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<TemplateBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct TemplateBody {\n    pub name: String,\n    pub language: String,\n    pub subject: String,\n    pub body: String,\n    pub format: String,\n    #[serde(default)]\n    pub version: i64,\n}"
+    ],
+    "permission_checks": [
+      "notifications.read",
+      "notifications.update"
+    ],
+    "permission": "notifications.update"
+  },
+  {
+    "path": "/pipeline-artifacts",
+    "method": "GET",
+    "handler": "pipelines::artifacts::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipelines.read"
+    ]
+  },
+  {
+    "path": "/pipeline-artifacts/{id}/content",
+    "method": "GET",
+    "handler": "pipelines::artifacts::download",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn download(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<impl IntoResponse>",
+    "definitions": [],
+    "permission_checks": [
+      "pipelines.read"
+    ]
+  },
+  {
+    "path": "/pipeline-environments",
+    "method": "GET",
+    "handler": "pipelines::contexts::environments::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n                State(s): State<AppState>,\n                scope: Scope,\n                Query(raw): Query<HashMap<String, String>>,\n            ) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipeline-environments.read"
+    ],
+    "permission": "pipeline-environments.read"
+  },
+  {
+    "path": "/pipeline-environments",
+    "method": "POST",
+    "handler": "pipelines::contexts::environments::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n                State(s): State<AppState>,\n                scope: Scope,\n                Json(body): Json<Body>,\n            ) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    target_kind: String,\n    #[serde(default)]\n    target_ref: String,\n    /// Environments: jobs that declare this environment wait for approval.\n    #[serde(default)]\n    requires_approval: bool,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "pipeline-environments.create"
+    ]
+  },
+  {
+    "path": "/pipeline-environments/{id}",
+    "method": "DELETE",
+    "handler": "pipelines::contexts::environments::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n            ) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "pipeline-environments.delete"
+    ],
+    "permission": "pipeline-environments.delete"
+  },
+  {
+    "path": "/pipeline-environments/{id}",
+    "method": "GET",
+    "handler": "pipelines::contexts::environments::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n            ) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipeline-environments.read"
+    ],
+    "permission": "pipeline-environments.read"
+  },
+  {
+    "path": "/pipeline-environments/{id}",
+    "method": "PATCH",
+    "handler": "pipelines::contexts::environments::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n                Json(body): Json<Body>,\n            ) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    target_kind: String,\n    #[serde(default)]\n    target_ref: String,\n    /// Environments: jobs that declare this environment wait for approval.\n    #[serde(default)]\n    requires_approval: bool,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "pipeline-environments.update"
+    ],
+    "permission": "pipeline-environments.update"
+  },
+  {
+    "path": "/pipeline-groups",
+    "method": "GET",
+    "handler": "pipelines::contexts::groups::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n                State(s): State<AppState>,\n                scope: Scope,\n                Query(raw): Query<HashMap<String, String>>,\n            ) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipeline-groups.read"
+    ],
+    "permission": "pipeline-groups.read"
+  },
+  {
+    "path": "/pipeline-groups",
+    "method": "POST",
+    "handler": "pipelines::contexts::groups::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n                State(s): State<AppState>,\n                scope: Scope,\n                Json(body): Json<Body>,\n            ) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    target_kind: String,\n    #[serde(default)]\n    target_ref: String,\n    /// Environments: jobs that declare this environment wait for approval.\n    #[serde(default)]\n    requires_approval: bool,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "pipeline-groups.create"
+    ]
+  },
+  {
+    "path": "/pipeline-groups/ordering",
+    "method": "PATCH",
+    "handler": "pipelines::contexts::reorder_groups",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn reorder_groups(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<ReorderGroupsBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct ReorderGroupsBody {\n    ids: Vec<String>,\n}"
+    ],
+    "permission_checks": [
+      "pipeline-groups.update"
+    ],
+    "permission": "pipeline-groups.update"
+  },
+  {
+    "path": "/pipeline-groups/{id}",
+    "method": "DELETE",
+    "handler": "pipelines::contexts::groups::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n            ) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "pipeline-groups.delete"
+    ],
+    "permission": "pipeline-groups.delete"
+  },
+  {
+    "path": "/pipeline-groups/{id}",
+    "method": "GET",
+    "handler": "pipelines::contexts::groups::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n            ) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipeline-groups.read"
+    ],
+    "permission": "pipeline-groups.read"
+  },
+  {
+    "path": "/pipeline-groups/{id}",
+    "method": "PATCH",
+    "handler": "pipelines::contexts::groups::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n                Json(body): Json<Body>,\n            ) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    target_kind: String,\n    #[serde(default)]\n    target_ref: String,\n    /// Environments: jobs that declare this environment wait for approval.\n    #[serde(default)]\n    requires_approval: bool,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "pipeline-groups.update"
+    ],
+    "permission": "pipeline-groups.update"
+  },
+  {
+    "path": "/pipeline-groups/{id}/acl",
+    "method": "GET",
+    "handler": "definitions::access::pipeline_groups::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n                Query(raw): Query<HashMap<String, String>>,\n            ) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": []
+  },
+  {
+    "path": "/pipeline-groups/{id}/acl",
+    "method": "POST",
+    "handler": "definitions::access::pipeline_groups::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n                Json(body): Json<Grant>,\n            ) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Grant {\n    user_id: Id,\n    role: String,\n}"
+    ],
+    "permission_checks": []
+  },
+  {
+    "path": "/pipeline-groups/{id}/acl/{grant}",
+    "method": "DELETE",
+    "handler": "definitions::access::pipeline_groups::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id, grant)): Path<(String, Id, Id)>,\n                Query(body): Query<Version>,\n            ) -> Result<StatusCode>",
+    "definitions": [
+      "struct Version {\n    version: i64,\n}"
+    ],
+    "permission_checks": []
+  },
+  {
+    "path": "/pipeline-runs",
+    "method": "GET",
+    "handler": "pipelines::runs::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipelines.read"
+    ],
+    "permission": "pipelines.read"
+  },
+  {
+    "path": "/pipeline-runs/{id}",
+    "method": "GET",
+    "handler": "pipelines::runs::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipelines.read"
+    ],
+    "permission": "pipelines.read"
+  },
+  {
+    "path": "/pipeline-runs/{id}/cancellations",
+    "method": "POST",
+    "handler": "pipelines::runs::cancel",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn cancel(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipelines.run"
+    ],
+    "permission": "pipelines.run"
+  },
+  {
+    "path": "/pipeline-runs/{id}/jobs/{key}/approvals",
+    "method": "POST",
+    "handler": "pipelines::runs::approve",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn approve(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, key)): Path<(String, String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipelines.run"
+    ],
+    "permission": "pipelines.run"
+  },
+  {
+    "path": "/pipeline-runs/{id}/logs",
+    "method": "GET",
+    "handler": "pipelines::runs::log_list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn log_list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Query(q): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipelines.read"
+    ],
+    "permission": "pipelines.read"
+  },
+  {
+    "path": "/pipeline-templates",
+    "method": "GET",
+    "handler": "templates::pipelines::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(State(s):State<AppState>,scope:Scope,Query(raw):Query<HashMap<String,String>>) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipeline-templates.read"
+    ],
+    "permission": "pipeline-templates.read"
+  },
+  {
+    "path": "/pipeline-templates",
+    "method": "POST",
+    "handler": "templates::pipelines::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(State(s):State<AppState>,scope:Scope,Json(body):Json<Body>) -> Result<(StatusCode,Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    content: String,\n    parameters: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "pipeline-templates.create"
+    ]
+  },
+  {
+    "path": "/pipeline-templates/{id}",
+    "method": "DELETE",
+    "handler": "templates::pipelines::delete",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "pipeline-templates.delete"
+    ],
+    "permission": "pipeline-templates.delete"
+  },
+  {
+    "path": "/pipeline-templates/{id}",
+    "method": "GET",
+    "handler": "templates::pipelines::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipeline-templates.read"
+    ],
+    "permission": "pipeline-templates.read"
+  },
+  {
+    "path": "/pipeline-templates/{id}",
+    "method": "PATCH",
+    "handler": "templates::pipelines::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>,Json(body):Json<Body>) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    content: String,\n    parameters: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "pipeline-templates.update"
+    ],
+    "permission": "pipeline-templates.update"
+  },
+  {
+    "path": "/pipeline-templates/{id}/renderings",
+    "method": "POST",
+    "handler": "templates::pipelines::render",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn render(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>,Json(body):Json<RenderBody>) -> Result<Json<Value>>",
+    "definitions": [
+      "struct RenderBody {\n    version: i64,\n    #[serde(default)]\n    values: BTreeMap<String, Value>,\n}"
+    ],
+    "permission_checks": [
+      "pipeline-templates.read"
+    ],
+    "permission": "pipeline-templates.read"
+  },
+  {
+    "path": "/pipelines",
+    "method": "GET",
+    "handler": "pipelines::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(mut raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipelines.delete",
+      "pipelines.read"
+    ],
+    "permission": "pipelines.read"
+  },
+  {
+    "path": "/pipelines",
+    "method": "POST",
+    "handler": "pipelines::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    message: Option<String>,\n    #[serde(default)]\n    group_id: Option<String>,\n    #[serde(default)]\n    application_id: Option<String>,\n    #[serde(default)]\n    tag_ids: Option<Vec<Id>>,\n    #[serde(default)]\n    environment_ids: Option<Vec<Id>>,\n    definition: String,\n    #[serde(default)]\n    definition_format: String,\n    #[serde(default)]\n    executor_bindings: Vec<crate::pipelines::actions::Binding>,\n    #[serde(default)]\n    checkout_bindings: Vec<crate::pipelines::actions::CheckoutBinding>,\n    #[serde(default)]\n    graph_layout: Value,\n    #[serde(default)]\n    repository_id: String,\n    #[serde(default)]\n    repository_selection: Option<crate::repositories::Body>,\n    #[serde(default)]\n    target_kind: String,\n    #[serde(default)]\n    target_ref: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "pipelines.create"
+    ]
+  },
+  {
+    "path": "/pipelines/{id}",
+    "method": "DELETE",
+    "handler": "pipelines::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "pipelines.delete"
+    ]
+  },
+  {
+    "path": "/pipelines/{id}",
+    "method": "GET",
+    "handler": "pipelines::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipelines.delete",
+      "pipelines.read"
+    ]
+  },
+  {
+    "path": "/pipelines/{id}",
+    "method": "PATCH",
+    "handler": "pipelines::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(mut body): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    message: Option<String>,\n    #[serde(default)]\n    group_id: Option<String>,\n    #[serde(default)]\n    application_id: Option<String>,\n    #[serde(default)]\n    tag_ids: Option<Vec<Id>>,\n    #[serde(default)]\n    environment_ids: Option<Vec<Id>>,\n    definition: String,\n    #[serde(default)]\n    definition_format: String,\n    #[serde(default)]\n    executor_bindings: Vec<crate::pipelines::actions::Binding>,\n    #[serde(default)]\n    checkout_bindings: Vec<crate::pipelines::actions::CheckoutBinding>,\n    #[serde(default)]\n    graph_layout: Value,\n    #[serde(default)]\n    repository_id: String,\n    #[serde(default)]\n    repository_selection: Option<crate::repositories::Body>,\n    #[serde(default)]\n    target_kind: String,\n    #[serde(default)]\n    target_ref: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "pipelines.update"
+    ]
+  },
+  {
+    "path": "/pipelines/{id}/acl",
+    "method": "GET",
+    "handler": "definitions::access::pipeline::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n                Query(raw): Query<HashMap<String, String>>,\n            ) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": []
+  },
+  {
+    "path": "/pipelines/{id}/acl",
+    "method": "POST",
+    "handler": "definitions::access::pipeline::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n                Json(body): Json<Grant>,\n            ) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Grant {\n    user_id: Id,\n    role: String,\n}"
+    ],
+    "permission_checks": []
+  },
+  {
+    "path": "/pipelines/{id}/acl/{grant}",
+    "method": "DELETE",
+    "handler": "definitions::access::pipeline::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id, grant)): Path<(String, Id, Id)>,\n                Query(body): Query<Version>,\n            ) -> Result<StatusCode>",
+    "definitions": [
+      "struct Version {\n    version: i64,\n}"
+    ],
+    "permission_checks": []
+  },
+  {
+    "path": "/pipelines/{id}/owner-transfers",
+    "method": "POST",
+    "handler": "pipelines::transfer",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn transfer(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Transfer>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Transfer {\n    owner_id: Id,\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "pipelines.delete",
+      "pipelines.update"
+    ]
+  },
+  {
+    "path": "/pipelines/{id}/revisions",
+    "method": "GET",
+    "handler": "definitions::pipeline_list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn pipeline_list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipelines.read"
+    ]
+  },
+  {
+    "path": "/pipelines/{id}/revisions/{revision}",
+    "method": "GET",
+    "handler": "definitions::pipeline_get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn pipeline_get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, revision)): Path<(String, String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "pipelines.read"
+    ]
+  },
+  {
+    "path": "/pipelines/{id}/runs",
+    "method": "POST",
+    "handler": "pipelines::runs::trigger",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn trigger(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    body: Bytes,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [],
+    "permission_checks": []
+  },
+  {
+    "path": "/preferences",
+    "method": "GET",
+    "handler": "maintenance::preferences",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn preferences(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [],
+    "documentation": "Safe presentation preferences are available to every workspace member."
+  },
+  {
+    "path": "/repositories",
+    "method": "GET",
+    "handler": "repositories::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.read"
+    ],
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/repositories",
+    "method": "POST",
+    "handler": "repositories::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    provider: String,\n    #[serde(default)]\n    inline_credential: Option<InlineCredential>,\n    url: String,\n    #[serde(default)]\n    default_branch: String,\n    #[serde(default)]\n    credential_id: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n}",
+      "struct InlineCredential {\n    kind: String,\n    #[serde(default)]\n    username: String,\n    secret: String,\n}"
+    ],
+    "permission_checks": [
+      "repositories.create"
+    ]
+  },
+  {
+    "path": "/repositories/{id}",
+    "method": "DELETE",
+    "handler": "repositories::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.delete"
+    ]
+  },
+  {
+    "path": "/repositories/{id}",
+    "method": "GET",
+    "handler": "repositories::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.read"
+    ]
+  },
+  {
+    "path": "/repositories/{id}",
+    "method": "PATCH",
+    "handler": "repositories::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(mut body): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    provider: String,\n    #[serde(default)]\n    inline_credential: Option<InlineCredential>,\n    url: String,\n    #[serde(default)]\n    default_branch: String,\n    #[serde(default)]\n    credential_id: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n}",
+      "struct InlineCredential {\n    kind: String,\n    #[serde(default)]\n    username: String,\n    secret: String,\n}"
+    ],
+    "permission_checks": [
+      "repositories.update"
+    ]
+  },
+  {
+    "path": "/repository-events",
+    "method": "GET",
+    "handler": "repositories::monitor::workspace_history",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn workspace_history(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.read",
+      "repositories.update"
+    ],
+    "documentation": "Events of every connection accessible to the caller in this workspace, newest first.",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/repository-events/{id}",
+    "method": "GET",
+    "handler": "repositories::monitor::event",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn event(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "repositories.read"
+    ],
+    "documentation": "One event with its detail flattened for the shared detail page.",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/repository-providers",
+    "method": "GET",
+    "handler": "repositories::auth::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "credentials.read"
+    ],
+    "permission": "credentials.read"
+  },
+  {
+    "path": "/repository-providers/{provider}/authorizations",
+    "method": "POST",
+    "handler": "repositories::auth::start",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn start(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, kind)): Path<(String, String)>,\n    Query(options): Query<StartOptions>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct StartOptions {\n    #[serde(default)]\n    popup: bool,\n    #[serde(default)]\n    channel: String,\n    #[serde(default)]\n    name: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    connection_id: String,\n}"
+    ],
+    "permission_checks": [
+      "credentials.create",
+      "repositories.create",
+      "repositories.update"
+    ],
+    "permission": "credentials.create"
+  },
+  {
+    "path": "/repository-providers/{provider}/connections",
+    "method": "POST",
+    "handler": "repositories::auth::connect_token",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn connect_token(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, kind)): Path<(String, String)>,\n    Json(body): Json<TokenConnect>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "credentials.create",
+      "repositories.create"
+    ],
+    "permission": "credentials.create"
+  },
+  {
+    "path": "/repository-providers/{provider}/repositories",
+    "method": "GET",
+    "handler": "repositories::auth::browse_repositories",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn browse_repositories(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, kind)): Path<(String, String)>,\n    Query(page): Query<RepositoryPage>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct RepositoryPage {\n    #[serde(default = \"first_page\")]\n    page: u32,\n}"
+    ],
+    "permission_checks": [
+      "credentials.read",
+      "repositories.create"
+    ],
+    "permission": "credentials.read"
+  },
+  {
+    "path": "/roles",
+    "method": "GET",
+    "handler": "accounts::workspace_admin::roles",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn roles(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "roles.read"
+    ],
+    "permission": "roles.read"
+  },
+  {
+    "path": "/roles",
+    "method": "POST",
+    "handler": "accounts::workspace_admin::create_role",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create_role(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<RoleBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct RoleBody {\n    name: String,\n    permissions: Vec<String>,\n    version: Option<i64>,\n}"
+    ],
+    "permission_checks": [
+      "roles.create"
+    ]
+  },
+  {
+    "path": "/roles/{id}",
+    "method": "DELETE",
+    "handler": "accounts::workspace_admin::delete_role",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete_role(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "roles.delete"
+    ]
+  },
+  {
+    "path": "/roles/{id}",
+    "method": "GET",
+    "handler": "accounts::workspace_admin::get_role",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get_role(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "roles.read"
+    ],
+    "permission": "roles.read"
+  },
+  {
+    "path": "/roles/{id}",
+    "method": "PATCH",
+    "handler": "accounts::workspace_admin::update_role",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update_role(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<RoleBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct RoleBody {\n    name: String,\n    permissions: Vec<String>,\n    version: Option<i64>,\n}"
+    ],
+    "permission_checks": [
+      "roles.update"
+    ]
+  },
+  {
+    "path": "/runner-tokens",
+    "method": "POST",
+    "handler": "hosts::runner::create_token",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create_token(\n    State(s): State<AppState>,\n    scope: Scope,\n    headers: HeaderMap,\n    Json(body): Json<TokenBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct TokenBody {\n    /// Bind the token to a host the operator already created. Empty means the\n    /// runner's own hostname becomes a new host row when it enrols.\n    #[serde(default)]\n    host_id: String,\n    #[serde(default)]\n    ttl_minutes: i64,\n}"
+    ],
+    "permission_checks": [
+      "hosts.enroll"
+    ],
+    "documentation": "`POST .../runner-tokens` — mints the token that goes in the one command the\noperator runs on the host.",
+    "permission": "hosts.enroll"
+  },
+  {
+    "path": "/runner-tokens/{id}",
+    "method": "GET",
+    "handler": "hosts::runner::token_status",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn token_status(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_workspace, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "hosts.enroll"
+    ],
+    "permission": "hosts.enroll"
+  },
+  {
+    "path": "/settings",
+    "method": "GET",
+    "handler": "maintenance::list_settings",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list_settings(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "settings.read"
+    ],
+    "permission": "settings.read"
+  },
+  {
+    "path": "/settings",
+    "method": "POST",
+    "handler": "maintenance::create_setting",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create_setting(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<SettingBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct SettingBody {\n    #[serde(default)]\n    value: Option<i64>,\n    #[serde(default)]\n    version: i64,\n    #[serde(default)]\n    key: Option<String>,\n    #[serde(default)]\n    name: Option<String>,\n    #[serde(default)]\n    description: Option<String>,\n    #[serde(default)]\n    category: Option<String>,\n    #[serde(default)]\n    value_type: Option<String>,\n    #[serde(default)]\n    value_json: Option<String>,\n    #[serde(default)]\n    schema_json: Option<String>,\n}"
+    ],
+    "permission_checks": [
+      "settings.create"
+    ]
+  },
+  {
+    "path": "/settings/categories",
+    "method": "GET",
+    "handler": "maintenance::setting_categories",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn setting_categories(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "settings.read"
+    ],
+    "permission": "settings.read"
+  },
+  {
+    "path": "/settings/{id}",
+    "method": "DELETE",
+    "handler": "maintenance::delete_setting",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete_setting(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "settings.delete"
+    ],
+    "permission": "settings.delete"
+  },
+  {
+    "path": "/settings/{id}",
+    "method": "GET",
+    "handler": "maintenance::get_setting",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get_setting(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "settings.read"
+    ],
+    "permission": "settings.read"
+  },
+  {
+    "path": "/settings/{id}",
+    "method": "PATCH",
+    "handler": "maintenance::update_setting",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update_setting(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<SettingBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct SettingBody {\n    #[serde(default)]\n    value: Option<i64>,\n    #[serde(default)]\n    version: i64,\n    #[serde(default)]\n    key: Option<String>,\n    #[serde(default)]\n    name: Option<String>,\n    #[serde(default)]\n    description: Option<String>,\n    #[serde(default)]\n    category: Option<String>,\n    #[serde(default)]\n    value_type: Option<String>,\n    #[serde(default)]\n    value_json: Option<String>,\n    #[serde(default)]\n    schema_json: Option<String>,\n}"
+    ],
+    "permission_checks": [
+      "settings.update"
+    ],
+    "permission": "settings.update"
+  },
+  {
+    "path": "/tags",
+    "method": "GET",
+    "handler": "hosts::list_tags",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list_tags(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "tags.read"
+    ],
+    "permission": "tags.read"
+  },
+  {
+    "path": "/tags",
+    "method": "POST",
+    "handler": "hosts::create_tag",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create_tag(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<TagBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct TagBody {\n    name: String,\n    #[serde(default)]\n    color: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "tags.create"
+    ]
+  },
+  {
+    "path": "/tags/{id}",
+    "method": "DELETE",
+    "handler": "hosts::delete_tag",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn delete_tag(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "tags.delete"
+    ]
+  },
+  {
+    "path": "/tags/{id}",
+    "method": "GET",
+    "handler": "hosts::get_tag",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get_tag(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "tags.read"
+    ]
+  },
+  {
+    "path": "/tags/{id}",
+    "method": "PATCH",
+    "handler": "hosts::update_tag",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update_tag(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(body): Json<TagBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct TagBody {\n    name: String,\n    #[serde(default)]\n    color: String,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "tags.update"
+    ]
+  },
+  {
+    "path": "/value-files",
+    "method": "POST",
+    "handler": "upload",
+    "source": "crates/server/src/maintenance/files.rs",
+    "signature": "async fn upload(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(query): Query<UploadQuery>,\n    mut multipart: Multipart,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct UploadQuery {\n    resource: String,\n}"
+    ],
+    "permission_checks": []
+  },
+  {
+    "path": "/value-files/{id}",
+    "method": "GET",
+    "handler": "download",
+    "source": "crates/server/src/maintenance/files.rs",
+    "signature": "async fn download(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Response>",
+    "definitions": [],
+    "permission_checks": []
+  },
+  {
+    "path": "/variables",
+    "method": "GET",
+    "handler": "variables::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(mut raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "variables.delete",
+      "variables.read"
+    ],
+    "permission": "variables.read"
+  },
+  {
+    "path": "/variables",
+    "method": "POST",
+    "handler": "variables::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    scope: Option<String>,\n    scope_ref: Option<String>,\n    kind: Option<String>,\n    #[serde(default)]\n    description: String,\n    value: Option<String>,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "variables.create"
+    ]
+  },
+  {
+    "path": "/variables/{id}",
+    "method": "DELETE",
+    "handler": "variables::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "variables.delete",
+      "variables.read"
+    ],
+    "permission": "variables.delete"
+  },
+  {
+    "path": "/variables/{id}",
+    "method": "GET",
+    "handler": "variables::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "variables.read"
+    ],
+    "permission": "variables.read"
+  },
+  {
+    "path": "/variables/{id}",
+    "method": "PATCH",
+    "handler": "variables::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(body): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    scope: Option<String>,\n    scope_ref: Option<String>,\n    kind: Option<String>,\n    #[serde(default)]\n    description: String,\n    value: Option<String>,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "variables.update"
+    ],
+    "permission": "variables.update"
+  },
+  {
+    "path": "/variables/{id}/disclosures",
+    "method": "POST",
+    "handler": "variables::reveal",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn reveal(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n) -> Result<([(header::HeaderName, &'static str); 1], Json<Value>)>",
+    "definitions": [],
+    "permission_checks": [
+      "variables.reveal"
+    ],
+    "permission": "variables.reveal"
+  },
+  {
+    "path": "/workflow-executions/{id}",
+    "method": "GET",
+    "handler": "workflows::run::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.read"
+    ],
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflow-executions/{id}/cancellations",
+    "method": "POST",
+    "handler": "workflows::run::cancel",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn cancel(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.run"
+    ],
+    "permission": "workflows.run"
+  },
+  {
+    "path": "/workflow-executions/{id}/node-runs",
+    "method": "GET",
+    "handler": "workflows::run::node_runs",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn node_runs(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.read"
+    ],
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflow-executions/{id}/node-runs/{node}/data",
+    "method": "GET",
+    "handler": "workflows::run::node_data",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn node_data(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, node)): Path<(String, Id, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.read"
+    ],
+    "documentation": "Inspect frozen inputs and resolved parameters without running any node again.",
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflow-executions/{id}/node-runs/{node}/output",
+    "method": "GET",
+    "handler": "workflows::run::node_output",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn node_output(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, node)): Path<(String, Id, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.read"
+    ],
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflow-groups",
+    "method": "GET",
+    "handler": "pipelines::contexts::workflow_groups::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n                State(s): State<AppState>,\n                scope: Scope,\n                Query(raw): Query<HashMap<String, String>>,\n            ) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflow-groups.read"
+    ],
+    "permission": "workflow-groups.read"
+  },
+  {
+    "path": "/workflow-groups",
+    "method": "POST",
+    "handler": "pipelines::contexts::workflow_groups::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n                State(s): State<AppState>,\n                scope: Scope,\n                Json(body): Json<Body>,\n            ) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    target_kind: String,\n    #[serde(default)]\n    target_ref: String,\n    /// Environments: jobs that declare this environment wait for approval.\n    #[serde(default)]\n    requires_approval: bool,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "workflow-groups.create"
+    ]
+  },
+  {
+    "path": "/workflow-groups/{id}",
+    "method": "DELETE",
+    "handler": "pipelines::contexts::workflow_groups::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n            ) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "workflow-groups.delete"
+    ],
+    "permission": "workflow-groups.delete"
+  },
+  {
+    "path": "/workflow-groups/{id}",
+    "method": "GET",
+    "handler": "pipelines::contexts::workflow_groups::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n            ) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflow-groups.read"
+    ],
+    "permission": "workflow-groups.read"
+  },
+  {
+    "path": "/workflow-groups/{id}",
+    "method": "PATCH",
+    "handler": "pipelines::contexts::workflow_groups::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n                Json(body): Json<Body>,\n            ) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    target_kind: String,\n    #[serde(default)]\n    target_ref: String,\n    /// Environments: jobs that declare this environment wait for approval.\n    #[serde(default)]\n    requires_approval: bool,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "workflow-groups.update"
+    ],
+    "permission": "workflow-groups.update"
+  },
+  {
+    "path": "/workflow-groups/{id}/acl",
+    "method": "GET",
+    "handler": "definitions::access::groups::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n                Query(raw): Query<HashMap<String, String>>,\n            ) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": []
+  },
+  {
+    "path": "/workflow-groups/{id}/acl",
+    "method": "POST",
+    "handler": "definitions::access::groups::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n                Json(body): Json<Grant>,\n            ) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Grant {\n    user_id: Id,\n    role: String,\n}"
+    ],
+    "permission_checks": []
+  },
+  {
+    "path": "/workflow-groups/{id}/acl/{grant}",
+    "method": "DELETE",
+    "handler": "definitions::access::groups::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id, grant)): Path<(String, Id, Id)>,\n                Query(body): Query<Version>,\n            ) -> Result<StatusCode>",
+    "definitions": [
+      "struct Version {\n    version: i64,\n}"
+    ],
+    "permission_checks": []
+  },
+  {
+    "path": "/workflow-integration-options",
+    "method": "POST",
+    "handler": "options",
+    "source": "crates/server/src/workflows/integration.rs",
+    "signature": "async fn options(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path(_): Path<String>,\n    Json(body): Json<Options>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Options {\n    node_type: String,\n    credential_id: Id,\n}"
+    ],
+    "permission_checks": [
+      "credentials.use",
+      "workflows.read"
+    ],
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflow-node-catalog",
+    "method": "GET",
+    "handler": "node_catalog",
+    "source": "crates/server/src/workflows/integration.rs",
+    "signature": "async fn node_catalog(scope: Scope, Path(_): Path<String>) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": []
+  },
+  {
+    "path": "/workflows",
+    "method": "GET",
+    "handler": "workflows::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.read"
+    ],
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflows",
+    "method": "POST",
+    "handler": "workflows::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: Option<String>,\n    group_id: Option<String>,\n    description: Option<String>,\n    definition: Option<String>,\n    message: Option<String>,\n    lifecycle: Option<String>,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "workflows.create"
+    ],
+    "permission": "workflows.create"
+  },
+  {
+    "path": "/workflows/{id}",
+    "method": "DELETE",
+    "handler": "workflows::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Query(body): Query<Version>,\n) -> Result<StatusCode>",
+    "definitions": [
+      "struct Version {\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "workflows.delete"
+    ]
+  },
+  {
+    "path": "/workflows/{id}",
+    "method": "GET",
+    "handler": "workflows::get",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn get(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.read"
+    ],
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflows/{id}",
+    "method": "PATCH",
+    "handler": "workflows::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: Option<String>,\n    group_id: Option<String>,\n    description: Option<String>,\n    definition: Option<String>,\n    message: Option<String>,\n    lifecycle: Option<String>,\n    #[serde(default)]\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "workflows.update"
+    ],
+    "permission": "workflows.update"
+  },
+  {
+    "path": "/workflows/{id}/acl",
+    "method": "GET",
+    "handler": "definitions::access::workflow::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n                Query(raw): Query<HashMap<String, String>>,\n            ) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": []
+  },
+  {
+    "path": "/workflows/{id}/acl",
+    "method": "POST",
+    "handler": "definitions::access::workflow::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id)): Path<(String, Id)>,\n                Json(body): Json<Grant>,\n            ) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Grant {\n    user_id: Id,\n    role: String,\n}"
+    ],
+    "permission_checks": []
+  },
+  {
+    "path": "/workflows/{id}/acl/{grant}",
+    "method": "DELETE",
+    "handler": "definitions::access::workflow::remove",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn remove(\n                State(s): State<AppState>,\n                scope: Scope,\n                Path((_, id, grant)): Path<(String, Id, Id)>,\n                Query(body): Query<Version>,\n            ) -> Result<StatusCode>",
+    "definitions": [
+      "struct Version {\n    version: i64,\n}"
+    ],
+    "permission_checks": []
+  },
+  {
+    "path": "/workflows/{id}/assets",
+    "method": "POST",
+    "handler": "upload",
+    "source": "crates/server/src/workflows/media.rs",
+    "signature": "async fn upload(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, workflow)): Path<(String, Id)>,\n    mut multipart: Multipart,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.update"
+    ],
+    "permission": "workflows.update"
+  },
+  {
+    "path": "/workflows/{id}/assets/{hash}",
+    "method": "GET",
+    "handler": "download",
+    "source": "crates/server/src/workflows/media.rs",
+    "signature": "async fn download(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, workflow, hash)): Path<(String, Id, String)>,\n    headers: HeaderMap,\n) -> Result<Response>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.read"
+    ],
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflows/{id}/executions",
+    "method": "GET",
+    "handler": "workflows::run::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Query(raw): Query<std::collections::HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.read"
+    ]
+  },
+  {
+    "path": "/workflows/{id}/executions",
+    "method": "POST",
+    "handler": "workflows::run::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Request>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Request {\n    mode: Mode,\n    revision: Revision,\n    version: i64,\n    entry_node_id: String,\n    #[serde(default)]\n    inputs: Map<String, Value>,\n}",
+      "enum Mode {\n    Manual,\n}",
+      "enum Revision {\n    Draft,\n    Published,\n}"
+    ],
+    "permission_checks": [
+      "workflows.run"
+    ],
+    "permission": "workflows.run"
+  },
+  {
+    "path": "/workflows/{id}/expression-previews",
+    "method": "POST",
+    "handler": "workflows::preview",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn preview(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Preview>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Preview {\n    version: i64,\n    node_path: String,\n    /// Optional unsaved parameter edits; never persisted by this operation.\n    params: Option<Value>,\n    data: ferry_protocol::sandbox::InputData,\n    selections: Vec<Option<usize>>,\n}"
+    ],
+    "permission_checks": [
+      "workflows.update"
+    ],
+    "documentation": "Pure editor preview over caller-supplied samples. No node executor, asset\ndownloader or credential client is invoked, and no revision/run is created.",
+    "permission": "workflows.update"
+  },
+  {
+    "path": "/workflows/{id}/owner-transfers",
+    "method": "POST",
+    "handler": "workflows::transfer",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn transfer(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Transfer>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Transfer {\n    owner_id: Id,\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "workflows.update"
+    ],
+    "permission": "workflows.update"
+  },
+  {
+    "path": "/workflows/{id}/publications",
+    "method": "GET",
+    "handler": "workflows::publication::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.read"
+    ]
+  },
+  {
+    "path": "/workflows/{id}/publications",
+    "method": "POST",
+    "handler": "workflows::publication::create",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Publish>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Publish {\n    version: i64,\n    revision_id: Id,\n    name: String,\n    change_note: Option<String>,\n    request_key: Option<String>,\n    previous_run_as: Option<Id>,\n}"
+    ],
+    "permission_checks": [
+      "workflows.run",
+      "workflows.update"
+    ],
+    "permission": "workflows.update"
+  },
+  {
+    "path": "/workflows/{id}/revisions",
+    "method": "GET",
+    "handler": "workflows::revisions",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn revisions(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.read"
+    ],
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflows/{id}/revisions/{revision}",
+    "method": "GET",
+    "handler": "workflows::revision",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn revision(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, revision)): Path<(String, Id, String)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "workflows.read"
+    ],
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflows/{id}/unpublication",
+    "method": "POST",
+    "handler": "workflows::publication::unpublish",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn unpublish(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Unpublish>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Unpublish {\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "workflows.update"
+    ]
+  }
+]

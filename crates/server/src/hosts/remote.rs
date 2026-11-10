@@ -37,6 +37,96 @@ pub struct PathQuery {
     show_hidden: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandRequest {
+    command: String,
+    timeout_seconds: u64,
+}
+
+/// Non-interactive counterpart of the terminal, sharing its permission and host channel.
+pub async fn execute_command(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, Id)>,
+    Json(body): Json<CommandRequest>,
+) -> Result<Json<Value>> {
+    scope.require("hosts.terminal")?;
+    if body.command.trim().is_empty()
+        || body.command.len() > 64 * 1024
+        || body.command.contains('\0')
+        || !(1..=300).contains(&body.timeout_seconds)
+    {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("request.jsonData"),
+        ));
+    }
+    let channel = open(&s, &scope.workspace_id, &id).await?;
+    // The approval contains the command; persistent host audit records metadata only.
+    crate::hosts::activity(
+        &s,
+        &scope,
+        "command-start",
+        "hosts",
+        &id,
+        json!({"timeout_seconds":body.timeout_seconds}),
+    )
+    .await?;
+    let (output, mut receiver) = tokio::sync::mpsc::channel(16);
+    let (cancel, cancelled) = tokio::sync::watch::channel(false);
+    struct Cancel(tokio::sync::watch::Sender<bool>);
+    impl Drop for Cancel {
+        fn drop(&mut self) {
+            self.0.send_replace(true);
+        }
+    }
+    let guard = Cancel(cancel);
+    let execution = channel.exec_stream(
+        &body.command,
+        Duration::from_secs(body.timeout_seconds),
+        output,
+        cancelled,
+    );
+    tokio::pin!(execution);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut truncated = false;
+    let code = loop {
+        tokio::select! {
+            result=&mut execution=>break result?,
+            Some((stream,bytes))=receiver.recv()=>{
+                let remaining=(128*1024usize).saturating_sub(stdout.len()+stderr.len());
+                let count=remaining.min(bytes.len());
+                if stream=="stderr" {stderr.extend_from_slice(&bytes[..count]);} else {stdout.extend_from_slice(&bytes[..count]);}
+                if count<bytes.len() {truncated=true;guard.0.send_replace(true);}
+            }
+        }
+    };
+    while let Ok((stream, bytes)) = receiver.try_recv() {
+        let remaining = (128 * 1024usize).saturating_sub(stdout.len() + stderr.len());
+        let count = remaining.min(bytes.len());
+        if stream == "stderr" {
+            stderr.extend_from_slice(&bytes[..count]);
+        } else {
+            stdout.extend_from_slice(&bytes[..count]);
+        }
+        truncated |= count < bytes.len();
+    }
+    crate::hosts::activity(
+        &s,
+        &scope,
+        "command-finish",
+        "hosts",
+        &id,
+        json!({"code":code,"truncated":truncated}),
+    )
+    .await?;
+    Ok(Json(
+        json!({"code":code,"stdout":String::from_utf8_lossy(&stdout),"stderr":String::from_utf8_lossy(&stderr),"truncated":truncated}),
+    ))
+}
+
 /// Discover mounted filesystems through the existing host channel.
 pub async fn file_systems(
     State(s): State<AppState>,
@@ -433,6 +523,116 @@ pub async fn upload(
     )
     .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PermissionsBody {
+    path: String,
+    mode: u32,
+}
+/// POSIX rwx only, non-recursive and without elevation. Existing special bits remain intact.
+pub async fn set_file_permissions(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, Id)>,
+    Json(body): Json<PermissionsBody>,
+) -> Result<Json<Value>> {
+    scope.require("hosts.files")?;
+    let path = channel::check_path(&body.path)?;
+    if body.mode > 0o777 {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("files.permissionInvalid"),
+        ));
+    }
+    let host = hosts::Entity::find_by_id(id)
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    if host.os.eq_ignore_ascii_case("windows")
+        || path.as_bytes().get(1) == Some(&b':')
+        || path.starts_with("\\\\")
+    {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("files.permissionUnsupported"),
+        ));
+    }
+    let (parent, name) = path
+        .rsplit_once('/')
+        .filter(|(_, name)| !name.is_empty())
+        .ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("files.permissionInvalid"),
+            )
+        })?;
+    let parent = if parent.is_empty() { "/" } else { parent };
+    let channel = open(&s, &scope.workspace_id, &id).await?;
+    let before = channel
+        .list_dir(parent)
+        .await?
+        .into_iter()
+        .find(|e| e.name == name)
+        .ok_or_else(ApiError::missing)?;
+    if before.kind == "symlink" {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("files.permissionUnsupported"),
+        ));
+    }
+    let mode = (before.mode & 0o7000) | body.mode;
+    let command = permissions_command(path, mode);
+    let result = channel.exec(&command, Duration::from_secs(15)).await?;
+    if result.code != 0 {
+        return Err(ApiError::localized(
+            StatusCode::BAD_GATEWAY,
+            crate::i18n::Message::new("ssh.fileOperation")
+                .with("path", path)
+                .with(
+                    "error",
+                    result.stderr.chars().take(2048).collect::<String>(),
+                ),
+        ));
+    }
+    crate::hosts::activity(
+        &s,
+        &scope,
+        "file-permissions",
+        "hosts",
+        &id,
+        json!({"path":path,"before":before.mode&0o7777,"after":mode}),
+    )
+    .await?;
+    Ok(Json(json!({"mode":mode})))
+}
+
+fn permissions_command(path: &str, mode: u32) -> String {
+    format!("chmod {mode:o} -- '{}'", path.replace('\'', "'\\''"))
+}
+
+#[cfg(test)]
+mod permission_tests {
+    use super::*;
+
+    #[test]
+    fn permissions_quote_the_complete_literal_path() {
+        assert_eq!(
+            permissions_command("/tmp/a'b; $(id)", 0o6750),
+            "chmod 6750 -- '/tmp/a'\\''b; $(id)'"
+        );
+        assert!(
+            serde_json::from_value::<PermissionsBody>(json!({"path":"/tmp/a","mode":-1})).is_err()
+        );
+        assert!(
+            serde_json::from_value::<PermissionsBody>(
+                json!({"path":"/tmp/a","mode":420,"recursive":true})
+            )
+            .is_err()
+        );
+    }
 }
 
 pub async fn delete_file(

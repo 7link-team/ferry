@@ -2,6 +2,7 @@ mod accounts;
 mod agents;
 mod conversations;
 mod models;
+mod platform_tools;
 const DEFAULT_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 mod artifact_store;
 mod assets;
@@ -210,6 +211,15 @@ async fn main() -> anyhow::Result<()> {
     accounts::workspace::prepare_permissions(&s)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e.1))?;
+    repositories::monitor::prepare_channels(&s)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.1))?;
+    notifications::alerts::prepare_channels(&s)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.1))?;
+    notifications::center::prepare(&s)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.1))?;
     repositories::auth::recover(&s)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e.1))?;
@@ -297,6 +307,330 @@ async fn main() -> anyhow::Result<()> {
 
     // Workspace resources all sit under /api/workspaces/{workspace}/..., which
     // is what makes the Scope extractor the only way to obtain a workspace id.
+    let workspace_api = workspace_routes();
+
+    let draining = drain.subscribe();
+    let trusted_proxies = cfg
+        .trusted_proxies
+        .as_deref()
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::parse)
+        .collect::<Result<Vec<ipnet::IpNet>, _>>()?;
+    let app = Router::new()
+        .route("/api/status", get(status))
+        // A runner is not a browser: it proves itself with the protocol's Hello
+        // frame, so these two sit outside the session cookie.
+        .route("/api/runners/connect", get(hosts::runner::connect))
+        .route("/api/runners/install.sh", get(hosts::runner::install::shell))
+        .route("/api/runners/install.ps1", get(hosts::runner::install::powershell))
+        .route("/api/runners/install/{target}", get(hosts::runner::install::artifact))
+        .route("/api/runners/sessions/{session}", get(hosts::runner::session))
+        // Preview holes are public by token; see docs/preview-holes-design.md.
+        .route("/holes/{token}", any(holes::serve_root))
+        .route("/holes/{token}/", any(holes::serve))
+        .route("/holes/{token}/{*rest}", any(holes::serve))
+        .route("/api/permissions", get(accounts::workspace::permission_catalogue))
+        .route(
+            "/api/setup",
+            get(accounts::platform::status).post(accounts::platform::initialize),
+        )
+        .route("/api/platform/users", get(accounts::platform::list_users))
+        .route("/api/platform/footer", get(accounts::platform::footer))
+        .route(
+            "/api/platform/users/{id}",
+            get(accounts::platform::get_user).patch(accounts::platform::update_user),
+        )
+        .route(
+            "/api/platform/workspaces",
+            get(accounts::platform::list_workspaces).post(accounts::platform::create_workspace),
+        )
+        .route(
+            "/api/platform/workspaces/{id}",
+            get(accounts::platform::get_workspace).patch(accounts::platform::update_workspace),
+        )
+        .route(
+            "/api/platform/settings/1",
+            get(accounts::platform::get_settings).patch(accounts::platform::update_settings),
+        )
+        .route("/api/platform/server-nodes",get(accounts::platform::server_nodes))
+        .route("/api/platform/monitor/activity",get(accounts::platform::list_activity))
+        .route("/api/platform/monitor/database",get(platform_monitor::database::overview))
+        .route("/api/platform/monitor/database/sql/reset",post(platform_monitor::database::reset_sql))
+        .route("/api/platform/monitor/database/table",get(platform_monitor::database::table))
+        .route("/api/platform/monitor/database/tables",get(platform_monitor::database::tables))
+        .route("/api/platform/monitor/redis",get(platform_monitor::cache::overview))
+        .route("/api/platform/monitor/nats",get(platform_monitor::nats::overview))
+        .route("/api/platform/monitor/usage",get(platform_monitor::usage))
+        .route("/api/platform/monitor/files",get(platform_monitor::files))
+        .route("/api/platform/monitor/files/catalog",get(platform_monitor::catalog::list))
+        .route("/api/platform/monitor/files/catalog/{id}/content",get(platform_monitor::catalog::content))
+        .route("/api/monitor/pageview",post(platform_monitor::pageview))
+        .route("/api/users", post(accounts::auth::register))
+        .route("/api/registration-code", post(accounts::mail::request_code))
+        .route("/api/platform/mail-test", post(accounts::mail::test))
+        .route("/api/sessions", post(accounts::auth::login).delete(accounts::auth::logout))
+        .route("/api/sessions/challenge", post(accounts::login_guard::challenge))
+        .route("/api/sessions/challenge/verify", post(accounts::login_guard::verify))
+        .route("/api/sessions/otp", post(accounts::otp::login))
+        .route("/api/profile/otp", get(accounts::otp::status).delete(accounts::otp::disable))
+        .route("/api/profile/otp/enrollment", post(accounts::otp::enroll))
+        .route("/api/profile/otp/enrollment/confirm", post(accounts::otp::confirm))
+        .route("/api/profile/otp/recovery-codes", post(accounts::otp::regenerate))
+        .route("/api/me", get(accounts::auth::me))
+        .route("/api/me/preferences", get(accounts::preferences::read).patch(accounts::preferences::update))
+        .route(
+            "/api/profile/1",
+            get(accounts::auth::profile).patch(accounts::auth::update_profile),
+        )
+        .route("/api/repository-providers/callback",get(repositories::auth::complete))
+        .route("/api/repository-events/{id}",post(repositories::monitor::receive).layer(DefaultBodyLimit::max(1024 * 1024)))
+        .route("/api/workspaces", post(accounts::workspace::create))
+        .route("/api/workspace-memberships", post(accounts::workspace::join))
+        .nest("/api/workspaces", workspace_api)
+        .fallback(assets::serve_configured)
+        .layer(axum::Extension(accounts::auth::TrustedProxies(trusted_proxies)))
+        .layer(DefaultBodyLimit::max(256 * 1024))
+        .layer(middleware::from_fn(move |req: Request, next: Next| {
+            let access_state = access_state.clone();
+            let draining = draining.clone();
+            async move {
+                // Runner transport must remain available until all steps and cleanup finish.
+                if *draining.borrow() && !req.uri().path().starts_with("/api/runners/") {
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        i18n::message("server.draining"),
+                    )
+                        .into_response();
+                }
+                match holes::dispatch(&access_state, req).await {
+                    Ok(req) => guard(req, next).await,
+                    Err(response) => response,
+                }
+            }
+        }))
+        .layer(middleware::from_fn(i18n::middleware))
+        .layer(middleware::from_fn_with_state(s.clone(),platform_monitor::middleware))
+        .layer(TraceLayer::new_for_http().make_span_with(|request: &Request| tracing::debug_span!("http", method=%request.method(), path=%holes::redact(request.uri().path()))))
+        .with_state(s.clone());
+
+    tracing::info!(address=%listener.local_addr()?, "Ferry 服务已启动");
+    let (http_stop, http_rx) = tokio::sync::oneshot::channel();
+    let mut http_task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
+            let _ = http_rx.await;
+        })
+        .await
+    });
+    let early_result = tokio::select! {
+        result = &mut http_task => Some(result),
+        _ = shutdown() => {
+            let _ = cron_stop.send(true);
+            let _ = deployment_stop.send(true);
+            let _ = pipeline_stop.send(true);
+            let _ = workflow_stop.send(true);
+            None
+        }
+        _ = desktop_shutdown(cfg.desktop_control) => {
+            tracing::info!("桌面服务正在等待执行中的任务完成");
+            None
+        }
+    };
+    let _ = drain.send(true);
+    alerts_task.await?;
+    host_monitor_task.await?;
+    hole_monitor_task.await?;
+    runner_auto_update_task.await?;
+    repository_monitor_task.await?;
+    repository_analysis_task.await?;
+    recovery_task.await?;
+    cron_task.await?;
+    workflow_task.await?;
+    conversation_task.await?;
+    deployment_task.await?;
+    pipeline_task.await?;
+    let _ = cluster_stop.send(true);
+    if let Some(task) = cluster_task {
+        task.await?
+            .map_err(|error| anyhow::anyhow!("{}", error.1))?;
+    }
+    let _ = http_stop.send(());
+    let served = match early_result {
+        Some(result) => result?,
+        None => http_task.await?,
+    };
+    let _ = metrics_stop.send(true);
+    metrics_task.await?;
+    s.monitor.stop();
+    monitor_writer.await?;
+    let _ = heartbeat_stop.send(true);
+    let heartbeat_result = heartbeat_task.await;
+    let released = worker.release(&s.db).await;
+    let closed = s.db.clone().close().await;
+    served?;
+    heartbeat_result?;
+    released?;
+    closed?;
+    tracing::info!("服务已安全关闭");
+    drop(lock);
+    Ok(())
+}
+
+async fn status(
+    axum::extract::State(s): axum::extract::State<state::AppState>,
+) -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::json!({
+        "ok": true,
+        "version": env!("CARGO_PKG_VERSION"),
+        "protocol": ferry_protocol::VERSION,
+        "instance_id": s.instance_id,
+        "server_mode": s.server_mode,
+    }))
+}
+
+/// A stable identity for this installation, so runners and backups can tell
+/// one deployment's data from another's.
+fn instance_id(dir: &std::path::Path) -> anyhow::Result<String> {
+    let path = dir.join("instance-id");
+    match std::fs::read_to_string(&path) {
+        Ok(value) => Ok(uuid::Uuid::parse_str(value.trim())?.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            use std::io::Write;
+            let value = uuid::Uuid::new_v4().to_string();
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)?;
+            file.write_all(value.as_bytes())?;
+            file.sync_all()?;
+            Ok(value)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+async fn desktop_shutdown(enabled: bool) {
+    if !enabled {
+        std::future::pending::<()>().await;
+    }
+    // A dedicated thread avoids an uncancellable Tokio stdin read delaying runtime exit.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut byte = [0u8; 1];
+        while matches!(std::io::stdin().read(&mut byte), Ok(1..)) {}
+        let _ = tx.send(());
+    });
+    let _ = rx.await;
+}
+
+async fn shutdown() {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("install termination handler");
+        tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
+    }
+    #[cfg(not(unix))]
+    let _ = tokio::signal::ctrl_c().await;
+}
+
+/// Request-shape defences that belong in one place rather than per handler:
+/// a valid Host, a same-origin check, a header no cross-site form can set,
+/// and the response headers.
+async fn guard(req: Request, next: Next) -> Response {
+    let host = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
+    let hostname = host
+        .parse::<axum::http::uri::Authority>()
+        .map(|a| a.host().to_string())
+        .unwrap_or_default();
+    if hostname.is_empty() {
+        return (StatusCode::FORBIDDEN, i18n::message("guard.host")).into_response();
+    }
+    let mutating = !matches!(
+        *req.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS
+    );
+    // A cross-site form can issue a POST but cannot add a custom header, and
+    // cannot read the response. Cheaper and harder to get wrong than tokens.
+    let provider_event = req.method() == axum::http::Method::POST
+        && req
+            .uri()
+            .path()
+            .strip_prefix("/api/repository-events/")
+            .is_some_and(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()));
+    // Domain previews are dispatched before this console-only guard.
+    if mutating
+        && !provider_event
+        && req
+            .headers()
+            .get("x-ferry-request")
+            .and_then(|v| v.to_str().ok())
+            != Some("1")
+    {
+        return (StatusCode::FORBIDDEN, i18n::message("guard.request")).into_response();
+    }
+    if let Some(origin) = req
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        && origin != format!("http://{host}")
+        && origin != format!("https://{host}")
+    {
+        return (StatusCode::FORBIDDEN, i18n::message("guard.origin")).into_response();
+    }
+    let oauth_callback = req.uri().path() == "/api/repository-providers/callback";
+    let mut response = next.run(req).await;
+    let headers = response.headers_mut();
+    headers.insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
+    headers.insert(
+        header::REFERRER_POLICY,
+        if oauth_callback {
+            "no-referrer"
+        } else {
+            "same-origin"
+        }
+        .parse()
+        .unwrap(),
+    );
+    headers
+        .entry(header::CONTENT_SECURITY_POLICY)
+        .or_insert(DEFAULT_CSP.parse().unwrap());
+    headers
+        .entry(header::CACHE_CONTROL)
+        .or_insert("no-store".parse().unwrap());
+    response
+}
+
+/// Picks the way to reach a host. The only place that chooses, so a third kind
+/// of connection is one more arm here and no change to any caller.
+pub async fn channel_open(
+    s: &state::AppState,
+    host: &hosts::remote::Host,
+) -> error::Result<Box<dyn hosts::channel::HostChannel>> {
+    match host.connection.as_str() {
+        "ssh" => hosts::ssh::open(s, host).await,
+        "runner" => hosts::runner::open(s, host).await,
+        _ => Err(error::ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            i18n::Message::new("host.connectionUnknown"),
+        )),
+    }
+}
+
+/// Shared by authenticated HTTP and permission-scoped Agent tools.
+fn workspace_routes() -> Router<state::AppState> {
     let workspace_api = Router::new()
         .route(
             "/{workspace}/code-insights",
@@ -410,6 +744,42 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/{workspace}/marketplace/{id}/installations",
             post(marketplace::install),
+        )
+        .route(
+            "/{workspace}/notification-channels",
+            get(notifications::center::list).post(notifications::center::create),
+        )
+        .route(
+            "/{workspace}/notification-channels/{id}",
+            get(notifications::center::get)
+                .patch(notifications::center::update)
+                .delete(notifications::center::delete),
+        )
+        .route(
+            "/{workspace}/notification-templates",
+            get(notifications::center::list_templates).post(notifications::center::create_template),
+        )
+        .route(
+            "/{workspace}/notification-templates/{id}",
+            get(notifications::center::get_template)
+                .patch(notifications::center::update_template)
+                .delete(notifications::center::delete_template),
+        )
+        .route(
+            "/{workspace}/notification-deliveries",
+            get(notifications::center::list_deliveries),
+        )
+        .route(
+            "/{workspace}/notification-deliveries/{id}",
+            get(notifications::center::get_delivery),
+        )
+        .route(
+            "/{workspace}/notification-channels/{id}/previews",
+            post(notifications::center::preview),
+        )
+        .route(
+            "/{workspace}/notification-channels/{id}/deliveries",
+            post(notifications::center::send),
         )
         .route(
             "/{workspace}/alert-rules",
@@ -704,6 +1074,10 @@ async fn main() -> anyhow::Result<()> {
             get(hosts::remote::terminal),
         )
         .route(
+            "/{workspace}/nodes/{id}/commands",
+            post(hosts::remote::execute_command),
+        )
+        .route(
             "/{workspace}/nodes/{id}/files",
             get(hosts::remote::list_dir)
                 .post(hosts::remote::create_entry)
@@ -717,6 +1091,10 @@ async fn main() -> anyhow::Result<()> {
             get(hosts::remote::download)
                 .put(hosts::remote::upload)
                 .layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/{workspace}/nodes/{id}/files/permissions",
+            axum::routing::patch(hosts::remote::set_file_permissions),
         )
         .route(
             "/{workspace}/runner-tokens",
@@ -902,318 +1280,5 @@ async fn main() -> anyhow::Result<()> {
         .merge(workflows::ai::routes())
         .merge(workflows::integration::routes())
         .fallback(|| async { error::ApiError::missing() });
-
-    let draining = drain.subscribe();
-    let trusted_proxies = cfg
-        .trusted_proxies
-        .as_deref()
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::parse)
-        .collect::<Result<Vec<ipnet::IpNet>, _>>()?;
-    let app = Router::new()
-        .route("/api/status", get(status))
-        // A runner is not a browser: it proves itself with the protocol's Hello
-        // frame, so these two sit outside the session cookie.
-        .route("/api/runners/connect", get(hosts::runner::connect))
-        .route("/api/runners/install.sh", get(hosts::runner::install::shell))
-        .route("/api/runners/install.ps1", get(hosts::runner::install::powershell))
-        .route("/api/runners/install/{target}", get(hosts::runner::install::artifact))
-        .route("/api/runners/sessions/{session}", get(hosts::runner::session))
-        // Preview holes are public by token; see docs/preview-holes-design.md.
-        .route("/holes/{token}", any(holes::serve_root))
-        .route("/holes/{token}/", any(holes::serve))
-        .route("/holes/{token}/{*rest}", any(holes::serve))
-        .route("/api/permissions", get(accounts::workspace::permission_catalogue))
-        .route(
-            "/api/setup",
-            get(accounts::platform::status).post(accounts::platform::initialize),
-        )
-        .route("/api/platform/users", get(accounts::platform::list_users))
-        .route("/api/platform/footer", get(accounts::platform::footer))
-        .route(
-            "/api/platform/users/{id}",
-            get(accounts::platform::get_user).patch(accounts::platform::update_user),
-        )
-        .route(
-            "/api/platform/workspaces",
-            get(accounts::platform::list_workspaces).post(accounts::platform::create_workspace),
-        )
-        .route(
-            "/api/platform/workspaces/{id}",
-            get(accounts::platform::get_workspace).patch(accounts::platform::update_workspace),
-        )
-        .route(
-            "/api/platform/settings/1",
-            get(accounts::platform::get_settings).patch(accounts::platform::update_settings),
-        )
-        .route("/api/platform/server-nodes",get(accounts::platform::server_nodes))
-        .route("/api/platform/monitor/activity",get(accounts::platform::list_activity))
-        .route("/api/platform/monitor/database",get(platform_monitor::database::overview))
-        .route("/api/platform/monitor/database/sql/reset",post(platform_monitor::database::reset_sql))
-        .route("/api/platform/monitor/database/table",get(platform_monitor::database::table))
-        .route("/api/platform/monitor/database/tables",get(platform_monitor::database::tables))
-        .route("/api/platform/monitor/redis",get(platform_monitor::cache::overview))
-        .route("/api/platform/monitor/nats",get(platform_monitor::nats::overview))
-        .route("/api/platform/monitor/usage",get(platform_monitor::usage))
-        .route("/api/platform/monitor/files",get(platform_monitor::files))
-        .route("/api/platform/monitor/files/catalog",get(platform_monitor::catalog::list))
-        .route("/api/platform/monitor/files/catalog/{id}/content",get(platform_monitor::catalog::content))
-        .route("/api/monitor/pageview",post(platform_monitor::pageview))
-        .route("/api/users", post(accounts::auth::register))
-        .route("/api/registration-code", post(accounts::mail::request_code))
-        .route("/api/platform/mail-test", post(accounts::mail::test))
-        .route("/api/sessions", post(accounts::auth::login).delete(accounts::auth::logout))
-        .route("/api/sessions/challenge", post(accounts::login_guard::challenge))
-        .route("/api/sessions/challenge/verify", post(accounts::login_guard::verify))
-        .route("/api/me", get(accounts::auth::me))
-        .route("/api/me/preferences", get(accounts::preferences::read).patch(accounts::preferences::update))
-        .route(
-            "/api/profile/1",
-            get(accounts::auth::profile).patch(accounts::auth::update_profile),
-        )
-        .route("/api/repository-providers/callback",get(repositories::auth::complete))
-        .route("/api/repository-events/{id}",post(repositories::monitor::receive).layer(DefaultBodyLimit::max(1024 * 1024)))
-        .route("/api/workspaces", post(accounts::workspace::create))
-        .route("/api/workspace-memberships", post(accounts::workspace::join))
-        .nest("/api/workspaces", workspace_api)
-        .fallback(assets::serve_configured)
-        .layer(axum::Extension(accounts::auth::TrustedProxies(trusted_proxies)))
-        .layer(DefaultBodyLimit::max(256 * 1024))
-        .layer(middleware::from_fn(move |req: Request, next: Next| {
-            let access_state = access_state.clone();
-            let draining = draining.clone();
-            async move {
-                // Runner transport must remain available until all steps and cleanup finish.
-                if *draining.borrow() && !req.uri().path().starts_with("/api/runners/") {
-                    return (
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        i18n::message("server.draining"),
-                    )
-                        .into_response();
-                }
-                match holes::dispatch(&access_state, req).await {
-                    Ok(req) => guard(req, next).await,
-                    Err(response) => response,
-                }
-            }
-        }))
-        .layer(middleware::from_fn(i18n::middleware))
-        .layer(middleware::from_fn_with_state(s.clone(),platform_monitor::middleware))
-        .layer(TraceLayer::new_for_http().make_span_with(|request: &Request| tracing::debug_span!("http", method=%request.method(), path=%holes::redact(request.uri().path()))))
-        .with_state(s.clone());
-
-    tracing::info!(address=%listener.local_addr()?, "Ferry 服务已启动");
-    let (http_stop, http_rx) = tokio::sync::oneshot::channel();
-    let mut http_task = tokio::spawn(async move {
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .with_graceful_shutdown(async {
-            let _ = http_rx.await;
-        })
-        .await
-    });
-    let early_result = tokio::select! {
-        result = &mut http_task => Some(result),
-        _ = shutdown() => {
-            let _ = cron_stop.send(true);
-            let _ = deployment_stop.send(true);
-            let _ = pipeline_stop.send(true);
-            let _ = workflow_stop.send(true);
-            None
-        }
-        _ = desktop_shutdown(cfg.desktop_control) => {
-            tracing::info!("桌面服务正在等待执行中的任务完成");
-            None
-        }
-    };
-    let _ = drain.send(true);
-    alerts_task.await?;
-    host_monitor_task.await?;
-    hole_monitor_task.await?;
-    runner_auto_update_task.await?;
-    repository_monitor_task.await?;
-    repository_analysis_task.await?;
-    recovery_task.await?;
-    cron_task.await?;
-    workflow_task.await?;
-    conversation_task.await?;
-    deployment_task.await?;
-    pipeline_task.await?;
-    let _ = cluster_stop.send(true);
-    if let Some(task) = cluster_task {
-        task.await?
-            .map_err(|error| anyhow::anyhow!("{}", error.1))?;
-    }
-    let _ = http_stop.send(());
-    let served = match early_result {
-        Some(result) => result?,
-        None => http_task.await?,
-    };
-    let _ = metrics_stop.send(true);
-    metrics_task.await?;
-    s.monitor.stop();
-    monitor_writer.await?;
-    let _ = heartbeat_stop.send(true);
-    let heartbeat_result = heartbeat_task.await;
-    let released = worker.release(&s.db).await;
-    let closed = s.db.clone().close().await;
-    served?;
-    heartbeat_result?;
-    released?;
-    closed?;
-    tracing::info!("服务已安全关闭");
-    drop(lock);
-    Ok(())
-}
-
-async fn status(
-    axum::extract::State(s): axum::extract::State<state::AppState>,
-) -> axum::Json<serde_json::Value> {
-    axum::Json(serde_json::json!({
-        "ok": true,
-        "version": env!("CARGO_PKG_VERSION"),
-        "protocol": ferry_protocol::VERSION,
-        "instance_id": s.instance_id,
-        "server_mode": s.server_mode,
-    }))
-}
-
-/// A stable identity for this installation, so runners and backups can tell
-/// one deployment's data from another's.
-fn instance_id(dir: &std::path::Path) -> anyhow::Result<String> {
-    let path = dir.join("instance-id");
-    match std::fs::read_to_string(&path) {
-        Ok(value) => Ok(uuid::Uuid::parse_str(value.trim())?.to_string()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            use std::io::Write;
-            let value = uuid::Uuid::new_v4().to_string();
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)?;
-            file.write_all(value.as_bytes())?;
-            file.sync_all()?;
-            Ok(value)
-        }
-        Err(error) => Err(error.into()),
-    }
-}
-
-async fn desktop_shutdown(enabled: bool) {
-    if !enabled {
-        std::future::pending::<()>().await;
-    }
-    // A dedicated thread avoids an uncancellable Tokio stdin read delaying runtime exit.
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    std::thread::spawn(move || {
-        use std::io::Read;
-        let mut byte = [0u8; 1];
-        while matches!(std::io::stdin().read(&mut byte), Ok(1..)) {}
-        let _ = tx.send(());
-    });
-    let _ = rx.await;
-}
-
-async fn shutdown() {
-    #[cfg(unix)]
-    {
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("install termination handler");
-        tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
-    }
-    #[cfg(not(unix))]
-    let _ = tokio::signal::ctrl_c().await;
-}
-
-/// Request-shape defences that belong in one place rather than per handler:
-/// a valid Host, a same-origin check, a header no cross-site form can set,
-/// and the response headers.
-async fn guard(req: Request, next: Next) -> Response {
-    let host = req
-        .headers()
-        .get(header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_owned();
-    let hostname = host
-        .parse::<axum::http::uri::Authority>()
-        .map(|a| a.host().to_string())
-        .unwrap_or_default();
-    if hostname.is_empty() {
-        return (StatusCode::FORBIDDEN, i18n::message("guard.host")).into_response();
-    }
-    let mutating = !matches!(
-        *req.method(),
-        axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS
-    );
-    // A cross-site form can issue a POST but cannot add a custom header, and
-    // cannot read the response. Cheaper and harder to get wrong than tokens.
-    let provider_event = req.method() == axum::http::Method::POST
-        && req
-            .uri()
-            .path()
-            .strip_prefix("/api/repository-events/")
-            .is_some_and(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()));
-    // Domain previews are dispatched before this console-only guard.
-    if mutating
-        && !provider_event
-        && req
-            .headers()
-            .get("x-ferry-request")
-            .and_then(|v| v.to_str().ok())
-            != Some("1")
-    {
-        return (StatusCode::FORBIDDEN, i18n::message("guard.request")).into_response();
-    }
-    if let Some(origin) = req
-        .headers()
-        .get(header::ORIGIN)
-        .and_then(|v| v.to_str().ok())
-        && origin != format!("http://{host}")
-        && origin != format!("https://{host}")
-    {
-        return (StatusCode::FORBIDDEN, i18n::message("guard.origin")).into_response();
-    }
-    let oauth_callback = req.uri().path() == "/api/repository-providers/callback";
-    let mut response = next.run(req).await;
-    let headers = response.headers_mut();
-    headers.insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
-    headers.insert(
-        header::REFERRER_POLICY,
-        if oauth_callback {
-            "no-referrer"
-        } else {
-            "same-origin"
-        }
-        .parse()
-        .unwrap(),
-    );
-    headers
-        .entry(header::CONTENT_SECURITY_POLICY)
-        .or_insert(DEFAULT_CSP.parse().unwrap());
-    headers
-        .entry(header::CACHE_CONTROL)
-        .or_insert("no-store".parse().unwrap());
-    response
-}
-
-/// Picks the way to reach a host. The only place that chooses, so a third kind
-/// of connection is one more arm here and no change to any caller.
-pub async fn channel_open(
-    s: &state::AppState,
-    host: &hosts::remote::Host,
-) -> error::Result<Box<dyn hosts::channel::HostChannel>> {
-    match host.connection.as_str() {
-        "ssh" => hosts::ssh::open(s, host).await,
-        "runner" => hosts::runner::open(s, host).await,
-        _ => Err(error::ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            i18n::Message::new("host.connectionUnknown"),
-        )),
-    }
+    workspace_api
 }
