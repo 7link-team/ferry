@@ -7,6 +7,7 @@ import {sanitizeRichText} from "../features/maintenance/value-content";
 import {Tabs, TabsList, TabsTrigger} from "../shared/ui/tabs";
 import {typedText} from "../shared/i18n/i18n";
 import {defaultSiteSettings, SiteSettingsContext, type SiteSettings} from "../shared/site/settings";
+import {useRoute} from "./router";
 
 const RichTextEditor = lazy(() => import("../features/maintenance/RichTextValueEditor"));
 export const FOOTER_UPDATED = "platform:footer-updated";
@@ -19,6 +20,7 @@ export function FooterContent({value}: {value: string}) {
 
 /** A normal layout row: footer content never covers controls or the canvas. */
 export function PlatformFrame({children}: {children: ReactNode}) {
+  const route = useRoute();
   const [content, setContent] = useState("");
   const [site, setSite] = useState(defaultSiteSettings);
   useEffect(() => {
@@ -44,7 +46,7 @@ export function PlatformFrame({children}: {children: ReactNode}) {
   const visible = clean.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim() || /<img\b/i.test(clean);
   return <SiteSettingsContext.Provider value={site}><div className="flex h-full min-h-0 min-w-0 flex-col">
     <div data-platform-content className="min-h-0 min-w-0 flex-1 overflow-auto">{children}</div>
-    {visible && <footer data-platform-footer className="max-h-[25vh] shrink-0 overflow-auto border-t bg-background px-4 py-2"><FooterContent value={clean} /></footer>}
+    {visible && <footer data-platform-footer className={`${route.group !== "entry" ? "max-md:hidden " : ""}max-h-[25vh] shrink-0 overflow-auto border-t bg-background px-4 py-2`}><FooterContent value={clean} /></footer>}
   </div></SiteSettingsContext.Provider>;
 }
 

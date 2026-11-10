@@ -3,6 +3,7 @@ import { TypedValueList } from "./pages/TypedValueList";
 import { ConversationsWorkspace } from "./pages/ConversationsWorkspace";
 import { cn } from "cn";
 import { BrandIcon } from "../shared/site/BrandIcon";
+import { MobileNavigation } from "./MobileNavigation";
 import { ChevronDown, ChevronRight, LogOut } from "lucide-react";
 import { LoadingSkeleton } from "../shared/ui/loading-skeleton";
 import { useEffect,useMemo,useState } from "react";
@@ -254,12 +255,12 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
     </div>;
 
   return (
-    <div className="grid h-full min-w-0 grid-cols-1 grid-rows-[auto_1fr]">
+    <div className="grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] md:grid-rows-[auto_minmax(0,1fr)]">
       <header className="flex min-h-12 min-w-0 flex-wrap items-center gap-x-5 gap-y-1 border-b border-border bg-background px-4 py-1">
         <a className="flex min-w-0 max-w-full items-center gap-2 font-semibold tracking-tight sm:max-w-xs" {...to(nav[0]!.key, nav[0]!.items[0]!.key)}>
           <BrandIcon /><span className="min-w-0 break-words [overflow-wrap:anywhere]">{site.site_name || t("app.title")}</span>
         </a>
-        <nav className="flex min-w-0 max-w-full gap-1 overflow-x-auto" aria-label={t("app.modules")}>
+        <nav className="hidden min-w-0 max-w-full gap-1 overflow-x-auto md:flex" aria-label={t("app.modules")}>
           {groups.map((g) => (
             <a
               key={g.key}
@@ -275,14 +276,13 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
           ))}
         </nav>
         <span className="flex-1" />
-        {identity.user.is_superadmin && <Button variant="ghost" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
-
         <WorkspaceHeaderActions identity={identity} current={current} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={onSignedOut} />
+        {identity.user.is_superadmin && <Button variant="ghost" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
       </header>
 
-      {item.resource === "conversations" ? <ConversationsWorkspace key={current.id} workspace={current.id} permissions={permissions} form={formConfig} /> : <div className="grid min-h-0 min-w-0 grid-cols-[180px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[auto_minmax(0,1fr)]">
+      {item.resource === "conversations" ? <ConversationsWorkspace key={current.id} workspace={current.id} permissions={permissions} form={formConfig} /> : <div className="grid min-h-0 min-w-0 grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)]">
         <nav
-          className="flex flex-col gap-0.5 overflow-y-auto border-r border-sidebar-border bg-sidebar text-sidebar-foreground p-3 max-sm:flex-row max-sm:overflow-x-auto max-sm:border-r-0 max-sm:border-b"
+          className="hidden flex-col gap-0.5 overflow-y-auto border-r border-sidebar-border bg-sidebar text-sidebar-foreground p-3 md:flex"
           aria-label={group.label}
         >
           {menuSections.map(({ section, items }) => <div key={section} role={section ? "group" : undefined} aria-label={section ? commonText(section) : undefined} className={cn("flex flex-col gap-1", section && "mb-3 shrink-0 last:mb-0 max-sm:mr-4 max-sm:mb-0")}>
@@ -310,8 +310,9 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
             the content own the scrolling instead of the page. */}
         <main className="grid min-h-0 min-w-0 grid-rows-[auto_1fr] px-4 pt-3">
           <div>
+          {route.mode === "list" && visibleMenu.length > 1 && <div className="mb-2 md:hidden"><DropdownMenu key={route.item}><DropdownMenuTrigger asChild><Button variant="outline" className="min-h-11 w-full justify-between"><span className="min-w-0 truncate">{group.label} · {parentItem.label}</span><ChevronDown className="size-4 shrink-0" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" collisionPadding={8} className="max-h-[60dvh] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto">{visibleMenu.map(entry => <DropdownMenuItem asChild key={entry.key}><a {...to(group.key, menuTarget(group, entry).key, menuTarget(group, entry).params)} aria-current={entry.key === parentItem.key ? "page" : undefined} className="min-h-11 whitespace-normal break-words">{entry.section ? `${commonText(entry.section)} · ` : ""}{entry.label}</a></DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>}
           <nav aria-label={commonText("shell.breadcrumbs")}>
-            <ol className="flex gap-1.5 text-sm text-muted-foreground">
+            <ol className="flex min-w-0 flex-wrap gap-1.5 text-sm break-words text-muted-foreground">
               <li>
                 <a className="hover:text-foreground" {...to(nav[0]!.key, nav[0]!.items[0]!.key)}>
                   {current.name}
@@ -425,6 +426,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
           )}
         </main>
       </div>}
+      <MobileNavigation active={group.key} items={groups.map(entry => ({key:entry.key,label:entry.label,...to(entry.key,menuTarget(findGroup(entry.key)!,entry.items[0]!).key)}))} />
     </div>
   );
 }

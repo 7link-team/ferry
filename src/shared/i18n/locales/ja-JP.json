@@ -1,5 +1,5 @@
 {
-  "app": {
+  "app": {"more": "その他", "mobileNavigation": "モバイルナビゲーション",
     "title": "AI ワークスペース",
     "modules": "モジュール",
     "platform": "プラットフォーム管理",

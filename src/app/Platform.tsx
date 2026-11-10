@@ -1,4 +1,5 @@
-import { LogIn } from "lucide-react";
+import { ChevronDown, LogIn } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../shared/ui/dropdown-menu";
 import { BrandIcon } from "../shared/site/BrandIcon";
 import { useEffect,type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -11,6 +12,7 @@ import { nav } from "./nav";
 import { ResourceForm } from "./resources/ResourceForm";
 import { ResourceTable } from "./resources/ResourceTable";
 import { PlatformServerNodes } from "./PlatformServerNodes";
+import { MobileNavigation } from "./MobileNavigation";
 import { PlatformActivity } from "./PlatformActivity";
 import { PlatformMonitor, monitorSections } from "./PlatformMonitor";
 import {FOOTER_UPDATED, PlatformFooterEditor} from "./PlatformFooter";
@@ -183,10 +185,14 @@ export function Platform({ identity, reload, headerActions }: { identity: Identi
   if (!identity.user.is_superadmin) return <div className="p-6 space-y-4"><div className="flex justify-end">{headerActions}</div><p>{commonText("resource-domain:platform.forbidden")}</p><Button onClick={() => navigate({ workspace: identity.workspaces[0]?.id ?? "", mode: "list" }, {})}>{commonText("common-domain:shell.backWorkspace")}</Button></div>;
   if (item === "server-nodes" || legacyServerNodes) return null;
   const form = forms[item]!;
-  return <div className="flex h-full flex-col">
+  const mobileItems = Object.entries(labels).map(([key, label]) => {
+    const target = {workspace:"_platform",item:key,mode:key==="settings"?"edit" as const:key==="monitor"?"view" as const:"list" as const,...(key==="settings"?{id:"1"}:key==="monitor"?{id:"server-nodes"}:{})};
+    return {key,label:commonText(label),href:href(target,{}),onClick:(event:React.MouseEvent<HTMLAnchorElement>)=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate(target,{});}};
+  });
+  return <div className="flex h-full min-h-0 min-w-0 flex-col">
     <header className="flex flex-wrap items-center gap-4 border-b px-5 py-3">
       <h1 className="flex items-center gap-2 font-semibold"><BrandIcon />{commonText("resource-domain:platform.management")}</h1>
-      <nav aria-label={commonText("resource-domain:platform.management")} className="flex flex-wrap gap-2">
+      <nav aria-label={commonText("resource-domain:platform.management")} className="hidden flex-wrap gap-2 md:flex">
         {Object.entries(labels).map(([key, label]) => <a key={key} href={href({ workspace: "_platform", item: key, mode: key === "settings" ? "edit" : key === "monitor" ? "view" : "list", ...(key === "settings" ? { id: "1" } : key === "monitor" ? { id: "server-nodes" } : {}) }, {})}
           aria-current={key === item ? "page" : undefined} className={`rounded px-3 py-2 text-sm ${key === item ? "bg-accent" : "text-muted-foreground"}`}
           onClick={event => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigate({ workspace: "_platform", item: key, mode: key === "settings" ? "edit" : key === "monitor" ? "view" : "list", ...(key === "settings" ? { id: "1" } : key === "monitor" ? { id: "server-nodes" } : {}) }, {}); }}>{commonText(label)}</a>)}
@@ -202,8 +208,9 @@ export function Platform({ identity, reload, headerActions }: { identity: Identi
       </ol></nav>
       {item === "workspaces" && route.id && <Button asChild variant="outline"><a href={href(workspaceEntry(route.id), {})} onClick={event => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigate(workspaceEntry(route.id!), {}); }}><LogIn className="size-4" />{commonText("resource-domain:platform.enter")}</a></Button>}
     </div>
-    <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
-      {item === "monitor" && <nav aria-label={commonText("resource-domain:monitor.title")} className="flex shrink-0 gap-1 overflow-auto border-b p-3 sm:w-48 sm:flex-col sm:border-r sm:border-b-0">
+    {item === "monitor" && <div className="shrink-0 px-4 pt-3 md:hidden"><DropdownMenu key={route.id}><DropdownMenuTrigger asChild><Button variant="outline" className="min-h-11 w-full justify-between"><span className="min-w-0 truncate">{serverNodes ? commonText("resource-domain:platform.serverNodes") : commonText(`resource-domain:monitor.${route.id ?? "server-nodes"}`)}</span><ChevronDown className="size-4 shrink-0" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" collisionPadding={8} className="max-h-[60dvh] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto">{["server-nodes",...monitorSections,"activity"].map(section=><DropdownMenuItem key={section} asChild><a className="min-h-11 whitespace-normal break-words" aria-current={(route.id??"server-nodes")===section?"page":undefined} href={href({workspace:"_platform",item:"monitor",id:section,mode:"view"},{})} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate({workspace:"_platform",item:"monitor",id:section,mode:"view"},{});}}>{commonText(section==="server-nodes"?"resource-domain:platform.serverNodes":`resource-domain:monitor.${section}`)}</a></DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>}
+    <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      {item === "monitor" && <nav aria-label={commonText("resource-domain:monitor.title")} className="hidden w-48 shrink-0 flex-col gap-1 overflow-auto border-r p-3 md:flex">
         {["server-nodes", ...monitorSections, "activity"].map(section => <a key={section} className={`rounded px-3 py-2 text-sm ${(route.id ?? "server-nodes") === section ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/50"}`} aria-current={(route.id ?? "server-nodes") === section ? "page" : undefined} href={href({workspace:"_platform",item:"monitor",id:section,mode:"view"},{})} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate({workspace:"_platform",item:"monitor",id:section,mode:"view"},{});}}>{commonText(section === "server-nodes" ? "resource-domain:platform.serverNodes" : `resource-domain:monitor.${section}`)}</a>)}
       </nav>}
     <main className="flex min-h-0 min-w-0 flex-1 flex-col p-5">
@@ -212,5 +219,6 @@ export function Platform({ identity, reload, headerActions }: { identity: Identi
           onSaved={() => { if (item === "settings") {toast.success(commonText("resource-domain:platform.saved")); window.dispatchEvent(new Event(FOOTER_UPDATED));} reload(); }} /></div>}
     </main>
     </div>
+    <MobileNavigation items={mobileItems} active={item} primary={["workspaces", "users", "monitor", "settings"]} />
   </div>;
 }

@@ -1,5 +1,5 @@
 {
-  "app": {
+  "app": {"more": "更多", "mobileNavigation": "底部導覽",
     "title": "AI 工作台",
     "modules": "模組",
     "platform": "平台管理",

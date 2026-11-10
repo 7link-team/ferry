@@ -1,5 +1,5 @@
 {
-  "app": {
+  "app": {"more": "더 보기", "mobileNavigation": "모바일 탐색",
     "title": "AI 워크스페이스",
     "modules": "모듈",
     "platform": "플랫폼 관리",
