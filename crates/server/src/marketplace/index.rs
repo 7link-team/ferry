@@ -34,6 +34,8 @@ const MAX_FILES: usize = 20;
 const MAX_FILE_BYTES: usize = 256 * 1024;
 const MAX_ICON_BYTES: usize = 64 * 1024;
 const MAX_README_BYTES: usize = 64 * 1024;
+/// Config template names are at most 60 characters; keep room for the "-20" conflict suffix.
+const MAX_FILE_NAME: usize = 57;
 const CATEGORIES: &[&str] = &["database", "cache", "messaging", "web", "scheduler", "platform", "other"];
 const DRIVERS: &[&str] = &["native", "docker", "compose", "stack", "k8s"];
 
@@ -260,7 +262,7 @@ pub fn parse_bundle(text: &str, ferry_version: &semver::Version, locale: &str) -
             let mut names = HashSet::new();
             let mut files = Vec::with_capacity(v.files.len());
             for f in v.files {
-                if !valid_key(&f.name) || !names.insert(f.name.clone()) || f.content.len() > MAX_FILE_BYTES {
+                if !valid_key(&f.name) || f.name.len() > MAX_FILE_NAME || !names.insert(f.name.clone()) || f.content.len() > MAX_FILE_BYTES {
                     return Err(bad("marketplace.packageFileInvalid"));
                 }
                 files.push(PackageFile { name: f.name, content: f.content, parameters: f.parameters });
@@ -404,6 +406,17 @@ mod tests {
         assert!(!rows.is_empty());
         assert!(rows.iter().all(|r| r.compatible), "official templates must be importable by this build");
         assert!(rows.iter().any(|r| r.key == "http-service" && r.name == "HTTP sample service"));
+    }
+
+    #[test]
+    fn file_names_leave_room_for_conflict_suffix() {
+        let named = |name: String| {
+            let mut v = version("1.0.0");
+            v["files"] = json!([{"name":name,"content":"x"}]);
+            bundle(json!([package(json!([v]))]))
+        };
+        assert!(parse_bundle(&named("f".repeat(57)), &ferry(), "en-US").is_ok());
+        assert!(parse_bundle(&named("f".repeat(58)), &ferry(), "en-US").is_err());
     }
 
     #[test]

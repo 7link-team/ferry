@@ -186,7 +186,9 @@ async fn fetch(
             url.query_pairs_mut().append_pair("access_token", token);
         }
     }
-    let mut request = client.get(url).header("Accept", "application/json");
+    // GitHub's JSON wrapper carries no content above 1 MB; the raw media type serves files up to 100 MB.
+    let accept = if source.provider == "github" { "application/vnd.github.raw" } else { "application/json" };
+    let mut request = client.get(url).header("Accept", accept);
     if let Some(token) = token {
         request = match source.provider.as_str() {
             "github" => request.bearer_auth(token),
@@ -231,6 +233,22 @@ async fn fetch(
             crate::i18n::Message::new("marketplace.responseJsonRequired"),
         )
     })?;
+    // A raw index body is itself the document: neither index format has a top-level "content".
+    if source.provider == "github" && document.get("content").is_none() {
+        let text = String::from_utf8(bytes).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.utf8Required"),
+            )
+        })?;
+        if text.len() > MAX_INDEX_BYTES {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.indexTooLarge"),
+            ));
+        }
+        return Ok(text);
+    }
     let content = document
         .get("content")
         .and_then(Value::as_str)
@@ -400,6 +418,32 @@ mod tests {
             validate_origin(&config, "git@codeup.aliyun.com:organization/repository.git").is_ok()
         );
     }
+    #[tokio::test]
+    async fn github_requests_raw_file_and_accepts_unwrapped_body() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut config = source("github");
+        config.api_base = format!("http://{}", listener.local_addr().unwrap());
+        let handler = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            while !bytes.windows(4).any(|w| w == b"\r\n\r\n") {
+                let mut part = [0u8; 1024];
+                let n = stream.read(&mut part).await.unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&part[..n]);
+            }
+            let lower = String::from_utf8(bytes).unwrap().to_ascii_lowercase();
+            assert!(lower.contains("accept: application/vnd.github.raw"), "{lower}");
+            let body = r#"{"schemaVersion":2,"packages":[]}"#;
+            stream
+                .write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes())
+                .await
+                .unwrap();
+        });
+        assert_eq!(fetch(&config, None, false, Duration::from_secs(20)).await.unwrap(), r#"{"schemaVersion":2,"packages":[]}"#);
+        handler.await.unwrap();
+    }
+
     #[tokio::test]
     async fn real_http_transport_uses_provider_auth_and_decodes_content() {
         for provider in ["github", "gitlab", "gitee", "codeup"] {
@@ -871,5 +915,5 @@ pub async fn recover(s: &AppState) -> Result<()> {
         .filter(sources::Column::WorkspaceId.ne(platform::PLATFORM))
         .exec(&s.db)
         .await?;
-    Ok(())
+    platform::release_expired(s).await
 }

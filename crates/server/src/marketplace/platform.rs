@@ -279,12 +279,31 @@ pub async fn sync(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>) -
     Ok(Json(json!({"templates": total})))
 }
 
+/// A crashed instance leaves `syncing` with a lease that eventually expires; mark those failed so
+/// the source can be synced again. Rows with a live lease belong to a running instance.
+pub(crate) async fn release_expired(s: &AppState) -> Result<()> {
+    sources::Entity::update_many()
+        .col_expr(sources::Column::State, Expr::value("failed"))
+        .col_expr(sources::Column::LastError, Expr::value(crate::i18n::store_message(&crate::i18n::Message::new("marketplace.interrupted"))))
+        .col_expr(sources::Column::SyncOwner, Expr::value(""))
+        .col_expr(sources::Column::SyncLeaseUntil, Expr::value(0))
+        .filter(sources::Column::WorkspaceId.eq(PLATFORM))
+        .filter(sources::Column::State.eq("syncing"))
+        .filter(sources::Column::SyncLeaseUntil.lte(db::now()))
+        .exec(&s.db)
+        .await?;
+    Ok(())
+}
+
 /// Background worker: synchronizes enabled platform sources whose interval elapsed.
 pub async fn scheduler(s: AppState, mut drain: tokio::sync::watch::Receiver<bool>) {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! { _ = drain.changed() => break, _ = tick.tick() => {} }
+        if let Err(error) = release_expired(&s).await {
+            tracing::warn!(%error, "释放过期的平台模板来源同步失败");
+        }
         let now = db::now();
         let due = match sources::Entity::find()
             .filter(sources::Column::WorkspaceId.eq(PLATFORM))
@@ -410,6 +429,26 @@ mod sync_tests {
         assert!(claim(&s, id).await.unwrap());
         super::super::recover(&s).await.unwrap();
         assert_eq!(scoped(&s.db, id.into()).await.unwrap().state, "syncing");
+    }
+
+    #[tokio::test]
+    async fn expired_lease_releases_stuck_syncing_source() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let id = platform_source(&s, "http://127.0.0.1:9").await;
+        assert!(claim(&s, id).await.unwrap());
+        sources::Entity::update_many()
+            .col_expr(sources::Column::SyncLeaseUntil, Expr::value(db::now() - 1))
+            .filter(sources::Column::Id.eq(id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        super::super::recover(&s).await.unwrap();
+        let row = scoped(&s.db, id.into()).await.unwrap();
+        assert_eq!(row.state, "failed");
+        assert!(!row.last_error.is_empty());
+        assert_eq!(row.sync_owner, "");
+        let Json(listed) = get(State(s.clone()), account(1, true), Path(id.into())).await.unwrap();
+        assert_eq!(listed["state"], "failed");
     }
 }
 

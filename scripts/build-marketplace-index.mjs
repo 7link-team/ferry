@@ -30,7 +30,7 @@ for (const key of dirs(join(root, "apps"))) {
   const versions = dirs(base).filter(v => SEMVER.test(v)).sort(compare).map(version => {
     const dir = join(base, version);
     const files = dirs(dir).includes("files") ? readdirSync(join(dir, "files")).sort().map(name => {
-      if (!KEY.test(name)) fail(`invalid file name ${name}`);
+      if (!KEY.test(name) || name.length > 57) fail(`invalid file name ${name} (1–57 of A-Z a-z 0-9 . _ -)`);
       const content = readFileSync(join(dir, "files", name), "utf8");
       if (Buffer.byteLength(content) > LIMITS.fileBytes) fail(`${name} exceeds 256 KiB`);
       return { name, content, parameters: [] };
