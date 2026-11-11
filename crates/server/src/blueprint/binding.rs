@@ -6,7 +6,7 @@ use crate::snowflake::Id;
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 
 const MAX_ADDRESS: usize = 253;
 const MAX_LABEL: usize = 63;
@@ -54,10 +54,11 @@ fn valid_address(address: &str) -> bool {
     if address.is_empty() || address.len() > MAX_ADDRESS {
         return false;
     }
-    let bare = address
-        .strip_prefix('[')
-        .and_then(|a| a.strip_suffix(']'))
-        .unwrap_or(address);
+    // Brackets are IPv6 syntax only: `[10.0.0.1]` is not an address.
+    let bare = match address.strip_prefix('[').and_then(|a| a.strip_suffix(']')) {
+        Some(inner) if inner.parse::<Ipv6Addr>().is_ok() => inner,
+        _ => address,
+    };
     if let Ok(ip) = bare.parse::<IpAddr>() {
         let ip = ip.to_canonical();
         return !ip.is_unspecified() && !ip.is_loopback();
@@ -370,6 +371,8 @@ mod tests {
             "fe80::zz",
             "a:80",
             "\u{4f8b}.jp",
+            "[10.0.0.1]",
+            "[example.com]",
         ];
         for a in bad {
             let mut r = three();
@@ -380,7 +383,12 @@ mod tests {
                 "{a:?}"
             );
         }
-        for long in [format!("{}.com", "a".repeat(250)), "a".repeat(64)] {
+        let dotted = |last: usize| format!("{0}.{0}.{0}.{1}", "a".repeat(63), "a".repeat(last));
+        assert_eq!(dotted(61).len(), 253);
+        let mut r = three();
+        r["nats"][0]["address"] = json!(dotted(61));
+        check("native", r).expect("253 chars with valid labels passes");
+        for long in [dotted(62), "a".repeat(64)] {
             let mut r = three();
             r["nats"][0]["address"] = json!(long);
             assert_eq!(key(check("native", r)), "blueprint.bindingAddressInvalid");
@@ -453,11 +461,24 @@ mod tests {
             key(validate(&bp, &b, &std_hosts())),
             "blueprint.driverUnsupported"
         );
-        let bp = blueprint(
+        let mut bp = blueprint(
             vec![role("web", 1, 1, 1, false, json!({}))],
             json!({}),
             false,
         );
+        bp.drivers.insert(
+            "podman".into(),
+            crate::blueprint::model::DriverSupport {
+                supported: true,
+                member_addressing: None,
+            },
+        );
+        let pb = binding("podman", json!({"web": [inst("1", "10.0.0.1")]}));
+        assert_eq!(
+            key(validate(&bp, &pb, &std_hosts())),
+            "blueprint.driverUnsupported"
+        );
+        bp.drivers.clear();
         assert_eq!(
             key(validate(&bp, &b, &std_hosts())),
             "blueprint.driverUnsupported"
