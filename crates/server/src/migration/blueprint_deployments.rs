@@ -1,5 +1,6 @@
 //! Cluster blueprint deployments keep their instance binding beside the blueprint manifest.
 use sea_orm_migration::prelude::*;
+use sea_orm_migration::sea_orm::ConnectionTrait;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -28,6 +29,17 @@ impl MigrationTrait for Migration {
     }
     async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
         if m.has_column(TABLE, COLUMN).await? {
+            // Spec §9.4: a rollback never deletes business data; blueprint bindings must survive.
+            let bound = Query::select()
+                .expr(Expr::val(1))
+                .from(Alias::new(TABLE))
+                .and_where(Expr::col(Alias::new(COLUMN)).is_not_null())
+                .limit(1)
+                .to_owned();
+            let db = m.get_connection();
+            if db.query_one(&bound).await?.is_some() {
+                return Err(DbErr::Custom("不自动删除业务数据".into()));
+            }
             m.alter_table(
                 Table::alter()
                     .table(Alias::new(TABLE))
@@ -81,6 +93,32 @@ mod tests {
             s.db.query_one_raw(Statement::from_string(
                 backend,
                 "SELECT blueprint_binding FROM deployments WHERE id = 71",
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.try_get::<Option<String>>("", "blueprint_binding")
+                .unwrap()
+                .as_deref(),
+            Some(binding)
+        );
+    }
+
+    #[tokio::test]
+    async fn down_refuses_to_drop_blueprint_bindings() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let manager = SchemaManager::new(&s.db);
+        let backend = s.db.get_database_backend();
+        let binding = r#"{"driver":"docker","roles":{}}"#;
+        s.db.execute_raw(Statement::from_string(backend, format!("INSERT INTO deployments (id,workspace_id,name,category,manifest,preview_artifact,mode,target_kind,target_ref,workdir,description,state,revision_number,current_revision,created_at,updated_at,version,blueprint_binding) VALUES (72,1,'nats','','{{}}','','blueprint','blueprint',0,'/srv','','idle',0,0,1,1,1,'{binding}')"))).await.unwrap();
+        let err = Migration.down(&manager).await.expect_err("must refuse");
+        assert!(err.to_string().contains("不自动删除业务数据"), "{err}");
+        assert!(manager.has_column(TABLE, COLUMN).await.unwrap());
+        let row =
+            s.db.query_one_raw(Statement::from_string(
+                backend,
+                "SELECT blueprint_binding FROM deployments WHERE id = 72",
             ))
             .await
             .unwrap()
