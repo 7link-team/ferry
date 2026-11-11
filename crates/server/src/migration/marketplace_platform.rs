@@ -59,6 +59,30 @@ const INDEXES: &[(&str, &str, &[&str])] = &[
     ),
 ];
 
+/// Columns created as TEXT by `external_repository_marketplace_v1` (LONGTEXT on MySQL).
+const TEXT_COLUMNS: &[&str] = &["entry_key"];
+
+/// Index statements for this backend. MySQL cannot index TEXT columns without a prefix length
+/// (error 1170), so indexes covering them are skipped there; `idx_marketplace_entries_source`
+/// still serves the per-source queries. Applied SQLite/PostgreSQL databases keep theirs.
+fn indexes(backend: sea_orm::DbBackend) -> Vec<(&'static str, &'static str, IndexCreateStatement)> {
+    INDEXES
+        .iter()
+        .filter(|(_, _, columns)| {
+            backend != sea_orm::DbBackend::MySql
+                || !columns.iter().any(|c| TEXT_COLUMNS.contains(c))
+        })
+        .map(|(table, name, columns)| {
+            let mut index = Index::create();
+            index.name(*name).table(Alias::new(*table));
+            for column in *columns {
+                index.col(Alias::new(*column));
+            }
+            (*table, *name, index.to_owned())
+        })
+        .collect()
+}
+
 /// Built-in official source (user decision 2026-11-11): the public templates in this repository.
 /// Inserted once by this migration; a superadmin may disable or delete it and it is not re-created.
 const OFFICIAL_SOURCE_ID: i64 = 1;
@@ -158,16 +182,10 @@ impl MigrationTrait for Migration {
             )
             .await?;
         }
-        for (table, name, columns) in INDEXES {
-            if m.has_index(*table, *name).await? {
-                continue;
+        for (table, name, index) in indexes(backend) {
+            if !m.has_index(table, name).await? {
+                m.create_index(index).await?;
             }
-            let mut index = Index::create();
-            index.name(*name).table(Alias::new(*table));
-            for column in *columns {
-                index.col(Alias::new(*column));
-            }
-            m.create_index(index.to_owned()).await?;
         }
         seed_official_source(m).await
     }
@@ -207,6 +225,30 @@ impl MigrationTrait for Migration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mysql_indexes_never_cover_text_columns() {
+        // MySQL rejects TEXT/BLOB columns in a key without a prefix length (error 1170);
+        // marketplace_entries.entry_key is TEXT from the original marketplace migration.
+        let sql = |backend| {
+            indexes(backend)
+                .into_iter()
+                .map(|(_, _, index)| match backend {
+                    sea_orm::DbBackend::MySql => index.to_string(MysqlQueryBuilder),
+                    sea_orm::DbBackend::Postgres => index.to_string(PostgresQueryBuilder),
+                    _ => index.to_string(SqliteQueryBuilder),
+                })
+                .collect::<Vec<_>>()
+        };
+        let mysql = sql(sea_orm::DbBackend::MySql);
+        assert!(mysql.iter().all(|s| !s.contains("entry_key")), "{mysql:?}");
+        assert_eq!(mysql.len(), 2);
+        for backend in [sea_orm::DbBackend::Sqlite, sea_orm::DbBackend::Postgres] {
+            let statements = sql(backend);
+            assert_eq!(statements.len(), 3);
+            assert!(statements.iter().any(|s| s.contains("entry_key")));
+        }
+    }
     use sea_orm::{ConnectionTrait, EntityTrait, PaginatorTrait, Statement};
     #[tokio::test]
     async fn marketplace_platform_migration_roundtrip_preserves_rows() {
