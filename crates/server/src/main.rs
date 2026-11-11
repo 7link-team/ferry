@@ -7,6 +7,7 @@ mod platform_tools;
 const DEFAULT_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 mod artifact_store;
 mod assets;
+mod blueprint;
 mod cluster;
 mod content_assets;
 mod credentials;
