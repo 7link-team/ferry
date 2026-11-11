@@ -14,6 +14,7 @@ mod cron_jobs;
 mod db;
 mod definitions;
 mod deployments;
+mod monitoring;
 mod entities;
 mod error;
 mod executions;
@@ -266,6 +267,7 @@ async fn main() -> anyhow::Result<()> {
         s.clone(),
         drain_rx.clone(),
     ));
+    let health_monitor_task = tokio::spawn(monitoring::scheduler(s.clone(), drain_rx.clone()));
     let host_monitor_task = tokio::spawn(hosts::monitor::collect(s.clone(), drain_rx.clone()));
     let hole_monitor_task = tokio::spawn(holes::monitor(s.clone(), drain_rx.clone()));
     let repository_monitor_task = tokio::spawn(repositories::monitor::scheduler(
@@ -446,6 +448,7 @@ async fn main() -> anyhow::Result<()> {
     let _ = drain.send(true);
     alerts_task.await?;
     host_monitor_task.await?;
+    health_monitor_task.await?;
     hole_monitor_task.await?;
     runner_auto_update_task.await?;
     repository_monitor_task.await?;
@@ -820,6 +823,7 @@ fn workspace_routes() -> Router<state::AppState> {
         )
         .merge(agents::routes())
         .merge(holes::routes())
+        .merge(monitoring::routes())
         .merge(models::routes())
         .merge(conversations::routes())
         .route("/{workspace}/preferences", get(maintenance::preferences))

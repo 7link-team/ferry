@@ -1,3 +1,66 @@
+# Task State - monitoring health v1
+
+## 当前事项清单（2026-11-11）
+| 编号 | 状态 | 事项与下一步/证据 |
+|---|---|---|
+| MONITORING-HEALTH-V1 | 待验证 | 一期代码、隔离API/通知/浏览器验收PASS；独立分支本地交付。待另一Agent/DSH进程完成后集成，再进行目标运行环境及用户验收；未合并/推送/部署。 |
+
+## Objective
+Three monitoring object levels: reuse host system monitoring; observe service instances; combine application entry availability and replica evidence. Reuse shared alerts/notifications.
+
+## Current Phase
+ACCEPTANCE
+
+## Current Step
+Scoped source delivery complete; verification and two review passes recorded. Local commit on isolated branch; inspect Git HEAD for its identity. User/live-environment acceptance remains separate.
+
+## Execution / isolation
+- Direct execution; coupled contracts did not benefit from delegation. No subagents.
+- Worktree C:/Users/FullStack/Projects/ferry-monitoring-health-v1; branch feature/monitoring-health-v1; base 058232f.
+- Private CARGO_TARGET_DIR=C:/Users/FullStack/AppData/Local/Temp/ferry-monitoring-health-target; temporary databases and dynamically allocated ports.
+- Preserve main D:/Projects/github/ferry and other Agent/DSH changes. No restart/replacement of 4291 (coordination PID15384) or Runner89776/20820. Shared services and data untouched.
+
+## Completed Work
+- Design/source audit and full review matrix with actual SQLite/PostgreSQL/MySQL generated DDL; additive migration with destructive-down protection.
+- HTTP/TCP checks, configurable evaluation/retention, runtime observations through existing HostChannel, CRUD/history/workspace permissions/audit/version fencing.
+- Native/systemd, Docker, Compose, Swarm parsers; running-revision evidence and explicit unknown/stale states.
+- Application entry/healthy/expected/unknown counts and per-service/instance evidence; shared alert events and notification delivery. Existing host and deployment-failure alerts preserved.
+- Swarm Cluster ID from bounded read-only Docker command; same-cluster managers merge demand, independent clusters stay separate; identity regression PASS.
+- Shared resource configurations/navigation, six-language catalogs; long-name column constraint and explicit action icons. Check list uses view/delete; edit/history/policy remain accessible in detail.
+
+## Confirmed Constraints / Decisions
+- Configurable defaults: interval30s, timeout5s, failures3, recoveries2, stale90s, raw history7d.
+- Entry-up + known replica failure=degraded; confirmed entry-down=unavailable; insufficient fresh evidence=unknown. Separate entry/healthy/unknown evidence. No automatic repair.
+- V1 HTTP/TCP and built-in runtime observations only. MQTT/log/scripts/heartbeat deferred. HTTP/TCP originate on server network; runtime evidence does not prove protocol quorum.
+- No historical automatic check creation, live migration, shared service update, merge, push or release in this delivery.
+
+## Verification
+- cargo test --workspace PASS (monitoring-workspace-complete.log): sandbox16/3ignored; protocol7; Runner54/7ignored plus integration3+12; server662/9ignored; doc suites0. This full run preceded the final cluster-identity change.
+- Final cluster-identity monitoring regressions12PASS (monitoring-cluster-final.log); cargo check --workspace PASS after that change (monitoring-check-final.log).
+- Frontend all82 files/627PASS/1existing skip (monitoring-ui-clean.log); final layout shared form/table/i18n54PASS (monitoring-layout-tests.log); final npm build including typecheck PASS (monitoring-delivery-ui.log).
+- Final server build after final dist PASS (monitoring-delivery-server.log).
+- Final actual isolated HTTP/TCP/API, unified local webhook trigger/recovery, workspace isolation/version conflict, unavailable runtime unknown, phone form saving a120-character name, four-width pages and English/Malay forms:7groupsPASS (monitoring-delivery-acceptance.log).
+- Final evidence C:/Users/FullStack/AppData/Local/Temp/monitoring-health-VcgIDN/report.json with22 screenshots. Desktop/Pad/Phone, Malay long text and final tablet/phone long-name tables visually inspected. No page overflow/browser exceptions.
+- git diff/cached diff checks PASS; LF verified; only scoped source/docs staged, no build/log/test artifacts.
+- Earlier failures retained: missing Bash/cygpath paths, incomplete catalogs, PowerShell Unicode/CLIXML handling; fixed without changing unrelated business code or weakening tests. Parallel UI run had2 timeouts; complete serial run passed.
+
+## Review / Acceptance
+- Self-review: scope/reuse/architecture/regression/complexity/durable state PASS.
+- Final acceptance review: authorized v1 implementation and isolated executable criteria PASS within environments listed above. No claim of user/production or live Linux-engine acceptance.
+
+## Known Issues / Risks
+- Windows test host has no live systemd/Docker/Compose/Swarm engines; parser/aggregation tests are not real-engine acceptance. PostgreSQL/MySQL SQL generation only, no live connections.
+- Figma/native App/physical mobile keyboard not available. MQTT/log/scripts/heartbeat remain excluded v2 scope.
+- Existing code warnings and frontend bundle-size warning retained; no unrelated cleanup.
+
+## Remaining Work / Next Action
+No source changes outstanding for this delivery. Wait for the other Agent/DSH process to finish its shared-service delivery, then integrate feature/monitoring-health-v1 with its changes and perform deployment separately. Recommended next environment gate: live Linux systemd/Docker/Compose/Swarm observation acceptance before production rollout; user acceptance follows deployment. Do not restart shared services or run live migrations from this worktree uncoordinated.
+
+## Last Checkpoint
+2026-11-11 final delivery build/API/browser/screenshots PASS; scoped local commit, integration/deployment pending.
+
+---
+
 ## 当前事项清单（2026-11-10）
 
 | ACCOUNT-APPEARANCE-36 | 待验证 | 主题、明暗、自定义主题和六语偏好已按账号存云端；前端47/后端2、真实双账号与跨浏览器7组验证PASS，证据account-preferences-20261110及preview-domain-account-final.log。已随46284b3提交推送；4291现为alpha.15/PID26112，38类原记录/密钥/实例/环境保全PASS。用户验收及PG/MySQL CI待完成；未宣称已发布。 |
@@ -2282,3 +2345,5 @@ Python py_compile、actionlint v1.7.12（官方发布checksum验证；未装shel
 
 
 2026-11-10最新检查点：4291已备份更新alpha.15/PID26112/index-D8FlvvKb.js；38类原记录、密钥、实例及环境保全，原会话200、普通账号平台设置403。备份pre-preview-domains-20261110-021351，证据preview-domain-local-final-20261110。Linux旧失败原始附件alpha13-preview-ci-evidence.zip保留：夹具后台进程未监听；最终夹具采用独立Node进程和启动就绪检查，待Linux实际执行。官方故障证据preview-domain-linux-validation/github-{status,incidents-unresolved}.json及run-*.html，事故https://stspg.io/7yw63xl9ztrv。曾因磁盘满构建失败，使用cargo clean -p ferry-server清理31.5GiB生成缓存后构建PASS，业务/备份/证据未动；后续构建使用CARGO_INCREMENTAL=0。
+
+Monitoring checkpoint: initial 6 focused Rust tests and 75 existing UI regressions PASS; initial typecheck fixed then PASS. Initial frontend build FAIL due D disk ENOSPC. Moved only this worktree to C via verified Move-Item and repaired Git metadata; rerun build. Cargo target remains private C:/Users/FullStack/AppData/Local/Temp/ferry-monitoring-health-target. New tests/changes since initial run require rerun. No Docker CLI or installed WSL available; live Linux engines not yet verified.

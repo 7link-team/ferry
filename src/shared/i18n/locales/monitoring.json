@@ -1,0 +1,626 @@
+{
+  "nav": [
+    "Monitoring & alerts",
+    "监控与告警",
+    "监控与告警",
+    "監視とアラート",
+    "모니터링 및 알림",
+    "Pemantauan & amaran"
+  ],
+  "overview": [
+    "Application health",
+    "应用健康",
+    "应用健康",
+    "アプリケーションの正常性",
+    "애플리케이션 상태",
+    "Kesihatan aplikasi"
+  ],
+  "checks": [
+    "Health checks",
+    "健康检查",
+    "健康检查",
+    "ヘルスチェック",
+    "상태 검사",
+    "Pemeriksaan kesihatan"
+  ],
+  "history": [
+    "Check history",
+    "检查历史",
+    "检查历史",
+    "チェック履歴",
+    "검사 이력",
+    "Sejarah pemeriksaan"
+  ],
+  "policies": [
+    "Alert policies",
+    "告警策略",
+    "告警策略",
+    "アラートポリシー",
+    "알림 정책",
+    "Dasar amaran"
+  ],
+  "kind": [
+    "Check type",
+    "检查方式",
+    "检查方式",
+    "チェック方式",
+    "검사 방식",
+    "Jenis pemeriksaan"
+  ],
+  "role": [
+    "Object level",
+    "对象层次",
+    "对象层次",
+    "監視対象の階層",
+    "모니터링 대상 계층",
+    "Peringkat objek"
+  ],
+  "entry": [
+    "Application entry",
+    "应用入口",
+    "应用入口",
+    "アプリケーション入口",
+    "애플리케이션 진입점",
+    "Pintu masuk aplikasi"
+  ],
+  "service": [
+    "Service / instances",
+    "服务 / 实例",
+    "服务 / 实例",
+    "サービス / インスタンス",
+    "서비스 / 인스턴스",
+    "Perkhidmatan / instans"
+  ],
+  "runtime": [
+    "Runtime instances",
+    "运行实例",
+    "运行实例",
+    "実行中のインスタンス",
+    "실행 인스턴스",
+    "Instans masa jalan"
+  ],
+  "http": [
+    "HTTP(S) check",
+    "HTTP(S) 检查",
+    "HTTP(S) 檢查",
+    "HTTP(S) チェック",
+    "HTTP(S) 검사",
+    "Pemeriksaan HTTP(S)"
+  ],
+  "tcp": [
+    "TCP connection",
+    "TCP 连接",
+    "TCP 连接",
+    "TCP 接続",
+    "TCP 연결",
+    "Sambungan TCP"
+  ],
+  "address": [
+    "Target address",
+    "目标地址",
+    "目标地址",
+    "対象アドレス",
+    "대상 주소",
+    "Alamat sasaran"
+  ],
+  "expected_status": [
+    "Expected HTTP status",
+    "预期 HTTP 状态码",
+    "预期 HTTP 状态码",
+    "期待する HTTP ステータス",
+    "예상 HTTP 상태 코드",
+    "Status HTTP dijangka"
+  ],
+  "body_contains": [
+    "Response contains",
+    "响应包含内容",
+    "响应包含内容",
+    "レスポンスに含まれる内容",
+    "응답에 포함할 내용",
+    "Respons mengandungi"
+  ],
+  "interval_seconds": [
+    "Check interval (seconds)",
+    "检查间隔（秒）",
+    "检查间隔（秒）",
+    "チェック間隔（秒）",
+    "검사 간격(초)",
+    "Sela pemeriksaan (saat)"
+  ],
+  "timeout_seconds": [
+    "Timeout (seconds)",
+    "超时（秒）",
+    "超时（秒）",
+    "タイムアウト（秒）",
+    "시간 초과(초)",
+    "Had masa (saat)"
+  ],
+  "failure_threshold": [
+    "Consecutive failures",
+    "连续失败次数",
+    "连续失败次数",
+    "連続失敗回数",
+    "연속 실패 횟수",
+    "Kegagalan berturut-turut"
+  ],
+  "recovery_threshold": [
+    "Consecutive recoveries",
+    "连续恢复次数",
+    "连续恢复次数",
+    "連続復旧回数",
+    "연속 복구 횟수",
+    "Pemulihan berturut-turut"
+  ],
+  "stale_seconds": [
+    "Stale after (seconds)",
+    "过期时间（秒）",
+    "过期时间（秒）",
+    "観測の有効期限（秒）",
+    "관측 유효 기간(초)",
+    "Luput selepas (saat)"
+  ],
+  "retention_days": [
+    "History retention (days)",
+    "历史保留（天）",
+    "历史保留（天）",
+    "履歴保持期間（日）",
+    "이력 보존 기간(일)",
+    "Pengekalan sejarah (hari)"
+  ],
+  "service_name": [
+    "Service name",
+    "服务名称",
+    "服务名称",
+    "サービス名",
+    "서비스 이름",
+    "Nama perkhidmatan"
+  ],
+  "deployment_id": [
+    "Application",
+    "应用",
+    "应用",
+    "アプリケーション",
+    "애플리케이션",
+    "Aplikasi"
+  ],
+  "host_id": [
+    "Runtime host",
+    "运行观测主机",
+    "运行观测主机",
+    "実行状態を観測するホスト",
+    "실행 상태 관측 호스트",
+    "Hos pemerhatian masa jalan"
+  ],
+  "position": [
+    "Execution location",
+    "执行位置",
+    "执行位置",
+    "実行場所",
+    "실행 위치",
+    "Lokasi pelaksanaan"
+  ],
+  "server": [
+    "Server network",
+    "服务端网络",
+    "服务端网络",
+    "サーバーネットワーク",
+    "서버 네트워크",
+    "Rangkaian pelayan"
+  ],
+  "state": [
+    "Health status",
+    "健康状态",
+    "健康状态",
+    "正常性の状態",
+    "상태",
+    "Status kesihatan"
+  ],
+  "checked": [
+    "Last observation",
+    "最后观测",
+    "最后观测",
+    "最終観測",
+    "마지막 관측",
+    "Pemerhatian terakhir"
+  ],
+  "latency": [
+    "Latency (ms)",
+    "耗时（毫秒）",
+    "耗时（毫秒）",
+    "所要時間（ミリ秒）",
+    "소요 시간(밀리초)",
+    "Kependaman (ms)"
+  ],
+  "reason": [
+    "Observation detail",
+    "观测说明",
+    "观测说明",
+    "観測の詳細",
+    "관측 설명",
+    "Butiran pemerhatian"
+  ],
+  "instances": [
+    "Service instances",
+    "服务实例",
+    "服务实例",
+    "サービスインスタンス",
+    "서비스 인스턴스",
+    "Instans perkhidmatan"
+  ],
+  "replicas": [
+    "Healthy / expected instances",
+    "健康 / 期望实例",
+    "健康 / 期望实例",
+    "正常 / 期待インスタンス数",
+    "정상 / 예상 인스턴스 수",
+    "Instans sihat / dijangka"
+  ],
+  "unknown_instances": [
+    "Unknown instances",
+    "未知实例",
+    "未知实例",
+    "不明なインスタンス数",
+    "알 수 없는 인스턴스 수",
+    "Instans tidak diketahui"
+  ],
+  "entry_state": [
+    "Entry status",
+    "入口状态",
+    "入口状态",
+    "入口の状態",
+    "진입점 상태",
+    "Status pintu masuk"
+  ],
+  "deployment_state": [
+    "Deployment execution",
+    "部署执行状态",
+    "部署执行状态",
+    "デプロイの実行状態",
+    "배포 실행 상태",
+    "Pelaksanaan pengerahan"
+  ],
+  "up": [
+    "Healthy",
+    "健康",
+    "健康",
+    "正常",
+    "정상",
+    "Sihat"
+  ],
+  "down": [
+    "Unavailable",
+    "不可用",
+    "不可用",
+    "利用不可",
+    "사용 불가",
+    "Tidak tersedia"
+  ],
+  "degraded": [
+    "Degraded",
+    "降级",
+    "降级",
+    "機能低下",
+    "성능 저하",
+    "Terjejas"
+  ],
+  "unknown": [
+    "Unknown",
+    "未知",
+    "未知",
+    "不明",
+    "알 수 없음",
+    "Tidak diketahui"
+  ],
+  "stale": [
+    "Stale",
+    "已过期",
+    "已过期",
+    "期限切れ",
+    "관측 만료",
+    "Luput"
+  ],
+  "paused": [
+    "Paused",
+    "已暂停",
+    "已暂停",
+    "一時停止",
+    "일시 중지",
+    "Dijeda"
+  ],
+  "pending": [
+    "Evaluating",
+    "判定中",
+    "判定中",
+    "判定中",
+    "판정 중",
+    "Sedang dinilai"
+  ],
+  "updating": [
+    "Updating",
+    "更新中",
+    "更新中",
+    "更新中",
+    "업데이트 중",
+    "Sedang dikemas kini"
+  ],
+  "settings": [
+    "Check configuration",
+    "检查配置",
+    "检查配置",
+    "チェック設定",
+    "검사 설정",
+    "Konfigurasi pemeriksaan"
+  ],
+  "timing": [
+    "Evaluation & retention",
+    "判定与保留",
+    "判定与保留",
+    "判定と保持期間",
+    "판정 및 보존 기간",
+    "Penilaian & pengekalan"
+  ],
+  "result": [
+    "Latest result",
+    "最近结果",
+    "最近结果",
+    "最新の結果",
+    "최신 결과",
+    "Keputusan terkini"
+  ],
+  "evidence": [
+    "Evidence",
+    "判定依据",
+    "判定依据",
+    "判定根拠",
+    "판정 근거",
+    "Bukti"
+  ],
+  "process": [
+    "Process state",
+    "进程状态",
+    "进程状态",
+    "プロセスの状態",
+    "프로세스 상태",
+    "Status proses"
+  ],
+  "container-health": [
+    "Container health check",
+    "容器健康检查",
+    "容器健康检查",
+    "コンテナーのヘルスチェック",
+    "컨테이너 상태 검사",
+    "Pemeriksaan kesihatan bekas"
+  ],
+  "task": [
+    "Scheduler task state",
+    "调度任务状态",
+    "调度任务状态",
+    "スケジューラーのタスク状態",
+    "스케줄러 작업 상태",
+    "Status tugas penjadual"
+  ],
+  "help": [
+    "HTTP/TCP run from the server network. Runtime checks use the selected host through SSH or Runner. Running processes alone do not prove protocol or business health.",
+    "HTTP/TCP 从服务端网络发起；运行实例通过所选主机的 SSH 或 Runner 观测。进程运行不代表协议或业务健康。",
+    "HTTP/TCP 从服务端网络发起；运行实例通过所选主机的 SSH 或 Runner 观测。进程运行不代表协议或业务健康。",
+    "HTTP/TCP はサーバーのネットワークから実行します。実行状態のチェックは SSH または Runner 経由で選択したホスト上で行います。プロセスの実行だけではプロトコルや業務の正常性を保証しません。",
+    "HTTP/TCP 검사는 서버 네트워크에서 실행합니다. 실행 상태 검사는 SSH 또는 Runner를 통해 선택한 호스트에서 수행합니다. 프로세스 실행만으로 프로토콜이나 업무의 정상 여부를 보장하지 않습니다.",
+    "HTTP/TCP dijalankan dari rangkaian pelayan. Pemeriksaan masa jalan menggunakan hos dipilih melalui SSH atau Runner. Proses berjalan sahaja tidak membuktikan kesihatan protokol atau perniagaan."
+  ],
+  "runtimeHelp": [
+    "Select an application and one of its deployment hosts; all services in the running revision are observed. Swarm uses a manager host.",
+    "选择应用及其部署主机，观测运行修订的全部服务；Swarm 选择管理节点。",
+    "选择应用及其部署主机，观测运行修订的全部服务；Swarm 选择管理节点。",
+    "アプリケーションとそのデプロイ先ホストを選択してください。実行中のリビジョンに含まれる全サービスを観測します。Swarm はマネージャーホストを使用します。",
+    "애플리케이션과 배포 대상 호스트를 선택하세요. 실행 중인 리비전의 모든 서비스를 관측합니다. Swarm은 관리자 호스트를 사용합니다.",
+    "Pilih aplikasi dan salah satu hos pengerahannya; semua perkhidmatan dalam semakan berjalan diperhatikan. Swarm menggunakan hos pengurus."
+  ],
+  "summaryHelp": [
+    "Entry availability and instance completeness are evaluated separately. Missing or stale observations remain unknown.",
+    "入口可用性与实例完整性分别判定，缺失或过期观测保持未知。",
+    "入口可用性与实例完整性分别判定，缺失或过期观测保持未知。",
+    "入口の可用性とインスタンスの充足を別々に判定します。観測の欠落や期限切れは不明として扱います。",
+    "진입점 가용성과 인스턴스 충족 여부를 별도로 판정합니다. 관측 누락이나 만료는 알 수 없음으로 처리합니다.",
+    "Ketersediaan pintu masuk dan kelengkapan instans dinilai secara berasingan. Pemerhatian hilang atau luput kekal tidak diketahui."
+  ],
+  "failed": [
+    "Health check failed",
+    "健康检查失败",
+    "健康检查失败",
+    "ヘルスチェック失敗",
+    "상태 검사 실패",
+    "Pemeriksaan kesihatan gagal"
+  ],
+  "recovered": [
+    "Health check recovered",
+    "健康检查已恢复",
+    "健康检查已恢复",
+    "ヘルスチェック復旧",
+    "상태 검사 복구",
+    "Pemeriksaan kesihatan pulih"
+  ],
+  "healthMetric": [
+    "Confirmed health failure",
+    "确认健康故障",
+    "确认健康故障",
+    "確認済みの正常性障害",
+    "확인된 상태 이상",
+    "Kegagalan kesihatan disahkan"
+  ],
+  "deploymentFailure": [
+    "Deployment execution failed",
+    "部署执行失败",
+    "部署执行失败",
+    "デプロイの実行失敗",
+    "배포 실행 실패",
+    "Pelaksanaan pengerahan gagal"
+  ],
+  "changed": [
+    "The check changed. Reload before saving.",
+    "检查配置已变更，请重新加载后保存。",
+    "检查配置已变更，请重新加载后保存。",
+    "チェックが変更されました。再読み込みしてから保存してください。",
+    "검사가 변경되었습니다. 새로고침 후 저장하세요.",
+    "Pemeriksaan telah berubah. Muat semula sebelum menyimpan."
+  ],
+  "referenced": [
+    "Remove alert policies referencing this check before deleting it.",
+    "请先移除引用此检查的告警策略。",
+    "请先移除引用此检查的告警策略。",
+    "削除する前に、このチェックを参照するアラートポリシーを削除してください。",
+    "검사를 삭제하기 전에 참조하는 알림 정책을 삭제하세요.",
+    "Alih keluar dasar amaran yang merujuk pemeriksaan ini sebelum memadamnya."
+  ],
+  "parametersInvalid": [
+    "Invalid check interval, timeout, thresholds, staleness or retention.",
+    "检查间隔、超时、连续次数、过期或保留参数无效。",
+    "检查间隔、超时、连续次数、过期或保留参数无效。",
+    "チェック間隔、タイムアウト、しきい値、有効期限、保持期間が無効です。",
+    "검사 간격, 시간 초과, 임계값, 유효 기간 또는 보존 기간이 잘못되었습니다.",
+    "Sela, had masa, ambang, tempoh luput atau pengekalan pemeriksaan tidak sah."
+  ],
+  "addressInvalid": [
+    "Invalid target address or HTTP assertion.",
+    "目标地址或 HTTP 断言无效。",
+    "目标地址或 HTTP 断言无效。",
+    "対象アドレスまたは HTTP 判定条件が無効です。",
+    "대상 주소 또는 HTTP 판정 조건이 잘못되었습니다.",
+    "Alamat sasaran atau penegasan HTTP tidak sah."
+  ],
+  "kindInvalid": [
+    "Unsupported check type.",
+    "不支持的检查方式。",
+    "不支持的检查方式。",
+    "このチェック方式はサポートされていません。",
+    "지원하지 않는 검사 방식입니다.",
+    "Jenis pemeriksaan tidak disokong."
+  ],
+  "bindingInvalid": [
+    "Invalid application, service or host binding.",
+    "应用、服务或主机关联无效。",
+    "应用、服务或主机关联无效。",
+    "アプリケーション、サービス、ホストの関連付けが無効です。",
+    "애플리케이션, 서비스 또는 호스트 연결이 잘못되었습니다.",
+    "Pautan aplikasi, perkhidmatan atau hos tidak sah."
+  ],
+  "nameInvalid": [
+    "A name of 1–120 characters and description up to 2000 characters are required.",
+    "名称需为1–120字符，说明最多2000字符。",
+    "名称需为1–120字符，说明最多2000字符。",
+    "名前は1～120文字、説明は2000文字以内で入力してください。",
+    "이름은 1~120자, 설명은 2000자 이내로 입력하세요.",
+    "Nama 1–120 aksara dan penerangan sehingga 2000 aksara diperlukan."
+  ],
+  "observerUnavailable": [
+    "Observation unavailable: check host connectivity, permissions and runtime tools.",
+    "无法观测，请检查主机连接、权限及运行工具。",
+    "无法观测，请检查主机连接、权限及运行工具。",
+    "観測できません。ホスト接続、権限、実行環境のツールを確認してください。",
+    "관측할 수 없습니다. 호스트 연결, 권한 및 실행 환경 도구를 확인하세요.",
+    "Pemerhatian tidak tersedia: semak sambungan hos, kebenaran dan alat masa jalan."
+  ],
+  "noRevision": [
+    "No running deployment revision.",
+    "无运行中的部署修订。",
+    "无运行中的部署修订。",
+    "実行中のデプロイリビジョンがありません。",
+    "실행 중인 배포 리비전이 없습니다.",
+    "Tiada semakan pengerahan berjalan."
+  ],
+  "runtimeUnsupported": [
+    "This runtime is not supported.",
+    "暂不支持此运行环境。",
+    "暂不支持此运行环境。",
+    "この実行環境はサポートされていません。",
+    "지원하지 않는 실행 환경입니다.",
+    "Masa jalan ini tidak disokong."
+  ],
+  "runtimeInvalid": [
+    "Invalid runtime observation format.",
+    "运行观测格式无效。",
+    "运行观测格式无效。",
+    "実行状態の観測形式が無効です。",
+    "실행 상태 관측 형식이 잘못되었습니다.",
+    "Format pemerhatian masa jalan tidak sah."
+  ],
+  "connectionFailed": [
+    "Connection failed.",
+    "连接失败。",
+    "连接失败。",
+    "接続に失敗しました。",
+    "연결에 실패했습니다.",
+    "Sambungan gagal."
+  ],
+  "statusMismatch": [
+    "Unexpected HTTP status.",
+    "HTTP 状态码不符。",
+    "HTTP 状态码不符。",
+    "HTTP ステータスが期待値と異なります。",
+    "HTTP 상태 코드가 예상과 다릅니다.",
+    "Status HTTP tidak dijangka."
+  ],
+  "bodyMismatch": [
+    "Response content did not match.",
+    "响应内容不符。",
+    "响应内容不符。",
+    "レスポンスの内容が一致しません。",
+    "응답 내용이 일치하지 않습니다.",
+    "Kandungan respons tidak sepadan."
+  ],
+  "responseTooLarge": [
+    "Response exceeded the 64 KiB content-check limit.",
+    "响应超过内容检查的64 KiB限制。",
+    "响应超过内容检查的64 KiB限制。",
+    "レスポンスが内容チェックの上限64 KiBを超えました。",
+    "응답이 내용 검사 한도인 64 KiB를 초과했습니다.",
+    "Respons melebihi had semakan kandungan 64 KiB."
+  ],
+  "timeout": [
+    "Check timed out.",
+    "检查超时。",
+    "检查超时。",
+    "チェックがタイムアウトしました。",
+    "검사 시간이 초과되었습니다.",
+    "Pemeriksaan tamat masa."
+  ],
+  "empty": [
+    "No health checks configured.",
+    "尚未配置健康检查。",
+    "尚未配置健康检查。",
+    "ヘルスチェックが設定されていません。",
+    "설정된 상태 검사가 없습니다.",
+    "Tiada pemeriksaan kesihatan dikonfigurasi."
+  ],
+  "streak": [
+    "Success / failure streak",
+    "连续成功 / 失败",
+    "连续成功 / 失败",
+    "連続成功 / 失敗回数",
+    "연속 성공 / 실패 횟수",
+    "Kejayaan / kegagalan berturut-turut"
+  ],
+  "createPolicy": [
+    "Create alert policy",
+    "新建告警策略",
+    "新建告警策略",
+    "アラートポリシーを作成",
+    "알림 정책 만들기",
+    "Cipta dasar amaran"
+  ],
+  "configure": [
+    "Configure health checks",
+    "配置健康检查",
+    "配置健康检查",
+    "ヘルスチェックを設定",
+    "상태 검사 설정",
+    "Konfigurasi pemeriksaan kesihatan"
+  ],
+  "unmonitored_hosts": [
+    "Unmonitored deployment hosts",
+    "未覆盖的部署主机",
+    "未覆盖的部署主机",
+    "Unmonitored deployment hosts",
+    "Unmonitored deployment hosts",
+    "Hos pengerahan tanpa pemantauan"
+  ]
+}

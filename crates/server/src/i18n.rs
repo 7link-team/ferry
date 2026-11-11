@@ -178,6 +178,14 @@ static CATALOGS: LazyLock<[Catalog; 6]> = LazyLock::new(|| {
     .map(|source| serde_json::from_str(source).expect("valid built-in message catalog"));
     for domain in [
         [
+            include_str!("i18n/monitoring-en-US.json"),
+            include_str!("i18n/monitoring-zh-CN.json"),
+            include_str!("i18n/monitoring-zh-TW.json"),
+            include_str!("i18n/monitoring-ja-JP.json"),
+            include_str!("i18n/monitoring-ko-KR.json"),
+            include_str!("i18n/monitoring-ms-MY.json"),
+        ],
+        [
             include_str!("i18n/models-en-US.json"),
             include_str!("i18n/models-zh-CN.json"),
             include_str!("i18n/models-zh-TW.json"),

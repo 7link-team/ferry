@@ -680,3 +680,11 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Alternatives：旧有效路径308迁移，旧域名和未知token404。运维DNS/TLS/代理设置仍属于部署层，数据库配置不能替代。
 - Scope/Tradeoffs：新增access_config可空TEXT迁移，保留旧加密URL和历史strip_prefix字段。详细模型、up/down、全状态与验收见docs/preview-holes-design.md第17节。旧配置base路径的应用需调整为根路径。
 - Status：已实现，真实Runner/Actions/工作流、CI测试DNS与发布证据以MEMORY.md为准，不宣称公网DNS/TLS验收。
+
+## 2026-11-11 Monitoring health v1 (isolated branch)
+Decision: user approved three object levels and first-phase HTTP/TCP + runtime observations, shared alerts/notifications. Configurable defaults: interval30s, timeout5s, failures3, recoveries2, stale90s, history7d. Entry-up with known instance loss=degraded, confirmed entry-down=unavailable, insufficient fresh evidence=unknown.
+Reason: entry reachability alone masks failed cluster nodes; execution success is separate from runtime health.
+Alternatives considered: remove existing alert rules; replace host monitoring; both rejected because shared capabilities remain necessary.
+Tradeoffs: runtime state is explicitly process/container/task evidence, not protocol quorum. HTTP/TCP originate on server network.
+Cluster identity: Swarm observations include the Cluster ID returned by a bounded read-only `docker info` command. Only observations with the same cluster identity merge replica demand; independent clusters in a host group remain separate. Missing identity is unknown evidence, never an inferred shared cluster.
+Scope: docs/监控与应用健康一期设计.md. No phase-two protocols/log/scripts/heartbeat/automatic repair. No existing data migration or shared service update. Status: implementation in isolated worktree, not accepted.

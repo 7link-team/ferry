@@ -19,6 +19,7 @@ mod holes;
 mod holes_sources;
 mod login_guard;
 mod notification_center;
+mod monitoring;
 mod platform_monitor;
 mod platform_storage;
 mod workflow_node_logs;
@@ -169,6 +170,7 @@ impl MigratorTrait for Migrator {
             Box::new(notification_center::Migration),
             Box::new(account_otp::Migration),
             Box::new(identity_avatars::Migration),
+            Box::new(monitoring::Migration),
         ]
     }
 }

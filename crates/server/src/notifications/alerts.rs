@@ -63,6 +63,8 @@ fn event(r: events::Model) -> Value {
 fn permission(kind: &str) -> Result<&'static str> {
     match kind {
         "host" => Ok("hosts.read"),
+        "health-check" => Ok("alerts.read"),
+        "application-health" => Ok("deployments.read"),
         "pipeline" => Ok("pipelines.read"),
         "deployment" => Ok("deployments.read"),
         "cron-job" => Ok("cron-jobs.read"),
@@ -83,10 +85,14 @@ async fn target(conn: &impl ConnectionTrait, scope: &Scope, kind: &str, id: Id) 
                 .is_some()
         };
     }
+    if kind == "health-check" {
+        crate::monitoring::scoped(conn, scope, id).await?;
+        return Ok(());
+    }
     let present = match kind {
         "host" => exists!(hosts),
         "pipeline" => exists!(pipelines),
-        "deployment" => exists!(deployments),
+        "deployment" | "application-health" => exists!(deployments),
         "cron-job" => exists!(cron_jobs),
         _ => false,
     };
@@ -106,7 +112,9 @@ async fn validate(conn: &impl ConnectionTrait, scope: &Scope, b: &Body) -> Resul
             Message::new("alerts.nameInvalid"),
         ));
     }
-    let valid = if b.target_kind == "host" {
+    let valid = if matches!(b.target_kind.as_str(), "health-check" | "application-health") {
+        b.metric == "health-failed"
+    } else if b.target_kind == "host" {
         match b.metric.as_str() {
             "offline" => true,
             "load1" => b.threshold >= 0,
@@ -434,6 +442,22 @@ async fn abnormal(s: &AppState, r: &rules::Model) -> Result<Option<(bool, Messag
     let scope = Scope::for_actor(s, r.workspace_id.into(), r.run_as.into()).await?;
     scope.require("alerts.read")?;
     target(&s.db, &scope, &r.target_kind, r.target_ref.into()).await?;
+    if r.target_kind == "application-health" {
+        let Json(value)=crate::monitoring::application(State(s.clone()),scope,Path((r.workspace_id.to_string(),r.target_ref.into()))).await?;
+        return Ok(match value["health"].as_str() {
+            Some("up") => Some((false,Message::new("monitoring.recovered"))),
+            Some("down"|"degraded") => Some((true,Message::new("monitoring.failed"))),
+            _ => None,
+        });
+    }
+    if r.target_kind == "health-check" {
+        let row = crate::monitoring::scoped(&s.db, &scope, r.target_ref.into()).await?;
+        return Ok(match crate::monitoring::state(&row, db::now()).as_str() {
+            "up" => Some((false, Message::new("monitoring.recovered"))),
+            "down" => Some((true, Message::new("monitoring.failed"))),
+            _ => None,
+        });
+    }
     if r.target_kind == "host" {
         let host = hosts::Entity::find_by_id(r.target_ref)
             .one(&s.db)
