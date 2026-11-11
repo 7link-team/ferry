@@ -1,5 +1,6 @@
 //! Read external repository indexes; no Git hosting or local Git executable.
 pub(crate) mod index;
+pub(crate) mod store;
 use crate::error::{ApiError, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -527,7 +528,10 @@ async fn bind_source_repository(
     Ok(())
 }
 
-use index::parse_index;
+/// Release version of this build, used to judge package compatibility.
+pub(crate) fn ferry_version() -> semver::Version {
+    semver::Version::parse(env!("CARGO_PKG_VERSION")).expect("crate version is semver")
+}
 fn source_json(row: sources::Model) -> Result<Value> {
     let mut value: Value = serde_json::from_str(&row.config).map_err(|_| {
         ApiError::localized(
@@ -868,47 +872,13 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
             .one(&s.db)
             .await?
             .is_some();
-        let index = parse_index(&fetch(&config, token.as_deref(), oauth, timeout).await?)?;
+        let packages = index::parse_bundle(&fetch(&config, token.as_deref(), oauth, timeout).await?, &ferry_version(), "en-US")?;
         let fresh = Scope::for_actor(s, scope.workspace_id, scope.user.id).await?;
         fresh.require("marketplace-sources.sync")?;
         fresh.require("repositories.read")?;
         let tx = crate::variables::transaction(s, scope.workspace_id).await?;
         let now = db::now();
-        entries::Entity::delete_many()
-            .filter(entries::Column::WorkspaceId.eq(scope.workspace_id))
-            .filter(entries::Column::SourceId.eq(id))
-            .exec(&tx)
-            .await?;
-        let total = index.templates.len();
-        for entry in index.templates {
-            if std::time::Instant::now() >= deadline {
-                return Err(ApiError::localized(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("marketplace.syncTimeout"),
-                ));
-            }
-            entries::Entity::insert(entries::ActiveModel {
-                id: Set(s.next_id()?.into()),
-                workspace_id: Set(scope.workspace_id.into()),
-                source_id: Set(id.into()),
-                entry_key: Set(entry.key),
-                name: Set(entry.name),
-                description: Set(entry.description),
-                content: Set(serde_json::to_string_pretty(&entry.content).unwrap()),
-                parameters: Set(serde_json::to_string(&entry.parameters).unwrap()),
-                version: Set(1),
-                created_at: Set(now),
-                updated_at: Set(now), ..Default::default()
-            })
-            .exec(&tx)
-            .await?;
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("marketplace.syncTimeout"),
-            ));
-        }
+        let total = store::replace_entries(s, &tx, scope.workspace_id.into(), id.into(), scope.user.id.into(), packages, deadline).await?;
         sources::Entity::update_many()
             .col_expr(sources::Column::State, Expr::value("idle"))
             .col_expr(sources::Column::SyncedAt, Expr::value(now))
