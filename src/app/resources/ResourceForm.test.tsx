@@ -11,6 +11,21 @@ vi.mock("../../features/pipelines/YamlEditor", () => ({
 }));
 let root: Root, host: HTMLDivElement, requests: { url: string; method: string | undefined; body: string | undefined }[];
 let stored: Record<string, unknown>;
+it("keeps resource groups and individual actions in read-only permission summaries", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/variables/10");
+  stored = { id: "10", permissions: ["hosts.read", "hosts.update", "pipelines.read", "legacy.action"], version: 1 };
+  const config = { resource: "variables", heading: () => "Role", blank: {}, sections: [{ fields: [{ key: "permissions", label: "Permissions", type: "multiselect" as const, options: [
+    { value: "hosts.read", label: "Read", group: "Hosts" }, { value: "hosts.update", label: "Update", group: "Hosts" },
+    { value: "pipelines.read", label: "Read", group: "Pipelines" }, { value: "pipelines.delete", label: "Delete", group: "Pipelines" },
+  ] }] }] };
+  await act(async () => root.render(<ResourceForm config={config} workspace="ops" permissions={perms} />));
+  const summary = host.querySelector('[data-multiselect-summary]')!;
+  expect(summary.querySelector('section[aria-label="Hosts"]')?.querySelectorAll('li')).toHaveLength(2);
+  expect(summary.querySelector('section[aria-label="Pipelines"]')?.textContent).toContain("Read");
+  expect(summary.textContent).not.toContain("Delete");
+  expect(summary.textContent).toContain("legacy.action");
+  expect(summary.querySelectorAll('[role="checkbox"]')).toHaveLength(0);
+});
 const perms = new Set(["variables.read", "variables.update", "variables.reveal"]);
 
 it.each([false, true])("matches conditional secret required markers and save validation; enabled=%s", async enabled => {

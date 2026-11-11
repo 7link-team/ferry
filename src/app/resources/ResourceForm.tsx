@@ -638,7 +638,16 @@ function Field<T>({
 
   if (field.type === "multiselect") {
     const selected = new Set(Array.isArray(value) ? value.map(String) : []);
-    if (asText) return <Wrapper field={field}>{label}<div className="flex flex-wrap gap-1 text-sm">{options.some(option => selected.has(option.value)) ? options.filter(option => selected.has(option.value)).map(option => <span key={option.value}>{option.content ?? optionText(option)}</span>) : "\u2014"}</div></Wrapper>;
+    if (asText) {
+      const chosen = options.filter(option => selected.has(option.value));
+      const groups = [...new Set(chosen.map(option => option.group ?? ""))];
+      return <Wrapper field={field}>{label}{chosen.length ? <div className={groups.length > 1 ? "grid min-w-0 gap-3 lg:grid-cols-2" : "min-w-0 space-y-3"} data-multiselect-summary>
+        {groups.map(group => <section key={group} aria-label={group || field.label} className="min-w-0 rounded-lg border bg-background p-3">
+          {group && <h3 className="mb-2 flex items-start justify-between gap-2 text-sm font-semibold"><span className="min-w-0 break-words">{group}</span><span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-normal tabular-nums text-muted-foreground">{chosen.filter(option => (option.group ?? "") === group).length}</span></h3>}
+          <ul className="flex min-w-0 flex-wrap gap-2 text-sm">{chosen.filter(option => (option.group ?? "") === group).map(option => <li key={option.value} className="max-w-full break-words rounded-md border bg-muted/50 px-2.5 py-1" title={option.value}>{option.content ?? optionText(option)}</li>)}</ul>
+        </section>)}
+      </div> : <p className="text-sm">—</p>}</Wrapper>;
+    }
     const toggle = (key: string, checked: boolean) => {
       const next = new Set(selected);
       if (checked) {
