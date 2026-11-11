@@ -1,6 +1,7 @@
 //! Read external repository indexes; no Git hosting or local Git executable.
 pub(crate) mod index;
 pub(crate) mod store;
+pub mod platform;
 use crate::error::{ApiError, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};

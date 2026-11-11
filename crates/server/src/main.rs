@@ -356,6 +356,8 @@ async fn main() -> anyhow::Result<()> {
             "/api/platform/settings/1",
             get(accounts::platform::get_settings).patch(accounts::platform::update_settings),
         )
+        .route("/api/platform/marketplace-sources",get(marketplace::platform::list).post(marketplace::platform::create))
+        .route("/api/platform/marketplace-sources/{id}",get(marketplace::platform::get).patch(marketplace::platform::update).delete(marketplace::platform::delete))
         .route("/api/platform/server-nodes",get(accounts::platform::server_nodes))
         .route("/api/platform/monitor/activity",get(accounts::platform::list_activity))
         .route("/api/platform/monitor/database",get(platform_monitor::database::overview))
