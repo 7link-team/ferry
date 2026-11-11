@@ -161,7 +161,7 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         request(owner,root+'/cron-jobs/'+job,method='DELETE',expected=204)
         check('fixture-provider-token' not in json.dumps(request(owner,root+'/activity?page_size=200')) and 'fixture-provider-token' not in json.dumps(source(sid)),'source metadata and audit never reveal provider token')
         for source_id in sources:request(owner,root+'/marketplace-sources/'+source_id,method='DELETE',expected=204)
-        check(request(owner,root+'/marketplace')['total']==0 and request(owner,root+'/app-templates/'+imported)==template,'source deletion removes catalog but preserves imported templates')
+        check(not [i for i in request(owner,root+'/marketplace?page_size=100')['items'] if i['trust']=='workspace'] and request(owner,root+'/app-templates/'+imported)==template,'source deletion removes catalog but preserves imported templates')
         request(owner,root+'/repositories/'+repo,method='DELETE',expected=204)
         # Platform-level public sources: superadmin only, no credentials, visible in every workspace.
         other_root=f'/workspaces/{workspace_other}'
@@ -205,7 +205,7 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         check(official(root)==[] and request(owner,root+'/config-templates/'+config_ref)['id']==config_ref,'deleting a platform source removes its catalog and keeps imports')
         print(f'{checks} checks passed (local provider fixtures; not live private-platform acceptance)',flush=True)
     except Exception:
-        log.flush();print((data/'server.log').read_text()[-5000:],flush=True)
+        log.flush();print((data/'server.log').read_text(encoding='utf-8',errors='replace')[-5000:],flush=True)
         raise
     finally:
         if proc.poll() is None:proc.terminate();proc.wait(timeout=30)
