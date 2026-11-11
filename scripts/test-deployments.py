@@ -18,6 +18,19 @@ import urllib.request
 import uuid
 
 
+def report_log_tail(path, title, lines=80):
+    """Print a log's tail and emit it as a GitHub annotation, so a CI failure is readable without downloading artifacts."""
+    try:
+        tail = Path(path).read_text(encoding='utf-8', errors='replace').splitlines()[-lines:]
+    except OSError as error:
+        tail = [f'cannot read {path}: {error}']
+    text = '\n'.join(tail)
+    print(f'== {title}: last {len(tail)} lines of {path}\n{text}', flush=True)
+    if os.environ.get('GITHUB_ACTIONS') == 'true':
+        escaped = text[-60000:].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+        print(f'::error title={title}::{escaped}', flush=True)
+
+
 def command(args, **kw):
     try:
         return subprocess.run(args, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kw).stdout
@@ -236,7 +249,12 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         print('== preparing Linux Docker/SSH fixture', flush=True)
         with (work / 'docker-build.log').open('wb') as log:
             print('build log: '+str(work / 'docker-build.log'), flush=True)
-            subprocess.run(['docker','build','--progress=plain','-t','deployment-live-test-'+mode,str(build_dir)],stdout=log,stderr=log,check=True,timeout=600)
+            try:
+                subprocess.run(['docker','build','--progress=plain','-t','deployment-live-test-'+mode,str(build_dir)],stdout=log,stderr=log,check=True,timeout=600)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                log.flush()
+                report_log_tail(work / 'docker-build.log', 'fixture docker build failed')
+                raise
         if mode=='stack':
             # This CLI reaches an owned nested daemon. Never initialize Swarm on the developer daemon.
             command(['docker','network','create',name+'-swarm'])
