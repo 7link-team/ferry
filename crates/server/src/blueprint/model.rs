@@ -261,7 +261,10 @@ fn validate_ports(role: &Role) -> Result<()> {
             Value::String(s) => !s.trim().is_empty(),
             _ => false,
         };
-        let protocol_ok = port.protocol.as_deref().is_none_or(|p| p == "tcp" || p == "udp");
+        let protocol_ok = port
+            .protocol
+            .as_deref()
+            .is_none_or(|p| p == "tcp" || p == "udp");
         if !valid_identifier(&port.name) || port.container == 0 || !published_ok || !protocol_ok {
             return fail(Message::new("blueprint.portInvalid").with("role", &role.name));
         }
@@ -344,7 +347,10 @@ mod tests {
         assert!(b.roles[0].placement.distinct_hosts);
         assert_eq!(b.roles[1].placement.colocate_with.as_deref(), Some("nats"));
         assert_eq!(b.roles[0].ports[1].protocol.as_deref(), Some("tcp"));
-        assert_eq!(b.roles[0].ports[0].published, json!("{{ .Values.client_port }}"));
+        assert_eq!(
+            b.roles[0].ports[0].published,
+            json!("{{ .Values.client_port }}")
+        );
         assert_eq!(b.endpoints[0].kind, "discovery");
         assert!(b.drivers["stack"].supported);
         assert_eq!(b.update.health_timeout, 180);
@@ -361,7 +367,11 @@ mod tests {
         v.as_object_mut().unwrap().remove("update");
         let b = parse_v(&v).unwrap();
         assert_eq!(
-            (b.update.max_parallel, b.update.min_healthy_seconds, b.update.health_timeout),
+            (
+                b.update.max_parallel,
+                b.update.min_healthy_seconds,
+                b.update.health_timeout
+            ),
             (1, 10, 180)
         );
         assert!(b.update.auto_revert);
@@ -450,7 +460,8 @@ mod tests {
     #[test]
     fn hooks_not_yet_supported() {
         let mut v = nats();
-        v["hooks"] = json!([{ "event": "post-add", "role": "nats", "run": "any", "command": ["true"] }]);
+        v["hooks"] =
+            json!([{ "event": "post-add", "role": "nats", "run": "any", "command": ["true"] }]);
         assert_eq!(err_key(&v), "blueprint.hooksNotYetSupported");
         v.as_object_mut().unwrap().remove("hooks");
         assert!(parse_v(&v).is_ok());

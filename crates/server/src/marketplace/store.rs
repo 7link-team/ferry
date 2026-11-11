@@ -10,7 +10,10 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::json;
 
 fn timeout() -> ApiError {
-    ApiError::localized(axum::http::StatusCode::BAD_REQUEST, crate::i18n::Message::new("marketplace.syncTimeout"))
+    ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new("marketplace.syncTimeout"),
+    )
 }
 
 /// All localized names and descriptions, so search works in the reader's language.
@@ -47,7 +50,11 @@ pub(crate) async fn replace_entries(
         if let Some(reason) = &p.incompatible_reason {
             meta["incompatible"] = json!(reason);
         }
-        let files: Vec<_> = p.files.iter().map(|f| json!({"name":f.name,"content":f.content,"parameters":f.parameters})).collect();
+        let files: Vec<_> = p
+            .files
+            .iter()
+            .map(|f| json!({"name":f.name,"content":f.content,"parameters":f.parameters}))
+            .collect();
         entries::Entity::insert(entries::ActiveModel {
             id: Set(s.next_id()?.into()),
             workspace_id: Set(workspace_id),
@@ -93,9 +100,20 @@ mod tests {
         json!({"schemaVersion":2,"packages":[{"key":"web","kind":"app","meta":{"name":{"en-US":"Website"},"category":"web","topology":"single","drivers":["docker"]},"versions":versions}]}).to_string()
     }
     async fn store(s: &AppState, text: &str) -> usize {
-        let rows = super::super::index::parse_bundle(text, &semver::Version::new(0, 3, 0), "en-US").unwrap();
+        let rows = super::super::index::parse_bundle(text, &semver::Version::new(0, 3, 0), "en-US")
+            .unwrap();
         let tx = s.db.begin().await.unwrap();
-        let n = replace_entries(s, &tx, 7, 70, 1, rows, std::time::Instant::now() + std::time::Duration::from_secs(20)).await.unwrap();
+        let n = replace_entries(
+            s,
+            &tx,
+            7,
+            70,
+            1,
+            rows,
+            std::time::Instant::now() + std::time::Duration::from_secs(20),
+        )
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
         n
     }
@@ -104,19 +122,30 @@ mod tests {
     async fn replace_entries_stores_versions_files_digest_and_replaces_previous() {
         let (_dir, s) = crate::agents::tests::setup().await;
         assert_eq!(store(&s, &bundle(&["1.0.0", "1.1.0"])).await, 2);
-        let rows = entries::Entity::find().filter(entries::Column::SourceId.eq(70)).order_by_asc(entries::Column::PackageVersion).all(&s.db).await.unwrap();
+        let rows = entries::Entity::find()
+            .filter(entries::Column::SourceId.eq(70))
+            .order_by_asc(entries::Column::PackageVersion)
+            .all(&s.db)
+            .await
+            .unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].package_version, "1.0.0");
         assert_eq!(rows[0].workspace_id, 7);
         assert_eq!(rows[0].entry_key, "web");
         assert_eq!(rows[0].created_by, 1);
         assert_eq!(rows[0].digest.len(), 64);
-        let files: serde_json::Value = serde_json::from_str(rows[0].files.as_deref().unwrap()).unwrap();
+        let files: serde_json::Value =
+            serde_json::from_str(rows[0].files.as_deref().unwrap()).unwrap();
         assert_eq!(files[0]["name"], "web.conf");
-        let meta: serde_json::Value = serde_json::from_str(rows[0].meta.as_deref().unwrap()).unwrap();
+        let meta: serde_json::Value =
+            serde_json::from_str(rows[0].meta.as_deref().unwrap()).unwrap();
         assert_eq!(meta["name"]["en-US"], "Website");
         assert_eq!(store(&s, &bundle(&["2.0.0"])).await, 1);
-        let rows = entries::Entity::find().filter(entries::Column::SourceId.eq(70)).all(&s.db).await.unwrap();
+        let rows = entries::Entity::find()
+            .filter(entries::Column::SourceId.eq(70))
+            .all(&s.db)
+            .await
+            .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].package_version, "2.0.0");
     }
@@ -124,8 +153,17 @@ mod tests {
     #[tokio::test]
     async fn replace_entries_honours_deadline() {
         let (_dir, s) = crate::agents::tests::setup().await;
-        let rows = super::super::index::parse_bundle(&bundle(&["1.0.0"]), &semver::Version::new(0, 3, 0), "en-US").unwrap();
+        let rows = super::super::index::parse_bundle(
+            &bundle(&["1.0.0"]),
+            &semver::Version::new(0, 3, 0),
+            "en-US",
+        )
+        .unwrap();
         let tx = s.db.begin().await.unwrap();
-        assert!(replace_entries(&s, &tx, 7, 70, 1, rows, std::time::Instant::now()).await.is_err());
+        assert!(
+            replace_entries(&s, &tx, 7, 70, 1, rows, std::time::Instant::now())
+                .await
+                .is_err()
+        );
     }
 }

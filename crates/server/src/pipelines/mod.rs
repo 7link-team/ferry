@@ -655,13 +655,15 @@ pub async fn remove(
         .all(&tx)
         .await?
     {
-        let referenced = crate::deployments::applications(&app)?.iter().any(|manifest| {
-            manifest.services.iter().any(|s| {
-                s.artifact
-                    .as_ref()
-                    .is_some_and(|a| a.pipeline == id.to_string())
-            })
-        });
+        let referenced = crate::deployments::applications(&app)?
+            .iter()
+            .any(|manifest| {
+                manifest.services.iter().any(|s| {
+                    s.artifact
+                        .as_ref()
+                        .is_some_and(|a| a.pipeline == id.to_string())
+                })
+            });
         if referenced {
             return Err(ApiError::localized(
                 StatusCode::CONFLICT,

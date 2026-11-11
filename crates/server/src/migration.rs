@@ -5,26 +5,26 @@
 use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 mod access_addresses;
-mod preview_ingress;
 mod account_otp;
 mod account_preferences;
-mod identity_avatars;
-mod marketplace_platform;
-mod blueprint_deployments;
 mod agent_models;
 mod ai_agents;
 mod ai_models;
+mod blueprint_deployments;
 mod chat;
 mod chat_interactions;
 mod chat_messages;
 mod conversations;
 mod holes;
 mod holes_sources;
+mod identity_avatars;
 mod login_guard;
-mod notification_center;
+mod marketplace_platform;
 mod monitoring;
+mod notification_center;
 mod platform_monitor;
 mod platform_storage;
+mod preview_ingress;
 mod workflow_node_logs;
 
 // Keep names alongside builders for existence checks; no SQL parsing is needed.

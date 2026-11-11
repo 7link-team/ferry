@@ -588,7 +588,9 @@ pub async fn update_profile(
     Json(body): Json<ProfileUpdate>,
 ) -> Result<Json<Value>> {
     use sea_orm::TransactionTrait;
-    if let Some(avatar) = &body.avatar { avatar.validate()?; }
+    if let Some(avatar) = &body.avatar {
+        avatar.validate()?;
+    }
     let name = body.name.trim().to_owned();
     if name.is_empty() {
         return Err(ApiError::localized(

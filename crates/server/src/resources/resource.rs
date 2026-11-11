@@ -178,7 +178,12 @@ pub async fn list_with<E: EntityTrait, M: FromQueryResult + Send + Sync>(
     scope: Condition,
     query: &ListQuery,
 ) -> Result<(Vec<M>, u64)> {
-    page(conn, select.filter(Condition::all().add(scope).add(filters::<E>(spec, query)?)), query).await
+    page(
+        conn,
+        select.filter(Condition::all().add(scope).add(filters::<E>(spec, query)?)),
+        query,
+    )
+    .await
 }
 
 /// Deliberately global: caller must have obtained a platform Admin extractor.

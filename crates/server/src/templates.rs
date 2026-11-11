@@ -69,7 +69,8 @@ pub(crate) async fn seed_examples(
         parameters: Set(parameters),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now), ..Default::default()
+        updated_at: Set(now),
+        ..Default::default()
     })
     .exec(conn)
     .await?;
@@ -86,7 +87,8 @@ pub(crate) async fn seed_examples(
         parameters: Set("[]".into()),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now), ..Default::default()
+        updated_at: Set(now),
+        ..Default::default()
     })
     .exec(conn)
     .await?;
@@ -111,7 +113,8 @@ pub(crate) async fn seed_examples(
         parameters: Set(parameters),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now), ..Default::default()
+        updated_at: Set(now),
+        ..Default::default()
     })
     .exec(conn)
     .await?;
@@ -129,7 +132,8 @@ pub(crate) async fn seed_examples(
             parameters: Set("[]".into()),
             version: Set(1),
             created_at: Set(now),
-            updated_at: Set(now), ..Default::default()
+            updated_at: Set(now),
+            ..Default::default()
         },
     )
     .exec(conn)
@@ -154,7 +158,8 @@ pub(crate) async fn seed_examples(
         parameters: Set(parameters),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now), ..Default::default()
+        updated_at: Set(now),
+        ..Default::default()
     })
     .exec(conn)
     .await?;
@@ -172,7 +177,8 @@ pub(crate) async fn seed_examples(
             parameters: Set("[]".into()),
             version: Set(1),
             created_at: Set(now),
-            updated_at: Set(now), ..Default::default()
+            updated_at: Set(now),
+            ..Default::default()
         },
     )
     .exec(conn)
@@ -202,7 +208,8 @@ pub(crate) async fn seed_examples(
         parameters: Set(parameters),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now), ..Default::default()
+        updated_at: Set(now),
+        ..Default::default()
     })
     .exec(conn)
     .await?;
@@ -1626,7 +1633,8 @@ mod tests {
             parameters: Set("[]".into()),
             version: Set(1),
             created_at: Set(0),
-            updated_at: Set(0), ..Default::default()
+            updated_at: Set(0),
+            ..Default::default()
         })
         .exec(&s.db)
         .await

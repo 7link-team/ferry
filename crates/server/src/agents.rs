@@ -129,9 +129,13 @@ impl Body {
         }
         self.name = self.name.trim().into();
         if self.avatar.is_none() {
-            self.avatar = old.and_then(|row| row.avatar.as_ref()).and_then(|value| serde_json::from_str(value).ok());
+            self.avatar = old
+                .and_then(|row| row.avatar.as_ref())
+                .and_then(|value| serde_json::from_str(value).ok());
         }
-        if let Some(avatar) = &self.avatar { avatar.validate()?; }
+        if let Some(avatar) = &self.avatar {
+            avatar.validate()?;
+        }
         if self.platform_role_id.is_empty() {
             if let Some(old) = old {
                 self.platform_role_id =
@@ -256,7 +260,10 @@ impl Body {
                 .into(),
             workspace_id: workspace.into(),
             name: self.name.clone(),
-            avatar: self.avatar.as_ref().map(|value| serde_json::to_string(value).expect("serializable avatar")),
+            avatar: self
+                .avatar
+                .as_ref()
+                .map(|value| serde_json::to_string(value).expect("serializable avatar")),
             role: self.role.clone(),
             description: self.description.clone(),
             runtime: self.runtime.clone(),

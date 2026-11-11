@@ -7,16 +7,35 @@ use sea_orm::TransactionTrait;
 async fn conversation_member_avatars_are_scoped_and_do_not_expose_agent_config() {
     let (_dir, s, id) = seeded().await;
     let avatar = serde_json::from_value(json!({"style":"emoji","emoji":"🙂"})).unwrap();
-    crate::accounts::preferences::save_avatar(&s.db, 1, &avatar).await.unwrap();
+    crate::accounts::preferences::save_avatar(&s.db, 1, &avatar)
+        .await
+        .unwrap();
     let c = find(&s.db, &admin(1), id).await.unwrap();
-    ai_agents::Entity::update_many().col_expr(ai_agents::Column::Avatar, sea_orm::sea_query::Expr::value(Some(json!({"style":"pixel","seed":"agent"}).to_string())))
-        .filter(ai_agents::Column::Id.eq(c.agent_id)).exec(&s.db).await.unwrap();
-    let Json(value) = detail(State(s.clone()), admin(1), Path(("1".into(), id))).await.unwrap();
+    ai_agents::Entity::update_many()
+        .col_expr(
+            ai_agents::Column::Avatar,
+            sea_orm::sea_query::Expr::value(Some(
+                json!({"style":"pixel","seed":"agent"}).to_string(),
+            )),
+        )
+        .filter(ai_agents::Column::Id.eq(c.agent_id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let Json(value) = detail(State(s.clone()), admin(1), Path(("1".into(), id)))
+        .await
+        .unwrap();
     assert_eq!(value["members"][0]["avatar"]["emoji"], "🙂");
     assert_eq!(value["agent_avatar"]["seed"], "agent");
     assert!(value["members"][0].get("email").is_none());
     assert!(value["members"][0].get("password_hash").is_none());
-    assert_eq!(detail(State(s), admin(2), Path(("2".into(), id))).await.unwrap_err().0, StatusCode::NOT_FOUND);
+    assert_eq!(
+        detail(State(s), admin(2), Path(("2".into(), id)))
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::NOT_FOUND
+    );
 }
 
 #[tokio::test]

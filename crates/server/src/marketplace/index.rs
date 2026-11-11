@@ -36,7 +36,15 @@ const MAX_ICON_BYTES: usize = 64 * 1024;
 const MAX_README_BYTES: usize = 64 * 1024;
 /// Config template names are at most 60 characters; keep room for the "-20" conflict suffix.
 const MAX_FILE_NAME: usize = 57;
-const CATEGORIES: &[&str] = &["database", "cache", "messaging", "web", "scheduler", "platform", "other"];
+const CATEGORIES: &[&str] = &[
+    "database",
+    "cache",
+    "messaging",
+    "web",
+    "scheduler",
+    "platform",
+    "other",
+];
 const DRIVERS: &[&str] = &["native", "docker", "compose", "stack", "k8s"];
 
 #[derive(Deserialize)]
@@ -60,11 +68,16 @@ fn empty_parameters() -> Value {
     json!([])
 }
 fn valid_key(key: &str) -> bool {
-    !key.is_empty() && key.len() <= 100 && key.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
+    !key.is_empty()
+        && key.len() <= 100
+        && key
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
 }
 /// Legacy v1 index: one application template per entry, all validated or none stored.
 pub(crate) fn parse_index(text: &str) -> Result<Index> {
-    let index: Index = serde_json::from_str(text).map_err(|_| bad("marketplace.indexObjectRequired"))?;
+    let index: Index =
+        serde_json::from_str(text).map_err(|_| bad("marketplace.indexObjectRequired"))?;
     if index.version != 1 || index.templates.len() > MAX_PACKAGES {
         return Err(bad("marketplace.indexVersionInvalid"));
     }
@@ -139,7 +152,11 @@ struct File {
 pub(crate) fn localized(map: &Value, locale: &str) -> Option<String> {
     [locale, "en-US", "zh-CN"]
         .iter()
-        .find_map(|l| map.get(*l).and_then(Value::as_str).filter(|v| !v.trim().is_empty()))
+        .find_map(|l| {
+            map.get(*l)
+                .and_then(Value::as_str)
+                .filter(|v| !v.trim().is_empty())
+        })
         .map(str::to_owned)
 }
 
@@ -152,7 +169,11 @@ fn validate_meta(meta: &Value) -> Result<()> {
             Some(Value::Object(map)) => {
                 let has_base = map.contains_key("zh-CN") || map.contains_key("en-US");
                 if (required && !has_base)
-                    || map.values().any(|v| v.as_str().is_none_or(|t| t.chars().count() > max || (required && t.trim().is_empty())))
+                    || map.values().any(|v| {
+                        v.as_str().is_none_or(|t| {
+                            t.chars().count() > max || (required && t.trim().is_empty())
+                        })
+                    })
                 {
                     return Err(invalid());
                 }
@@ -164,23 +185,42 @@ fn validate_meta(meta: &Value) -> Result<()> {
     texts("name", 60, true)?;
     texts("description", 500, false)?;
     let text = |key: &str| object.get(key).and_then(Value::as_str);
-    if !text("category").is_some_and(|c| CATEGORIES.contains(&c)) || !matches!(text("topology"), Some("single" | "cluster")) {
+    if !text("category").is_some_and(|c| CATEGORIES.contains(&c))
+        || !matches!(text("topology"), Some("single" | "cluster"))
+    {
         return Err(invalid());
     }
-    let drivers = object.get("drivers").and_then(Value::as_array).ok_or_else(invalid)?;
-    if drivers.is_empty() || drivers.iter().any(|d| !d.as_str().is_some_and(|d| DRIVERS.contains(&d))) {
+    let drivers = object
+        .get("drivers")
+        .and_then(Value::as_array)
+        .ok_or_else(invalid)?;
+    if drivers.is_empty()
+        || drivers
+            .iter()
+            .any(|d| !d.as_str().is_some_and(|d| DRIVERS.contains(&d)))
+    {
         return Err(invalid());
     }
     let list = |key: &str, count: usize, len: usize| match object.get(key) {
         None => true,
-        Some(Value::Array(items)) => items.len() <= count && items.iter().all(|i| i.as_str().is_some_and(|t| !t.is_empty() && t.chars().count() <= len)),
+        Some(Value::Array(items)) => {
+            items.len() <= count
+                && items.iter().all(|i| {
+                    i.as_str()
+                        .is_some_and(|t| !t.is_empty() && t.chars().count() <= len)
+                })
+        }
         _ => false,
     };
     if !list("tags", 10, 30) || !list("maintainers", 10, 100) {
         return Err(invalid());
     }
     if let Some(home) = object.get("homepage") {
-        if !home.as_str().and_then(|h| reqwest::Url::parse(h).ok()).is_some_and(|u| u.scheme() == "https") {
+        if !home
+            .as_str()
+            .and_then(|h| reqwest::Url::parse(h).ok())
+            .is_some_and(|u| u.scheme() == "https")
+        {
             return Err(invalid());
         }
     }
@@ -189,7 +229,10 @@ fn validate_meta(meta: &Value) -> Result<()> {
 
 fn digest(content: &Value, parameters: &Value, files: &[PackageFile]) -> String {
     use sha2::Digest;
-    let files: Vec<Value> = files.iter().map(|f| json!({"name":f.name,"content":f.content,"parameters":f.parameters})).collect();
+    let files: Vec<Value> = files
+        .iter()
+        .map(|f| json!({"name":f.name,"content":f.content,"parameters":f.parameters}))
+        .collect();
     let canonical = json!({"content":content,"parameters":parameters,"files":files}).to_string();
     hex::encode(sha2::Sha256::digest(canonical.as_bytes()))
 }
@@ -200,7 +243,8 @@ fn compatibility(kind: &str, requires: &str, ferry: &semver::Version) -> Result<
         return Ok(Some("marketplace.kindUnsupported".into()));
     }
     if !requires.trim().is_empty() {
-        let requirement = semver::VersionReq::parse(requires).map_err(|_| bad("marketplace.requirementInvalid"))?;
+        let requirement = semver::VersionReq::parse(requires)
+            .map_err(|_| bad("marketplace.requirementInvalid"))?;
         if !requirement.matches(&semver::Version::new(ferry.major, ferry.minor, ferry.patch)) {
             return Ok(Some("marketplace.ferryVersionUnsupported".into()));
         }
@@ -208,8 +252,13 @@ fn compatibility(kind: &str, requires: &str, ferry: &semver::Version) -> Result<
     Ok(None)
 }
 
-pub fn parse_bundle(text: &str, ferry_version: &semver::Version, locale: &str) -> Result<Vec<PackageVersion>> {
-    let document: Value = serde_json::from_str(text).map_err(|_| bad("marketplace.indexObjectRequired"))?;
+pub fn parse_bundle(
+    text: &str,
+    ferry_version: &semver::Version,
+    locale: &str,
+) -> Result<Vec<PackageVersion>> {
+    let document: Value =
+        serde_json::from_str(text).map_err(|_| bad("marketplace.indexObjectRequired"))?;
     if document.get("schemaVersion").is_none() {
         return Ok(parse_index(text)?
             .templates
@@ -237,36 +286,59 @@ pub fn parse_bundle(text: &str, ferry_version: &semver::Version, locale: &str) -
     if document["schemaVersion"] != json!(2) {
         return Err(bad("marketplace.indexVersionInvalid"));
     }
-    let bundle: Bundle = serde_json::from_value(document).map_err(|_| bad("marketplace.indexObjectRequired"))?;
+    let bundle: Bundle =
+        serde_json::from_value(document).map_err(|_| bad("marketplace.indexObjectRequired"))?;
     if bundle.schema_version != 2 || bundle.packages.len() > MAX_PACKAGES {
         return Err(bad("marketplace.indexVersionInvalid"));
     }
     let mut keys = HashSet::new();
     let mut rows = Vec::new();
     for package in bundle.packages {
-        if !valid_key(&package.key) || !keys.insert(package.key.clone()) || package.versions.is_empty() || package.versions.len() > MAX_VERSIONS || package.icon.len() > MAX_ICON_BYTES {
+        if !valid_key(&package.key)
+            || !keys.insert(package.key.clone())
+            || package.versions.is_empty()
+            || package.versions.len() > MAX_VERSIONS
+            || package.icon.len() > MAX_ICON_BYTES
+        {
             return Err(bad("marketplace.templateInvalid"));
         }
         validate_meta(&package.meta)?;
-        let name = localized(&package.meta["name"], locale).ok_or_else(|| bad("marketplace.packageMetaInvalid"))?;
+        let name = localized(&package.meta["name"], locale)
+            .ok_or_else(|| bad("marketplace.packageMetaInvalid"))?;
         let description = localized(&package.meta["description"], locale).unwrap_or_default();
         let mut versions = HashSet::new();
         for v in package.versions {
-            let parsed = semver::Version::parse(&v.version).map_err(|_| bad("marketplace.packageVersionInvalid"))?;
-            if !versions.insert(parsed) || v.files.len() > MAX_FILES || v.readme.len() > MAX_README_BYTES || !v.verified.is_array() {
+            let parsed = semver::Version::parse(&v.version)
+                .map_err(|_| bad("marketplace.packageVersionInvalid"))?;
+            if !versions.insert(parsed)
+                || v.files.len() > MAX_FILES
+                || v.readme.len() > MAX_README_BYTES
+                || !v.verified.is_array()
+            {
                 return Err(bad("marketplace.templateInvalid"));
             }
             let mut names = HashSet::new();
             let mut files = Vec::with_capacity(v.files.len());
             for f in v.files {
-                if !valid_key(&f.name) || f.name.len() > MAX_FILE_NAME || !names.insert(f.name.clone()) || f.content.len() > MAX_FILE_BYTES {
+                if !valid_key(&f.name)
+                    || f.name.len() > MAX_FILE_NAME
+                    || !names.insert(f.name.clone())
+                    || f.content.len() > MAX_FILE_BYTES
+                {
                     return Err(bad("marketplace.packageFileInvalid"));
                 }
-                files.push(PackageFile { name: f.name, content: f.content, parameters: f.parameters });
+                files.push(PackageFile {
+                    name: f.name,
+                    content: f.content,
+                    parameters: f.parameters,
+                });
             }
             let reason = compatibility(&package.kind, &v.requires.ferry, ferry_version)?;
             if reason.is_none() {
-                crate::templates::validate_app(&v.blueprint.to_string(), &v.parameters.to_string())?;
+                crate::templates::validate_app(
+                    &v.blueprint.to_string(),
+                    &v.parameters.to_string(),
+                )?;
                 for f in &files {
                     crate::templates::validate_config(&f.content, &f.parameters.to_string())?;
                 }
@@ -295,7 +367,10 @@ pub fn parse_bundle(text: &str, ferry_version: &semver::Version, locale: &str) -
 }
 
 fn bad(key: &str) -> ApiError {
-    ApiError::localized(axum::http::StatusCode::BAD_REQUEST, crate::i18n::Message::new(key))
+    ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new(key),
+    )
 }
 
 #[cfg(test)]
@@ -315,7 +390,8 @@ mod tests {
         json!({"version":v,"blueprint":app(),"parameters":[],"files":[{"name":"nginx.conf","content":"listen 80;","parameters":[]}],"readme":"# Web"})
     }
     fn bundle(packages: Value) -> String {
-        json!({"schemaVersion":2,"generatedAt":"2026-11-11T00:00:00Z","packages":packages}).to_string()
+        json!({"schemaVersion":2,"generatedAt":"2026-11-11T00:00:00Z","packages":packages})
+            .to_string()
     }
 
     #[test]
@@ -332,7 +408,10 @@ mod tests {
 
     #[test]
     fn v2_bundle_parses_versions_files_and_locale_fallback() {
-        let text = bundle(json!([package(json!([version("1.0.0"), version("1.1.0")]))]));
+        let text = bundle(json!([package(json!([
+            version("1.0.0"),
+            version("1.1.0")
+        ]))]));
         let rows = parse_bundle(&text, &ferry(), "ms-MY").unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].name, "Website");
@@ -362,7 +441,10 @@ mod tests {
         let text = bundle(json!([pipeline, package(json!([newer]))]));
         let rows = parse_bundle(&text, &ferry(), "en-US").unwrap();
         assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|r| !r.compatible && r.incompatible_reason.is_some()));
+        assert!(
+            rows.iter()
+                .all(|r| !r.compatible && r.incompatible_reason.is_some())
+        );
     }
 
     #[test]
@@ -374,7 +456,12 @@ mod tests {
                 "service":{"image":"nginx","env":[{"name":"NODE","value":"{{ .Instance.Name }}"}]}}]});
         v["parameters"] = json!([{"name":"port","type":"integer","default":8080}]);
         v["files"] = json!([{"name":"nginx.conf","content":"server_name {{ .Instance.Name }};","parameters":[]}]);
-        let rows = parse_bundle(&bundle(json!([package(json!([v.clone()]))])), &ferry(), "en-US").unwrap();
+        let rows = parse_bundle(
+            &bundle(json!([package(json!([v.clone()]))])),
+            &ferry(),
+            "en-US",
+        )
+        .unwrap();
         assert!(rows[0].compatible);
         assert_eq!(rows[0].incompatible_reason, None);
         assert_eq!(rows[0].content["kind"], "Blueprint");
@@ -388,7 +475,12 @@ mod tests {
         let mut v = version("1.0.0");
         v["requires"] = json!({"ferry":">=0.3.0"});
         let text = bundle(json!([package(json!([v]))]));
-        let rows = parse_bundle(&text, &semver::Version::parse("0.3.0-alpha.18").unwrap(), "en-US").unwrap();
+        let rows = parse_bundle(
+            &text,
+            &semver::Version::parse("0.3.0-alpha.18").unwrap(),
+            "en-US",
+        )
+        .unwrap();
         assert!(rows[0].compatible);
     }
 
@@ -397,15 +489,28 @@ mod tests {
         let many: Vec<Value> = (0..21).map(|i| version(&format!("1.0.{i}"))).collect();
         assert!(parse_bundle(&bundle(json!([package(json!(many))])), &ferry(), "en-US").is_err());
         let mut files = version("1.0.0");
-        files["files"] = json!((0..21).map(|i| json!({"name":format!("f{i}"),"content":"x"})).collect::<Vec<_>>());
-        assert!(parse_bundle(&bundle(json!([package(json!([files]))])), &ferry(), "en-US").is_err());
+        files["files"] = json!(
+            (0..21)
+                .map(|i| json!({"name":format!("f{i}"),"content":"x"}))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            parse_bundle(&bundle(json!([package(json!([files]))])), &ferry(), "en-US").is_err()
+        );
         let mut big = version("1.0.0");
         big["files"] = json!([{"name":"big","content":"x".repeat(256 * 1024 + 1)}]);
         assert!(parse_bundle(&bundle(json!([package(json!([big]))])), &ferry(), "en-US").is_err());
         let mut bad_key = package(json!([version("1.0.0")]));
         bad_key["key"] = json!("a b");
         assert!(parse_bundle(&bundle(json!([bad_key])), &ferry(), "en-US").is_err());
-        assert!(parse_bundle(&bundle(json!([package(json!([version("latest")]))])), &ferry(), "en-US").is_err());
+        assert!(
+            parse_bundle(
+                &bundle(json!([package(json!([version("latest")]))])),
+                &ferry(),
+                "en-US"
+            )
+            .is_err()
+        );
         let duplicate = package(json!([version("1.0.0"), version("1.0.0")]));
         assert!(parse_bundle(&bundle(json!([duplicate])), &ferry(), "en-US").is_err());
         let mut no_name = package(json!([version("1.0.0")]));
@@ -415,10 +520,21 @@ mod tests {
 
     #[test]
     fn repository_bundle_parses() {
-        let rows = parse_bundle(include_str!("../../../../marketplace/index.json"), &semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap(), "en-US").unwrap();
+        let rows = parse_bundle(
+            include_str!("../../../../marketplace/index.json"),
+            &semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
+            "en-US",
+        )
+        .unwrap();
         assert!(!rows.is_empty());
-        assert!(rows.iter().all(|r| r.compatible), "official templates must be importable by this build");
-        assert!(rows.iter().any(|r| r.key == "http-service" && r.name == "HTTP sample service"));
+        assert!(
+            rows.iter().all(|r| r.compatible),
+            "official templates must be importable by this build"
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r.key == "http-service" && r.name == "HTTP sample service")
+        );
     }
 
     #[test]
@@ -440,6 +556,9 @@ mod tests {
         assert_eq!(a[0].digest, b[0].digest);
         assert_eq!(a[0].digest.len(), 64);
         let changed = text.replace("listen 80;", "listen 81;");
-        assert_ne!(parse_bundle(&changed, &ferry(), "en-US").unwrap()[0].digest, a[0].digest);
+        assert_ne!(
+            parse_bundle(&changed, &ferry(), "en-US").unwrap()[0].digest,
+            a[0].digest
+        );
     }
 }

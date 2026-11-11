@@ -1,10 +1,10 @@
 //! Read external repository indexes; no Git hosting or local Git executable.
-pub(crate) mod index;
-pub(crate) mod store;
-pub mod platform;
 pub mod catalog;
 #[cfg(test)]
 mod catalog_tests;
+pub(crate) mod index;
+pub mod platform;
+pub(crate) mod store;
 use crate::error::{ApiError, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -187,7 +187,11 @@ async fn fetch(
         }
     }
     // GitHub's JSON wrapper carries no content above 1 MB; the raw media type serves files up to 100 MB.
-    let accept = if source.provider == "github" { "application/vnd.github.raw" } else { "application/json" };
+    let accept = if source.provider == "github" {
+        "application/vnd.github.raw"
+    } else {
+        "application/json"
+    };
     let mut request = client.get(url).header("Accept", accept);
     if let Some(token) = token {
         request = match source.provider.as_str() {
@@ -433,14 +437,29 @@ mod tests {
                 bytes.extend_from_slice(&part[..n]);
             }
             let lower = String::from_utf8(bytes).unwrap().to_ascii_lowercase();
-            assert!(lower.contains("accept: application/vnd.github.raw"), "{lower}");
+            assert!(
+                lower.contains("accept: application/vnd.github.raw"),
+                "{lower}"
+            );
             let body = r#"{"schemaVersion":2,"packages":[]}"#;
             stream
-                .write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes())
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
                 .await
                 .unwrap();
         });
-        assert_eq!(fetch(&config, None, false, Duration::from_secs(20)).await.unwrap(), r#"{"schemaVersion":2,"packages":[]}"#);
+        assert_eq!(
+            fetch(&config, None, false, Duration::from_secs(20))
+                .await
+                .unwrap(),
+            r#"{"schemaVersion":2,"packages":[]}"#
+        );
         handler.await.unwrap();
     }
 
@@ -679,7 +698,8 @@ pub(crate) async fn create_source_in(
         run_as: Set(scope.user.id.into()),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now), ..Default::default()
+        updated_at: Set(now),
+        ..Default::default()
     })
     .exec(tx)
     .await?;
@@ -855,13 +875,26 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
             .one(&s.db)
             .await?
             .is_some();
-        let packages = index::parse_bundle(&fetch(&config, token.as_deref(), oauth, timeout).await?, &ferry_version(), "en-US")?;
+        let packages = index::parse_bundle(
+            &fetch(&config, token.as_deref(), oauth, timeout).await?,
+            &ferry_version(),
+            "en-US",
+        )?;
         let fresh = Scope::for_actor(s, scope.workspace_id, scope.user.id).await?;
         fresh.require("marketplace-sources.sync")?;
         fresh.require("repositories.read")?;
         let tx = crate::variables::transaction(s, scope.workspace_id).await?;
         let now = db::now();
-        let total = store::replace_entries(s, &tx, scope.workspace_id.into(), id.into(), scope.user.id.into(), packages, deadline).await?;
+        let total = store::replace_entries(
+            s,
+            &tx,
+            scope.workspace_id.into(),
+            id.into(),
+            scope.user.id.into(),
+            packages,
+            deadline,
+        )
+        .await?;
         sources::Entity::update_many()
             .col_expr(sources::Column::State, Expr::value("idle"))
             .col_expr(sources::Column::SyncedAt, Expr::value(now))

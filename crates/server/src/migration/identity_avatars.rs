@@ -5,13 +5,25 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
         for name in ["account_preferences", "ai_agents"] {
-            m.alter_table(Table::alter().table(Alias::new(name)).add_column(ColumnDef::new(Alias::new("avatar")).text().null()).to_owned()).await?;
+            m.alter_table(
+                Table::alter()
+                    .table(Alias::new(name))
+                    .add_column(ColumnDef::new(Alias::new("avatar")).text().null())
+                    .to_owned(),
+            )
+            .await?;
         }
         Ok(())
     }
     async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
         for name in ["ai_agents", "account_preferences"] {
-            m.alter_table(Table::alter().table(Alias::new(name)).drop_column(Alias::new("avatar")).to_owned()).await?;
+            m.alter_table(
+                Table::alter()
+                    .table(Alias::new(name))
+                    .drop_column(Alias::new("avatar"))
+                    .to_owned(),
+            )
+            .await?;
         }
         Ok(())
     }
@@ -27,9 +39,22 @@ mod tests {
         let manager = SchemaManager::new(&s.db);
         Migration.down(&manager).await.unwrap();
         Migration.up(&manager).await.unwrap();
-        assert_eq!(crate::entities::users::Entity::find().count(&s.db).await.unwrap(), 2);
+        assert_eq!(
+            crate::entities::users::Entity::find()
+                .count(&s.db)
+                .await
+                .unwrap(),
+            2
+        );
         let avatar = serde_json::from_value(serde_json::json!({"style":"pixel"})).unwrap();
-        crate::accounts::preferences::save_avatar(&s.db, 1, &avatar).await.unwrap();
-        assert_eq!(crate::accounts::preferences::avatars(&s.db, vec![1]).await.unwrap()[&1]["style"], "pixel");
+        crate::accounts::preferences::save_avatar(&s.db, 1, &avatar)
+            .await
+            .unwrap();
+        assert_eq!(
+            crate::accounts::preferences::avatars(&s.db, vec![1])
+                .await
+                .unwrap()[&1]["style"],
+            "pixel"
+        );
     }
 }

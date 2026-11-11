@@ -10,7 +10,9 @@ use crate::{
     state::AppState,
 };
 use axum::{extract::State, http::StatusCode};
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set, TransactionTrait, sea_query::Expr};
+use sea_orm::{
+    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set, TransactionTrait, sea_query::Expr,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -82,8 +84,11 @@ async fn source_json(conn: &impl sea_orm::ConnectionTrait, row: sources::Model) 
         .filter(entries::Column::SourceId.eq(row.id))
         .count(conn)
         .await?;
-    let mut value: Value = serde_json::from_str(&row.config).map_err(|_| bad("marketplace.sourceConfigCorrupt"))?;
-    let object = value.as_object_mut().ok_or_else(|| bad("marketplace.configCorrupt"))?;
+    let mut value: Value =
+        serde_json::from_str(&row.config).map_err(|_| bad("marketplace.sourceConfigCorrupt"))?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| bad("marketplace.configCorrupt"))?;
     for (k, v) in json!({
         "id": Id::from(row.id), "name": row.name, "trust": row.trust, "enabled": row.enabled != 0,
         "sync_interval_hours": row.sync_interval / 3600, "next_sync_at": row.next_sync_at,
@@ -98,7 +103,11 @@ async fn source_json(conn: &impl sea_orm::ConnectionTrait, row: sources::Model) 
     Ok(value)
 }
 
-pub async fn list(State(s): State<AppState>, admin: Admin, Query(raw): Query<HashMap<String, String>>) -> Result<Json<Value>> {
+pub async fn list(
+    State(s): State<AppState>,
+    admin: Admin,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Result<Json<Value>> {
     check_admin(&s.db, &admin).await?;
     let q = ListQuery::parse(&SPEC, &raw)?;
     let (rows, total) = resource::global_list::<sources::Entity, sources::Model>(
@@ -113,15 +122,25 @@ pub async fn list(State(s): State<AppState>, admin: Admin, Query(raw): Query<Has
     for row in rows {
         items.push(source_json(&s.db, row).await?);
     }
-    Ok(Json(json!({"items":items,"total":total,"page":q.page,"page_size":q.page_size})))
+    Ok(Json(
+        json!({"items":items,"total":total,"page":q.page,"page_size":q.page_size}),
+    ))
 }
 
-pub async fn get(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>) -> Result<Json<Value>> {
+pub async fn get(
+    State(s): State<AppState>,
+    admin: Admin,
+    Path(id): Path<Id>,
+) -> Result<Json<Value>> {
     check_admin(&s.db, &admin).await?;
     Ok(Json(source_json(&s.db, scoped(&s.db, id).await?).await?))
 }
 
-pub async fn create(State(s): State<AppState>, admin: Admin, Json(b): Json<PlatformBody>) -> Result<(StatusCode, Json<Value>)> {
+pub async fn create(
+    State(s): State<AppState>,
+    admin: Admin,
+    Json(b): Json<PlatformBody>,
+) -> Result<(StatusCode, Json<Value>)> {
     let tx = s.db.begin().await?;
     check_admin(&tx, &admin).await?;
     validate(&b)?;
@@ -153,12 +172,26 @@ pub async fn create(State(s): State<AppState>, admin: Admin, Json(b): Json<Platf
     })
     .exec(&tx)
     .await?;
-    crate::accounts::platform::audit(&s, &tx, &admin.0.user, "create", "marketplace-sources", id, json!({"name":b.name,"trust":b.trust})).await?;
+    crate::accounts::platform::audit(
+        &s,
+        &tx,
+        &admin.0.user,
+        "create",
+        "marketplace-sources",
+        id,
+        json!({"name":b.name,"trust":b.trust}),
+    )
+    .await?;
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(json!({"id":id,"version":1}))))
 }
 
-pub async fn update(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>, Json(b): Json<PlatformBody>) -> Result<Json<Value>> {
+pub async fn update(
+    State(s): State<AppState>,
+    admin: Admin,
+    Path(id): Path<Id>,
+    Json(b): Json<PlatformBody>,
+) -> Result<Json<Value>> {
     let tx = s.db.begin().await?;
     check_admin(&tx, &admin).await?;
     validate(&b)?;
@@ -166,11 +199,20 @@ pub async fn update(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>,
     let now = db::now();
     let n = sources::Entity::update_many()
         .col_expr(sources::Column::Name, Expr::value(b.name.trim()))
-        .col_expr(sources::Column::Config, Expr::value(serde_json::to_string(&b.source).unwrap()))
+        .col_expr(
+            sources::Column::Config,
+            Expr::value(serde_json::to_string(&b.source).unwrap()),
+        )
         .col_expr(sources::Column::Trust, Expr::value(b.trust.clone()))
         .col_expr(sources::Column::Enabled, Expr::value(i64::from(b.enabled)))
-        .col_expr(sources::Column::SyncInterval, Expr::value(b.sync_interval_hours * 3600))
-        .col_expr(sources::Column::UpdatedBy, Expr::value(i64::from(admin.0.user.id)))
+        .col_expr(
+            sources::Column::SyncInterval,
+            Expr::value(b.sync_interval_hours * 3600),
+        )
+        .col_expr(
+            sources::Column::UpdatedBy,
+            Expr::value(i64::from(admin.0.user.id)),
+        )
         .col_expr(sources::Column::UpdatedAt, Expr::value(now))
         .col_expr(sources::Column::Version, Expr::value(b.version + 1))
         .filter(sources::Column::Id.eq(id))
@@ -181,15 +223,35 @@ pub async fn update(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>,
         .await?
         .rows_affected;
     if n == 0 {
-        let key = if scoped(&tx, id).await?.sync_lease_until > now { "marketplace.waitForSync" } else { "marketplace.sourceChanged" };
-        return Err(ApiError::localized(StatusCode::CONFLICT, crate::i18n::Message::new(key)));
+        let key = if scoped(&tx, id).await?.sync_lease_until > now {
+            "marketplace.waitForSync"
+        } else {
+            "marketplace.sourceChanged"
+        };
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new(key),
+        ));
     }
-    crate::accounts::platform::audit(&s, &tx, &admin.0.user, "update", "marketplace-sources", id, json!({"name":b.name,"trust":b.trust,"enabled":b.enabled})).await?;
+    crate::accounts::platform::audit(
+        &s,
+        &tx,
+        &admin.0.user,
+        "update",
+        "marketplace-sources",
+        id,
+        json!({"name":b.name,"trust":b.trust,"enabled":b.enabled}),
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(json!({"id":id,"version":b.version+1})))
 }
 
-pub async fn delete(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>) -> Result<StatusCode> {
+pub async fn delete(
+    State(s): State<AppState>,
+    admin: Admin,
+    Path(id): Path<Id>,
+) -> Result<StatusCode> {
     let tx = s.db.begin().await?;
     check_admin(&tx, &admin).await?;
     scoped(&tx, id).await?;
@@ -201,14 +263,26 @@ pub async fn delete(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>)
         .await?
         .rows_affected;
     if removed == 0 {
-        return Err(ApiError::localized(StatusCode::CONFLICT, crate::i18n::Message::new("marketplace.waitForSync")));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("marketplace.waitForSync"),
+        ));
     }
     entries::Entity::delete_many()
         .filter(entries::Column::WorkspaceId.eq(PLATFORM))
         .filter(entries::Column::SourceId.eq(id))
         .exec(&tx)
         .await?;
-    crate::accounts::platform::audit(&s, &tx, &admin.0.user, "delete", "marketplace-sources", id, json!({"imported_templates_preserved":true})).await?;
+    crate::accounts::platform::audit(
+        &s,
+        &tx,
+        &admin.0.user,
+        "delete",
+        "marketplace-sources",
+        id,
+        json!({"imported_templates_preserved":true}),
+    )
+    .await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -219,7 +293,10 @@ const LEASE_MS: i64 = 60_000;
 pub(crate) async fn claim(s: &AppState, id: i64) -> Result<bool> {
     let now = db::now();
     Ok(sources::Entity::update_many()
-        .col_expr(sources::Column::SyncOwner, Expr::value(s.instance_id.clone()))
+        .col_expr(
+            sources::Column::SyncOwner,
+            Expr::value(s.instance_id.clone()),
+        )
         .col_expr(sources::Column::SyncLeaseUntil, Expr::value(now + LEASE_MS))
         .col_expr(sources::Column::State, Expr::value("syncing"))
         .filter(sources::Column::Id.eq(id))
@@ -233,9 +310,17 @@ pub(crate) async fn claim(s: &AppState, id: i64) -> Result<bool> {
 
 /// Reads a public bundle without credentials and replaces this source's catalog; failure keeps it.
 /// Replaces the catalog and marks the source idle, but only while this instance still owns the lease.
-pub(crate) async fn commit_sync(s: &AppState, id: i64, actor: i64, packages: Vec<super::index::PackageVersion>, interval: i64, deadline: std::time::Instant) -> Result<usize> {
+pub(crate) async fn commit_sync(
+    s: &AppState,
+    id: i64,
+    actor: i64,
+    packages: Vec<super::index::PackageVersion>,
+    interval: i64,
+    deadline: std::time::Instant,
+) -> Result<usize> {
     let tx = s.db.begin().await?;
-    let total = super::store::replace_entries(s, &tx, PLATFORM, id, actor, packages, deadline).await?;
+    let total =
+        super::store::replace_entries(s, &tx, PLATFORM, id, actor, packages, deadline).await?;
     let now = db::now();
     let owned = sources::Entity::update_many()
         .col_expr(sources::Column::State, Expr::value("idle"))
@@ -252,7 +337,10 @@ pub(crate) async fn commit_sync(s: &AppState, id: i64, actor: i64, packages: Vec
         .rows_affected;
     if owned == 0 {
         // Lease expired and another instance took over: dropping `tx` rolls back the replaced entries.
-        return Err(ApiError::localized(StatusCode::CONFLICT, crate::i18n::Message::new("marketplace.syncing")));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("marketplace.syncing"),
+        ));
     }
     tx.commit().await?;
     Ok(total)
@@ -260,14 +348,18 @@ pub(crate) async fn commit_sync(s: &AppState, id: i64, actor: i64, packages: Vec
 
 pub(crate) async fn synchronize_platform(s: &AppState, id: i64, actor: i64) -> Result<usize> {
     if !claim(s, id).await? {
-        return Err(ApiError::localized(StatusCode::CONFLICT, crate::i18n::Message::new("marketplace.syncing")));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("marketplace.syncing"),
+        ));
     }
     let timeout = std::time::Duration::from_secs(20);
     let deadline = std::time::Instant::now() + timeout;
     let row = scoped(&s.db, id.into()).await?;
     let interval = row.sync_interval.max(3600) * 1000;
     let result: Result<usize> = async {
-        let config: Source = serde_json::from_str(&row.config).map_err(|_| bad("marketplace.configCorrupt"))?;
+        let config: Source =
+            serde_json::from_str(&row.config).map_err(|_| bad("marketplace.configCorrupt"))?;
         let text = super::fetch(&config, None, false, timeout).await?;
         let packages = super::index::parse_bundle(&text, &super::ferry_version(), "en-US")?;
         commit_sync(s, id, actor, packages, interval, deadline).await
@@ -277,7 +369,10 @@ pub(crate) async fn synchronize_platform(s: &AppState, id: i64, actor: i64) -> R
         let recorded = sources::Entity::update_many()
             .col_expr(sources::Column::State, Expr::value("failed"))
             .col_expr(sources::Column::LastError, Expr::value(error.stored()))
-            .col_expr(sources::Column::NextSyncAt, Expr::value(db::now() + interval))
+            .col_expr(
+                sources::Column::NextSyncAt,
+                Expr::value(db::now() + interval),
+            )
             .col_expr(sources::Column::SyncOwner, Expr::value(""))
             .col_expr(sources::Column::SyncLeaseUntil, Expr::value(0))
             .filter(sources::Column::Id.eq(id))
@@ -291,11 +386,24 @@ pub(crate) async fn synchronize_platform(s: &AppState, id: i64, actor: i64) -> R
     result
 }
 
-pub async fn sync(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>) -> Result<Json<Value>> {
+pub async fn sync(
+    State(s): State<AppState>,
+    admin: Admin,
+    Path(id): Path<Id>,
+) -> Result<Json<Value>> {
     check_admin(&s.db, &admin).await?;
     scoped(&s.db, id).await?;
     let total = synchronize_platform(&s, id.into(), admin.0.user.id.into()).await?;
-    crate::accounts::platform::audit(&s, &s.db, &admin.0.user, "sync", "marketplace-sources", id, json!({"templates":total})).await?;
+    crate::accounts::platform::audit(
+        &s,
+        &s.db,
+        &admin.0.user,
+        "sync",
+        "marketplace-sources",
+        id,
+        json!({"templates":total}),
+    )
+    .await?;
     Ok(Json(json!({"templates": total})))
 }
 
@@ -304,7 +412,12 @@ pub async fn sync(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>) -
 pub(crate) async fn release_expired(s: &AppState) -> Result<()> {
     sources::Entity::update_many()
         .col_expr(sources::Column::State, Expr::value("failed"))
-        .col_expr(sources::Column::LastError, Expr::value(crate::i18n::store_message(&crate::i18n::Message::new("marketplace.interrupted"))))
+        .col_expr(
+            sources::Column::LastError,
+            Expr::value(crate::i18n::store_message(&crate::i18n::Message::new(
+                "marketplace.interrupted",
+            ))),
+        )
         .col_expr(sources::Column::SyncOwner, Expr::value(""))
         .col_expr(sources::Column::SyncLeaseUntil, Expr::value(0))
         .filter(sources::Column::WorkspaceId.eq(PLATFORM))
@@ -366,7 +479,9 @@ mod sync_tests {
                 while !bytes.windows(4).any(|w| w == b"\r\n\r\n") {
                     let mut part = [0u8; 1024];
                     let n = stream.read(&mut part).await.unwrap();
-                    if n == 0 { break; }
+                    if n == 0 {
+                        break;
+                    }
                     bytes.extend_from_slice(&part[..n]);
                 }
                 let _ = stream.write_all(format!("HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
@@ -383,9 +498,16 @@ mod sync_tests {
         json!({"schemaVersion":2,"packages":[{"key":"web","kind":"app","meta":{"name":{"en-US":"Website"},"category":"web","topology":"single","drivers":["docker"]},"versions":[{"version":"1.0.0","blueprint":app},{"version":"1.1.0","blueprint":app}]}]})
     }
     async fn platform_source(s: &AppState, api_base: &str) -> i64 {
-        let (_, Json(created)) = create(State(s.clone()), superadmin(s).await, Json(body("Official"))).await.unwrap();
+        let (_, Json(created)) = create(
+            State(s.clone()),
+            superadmin(s).await,
+            Json(body("Official")),
+        )
+        .await
+        .unwrap();
         let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
-        let mut config: Value = serde_json::from_str(&scoped(&s.db, id).await.unwrap().config).unwrap();
+        let mut config: Value =
+            serde_json::from_str(&scoped(&s.db, id).await.unwrap().config).unwrap();
         config["api_base"] = json!(api_base);
         sources::Entity::update_many()
             .col_expr(sources::Column::Config, Expr::value(config.to_string()))
@@ -428,9 +550,15 @@ mod sync_tests {
         assert!(!row.last_error.is_empty());
         assert!(row.next_sync_at > db::now());
         assert_eq!(row.sync_lease_until, 0);
-        let kept = entries::Entity::find().filter(entries::Column::SourceId.eq(id)).count(&s.db).await.unwrap();
+        let kept = entries::Entity::find()
+            .filter(entries::Column::SourceId.eq(id))
+            .count(&s.db)
+            .await
+            .unwrap();
         assert_eq!(kept, 2);
-        let Json(listed) = get(State(s.clone()), account(1, true), Path(id.into())).await.unwrap();
+        let Json(listed) = get(State(s.clone()), account(1, true), Path(id.into()))
+            .await
+            .unwrap();
         assert_eq!(listed["entry_count"], 2);
     }
 
@@ -439,7 +567,10 @@ mod sync_tests {
         let (_dir, s) = crate::agents::tests::setup().await;
         let id = platform_source(&s, "http://127.0.0.1:9").await;
         assert!(claim(&s, id).await.unwrap());
-        assert_eq!(synchronize_platform(&s, id, 1).await.err().unwrap().0, StatusCode::CONFLICT);
+        assert_eq!(
+            synchronize_platform(&s, id, 1).await.err().unwrap().0,
+            StatusCode::CONFLICT
+        );
     }
 
     #[tokio::test]
@@ -457,15 +588,41 @@ mod sync_tests {
         let id = platform_source(&s, "http://127.0.0.1:9").await;
         sources::Entity::update_many()
             .col_expr(sources::Column::SyncOwner, Expr::value("other-instance"))
-            .col_expr(sources::Column::SyncLeaseUntil, Expr::value(db::now() + 60_000))
+            .col_expr(
+                sources::Column::SyncLeaseUntil,
+                Expr::value(db::now() + 60_000),
+            )
             .filter(sources::Column::Id.eq(id))
             .exec(&s.db)
             .await
             .unwrap();
-        let packages = super::super::index::parse_bundle(&bundle().to_string(), &semver::Version::new(0, 3, 0), "en-US").unwrap();
-        let error = commit_sync(&s, id, 1, packages, 3_600_000, std::time::Instant::now() + std::time::Duration::from_secs(20)).await.err().expect("lease lost must abort");
+        let packages = super::super::index::parse_bundle(
+            &bundle().to_string(),
+            &semver::Version::new(0, 3, 0),
+            "en-US",
+        )
+        .unwrap();
+        let error = commit_sync(
+            &s,
+            id,
+            1,
+            packages,
+            3_600_000,
+            std::time::Instant::now() + std::time::Duration::from_secs(20),
+        )
+        .await
+        .err()
+        .expect("lease lost must abort");
         assert_eq!(error.0, StatusCode::CONFLICT);
-        assert_eq!(entries::Entity::find().filter(entries::Column::SourceId.eq(id)).count(&s.db).await.unwrap(), 0, "no entries committed");
+        assert_eq!(
+            entries::Entity::find()
+                .filter(entries::Column::SourceId.eq(id))
+                .count(&s.db)
+                .await
+                .unwrap(),
+            0,
+            "no entries committed"
+        );
     }
 
     #[tokio::test]
@@ -473,14 +630,26 @@ mod sync_tests {
         let (_dir, s) = crate::agents::tests::setup().await;
         let id = platform_source(&s, "http://127.0.0.1:9").await;
         assert!(claim(&s, id).await.unwrap());
-        let deleted = delete(State(s.clone()), account(1, true), Path(id.into())).await.err().unwrap();
-        assert_eq!(deleted.2.as_ref().map(|m| m.key.as_str()), Some("marketplace.waitForSync"));
+        let deleted = delete(State(s.clone()), account(1, true), Path(id.into()))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            deleted.2.as_ref().map(|m| m.key.as_str()),
+            Some("marketplace.waitForSync")
+        );
         let version = scoped(&s.db, id.into()).await.unwrap().version;
         let mut b = body("Renamed");
         b.version = version;
-        let edited = update(State(s.clone()), account(1, true), Path(id.into()), Json(b)).await.err().unwrap();
+        let edited = update(State(s.clone()), account(1, true), Path(id.into()), Json(b))
+            .await
+            .err()
+            .unwrap();
         assert_eq!(edited.0, StatusCode::CONFLICT);
-        assert_eq!(edited.2.as_ref().map(|m| m.key.as_str()), Some("marketplace.waitForSync"));
+        assert_eq!(
+            edited.2.as_ref().map(|m| m.key.as_str()),
+            Some("marketplace.waitForSync")
+        );
         assert!(scoped(&s.db, id.into()).await.is_ok());
     }
 
@@ -500,7 +669,9 @@ mod sync_tests {
         assert_eq!(row.state, "failed");
         assert!(!row.last_error.is_empty());
         assert_eq!(row.sync_owner, "");
-        let Json(listed) = get(State(s.clone()), account(1, true), Path(id.into())).await.unwrap();
+        let Json(listed) = get(State(s.clone()), account(1, true), Path(id.into()))
+            .await
+            .unwrap();
         assert_eq!(listed["state"], "failed");
     }
 }
@@ -521,7 +692,12 @@ pub(crate) mod tests {
     }
     pub(crate) fn account(id: i64, is_superadmin: bool) -> Admin {
         Admin(Account {
-            user: User { id: id.into(), email: format!("user{id}@example.invalid"), name: format!("Owner {id}"), is_superadmin },
+            user: User {
+                id: id.into(),
+                email: format!("user{id}@example.invalid"),
+                name: format!("Owner {id}"),
+                is_superadmin,
+            },
             session_id: Id::from(1),
         })
     }
@@ -548,11 +724,26 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn platform_sources_require_superadmin() {
         let (_dir, s) = crate::agents::tests::setup().await;
-        let denied = create(State(s.clone()), account(2, true), Json(body("Official"))).await.err().unwrap();
+        let denied = create(State(s.clone()), account(2, true), Json(body("Official")))
+            .await
+            .err()
+            .unwrap();
         assert_eq!(denied.0, StatusCode::FORBIDDEN);
-        let (status, Json(created)) = create(State(s.clone()), superadmin(&s).await, Json(body("Official"))).await.unwrap();
+        let (status, Json(created)) = create(
+            State(s.clone()),
+            superadmin(&s).await,
+            Json(body("Official")),
+        )
+        .await
+        .unwrap();
         assert_eq!(status, StatusCode::CREATED);
-        let Json(row) = get(State(s.clone()), account(1, true), Path(serde_json::from_value(created["id"].clone()).unwrap())).await.unwrap();
+        let Json(row) = get(
+            State(s.clone()),
+            account(1, true),
+            Path(serde_json::from_value(created["id"].clone()).unwrap()),
+        )
+        .await
+        .unwrap();
         assert_eq!(row["trust"], "official");
         assert_eq!(row["sync_interval_hours"], 6);
         assert_eq!(row["enabled"], true);
@@ -572,7 +763,14 @@ pub(crate) mod tests {
             json!({"name":""}),
             json!({"name":"x".repeat(61)}),
         ] {
-            let error = create(State(s.clone()), account(1, true), Json(with("Official", patch.clone()))).await.err().unwrap_or_else(|| panic!("{patch} accepted"));
+            let error = create(
+                State(s.clone()),
+                account(1, true),
+                Json(with("Official", patch.clone())),
+            )
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("{patch} accepted"));
             assert_eq!(error.0, StatusCode::BAD_REQUEST, "{patch}");
         }
         drop(admin);
@@ -581,25 +779,85 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn platform_source_update_version_conflict() {
         let (_dir, s) = crate::agents::tests::setup().await;
-        let (_, Json(created)) = create(State(s.clone()), superadmin(&s).await, Json(body("Official"))).await.unwrap();
+        let (_, Json(created)) = create(
+            State(s.clone()),
+            superadmin(&s).await,
+            Json(body("Official")),
+        )
+        .await
+        .unwrap();
         let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
         let mut b = with("Renamed", json!({"version":1}));
-        let Json(updated) = update(State(s.clone()), account(1, true), Path(id), Json(b)).await.unwrap();
+        let Json(updated) = update(State(s.clone()), account(1, true), Path(id), Json(b))
+            .await
+            .unwrap();
         assert_eq!(updated["version"], 2);
         b = with("Stale", json!({"version":1}));
-        assert_eq!(update(State(s.clone()), account(1, true), Path(id), Json(b)).await.err().unwrap().0, StatusCode::CONFLICT);
-        assert_eq!(delete(State(s.clone()), account(1, true), Path(id)).await.unwrap(), StatusCode::NO_CONTENT);
-        assert_eq!(get(State(s.clone()), account(1, true), Path(id)).await.err().unwrap().0, StatusCode::NOT_FOUND);
+        assert_eq!(
+            update(State(s.clone()), account(1, true), Path(id), Json(b))
+                .await
+                .err()
+                .unwrap()
+                .0,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            delete(State(s.clone()), account(1, true), Path(id))
+                .await
+                .unwrap(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            get(State(s.clone()), account(1, true), Path(id))
+                .await
+                .err()
+                .unwrap()
+                .0,
+            StatusCode::NOT_FOUND
+        );
     }
 
     #[tokio::test]
     async fn platform_sources_not_listed_in_workspace_sources() {
         let (_dir, s) = crate::agents::tests::setup().await;
-        let (_, Json(created)) = create(State(s.clone()), superadmin(&s).await, Json(body("Official"))).await.unwrap();
-        let Json(list_all) = list(State(s.clone()), account(1, true), Query(HashMap::new())).await.unwrap();
-        assert!(list_all["items"].as_array().unwrap().iter().any(|i| i["id"] == created["id"]));
-        assert!(list_all["items"].as_array().unwrap().iter().any(|i| i["id"] == "1" && i["trust"] == "official"), "built-in official source is listed");
-        let Json(workspace) = super::super::list_sources(State(s.clone()), crate::agents::tests::admin(1), Query(HashMap::new())).await.unwrap();
-        assert!(workspace["items"].as_array().unwrap().iter().all(|i| i["id"] != created["id"]));
+        let (_, Json(created)) = create(
+            State(s.clone()),
+            superadmin(&s).await,
+            Json(body("Official")),
+        )
+        .await
+        .unwrap();
+        let Json(list_all) = list(State(s.clone()), account(1, true), Query(HashMap::new()))
+            .await
+            .unwrap();
+        assert!(
+            list_all["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|i| i["id"] == created["id"])
+        );
+        assert!(
+            list_all["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|i| i["id"] == "1" && i["trust"] == "official"),
+            "built-in official source is listed"
+        );
+        let Json(workspace) = super::super::list_sources(
+            State(s.clone()),
+            crate::agents::tests::admin(1),
+            Query(HashMap::new()),
+        )
+        .await
+        .unwrap();
+        assert!(
+            workspace["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|i| i["id"] != created["id"])
+        );
     }
 }

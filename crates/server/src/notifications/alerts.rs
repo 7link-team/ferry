@@ -112,7 +112,10 @@ async fn validate(conn: &impl ConnectionTrait, scope: &Scope, b: &Body) -> Resul
             Message::new("alerts.nameInvalid"),
         ));
     }
-    let valid = if matches!(b.target_kind.as_str(), "health-check" | "application-health") {
+    let valid = if matches!(
+        b.target_kind.as_str(),
+        "health-check" | "application-health"
+    ) {
         b.metric == "health-failed"
     } else if b.target_kind == "host" {
         match b.metric.as_str() {
@@ -443,10 +446,15 @@ async fn abnormal(s: &AppState, r: &rules::Model) -> Result<Option<(bool, Messag
     scope.require("alerts.read")?;
     target(&s.db, &scope, &r.target_kind, r.target_ref.into()).await?;
     if r.target_kind == "application-health" {
-        let Json(value)=crate::monitoring::application(State(s.clone()),scope,Path((r.workspace_id.to_string(),r.target_ref.into()))).await?;
+        let Json(value) = crate::monitoring::application(
+            State(s.clone()),
+            scope,
+            Path((r.workspace_id.to_string(), r.target_ref.into())),
+        )
+        .await?;
         return Ok(match value["health"].as_str() {
-            Some("up") => Some((false,Message::new("monitoring.recovered"))),
-            Some("down"|"degraded") => Some((true,Message::new("monitoring.failed"))),
+            Some("up") => Some((false, Message::new("monitoring.recovered"))),
+            Some("down" | "degraded") => Some((true, Message::new("monitoring.failed"))),
             _ => None,
         });
     }

@@ -38,8 +38,14 @@ impl MigrationTrait for Migration {
                 // This migration runs before identity_avatars on a fresh database.
                 // Keep the new optional presentation column out of its historical SELECT.
                 .select_only()
-                .columns(agents::Column::iter().filter(|column| !matches!(column, agents::Column::Avatar)))
-                .expr_as(sea_orm::sea_query::Expr::cust("NULL"), agents::Column::Avatar)
+                .columns(
+                    agents::Column::iter()
+                        .filter(|column| !matches!(column, agents::Column::Avatar)),
+                )
+                .expr_as(
+                    sea_orm::sea_query::Expr::cust("NULL"),
+                    agents::Column::Avatar,
+                )
                 .filter(agents::Column::Id.gt(after))
                 .order_by_asc(agents::Column::Id)
                 .limit(100)

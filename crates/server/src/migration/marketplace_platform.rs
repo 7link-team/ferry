@@ -18,7 +18,11 @@ const COLUMNS: &[(&str, &str, Kind)] = &[
     ("marketplace_sources", "created_by", Kind::Number(0)),
     ("marketplace_sources", "updated_by", Kind::Number(0)),
     ("marketplace_sources", "synced_by", Kind::Number(0)),
-    ("marketplace_entries", "package_version", Kind::Text(64, "0.0.0")),
+    (
+        "marketplace_entries",
+        "package_version",
+        Kind::Text(64, "0.0.0"),
+    ),
     ("marketplace_entries", "kind", Kind::Text(16, "app")),
     ("marketplace_entries", "meta", Kind::LongText),
     ("marketplace_entries", "files", Kind::LongText),
@@ -38,9 +42,21 @@ const COLUMNS: &[(&str, &str, Kind)] = &[
     ("config_templates", "origin_digest", Kind::Text(64, "")),
 ];
 const INDEXES: &[(&str, &str, &[&str])] = &[
-    ("marketplace_entries", "idx_marketplace_entries_source", &["workspace_id", "source_id"]),
-    ("marketplace_entries", "idx_marketplace_entries_key", &["workspace_id", "entry_key", "package_version"]),
-    ("marketplace_sources", "idx_marketplace_sources_due", &["workspace_id", "enabled", "next_sync_at"]),
+    (
+        "marketplace_entries",
+        "idx_marketplace_entries_source",
+        &["workspace_id", "source_id"],
+    ),
+    (
+        "marketplace_entries",
+        "idx_marketplace_entries_key",
+        &["workspace_id", "entry_key", "package_version"],
+    ),
+    (
+        "marketplace_sources",
+        "idx_marketplace_sources_due",
+        &["workspace_id", "enabled", "next_sync_at"],
+    ),
 ];
 
 /// Built-in official source (user decision 2026-11-11): the public templates in this repository.
@@ -53,21 +69,60 @@ async fn seed_official_source(m: &SchemaManager<'_>) -> Result<(), DbErr> {
     let db = m.get_connection();
     let backend = m.get_database_backend();
     let exists = db
-        .query_one_raw(Statement::from_string(backend, format!("SELECT id FROM marketplace_sources WHERE id = {OFFICIAL_SOURCE_ID}")))
+        .query_one_raw(Statement::from_string(
+            backend,
+            format!("SELECT id FROM marketplace_sources WHERE id = {OFFICIAL_SOURCE_ID}"),
+        ))
         .await?
         .is_some();
     if exists {
         return Ok(());
     }
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
     let mut insert = Query::insert();
     insert
         .into_table(Alias::new("marketplace_sources"))
-        .columns(["id", "workspace_id", "name", "repository_id", "config", "state", "last_error", "synced_at", "run_as", "version", "created_at", "updated_at", "trust", "enabled", "sync_interval", "next_sync_at"].map(Alias::new))
+        .columns(
+            [
+                "id",
+                "workspace_id",
+                "name",
+                "repository_id",
+                "config",
+                "state",
+                "last_error",
+                "synced_at",
+                "run_as",
+                "version",
+                "created_at",
+                "updated_at",
+                "trust",
+                "enabled",
+                "sync_interval",
+                "next_sync_at",
+            ]
+            .map(Alias::new),
+        )
         .values_panic([
-            OFFICIAL_SOURCE_ID.into(), 0_i64.into(), "Ferry official templates".into(), 0_i64.into(), OFFICIAL_SOURCE_CONFIG.into(),
-            "idle".into(), "".into(), 0_i64.into(), 0_i64.into(), 1_i64.into(), now.into(), now.into(),
-            "official".into(), 1_i64.into(), (6 * 3600_i64).into(), 0_i64.into(),
+            OFFICIAL_SOURCE_ID.into(),
+            0_i64.into(),
+            "Ferry official templates".into(),
+            0_i64.into(),
+            OFFICIAL_SOURCE_CONFIG.into(),
+            "idle".into(),
+            "".into(),
+            0_i64.into(),
+            0_i64.into(),
+            1_i64.into(),
+            now.into(),
+            now.into(),
+            "official".into(),
+            1_i64.into(),
+            (6 * 3600_i64).into(),
+            0_i64.into(),
         ]);
     m.exec_stmt(insert).await
 }
@@ -95,7 +150,13 @@ impl MigrationTrait for Migration {
                     }
                 }
             }
-            m.alter_table(Table::alter().table(Alias::new(*table)).add_column(column).to_owned()).await?;
+            m.alter_table(
+                Table::alter()
+                    .table(Alias::new(*table))
+                    .add_column(column)
+                    .to_owned(),
+            )
+            .await?;
         }
         for (table, name, columns) in INDEXES {
             if m.has_index(*table, *name).await? {
@@ -113,15 +174,30 @@ impl MigrationTrait for Migration {
     async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
         let db = m.get_connection();
         db.execute_unprepared(&format!("DELETE FROM marketplace_entries WHERE workspace_id = 0 AND source_id = {OFFICIAL_SOURCE_ID}")).await?;
-        db.execute_unprepared(&format!("DELETE FROM marketplace_sources WHERE id = {OFFICIAL_SOURCE_ID}")).await?;
+        db.execute_unprepared(&format!(
+            "DELETE FROM marketplace_sources WHERE id = {OFFICIAL_SOURCE_ID}"
+        ))
+        .await?;
         for (table, name, _) in INDEXES {
             if m.has_index(*table, *name).await? {
-                m.drop_index(Index::drop().name(*name).table(Alias::new(*table)).to_owned()).await?;
+                m.drop_index(
+                    Index::drop()
+                        .name(*name)
+                        .table(Alias::new(*table))
+                        .to_owned(),
+                )
+                .await?;
             }
         }
         for (table, name, _) in COLUMNS.iter().rev() {
             if m.has_column(*table, *name).await? {
-                m.alter_table(Table::alter().table(Alias::new(*table)).drop_column(Alias::new(*name)).to_owned()).await?;
+                m.alter_table(
+                    Table::alter()
+                        .table(Alias::new(*table))
+                        .drop_column(Alias::new(*name))
+                        .to_owned(),
+                )
+                .await?;
             }
         }
         Ok(())
@@ -138,7 +214,13 @@ mod tests {
         let manager = SchemaManager::new(&s.db);
         Migration.down(&manager).await.unwrap();
         Migration.up(&manager).await.unwrap();
-        assert_eq!(crate::entities::users::Entity::find().count(&s.db).await.unwrap(), 2);
+        assert_eq!(
+            crate::entities::users::Entity::find()
+                .count(&s.db)
+                .await
+                .unwrap(),
+            2
+        );
         let backend = s.db.get_database_backend();
         s.db.execute_raw(Statement::from_string(backend, "INSERT INTO marketplace_sources (id,workspace_id,name,repository_id,config,state,last_error,synced_at,run_as,version,created_at,updated_at,trust) VALUES (91,0,'Official',0,'{}','idle','',0,0,1,1,1,'official')")).await.unwrap();
         let row = s.db.query_one_raw(Statement::from_string(backend, "SELECT trust, enabled, sync_owner, sync_lease_until FROM marketplace_sources WHERE id = 91")).await.unwrap().unwrap();
@@ -146,19 +228,40 @@ mod tests {
         assert_eq!(row.try_get::<i64>("", "enabled").unwrap(), 1);
         assert_eq!(row.try_get::<String>("", "sync_owner").unwrap(), "");
         s.db.execute_raw(Statement::from_string(backend, "INSERT INTO marketplace_entries (id,workspace_id,source_id,entry_key,name,description,content,parameters,version,created_at,updated_at) VALUES (92,0,91,'k','n','','{}','[]',1,1,1)")).await.unwrap();
-        let entry = s.db.query_one_raw(Statement::from_string(backend, "SELECT package_version, kind, compatible FROM marketplace_entries WHERE id = 92")).await.unwrap().unwrap();
-        assert_eq!(entry.try_get::<String>("", "package_version").unwrap(), "0.0.0");
+        let entry =
+            s.db.query_one_raw(Statement::from_string(
+                backend,
+                "SELECT package_version, kind, compatible FROM marketplace_entries WHERE id = 92",
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            entry.try_get::<String>("", "package_version").unwrap(),
+            "0.0.0"
+        );
         assert_eq!(entry.try_get::<String>("", "kind").unwrap(), "app");
         assert_eq!(entry.try_get::<i64>("", "compatible").unwrap(), 1);
         let official = s.db.query_one_raw(Statement::from_string(backend, "SELECT workspace_id, trust, enabled, sync_interval, config FROM marketplace_sources WHERE id = 1")).await.unwrap().expect("default official source");
         assert_eq!(official.try_get::<i64>("", "workspace_id").unwrap(), 0);
         assert_eq!(official.try_get::<String>("", "trust").unwrap(), "official");
-        assert_eq!(official.try_get::<i64>("", "sync_interval").unwrap(), 6 * 3600);
-        let config: serde_json::Value = serde_json::from_str(&official.try_get::<String>("", "config").unwrap()).unwrap();
+        assert_eq!(
+            official.try_get::<i64>("", "sync_interval").unwrap(),
+            6 * 3600
+        );
+        let config: serde_json::Value =
+            serde_json::from_str(&official.try_get::<String>("", "config").unwrap()).unwrap();
         assert_eq!(config["project"], "7link-team/ferry");
         assert_eq!(config["index_path"], "marketplace/index.json");
         for table in ["app_templates", "config_templates"] {
-            let row = s.db.query_one_raw(Statement::from_string(backend, format!("SELECT COUNT(origin_source_id) AS n FROM {table}"))).await.unwrap().unwrap();
+            let row =
+                s.db.query_one_raw(Statement::from_string(
+                    backend,
+                    format!("SELECT COUNT(origin_source_id) AS n FROM {table}"),
+                ))
+                .await
+                .unwrap()
+                .unwrap();
             assert!(row.try_get::<i64>("", "n").unwrap() >= 0);
         }
     }

@@ -192,7 +192,8 @@ pub(super) async fn detail(
         )
         .all(conn)
         .await?;
-    let avatars = crate::accounts::preferences::avatars(conn, users.iter().map(|u| u.id).collect()).await?;
+    let avatars =
+        crate::accounts::preferences::avatars(conn, users.iter().map(|u| u.id).collect()).await?;
     value["members"] = json!(
         users
             .iter()
@@ -205,9 +206,23 @@ pub(super) async fn detail(
         .await?;
     let identities = ai_agents::Entity::find()
         .filter(ai_agents::Column::WorkspaceId.eq(c.workspace_id))
-        .filter(ai_agents::Column::Id.is_in(snapshots.iter().map(|a| a.agent_id).chain(std::iter::once(c.agent_id))))
-        .all(conn).await?;
-    let avatar = |id| identities.iter().find(|a| a.id == id).and_then(|a| a.avatar.as_deref()).and_then(|v| serde_json::from_str::<Value>(v).ok());
+        .filter(
+            ai_agents::Column::Id.is_in(
+                snapshots
+                    .iter()
+                    .map(|a| a.agent_id)
+                    .chain(std::iter::once(c.agent_id)),
+            ),
+        )
+        .all(conn)
+        .await?;
+    let avatar = |id| {
+        identities
+            .iter()
+            .find(|a| a.id == id)
+            .and_then(|a| a.avatar.as_deref())
+            .and_then(|v| serde_json::from_str::<Value>(v).ok())
+    };
     value["agent_avatar"] = json!(avatar(c.agent_id));
     value["agents"] = json!(snapshots.iter().filter(|a| a.state != "removed").map(|a| {
         let config: Value = serde_json::from_str(&a.config).unwrap_or(Value::Null);

@@ -571,8 +571,16 @@ mod tests {
     /// version skew turns into silent misbehaviour instead of a clean refusal.
     #[test]
     fn agent_probe_accepts_legacy_frames_without_an_execution_binding() {
-        let frame: Session = serde_json::from_str(r#"{"type":"agent_probe","runtime":"codex","cwd":""}"#).unwrap();
-        assert!(matches!(frame, Session::AgentProbe { workspace: None, binding: None, .. }));
+        let frame: Session =
+            serde_json::from_str(r#"{"type":"agent_probe","runtime":"codex","cwd":""}"#).unwrap();
+        assert!(matches!(
+            frame,
+            Session::AgentProbe {
+                workspace: None,
+                binding: None,
+                ..
+            }
+        ));
         let wire = serde_json::to_value(frame).unwrap();
         assert!(wire.get("binding").is_none());
     }

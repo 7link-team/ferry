@@ -15,7 +15,6 @@ mod cron_jobs;
 mod db;
 mod definitions;
 mod deployments;
-mod monitoring;
 mod entities;
 mod error;
 mod executions;
@@ -26,6 +25,7 @@ mod lock;
 mod maintenance;
 mod marketplace;
 mod migration;
+mod monitoring;
 mod notifications;
 mod pipelines;
 mod platform_monitor;
@@ -264,7 +264,10 @@ async fn main() -> anyhow::Result<()> {
         drain_rx.clone(),
     ));
     let cron_task = tokio::spawn(cron_jobs::scheduler(s.clone(), cron_rx, drain_rx.clone()));
-    let marketplace_task = tokio::spawn(marketplace::platform::scheduler(s.clone(), drain_rx.clone()));
+    let marketplace_task = tokio::spawn(marketplace::platform::scheduler(
+        s.clone(),
+        drain_rx.clone(),
+    ));
     let runner_auto_update_task = tokio::spawn(hosts::runner::automatic_updates(
         s.clone(),
         drain_rx.clone(),
