@@ -21,12 +21,8 @@ import {
 DropdownMenu,
 DropdownMenuContent,
 DropdownMenuItem,
-DropdownMenuPortal,
 DropdownMenuRadioGroup,
 DropdownMenuRadioItem,
-DropdownMenuSub,
-DropdownMenuSubContent,
-DropdownMenuSubTrigger,
 DropdownMenuTrigger,
 } from "../shared/ui/dropdown-menu";
 import { Account,accountRoute } from "./Account";
@@ -477,28 +473,21 @@ function WorkspaceSwitcher({ identity, current, onWorkspaces }: { identity: Iden
               <ChevronDown className="size-4 shrink-0" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" collisionPadding={8}>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>{workflowText("switchWorkspace")}</DropdownMenuSubTrigger>
-              <DropdownMenuPortal>
-                <DropdownMenuSubContent collisionPadding={8} className="max-h-[min(60dvh,var(--radix-dropdown-menu-content-available-height),28rem)] min-w-0 w-[min(22rem,var(--radix-dropdown-menu-content-available-width))] overflow-y-auto">
-                  <DropdownMenuRadioGroup
-                    value={current?.id}
-                    onValueChange={(workspace) => {
-                      if (workspace !== current?.id)
-                        navigate({ workspace, group: current ? route.group : nav[0]!.key, item: current ? route.item : nav[0]!.items[0]!.key, mode: "list" }, {});
-                    }}
-                  >
-                    {identity.workspaces.map((w) => (
-                      <DropdownMenuRadioItem key={w.id} value={w.id} className="flex-wrap">
-                        <span className="min-w-0 flex-1 basis-32 break-words">{w.name}</span>
-                        <span className="min-w-0 break-words text-xs text-muted-foreground">{myRole(w.relation, w.role_name)}</span>
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuSubContent>
-              </DropdownMenuPortal>
-            </DropdownMenuSub>
+          <DropdownMenuContent align="end" collisionPadding={8} className="max-h-[min(60dvh,var(--radix-dropdown-menu-content-available-height),28rem)] w-[min(22rem,var(--radix-dropdown-menu-content-available-width))] overflow-y-auto">
+            <DropdownMenuRadioGroup
+              value={current?.id}
+              onValueChange={(workspace) => {
+                if (workspace !== current?.id)
+                  navigate({ workspace, group: current ? route.group : nav[0]!.key, item: current ? route.item : nav[0]!.items[0]!.key, mode: "list" }, {});
+              }}
+            >
+              {identity.workspaces.map((w) => (
+                <DropdownMenuRadioItem key={w.id} value={w.id} className="flex-wrap">
+                  <span className="min-w-0 flex-1 basis-32 break-words">{w.name}</span>
+                  <span className="min-w-0 break-words text-xs text-muted-foreground">{myRole(w.relation, w.role_name)}</span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
             <DropdownMenuItem onClick={() => onWorkspaces()}>{t("app.workspaces")}</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
