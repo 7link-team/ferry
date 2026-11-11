@@ -3,6 +3,7 @@ import { AutoField } from "../../../shared/forms/auto-form";
 import { commonText, hostRepositoryText } from "../../../shared/i18n/i18n";
 import { Button } from "../../../shared/ui/button";
 import { Checkbox } from "../../../shared/ui/checkbox";
+import { Switch } from "../../../shared/ui/switch";
 import { Input } from "../../../shared/ui/input";
 import { grid, type ManifestFields, type Removal } from "./fields";
 import { JsonField } from "./JsonField";
@@ -509,7 +510,7 @@ export function ServiceEditor({
           return (
             <section key={key} className="space-y-3">
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox
+                <Switch
                   disabled={readOnly}
                   checked={enabled}
                   onCheckedChange={(checked) =>

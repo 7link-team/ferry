@@ -543,6 +543,15 @@ pub async fn serve(State(s): State<AppState>, request: Request) -> Response {
 }
 
 pub(super) async fn serve_domain(s: AppState, request: Request, token: String) -> Response {
+    serve_entry(s, request, token, "domain").await
+}
+
+pub(super) async fn serve_entry(
+    s: AppState,
+    request: Request,
+    token: String,
+    expected: &str,
+) -> Response {
     let path = request.uri().path().to_owned();
     if token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
         return not_found();
@@ -560,6 +569,12 @@ pub(super) async fn serve_domain(s: AppState, request: Request, token: String) -
             return refuse(StatusCode::BAD_GATEWAY, "holes.unavailable");
         }
     };
+    match super::ingress::Entry::read(&s, &row) {
+        Ok(Some(entry)) if entry.mode != expected => return not_found(),
+        Ok(None) if expected != "domain" => return not_found(),
+        Err(_) => return not_found(),
+        _ => {}
+    }
     let Some(target) = Target::of(&row) else {
         return not_found();
     };

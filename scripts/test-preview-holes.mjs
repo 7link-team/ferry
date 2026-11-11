@@ -5,7 +5,7 @@ import {previewFetch as fetch, previewResolverRules} from './preview-test-networ
 // Build first: `cargo build -p ferry-server -p ferry-runner` and `npm run build`.
 // Evidence lands in data/maintenance/preview-holes-<stamp>/.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import http from 'node:http';
@@ -89,7 +89,7 @@ let browser;
 let echo;
 try {
   const data = join(work, 'server-data');
-  await start('server', serverBinary, [], {
+  const serverProcess = await start('server', serverBinary, [], {
     FERRY_DATA_DIR: data,
     FERRY_BIND: `127.0.0.1:${serverPort}`,
     FERRY_DATABASE_URL: '',
@@ -287,6 +287,107 @@ document.getElementById('report').textContent = JSON.stringify(report);
   assert.ok(Object.values(overflow).every((px) => px <= 0), `page scrolls sideways: ${JSON.stringify(overflow)}`);
   pass('list_detail_form_four_widths_no_page_overflow');
 
+  // New ingress modes reuse the real Runner, console session and upstream fixtures.
+  const entrySettings = async (patch) => {
+    const settings = await api('/api/platform/settings/1');
+    return api('/api/platform/settings/1', { version: settings.version,
+      registration_enabled: settings.registration_enabled, ...patch }, 'PATCH');
+  };
+  const entryPort = await freePort();
+  await entrySettings({ preview_ip_enabled: true, preview_public_acknowledged: true,
+    preview_ip_address: '127.0.0.1', preview_ip_bind: '127.0.0.1',
+    preview_port_start: entryPort, preview_port_end: entryPort, preview_default_mode: 'ip_port' });
+  assert.equal(await createStatus(), 409, 'A public default never bypasses per-create acknowledgement');
+  const entryOptions = await api(`${root}/preview-ingresses`);
+  assert.equal(entryOptions.default_mode, 'ip_port');
+  assert.equal(entryOptions.items.find(item => item.id === 'ip_port').public_access, true);
+  for (const locale of ['en-US','ms-MY']) {
+    await ui.setViewportSize({width:390,height:844});
+    await ui.goto(`${base}/${locale}/workspaces/${ws}/holes/new?host_id=${host}`);
+    const confirmation = ui.locator('input[type="checkbox"]');
+    await confirmation.waitFor();
+    await confirmation.scrollIntoViewIfNeeded();
+    assert.ok(await ui.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} warning overflows`);
+    await ui.screenshot({path:join(work,`public-confirm-${locale}-390.png`),fullPage:true});
+  }
+  await ui.goto(`${base}/zh-CN/workspaces/${ws}/holes/new?host_id=${host}`);
+  await ui.getByText('公开访问：没有密码或 Token 鉴权', { exact: false }).waitFor();
+  await ui.getByRole('textbox', { name: '名称', exact: true }).fill('Public form preview');
+  await ui.getByRole('spinbutton').first().fill(String(echoPort));
+  const submitEntry = ui.locator('button[type="submit"]');
+  assert.equal(await submitEntry.isDisabled(), true, 'Unchecked public confirmation blocks submit');
+  for (const [width, height] of [[1440,900],[900,1100],[390,844],[320,720]]) {
+    await ui.setViewportSize({width,height});
+    assert.ok(await ui.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Public warning overflows ${width}`);
+    await ui.screenshot({path:join(work,`public-form-${width}.png`),fullPage:true});
+  }
+  await ui.getByRole('checkbox', { name: '我已了解此预览公开可访问，并确认其中不包含敏感数据。' }).check();
+  await submitEntry.click();
+  const publicPort = await until('public preview saved', async () => (await api(`${root}/holes`)).items.find(row => row.name === 'Public form preview'));
+  assert.equal(publicPort.ingress_mode, 'ip_port');
+  assert.equal(publicPort.ingress_available, true);
+  const publicResponse = await fetch(publicPort.url+'api/status?public=1', {headers:{cookie}});
+  const publicData = await publicResponse.json();
+  assert.equal(publicData.path, '/api/status?public=1');
+  assert.equal(publicData.headers.cookie, undefined);
+  assert.equal(publicResponse.headers.get('set-cookie'), null);
+  assert.ok(publicResponse.headers.get('content-security-policy').includes('sandbox'));
+  await entrySettings({preview_default_mode:'domain'});
+  assert.equal((await api(`${root}/holes/${publicPort.id}`)).url, publicPort.url);
+  const switched = await api(`${root}/holes/${publicPort.id}`, {version:publicPort.version,ingress_mode:'domain'}, 'PATCH');
+  assert.equal(switched.public_access, false);
+  assert.equal(new URL(switched.url).hostname.split('.')[0].length, 52);
+  assert.ok(await fetch(publicPort.url).then(r=>r.status===404,()=>true), 'Old port is closed or refuses the retired generation');
+  pass('public_port_form_ack_forwarding_default_stability_and_switch');
+
+  // Platform settings keep one shared form and responsive navigation.
+  await ui.setViewportSize({width:1440,height:900});
+  await ui.goto(`${base}/zh-CN/platform/settings/1/edit`);
+  await ui.getByText('预览穿透设置',{exact:true}).first().click();
+  await ui.getByText('默认方案和启用选项用于新建及显式切换入口；不会自动撤销已有预览。', {exact:false}).waitFor();
+  for (const [width,height] of [[1440,900],[900,1100],[390,844],[320,720]]) {
+    await ui.setViewportSize({width,height});
+    assert.ok(await ui.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Settings overflow ${width}`);
+    await ui.screenshot({path:join(work,`ingress-settings-${width}.png`),fullPage:true});
+  }
+  for (const [locale,caption] of [['en-US','Preview tunnel settings'],['ms-MY','Tetapan terowong pratonton']]) {
+    await ui.goto(`${base}/${locale}/platform/settings/1/edit`);
+    await ui.getByText(caption,{exact:true}).first().click();
+    await ui.setViewportSize({width:390,height:844});
+    assert.ok(await ui.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} settings overflow`);
+    await ui.screenshot({path:join(work,`ingress-settings-${locale}-390.png`),fullPage:true});
+  }
+  pass('ingress_platform_settings_four_widths');
+
+  if (process.env.PREVIEW_QUICK_BINARY) {
+    await entrySettings({preview_quick_enabled:true,preview_tunnel_binary:process.env.PREVIEW_QUICK_BINARY});
+    const quick = await api(`${root}/holes`, {name:'Quick fixture',host_id:host,target_port:vitePort,ttl_hours:1,
+      ingress_mode:'cloudflare',public_access_acknowledged:true});
+    assert.equal(quick.public_access,true);
+    assert.equal(quick.ingress_available,true);
+    assert.ok(new URL(quick.url).hostname.endsWith('.trycloudflare.com'));
+    const quickPage = await context.newPage();
+    const quickLines=[];
+    quickPage.on('console',message=>quickLines.push(message.text()));
+    // Connector registration can precede public DNS propagation. Bound the
+    // external readiness wait; all application/isolation assertions still run.
+    await until('Quick public DNS and HTTP ready', async () =>
+      (await quickPage.goto(quick.url, {timeout:10000}))?.ok(), 60);
+    await quickPage.waitForFunction(()=>document.getElementById('report')?.textContent!=='pending',null,{timeout:30000});
+    const quickReport=JSON.parse(await quickPage.locator('#report').textContent());
+    assert.deepEqual(quickReport.relative_api,{ok:true,value:{from:'relative api'}});
+    assert.equal(quickReport.local_storage.ok,false);
+    await until('Quick HMR WebSocket connected',async()=>quickLines.some(line=>/\[vite\] connected/i.test(line)),30);
+    await quickPage.screenshot({path:join(work,'quick-live-app.png'),fullPage:true});
+    await api(`${root}/holes/${quick.id}/revocations`,{});
+    assert.equal((await api(`${root}/holes/${quick.id}`)).ingress_available,false);
+    await until('Quick revoked URL unavailable',async()=>fetch(quick.url,{signal:AbortSignal.timeout(5000)}).then(r=>!r.ok,()=>true),30);
+    await quickPage.close();
+    pass('real_quick_tunnel_application_assets_api_websocket_sandbox_and_revoke');
+  } else {
+    result.checks.quick_tunnel = 'NOT_RUN: set PREVIEW_QUICK_BINARY to an installed executable';
+  }
+
   // Revocation cuts an open HMR socket and the link stops working. A fresh
   // page: the earlier one already lost its socket when Vite was restarted.
   const live = await context.newPage();
@@ -331,6 +432,20 @@ document.getElementById('report').textContent = JSON.stringify(report);
   stop(runner);
   await until('runner offline reported', async () => (await stateOf(echoHole.id)) === 'runner_offline', 60);
   pass('monitor_reports_runner_offline');
+
+  if (process.platform === 'win32' && process.env.PREVIEW_QUICK_BINARY) {
+    // Verify Job Object cleanup on a forced exit of this isolated server only.
+    await api(`${root}/holes`, {name:'Crash cleanup fixture',host_id:host,target_port:echoPort,ttl_hours:1,
+      ingress_mode:'cloudflare',public_access_acknowledged:true});
+    const connectorPids = () => new Promise((done,fail) => execFile('powershell.exe', [
+      '-NoProfile','-NonInteractive','-Command',
+      `Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe' AND ParentProcessId=${serverProcess.pid}" | Select-Object -ExpandProperty ProcessId`,
+    ], {windowsHide:true,timeout:10000}, (error,out)=>error ? fail(error) : done(out.trim().split(/\s+/).filter(Boolean))));
+    assert.ok((await connectorPids()).length > 0, 'The connector is owned by the test server');
+    stop(serverProcess);
+    await until('connector killed on forced server exit', async () => (await connectorPids()).length === 0, 20);
+    pass('windows_forced_server_exit_reaps_owned_connector');
+  }
 
   result.result = 'PASS';
 } catch (error) {

@@ -251,6 +251,72 @@ pub async fn create(
     Path((_, id)): Path<(String, Id)>,
     Json(body): Json<Request>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    create_as(s, scope, id, body, "manual").await
+}
+
+/// Resolve and validate a published target using the scheduler's current actor.
+pub(crate) async fn schedule_request(
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    id: Id,
+    entry: &str,
+    inputs: &Map<String, Value>,
+) -> Result<Request> {
+    scope.require("workflows.run")?;
+    let workflow = super::scoped(conn, scope.workspace_id, id).await?;
+    access::require(conn, scope, &workflow, Operation::Run).await?;
+    if workflow.lifecycle != "active" {
+        return Err(super::conflict("workflow.archived"));
+    }
+    let revision_id = workflow
+        .published_revision_id
+        .ok_or_else(|| error("workflow.runImplementation", "/revision"))?;
+    let revision = definition_revisions::Entity::find_by_id(revision_id)
+        .filter(definition_revisions::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(definition_revisions::Column::SubjectKind.eq("workflow"))
+        .filter(definition_revisions::Column::SubjectId.eq(id))
+        .one(conn)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    let graph: Value =
+        serde_json::from_str(&revision.definition).map_err(|_| ApiError::missing())?;
+    publication_ready(&graph)?;
+    let node = graph["nodes"]
+        .as_array()
+        .and_then(|nodes| {
+            nodes
+                .iter()
+                .find(|node| node["id"] == entry && node["type"] == "core.trigger.manual")
+        })
+        .ok_or_else(|| error("workflow.runEntry", "/entry_node_id"))?;
+    input(node, inputs)?;
+    Ok(Request {
+        mode: Mode::Manual,
+        revision: Revision::Published,
+        version: workflow.version,
+        entry_node_id: entry.into(),
+        inputs: inputs.clone(),
+    })
+}
+
+pub(crate) async fn scheduled(
+    s: AppState,
+    scope: Scope,
+    id: Id,
+    entry: &str,
+    inputs: &Map<String, Value>,
+) -> Result<(StatusCode, Json<Value>)> {
+    let body = schedule_request(&s.db, &scope, id, entry, inputs).await?;
+    create_as(s, scope, id, body, "schedule").await
+}
+
+async fn create_as(
+    s: AppState,
+    scope: Scope,
+    id: Id,
+    body: Request,
+    trigger: &'static str,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("workflows.run")?;
     let tx = access::snapshot(&s.db).await?;
     let scope = crate::accounts::workspace_admin::authorize(&tx, &scope, "workflows.run").await?;
@@ -276,8 +342,14 @@ pub async fn create(
         .await?
         .ok_or_else(ApiError::missing)?;
     let plan = plan::compile(&revision.definition, &body.entry_node_id)?;
-    let graph: Value =
+    let mut graph: Value =
         serde_json::from_str(&revision.definition).map_err(|_| ApiError::missing())?;
+    if trigger == "schedule" {
+        graph
+            .as_object_mut()
+            .ok_or_else(ApiError::missing)?
+            .remove("pin_data");
+    }
     supported(&graph, &plan)?;
     let entry = graph::node_at(
         &graph,
@@ -347,9 +419,14 @@ pub async fn create(
         workflow_id: workflow.id,
         revision_id,
         number,
-        mode: "manual".into(),
+        mode: if trigger == "schedule" {
+            "production"
+        } else {
+            "manual"
+        }
+        .into(),
         state: "queued".into(),
-        trigger_kind: "manual".into(),
+        trigger_kind: trigger.into(),
         trigger_ref: body.entry_node_id,
         triggered_by: scope.user.id.into(),
         parent_execution_id: 0,
@@ -1120,7 +1197,7 @@ async fn dispatch_inner(
             } else {
                 vec![None]
             };
-            graph::resolve_attempt(spec,&planned.path,InputData{items:items.clone(),upstream},&selections,json!({"$vars":start.vars,"$node":{"id":spec["id"],"name":spec["name"],"type":spec["type"]},"$workflow":{"id":Id::from(run.workflow_id)},"$execution":{"id":Id::from(run.id),"mode":"manual"},"$now":clock,"$today":today}),true).await?
+            graph::resolve_attempt(spec,&planned.path,InputData{items:items.clone(),upstream},&selections,json!({"$vars":start.vars,"$node":{"id":spec["id"],"name":spec["name"],"type":spec["type"]},"$workflow":{"id":Id::from(run.workflow_id)},"$execution":{"id":Id::from(run.id),"mode":run.mode},"$now":clock,"$today":today}),true).await?
         };
         let active = journal
             .activate(

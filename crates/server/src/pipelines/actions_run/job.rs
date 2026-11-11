@@ -534,7 +534,7 @@ async fn execute_private(
         .map(|chunk| Ok(bytes::Bytes::copy_from_slice(chunk)))
         .collect();
     ch.write_file(
-        &format!("{private}/worker{exe}"),
+        &format!("{private}/ferry-actions-worker{exe}"),
         0o700,
         Box::pin(futures::stream::iter(chunks)),
     )
@@ -822,7 +822,7 @@ async fn execute_private(
     .await?;
     let command = format!(
         "exec {} --request {}",
-        quote(&format!("{private}/worker{exe}")),
+        quote(&format!("{private}/ferry-actions-worker{exe}")),
         quote(&format!("{private}/request"))
     );
     let (code, outcome, cancelled) = stream_events(

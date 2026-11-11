@@ -214,7 +214,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
   const group = findGroup(route.group)!;
   const item = findItem(route.group, route.item)!;
 
-  const canVisit = (i: NavItem) => !i.permission || permissions.has(i.permission);
+  const canVisit = (i: NavItem) => (!i.permission || permissions.has(i.permission)) && (i.requires ?? []).every(permission => permissions.has(permission));
   const menuTarget = (g: NavGroup, i: NavItem) => canVisit(i) ? i : g.items.find(child => child.parent === i.key && canVisit(child)) ?? i;
   const menuVisible = (g: NavGroup, i: NavItem) => !i.hidden && (canVisit(i) || g.items.some(child => child.parent === i.key && canVisit(child)));
   const groups = nav
@@ -237,7 +237,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
   const visibleMenu = group.items.filter(i => menuVisible(group, i));
   const menuSections = [...new Set(visibleMenu.map(i => i.section ?? ""))].map(section => ({ section, items: visibleMenu.filter(i => (i.section ?? "") === section) }));
   const notificationArea = item.resource.startsWith("notification-");
-  const relatedItems = group.items.filter(i => i.resource !== "pipeline-groups" && i.resource !== "host-groups" && i.resource !== "holes" && (notificationArea ? (i.key === (item.resource === "notification-channels" ? item.key : "notification-channels") || ["notification-templates", "notification-deliveries"].includes(i.key)) : (i.key === parentItem.key || i.parent === parentItem.key)) && (!i.permission || permissions.has(i.permission)));
+  const relatedItems = group.items.filter(i => i.resource !== "pipeline-groups" && i.resource !== "host-groups" && i.resource !== "holes" && (notificationArea ? (i.key === (item.resource === "notification-channels" ? item.key : "notification-channels") || ["notification-templates", "notification-deliveries"].includes(i.key)) : (i.key === parentItem.key || i.parent === parentItem.key)) && canVisit(i));
   const listConfig = (lists[item.key] ?? lists[item.resource]);
   const nodeCatalogPending = needsNodeCatalog && nodeCatalogWorkspace !== workspaceId;
   const nodeCatalogFeedback = nodeCatalogError
@@ -247,7 +247,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
   if ((formConfig?.editor && route.mode !== "list") || (item.resource === "pipelines" && (route.mode === "new" || route.mode === "edit")) ||
       (item.resource === "pipeline-templates" && ["new", "edit", "view"].includes(route.mode)))
     return <div className="h-full min-h-0 min-w-0">
-      {item.permission && !permissions.has(item.permission) ? <><AppearanceActions floating /><p role="alert">{commonText("shell.forbidden")}</p></> : nodeCatalogPending ? <><AppearanceActions floating />{nodeCatalogFeedback}</> : formConfig ? (
+      {!canVisit(item) ? <><AppearanceActions floating /><p role="alert">{commonText("shell.forbidden")}</p></> : nodeCatalogPending ? <><AppearanceActions floating />{nodeCatalogFeedback}</> : formConfig ? (
         <ResourceForm key={`${current.id}/${item.resource}/${route.id ?? "new"}/${route.mode}`} config={formConfig} workspace={current.id} permissions={permissions} pipelineWorkspace headerActions={<AppearanceActions />} />
       ) : <><AppearanceActions floating /><UnavailablePage onBack={() => navigate({ mode: "list" }, {})} /></>}
     </div>;
@@ -364,7 +364,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
           {route.mode === "list" && group.key === "workflow" && ["pipelines","workflows"].includes(parentItem.key) && <nav aria-label={workflowText("libraryTabs")} className="mb-3 flex gap-3">{[findItem("workflow",parentItem.key),findItem("workflow",parentItem.key==="workflows"?"workflow-templates":"pipeline-templates")].filter((entry):entry is NavItem=>!!entry&&canVisit(entry)).map(entry=><a key={entry.key} {...to("workflow",entry.key,entry.params)} aria-current={entry.key===item.key?"page":undefined} className={cn("border-b-2 px-1 py-2 text-sm",entry.key===item.key?"border-primary text-primary":"border-transparent text-muted-foreground hover:text-foreground")}>{entry.key===parentItem.key?workflowText("workflows"):workflowText("templates")}</a>)}</nav>}
           {preferencesError && <p role="alert">{preferencesError}</p>}
           </div>
-          {item.permission && !permissions.has(item.permission) ? <p role="alert">{commonText("shell.forbidden")}</p> : nodeCatalogPending ? nodeCatalogFeedback : route.mode === "list" ? (
+          {!canVisit(item) ? <p role="alert">{commonText("shell.forbidden")}</p> : nodeCatalogPending ? nodeCatalogFeedback : route.mode === "list" ? (
             item.resource === "dashboard" ? <Dashboard key={current.id} workspace={current.id} /> : listConfig ? (
               <div className="flex min-h-0 min-w-0 flex-col">
               {item.resource === "members" && permissions.has("members.create") && <Invitation key={current.id} workspace={current.id} />}

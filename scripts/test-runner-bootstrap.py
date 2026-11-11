@@ -266,7 +266,7 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
             assert sentinel.read_bytes() == b'preexisting untrusted content'
             assert command(*acl_args, env=installer_env).stdout == unsafe_acl, 'rejection changed unsafe ACL'
             assert not (state/'service.json').exists()
-            assert not (state/'runner-service.exe').exists()
+            assert not (state/'ferry-runner-service.exe').exists()
             shutil.rmtree(state)
             print('PASS unsafe existing default state rejected without changing ACL or files', flush=True)
         assert not state.exists(), 'bootstrap must create fresh default native state'

@@ -169,6 +169,7 @@ export function deploymentsForms({
       presentation: "sections",
       sectionNavigation: "scroll",
       heading: (r: Deployment) => r.name,
+      viewActions: [{ label: "", labelKey: "monitoring:overview", permission: "alerts.read", to: row => ({ group: "monitoring", item: "overview", id: row.id, mode: "view" }) }],
       blank: {
         name: "",
         category: "",

@@ -1182,9 +1182,14 @@ async fn proxy_isolates_the_console_and_releases_every_connection() {
 /// state process-wide (as it must in production, where ids are unique), so
 /// this test draws its ids from another node.
 fn own_ids((dir, s): (tempfile::TempDir, AppState)) -> (tempfile::TempDir, AppState) {
+    static WORKER: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(9);
     let state = std::sync::Arc::new(crate::state::State {
         ids: std::sync::Arc::new(
-            crate::snowflake::Generator::new(9, tokio::time::Instant::now().into_std()).unwrap(),
+            crate::snowflake::Generator::new(
+                WORKER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                tokio::time::Instant::now().into_std(),
+            )
+            .unwrap(),
         ),
         db: s.db.clone(),
         data_dir: s.data_dir.clone(),
@@ -1203,4 +1208,221 @@ fn own_ids((dir, s): (tempfile::TempDir, AppState)) -> (tempfile::TempDir, AppSt
 async fn closed_port() -> u16 {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     listener.local_addr().unwrap().port()
+}
+
+async fn configure_entries(s: &AppState, patch: Value) {
+    let mut config = crate::accounts::addresses::Configuration::load(s, &s.db)
+        .await
+        .unwrap();
+    config.update(patch.as_object().unwrap()).unwrap();
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::AccessConfig,
+            sea_orm::sea_query::Expr::value(serde_json::to_string(&config).unwrap()),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn public_port_requires_ack_and_forwards_without_exposing_console_or_cookies() {
+    let (_dir, s) = own_ids(setup().await);
+    add_host(&s, 710001, 1, KEY).await;
+    let address = server(s.clone()).await;
+    fake_runner(&s, address, 710001, KEY, true).await;
+    let target = upstream().await;
+    let listen = closed_port().await;
+    configure_entries(&s, json!({"preview_ip_enabled":true,"preview_public_acknowledged":true,
+        "preview_ip_address":"127.0.0.1","preview_ip_bind":"127.0.0.1","preview_port_start":listen,"preview_port_end":listen})).await;
+    let body = json!({"name":"Public preview","host_id":"710001","target_port":target,"ttl_hours":1,"ingress_mode":"ip_port"});
+    assert!(
+        create(State(s.clone()), admin(1), Json(parse(body.clone())))
+            .await
+            .is_err()
+    );
+    let mut approved = body;
+    approved["public_access_acknowledged"] = json!(true);
+    let (_, Json(created)) = create(State(s.clone()), admin(1), Json(parse(approved.clone())))
+        .await
+        .unwrap();
+    assert_eq!(created["public_access"], true);
+    assert_eq!(created["ingress_available"], true);
+    let url = created["url"].as_str().unwrap();
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{url}api/status?kept=1"))
+        .header("cookie", "console=private")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-security-policy"], SANDBOX);
+    assert!(!response.headers().contains_key("set-cookie"));
+    let data: Value = response.json().await.unwrap();
+    assert_eq!(data["path"], "/api/status");
+    assert_eq!(data["query"], "kept=1");
+    assert!(data["headers"].get("cookie").is_none());
+    assert!(
+        data.get("instance_id").is_none(),
+        "The ingress must forward /api, never expose the platform API"
+    );
+    // Another creation cannot steal a bound port, and failure does not disturb it.
+    assert!(
+        create(State(s.clone()), admin(1), Json(parse(approved)))
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        client.get(url).send().await.unwrap().status(),
+        StatusCode::OK
+    );
+    revoke(
+        State(s.clone()),
+        admin(1),
+        Path(("one".into(), hole_id(&created))),
+    )
+    .await
+    .unwrap();
+    assert!(
+        tokio::net::TcpStream::connect(("127.0.0.1", listen))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn switch_failure_preserves_domain_and_success_rotates_token_and_closes_port() {
+    let (_dir, s) = own_ids(setup().await);
+    add_host(&s, 11, 1, KEY).await;
+    let created = create_hole(&s, 11, 80).await;
+    let id = hole_id(&created);
+    let original = reload(&s, id.into()).await;
+    configure_entries(
+        &s,
+        json!({"preview_quick_enabled":true,"preview_public_acknowledged":true,
+        "preview_tunnel_binary":s.data_dir.join("missing-connector").to_string_lossy()}),
+    )
+    .await;
+    assert!(
+        update(
+            State(s.clone()),
+            admin(1),
+            Path(("one".into(), id)),
+            Json(parse(json!({
+                "version":1,"ingress_mode":"cloudflare","public_access_acknowledged":true
+            })))
+        )
+        .await
+        .is_err()
+    );
+    let unchanged = reload(&s, id.into()).await;
+    assert_eq!(unchanged, original);
+    let port = closed_port().await;
+    configure_entries(&s, json!({"preview_ip_enabled":true,"preview_ip_address":"127.0.0.1","preview_ip_bind":"127.0.0.1",
+        "preview_port_start":port,"preview_port_end":port})).await;
+    let Json(switched) = update(
+        State(s.clone()),
+        admin(1),
+        Path(("one".into(), id)),
+        Json(parse(json!({
+            "version":1,"ingress_mode":"ip_port","public_access_acknowledged":true
+        }))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(switched["ingress_mode"], "ip_port");
+    assert_eq!(switched["version"], 2);
+    let current = reload(&s, id.into()).await;
+    assert_ne!(current.token_hash, original.token_hash);
+    let old_url = reqwest::Url::parse(created["url"].as_str().unwrap()).unwrap();
+    let old_request = Request::builder()
+        .header("host", old_url.host_str().unwrap())
+        .body(axum::body::Body::empty())
+        .unwrap();
+    assert_eq!(
+        super::dispatch(&s, old_request).await.unwrap_err().status(),
+        StatusCode::NOT_FOUND
+    );
+    // A stale edit cannot rotate or replace the successful entry.
+    assert!(
+        update(
+            State(s.clone()),
+            admin(1),
+            Path(("one".into(), id)),
+            Json(parse(json!({"version":1,"ingress_mode":"domain"})))
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(reload(&s, id.into()).await.token_hash, current.token_hash);
+    update(
+        State(s.clone()),
+        admin(1),
+        Path(("one".into(), id)),
+        Json(parse(json!({"version":2,"ingress_mode":"domain"}))),
+    )
+    .await
+    .unwrap();
+    assert!(
+        tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn mode_snapshot_survives_default_changes_and_expired_public_entries_are_reaped() {
+    let (_dir, s) = own_ids(setup().await);
+    add_host(&s, 11, 1, KEY).await;
+    let created = create_hole(&s, 11, 80).await;
+    let row = reload(&s, hole_id(&created).into()).await;
+    let port = closed_port().await;
+    configure_entries(&s,json!({"preview_default_mode":"ip_port","preview_ip_enabled":true,"preview_public_acknowledged":true,"preview_ip_address":"127.0.0.1",
+        "preview_ip_bind":"127.0.0.1","preview_port_start":port,"preview_port_end":port})).await;
+    assert_eq!(link(&s, &row).await.unwrap(), created["url"]);
+    let origin = reqwest::Url::parse(created["url"].as_str().unwrap()).unwrap();
+    let request = Request::builder()
+        .header("host", origin.host_str().unwrap())
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = super::dispatch(&s, request).await.unwrap_err();
+    assert_ne!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "Original snapshot Host must still route to its preview"
+    );
+
+    let (_, Json(public)) = create(
+        State(s.clone()),
+        admin(1),
+        Json(parse(
+            json!({"name":"expiring","host_id":"11","target_port":80,
+        "ttl_hours":1,"ingress_mode":"ip_port","public_access_acknowledged":true}),
+        )),
+    )
+    .await
+    .unwrap();
+    holes::Entity::update_many()
+        .col_expr(
+            holes::Column::ExpiresAt,
+            sea_orm::sea_query::Expr::value(1_i64),
+        )
+        .filter(holes::Column::Id.eq(i64::from(hole_id(&public))))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        reqwest::get(public["url"].as_str().unwrap())
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    ingress::tick(&s, false).await;
+    assert!(
+        tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_err()
+    );
 }

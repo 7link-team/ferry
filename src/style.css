@@ -232,6 +232,36 @@
 @layer components {
   [data-theme="custom"] :is([data-slot="button"], [data-slot="input"], [data-slot="tabs-list"]) { border-width: var(--border-width); }
 }
+/* Boolean settings use one labelled row; selection and confirmation keep checkboxes. */
+.auto-field:has(> [data-slot="switch"]):not(.flex-row-reverse) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  min-height: 3.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  padding: 0.25rem 0.75rem;
+}
+.auto-field:has(> [data-slot="switch"]):not(.flex-row-reverse) > [data-auto-label] {
+  min-width: 0;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.auto-field:has(> [data-slot="switch"]):not(.flex-row-reverse) > p {
+  grid-column: 1 / -1;
+}
+label:has([data-slot="checkbox"]),
+label:has(input[type="checkbox"]:not([aria-hidden="true"])) {
+  min-height: 44px;
+}
+input[type="checkbox"]:not([aria-hidden="true"]) {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  accent-color: var(--primary);
+}
 /* Configuration detail/edit pages: reachable touch controls and safe footer. */
 @media (max-width: 1199px) {
   .crud-config-page [data-slot="button"],

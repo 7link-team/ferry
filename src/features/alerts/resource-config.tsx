@@ -42,6 +42,8 @@ export interface AlertEvent {
 }
 
 export const alertTargets = [
+  { value: "application-health", label: "Application health", labelKey: "monitoring:overview" },
+  { value: "health-check", label: "Health check", labelKey: "monitoring:checks" },
   { value: "host", label: "主机", labelKey: "common-domain:nav.hosts" },
   {
     value: "pipeline",
@@ -61,6 +63,7 @@ export const alertTargets = [
 ];
 
 export const alertMetrics = [
+  { value: "health-failed", label: "Health failure", labelKey: "monitoring:healthMetric" },
   {
     value: "offline",
     label: "离线",
@@ -275,6 +278,7 @@ export function alertsForms({
     "alert-rules": form<AlertRule>({
       resource: "alert-rules",
       permissionResource: "alerts",
+      queryDefaults: ["target_kind", "target_ref", "metric"],
       heading: (r) => r.name,
       blank: {
         name: "",
@@ -316,6 +320,8 @@ export function alertsForms({
             },
             ...(
               [
+                ["application-health", "application-health", "应用健康"],
+                ["health-check", "health-checks", "健康检查"],
                 ["host", "hosts", "主机"],
                 ["pipeline", "pipelines", "流水线"],
                 ["deployment", "deployments", "应用"],
@@ -324,7 +330,7 @@ export function alertsForms({
             ).map(([kind, resource, label]) => ({
               key: "target_ref",
               label: `目标${label}`,
-              labelKey: `resource-domain:target.${kind}`,
+              labelKey: kind === "application-health" ? "monitoring:overview" : kind === "health-check" ? "monitoring:checks" : `resource-domain:target.${kind}`,
               type: "select" as const,
               required: true,
               immutable: true,
@@ -340,7 +346,7 @@ export function alertsForms({
               immutable: true,
               when: (d) => d.target_kind === "host",
               options: alertMetrics.filter(
-                (m) => m.value !== "execution-failed",
+                (m) => !["execution-failed", "health-failed"].includes(m.value),
               ),
             },
             {
@@ -350,10 +356,12 @@ export function alertsForms({
               type: "select",
               required: true,
               immutable: true,
-              when: (d) => d.target_kind !== "host",
-              options: alertMetrics.filter(
-                (m) => m.value === "execution-failed",
-              ),
+              when: (d) => !["host", "health-check", "application-health"].includes(d.target_kind ?? ""),
+              options: alertMetrics.filter(m => m.value === "execution-failed"),
+            },
+            {
+              key: "metric", label: "Health", labelKey: "monitoring:healthMetric", type: "select", required: true, immutable: true,
+              when: d => ["health-check", "application-health"].includes(d.target_kind ?? ""), options: alertMetrics.filter(m => m.value === "health-failed"),
             },
             {
               key: "threshold",
@@ -363,7 +371,7 @@ export function alertsForms({
               required: true,
               when: (d) =>
                 !!d.metric &&
-                !["offline", "execution-failed"].includes(d.metric),
+                !["offline", "execution-failed", "health-failed"].includes(d.metric),
               help: "指标严格大于阈值时触发；内存和磁盘范围0–100，负载为非负整数。",
               helpKey: "resource-domain:alert.thresholdHelp",
             },

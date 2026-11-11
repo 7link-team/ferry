@@ -3,7 +3,7 @@
 set -eu
 fail() { printf '%s\n' "$*" >&2; exit 1; }
 server=
-name=runner-agent
+name=ferry-runner-agent
 # --user installs a systemd --user unit / LaunchAgent for the invoking user
 # instead of a machine service: no sudo, that user's identity and PATH.
 user=
@@ -51,7 +51,7 @@ case "$(uname -s)/$(uname -m)" in
 esac
 command -v curl >/dev/null 2>&1 || fail 'curl is required'
 umask 077
-stage=$(mktemp -d /private/tmp/runner-install.XXXXXXXX 2>/dev/null || mktemp -d /tmp/runner-install.XXXXXXXX)
+stage=$(mktemp -d /private/tmp/ferry-runner-install.XXXXXXXX 2>/dev/null || mktemp -d /tmp/ferry-runner-install.XXXXXXXX)
 trap 'rm -rf "$stage"' EXIT
 trap 'exit 1' HUP INT TERM
 printf 'Authorization: Bearer %s\n' "$FERRY_TOKEN" > "$stage/auth"
@@ -79,16 +79,16 @@ case "$expected_size" in ''|0*|*[!0-9]*) fail 'Invalid artifact size' ;; esac
 [ "${#expected_size}" -le 9 ] && [ "$expected_size" -le 268435456 ] || fail 'Artifact exceeds size limit'
 curl --fail --silent --show-error --location --max-redirs 5 --connect-timeout 15 \
     --max-time 300 --max-filesize "$expected_size" --proto '=https' --proto-redir '=https' \
-    --output "$stage/runner" "$url"
-actual_size=$(wc -c < "$stage/runner" | tr -d ' ')
+    --output "$stage/ferry-runner" "$url"
+actual_size=$(wc -c < "$stage/ferry-runner" | tr -d ' ')
 [ "$actual_size" = "$expected_size" ] || fail 'Artifact size mismatch; nothing installed'
 if command -v sha256sum >/dev/null 2>&1; then
-    actual_hash=$(sha256sum "$stage/runner")
+    actual_hash=$(sha256sum "$stage/ferry-runner")
 else
-    actual_hash=$(shasum -a 256 "$stage/runner")
+    actual_hash=$(shasum -a 256 "$stage/ferry-runner")
 fi
 actual_hash=${actual_hash%% *}
 [ "$actual_hash" = "$expected_hash" ] || fail 'Artifact SHA256 mismatch; nothing installed'
-chmod 700 "$stage/runner"
+chmod 700 "$stage/ferry-runner"
 printf 'Installing Runner %s as %s%s…\n' "$version" "$name" "${user:+ for the current user}"
-"$stage/runner" service install --server "$server" --name "$name" --rebind $user
+"$stage/ferry-runner" service install --server "$server" --name "$name" --rebind $user

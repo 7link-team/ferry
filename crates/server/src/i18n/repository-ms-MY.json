@@ -840,5 +840,6 @@
   "templates.examples.redisDataPort": "Port data mendengar dan diterbitkan",
   "templates.examples.redisSentinelPort": "Port Sentinel mendengar dan diterbitkan",
   "files.permissionInvalid": "Pilih laluan fail sah dan bit kebenaran antara 000 hingga 777.",
-  "files.permissionUnsupported": "Penyuntingan kebenaran POSIX tidak tersedia untuk fail Windows dan pautan simbolik."
+  "files.permissionUnsupported": "Penyuntingan kebenaran POSIX tidak tersedia untuk fail Windows dan pautan simbolik.",
+  "cron.workflowRun": "Pelaksanaan aliran kerja {id}"
 }

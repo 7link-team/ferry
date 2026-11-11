@@ -53,6 +53,13 @@ fn offline(name: &str) -> ApiError {
 }
 
 fn remote_failed(error: impl std::fmt::Display) -> ApiError {
+    let error = error.to_string();
+    if error == "agents.runtimeSetupFailed" {
+        return ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("agents.runtimeSetupFailed"),
+        );
+    }
     ApiError::localized(
         StatusCode::BAD_GATEWAY,
         crate::i18n::Message::new("runner.remoteFailed").with("detail", error.to_string()),
@@ -216,6 +223,17 @@ mod tests {
 
     #[test]
     fn session_failure_identity_is_allowlisted_and_preserves_unknown_raw_reasons() {
+        let setup = remote_failed("agents.runtimeSetupFailed");
+        assert_eq!(setup.0, StatusCode::CONFLICT);
+        for locale in crate::i18n::Locale::ALL {
+            assert_eq!(
+                setup.render(locale),
+                crate::i18n::render(
+                    locale,
+                    &crate::i18n::Message::new("agents.runtimeSetupFailed")
+                )
+            );
+        }
         let raw = "provider 原文 {runnerExtra.preparingUpgrade}";
         let known = session_failed(
             raw.into(),

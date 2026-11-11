@@ -13,5 +13,12 @@
   "holes.tooLarge": "請求本文超過預覽的 64 MiB 上限。",
   "holes.automatic": "此預覽由流水線或工作流程託管，只能撤銷。",
   "holes.reviewClosed": "此預覽目前不在等待驗收。",
-  "holes.notReady": "本機服務未在規定時間內就緒：{detail}"
+  "holes.notReady": "本機服務未在規定時間內就緒：{detail}",
+  "holes.entryInvalid": "預覽入口設定無效，請檢查啟用方案、IP 位址和連接埠範圍。",
+  "holes.entryRisk": "使用前須明確確認公開存取風險；自動公開預覽另需管理員授權。",
+  "holes.entryBind": "無法綁定預覽監聽埠，請檢查本機 IP 與權限。",
+  "holes.entryPorts": "設定的預覽連接埠範圍內沒有可用埠。",
+  "holes.entryBinary": "無法啟動 cloudflared，請檢查此節點的執行檔路徑與權限。",
+  "holes.entryUnavailable": "預覽入口無法使用，請檢查連接器與網路後手動重試。",
+  "holes.entryTimeout": "臨時通道未在 45 秒內就緒；現有入口保持不變。"
 }

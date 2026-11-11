@@ -306,7 +306,7 @@ async fn discover(
             .await?
             .ok_or_else(ApiError::missing)?;
         let channel = crate::hosts::remote::open(&s, &scope.workspace_id, &body.host_id).await?;
-        let status = channel.agent_probe(runtime, "").await?;
+        let status = channel.agent_probe(runtime, "", None).await?;
         crate::accounts::workspace_admin::authorize(&s.db, &scope, "ai-agents.probe").await?;
         // The selected host cannot be silently replaced by another Runner.
         if crate::entities::hosts::Entity::find_by_id(host.id)

@@ -145,7 +145,23 @@ const forms: Record<string, FormConfig<Row>> = {
   ] })),
 { title: "访问地址", titleKey: "resource-domain:platform.accessAddresses", group: "访问地址", groupKey: "resource-domain:platform.accessAddresses", fields: [
     { key: "public_url", label: "平台公开访问地址", labelKey: "resource-domain:platform.publicUrl", type: "text", placeholder: "https://console.example.com", helpKey: "resource-domain:platform.publicAddressHelp" },
-    { key: "preview_domain", label: "预览根域名", labelKey: "resource-domain:platform.previewDomain", type: "text", placeholder: "preview.example.com", helpKey: "resource-domain:platform.previewDomainHelp" },
+  ] },
+{ title: "Preview tunnels", titleKey: "holes:settings", description: "Default and enabled schemes apply to new entries and explicit switches. Existing entries stay active; revoke them individually to close access. Changing or clearing the root domain follows the existing domain-link rules.", descriptionKey: "holes:settingsHelp", group: "preview", groupKey: "holes:settings", fields: [
+    { key: "preview_default_mode", label: "Default ingress", labelKey: "holes:defaultMode", type: "select", options: ["domain", "ip_port", "cloudflare"].map(value => ({value,label:value,labelKey:`holes:mode.${value}`})), helpKey: "holes:defaultHelp" },
+    { key: "preview_domain", label: "Preview root domain", labelKey: "resource-domain:platform.previewDomain", type: "text", placeholder: "preview.example.com", helpKey: "resource-domain:platform.previewDomainHelp" },
+    { key: "preview_public_acknowledged", label: "Acknowledge public access", labelKey: "holes:platformPublicAck", type: "switch", span: 2, helpKey: "holes:platformPublicWarning" },
+    { key: "preview_public_automatic", label: "Public automatic previews", labelKey: "holes:automaticPublic", type: "switch", span: 2, helpKey: "holes:automaticPublicHelp" },
+  ] },
+{ title: "IP port", titleKey: "holes:mode.ip_port", group: "preview", groupKey: "holes:settings", fields: [
+    { key: "preview_ip_enabled", label: "Enable IP ports", labelKey: "holes:enableIp", type: "switch", span: 2, helpKey: "holes:warning.ip_port" },
+    { key: "preview_ip_address", label: "Reachable IP", labelKey: "holes:reachableIp", type: "text", when: d => !!d.preview_ip_enabled, required: d => !!d.preview_ip_enabled, helpKey: "holes:reachableIpHelp" },
+    { key: "preview_ip_bind", label: "Bind IP", labelKey: "holes:bindIp", type: "text", when: d => !!d.preview_ip_enabled, required: d => !!d.preview_ip_enabled, helpKey: "holes:bindIpHelp" },
+    { key: "preview_port_start", label: "Port range start", labelKey: "holes:portStart", type: "number", min: 1, max: 65535, when: d => !!d.preview_ip_enabled },
+    { key: "preview_port_end", label: "Port range end", labelKey: "holes:portEnd", type: "number", min: 1, max: 65535, when: d => !!d.preview_ip_enabled },
+  ] },
+{ title: "Quick Tunnel", titleKey: "holes:mode.cloudflare", group: "preview", groupKey: "holes:settings", fields: [
+    { key: "preview_quick_enabled", label: "Enable temporary tunnels", labelKey: "holes:enableQuick", type: "switch", span: 2, helpKey: "holes:warning.cloudflare" },
+    { key: "preview_tunnel_binary", label: "cloudflared executable", labelKey: "holes:tunnelBinary", type: "text", when: d => !!d.preview_quick_enabled, required: d => !!d.preview_quick_enabled, helpKey: "holes:tunnelBinaryHelp" },
   ] },
 {title:"Basic information",titleKey:"resource-domain:platform.siteBasic",group:"site",groupKey:"resource-domain:platform.siteSettings",tab:"basic",tabKey:"resource-domain:platform.siteBasic",fields:[
     {key:"site_name",label:"Site name",labelKey:"resource-domain:platform.siteName",type:"text",span:2,helpKey:"resource-domain:platform.siteNameHelp"},

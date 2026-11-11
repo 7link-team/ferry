@@ -1,3 +1,4 @@
+import monitoringMessages from "./locales/monitoring.json";
 import notificationMessages from "./locales/notifications.json";
 import i18n from "i18next";
 import { initReactI18next,useTranslation } from "react-i18next";
@@ -41,6 +42,8 @@ for (const locale of typedLocales) i18n.addResourceBundle(locale, "holes", Objec
 for (const locale of typedLocales) i18n.addResourceBundle(locale, "otp", Object.fromEntries(Object.entries(otpMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])));
 
 for (const locale of typedLocales) i18n.addResourceBundle(locale, "identity", Object.fromEntries(Object.entries(identityMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])));
+
+for (const locale of typedLocales) i18n.addResourceBundle(locale, "monitoring", Object.fromEntries(Object.entries(monitoringMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])));
 
 export function workflowText(key: keyof typeof workflowMessages): string {
   return i18n.t(key, { ns: "workflow-domain", keySeparator: false });

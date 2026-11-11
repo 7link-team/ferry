@@ -69,13 +69,15 @@ async fn dispatch(
         wire::Session::CreateDir { path } => create_dir(socket, &path).await,
         wire::Session::DeleteFile { path } => delete_file(socket, &path).await,
         wire::Session::Monitor => monitor(socket).await,
-        wire::Session::AgentStart { request } => agent(socket, request).await,
+        wire::Session::AgentStart { request } => agent(socket, request, state_dir).await,
         wire::Session::ForwardStart { port } => forward(socket, port).await,
         wire::Session::AgentProbe {
             runtime,
             cwd,
             workspace,
+            binding,
         } => {
+            let prepare = workspace.is_some();
             let directory = if let Some(key) = workspace {
                 anyhow::ensure!(
                     cwd.is_empty(),
@@ -88,7 +90,15 @@ async fn dispatch(
             } else {
                 cwd
             };
-            let status = crate::agent::probe(runtime, &directory).await?;
+            let environment = crate::agent::provision::environment(
+                state_dir,
+                runtime,
+                &directory,
+                prepare,
+                binding.as_ref(),
+            )
+            .await?;
+            let status = crate::agent::probe::probe_with(runtime, &directory, &environment).await?;
             crate::transport::send(socket, &wire::Session::AgentProbeResult { status }).await
         }
         other => anyhow::bail!("服务下发了不是请求的帧：{other:?}"),
@@ -143,12 +153,16 @@ async fn forward(socket: &mut Socket, port: u16) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn agent(socket: &mut Socket, request: wire::agent::Request) -> anyhow::Result<()> {
+async fn agent(
+    socket: &mut Socket,
+    request: wire::agent::Request,
+    state_dir: &std::path::Path,
+) -> anyhow::Result<()> {
     use tokio::sync::{mpsc, watch};
     let (events, mut receiver) = mpsc::channel(16);
     let (inputs, commands) = mpsc::channel(16);
     let (stop, cancelled) = watch::channel(false);
-    let execution = crate::agent::run(request, events, commands, cancelled);
+    let execution = crate::agent::run_managed(state_dir, request, events, commands, cancelled);
     tokio::pin!(execution);
     let outcome = loop {
         tokio::select! {

@@ -13,5 +13,12 @@
   "holes.tooLarge": "Badan permintaan melebihi had pratonton 64 MiB.",
   "holes.automatic": "Pratonton ini diurus oleh saluran paip atau aliran kerja. Ia hanya boleh dibatalkan.",
   "holes.reviewClosed": "Pratonton ini tidak menunggu semakan.",
-  "holes.notReady": "Perkhidmatan tempatan tidak sedia dalam masa yang ditetapkan: {detail}"
+  "holes.notReady": "Perkhidmatan tempatan tidak sedia dalam masa yang ditetapkan: {detail}",
+  "holes.entryInvalid": "Konfigurasi pintu masuk tidak sah. Semak kaedah, IP dan julat port.",
+  "holes.entryRisk": "Sahkan risiko akses awam. Pratonton awam automatik memerlukan kelulusan pentadbir berasingan.",
+  "holes.entryBind": "Tidak dapat mengikat pendengar pratonton. Semak IP setempat dan kebenaran.",
+  "holes.entryPorts": "Tiada port kosong dalam julat pratonton yang dikonfigurasikan.",
+  "holes.entryBinary": "Tidak dapat memulakan cloudflared. Semak laluan fail dan kebenaran pada nod pelayan ini.",
+  "holes.entryUnavailable": "Pintu masuk tidak tersedia. Semak penyambung dan rangkaian, kemudian cuba semula secara manual.",
+  "holes.entryTimeout": "Terowong sementara tidak sedia dalam 45 saat. Pintu masuk asal dikekalkan."
 }

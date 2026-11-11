@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$Server,
-    [string]$Name = 'runner-agent',
+    [string]$Name = 'ferry-runner-agent',
     # Install for the current user as a logon task: no elevation, the user's own
     # identity, profile and PATH; runs only while that user is logged on.
     [switch]$User
@@ -45,7 +45,7 @@ while ($item) {
     }
     $item = $item.Parent
 }
-$stage = Join-Path $base.FullName ('runner-install-' + [Guid]::NewGuid().ToString('N'))
+$stage = Join-Path $base.FullName ('ferry-runner-install-' + [Guid]::NewGuid().ToString('N'))
 $client = $null
 try {
     $null = New-Item -ItemType Directory -Path $stage
@@ -153,7 +153,7 @@ try {
     if (-not $url.IsAbsoluteUri -or $url.Scheme -ne 'https') { throw 'Artifact URL must use HTTPS.' }
     $size = [long]$lines[3]
     if ($size -gt 268435456) { throw 'Artifact exceeds size limit.' }
-    $binary = Join-Path $stage 'runner.exe'
+    $binary = Join-Path $stage 'ferry-runner.exe'
     Write-Host ('Downloading Runner {0} ({1:N1} MiB)...' -f $lines[0], ($size / 1MB))
     Save-Download $url $binary $size $false
     Write-Host 'Verifying downloaded Runner size and SHA256...'

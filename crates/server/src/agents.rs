@@ -555,7 +555,7 @@ async fn probe(
     let runtime = ferry_protocol::agent::Runtime::parse(&execution.runtime).ok_or_else(invalid)?;
     let channel =
         crate::hosts::remote::open(&s, &scope.workspace_id, &execution.host_id.into()).await?;
-    let status = channel.agent_probe(runtime, &execution.cwd).await?;
+    let status = channel.agent_probe(runtime, &execution.cwd, None).await?;
     crate::hosts::activity(
         &s,
         &scope,

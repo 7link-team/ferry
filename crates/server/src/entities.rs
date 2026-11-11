@@ -1,5 +1,57 @@
 //! Table mirrors. HTTP responses explicitly wrap identifiers in `Id`.
 
+pub mod health_checks {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "health_checks")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub name: String,
+        pub description: String,
+        pub kind: String,
+        pub role: String,
+        pub deployment_id: i64,
+        pub host_id: i64,
+        pub service_name: String,
+        pub settings: String,
+        pub enabled: i64,
+        pub run_as: i64,
+        pub result: String,
+        pub version: i64,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub updated_at: i64,
+        pub updated_by: i64,
+        pub checked_at: i64,
+        pub checked_by: i64,
+        pub due_at: i64,
+        pub due_by: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod health_observations {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "health_observations")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub check_id: i64,
+        pub result: String,
+        pub observed_at: i64,
+        pub observed_by: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod ai_model_profiles {
     use sea_orm::entity::prelude::*;
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
@@ -249,6 +301,7 @@ pub mod holes {
         pub strip_prefix: bool,
         pub token_hash: String,
         pub token_sealed: String,
+        pub ingress_config: Option<String>,
         pub expires_at: i64,
         pub revoked_at: i64,
         pub revoked_by: i64,

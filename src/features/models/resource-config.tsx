@@ -12,7 +12,7 @@ import {
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
-import { Checkbox } from "../../shared/ui/checkbox";
+import { Switch } from "../../shared/ui/switch";
 import {
   ProviderFields,
   type Provider,
@@ -59,7 +59,7 @@ function ModelConnection({
     <div className="space-y-4">
       {draft.kind === "cli" && !readOnly && (
         <AutoField label={t("customApi")}>
-          <Checkbox
+          <Switch
             checked={!!draft.connection}
             onCheckedChange={(checked) =>
               onPatch({
@@ -357,6 +357,7 @@ export function modelsLists(
               qwen: "Qwen Code",
               opencode: "OpenCode",
               pi: "Pi",
+              dsh: "DeepSeek Harness",
             })[r.runtime as string] ?? "—",
         },
         {
@@ -477,6 +478,7 @@ export function modelsForms({
                 { value: "qwen", label: "Qwen Code" },
                 { value: "opencode", label: "OpenCode" },
                 { value: "pi", label: "Pi" },
+                { value: "dsh", label: "DeepSeek Harness" },
               ],
             },
             {

@@ -177,6 +177,8 @@ export interface FormField<T> {
   immutable?: boolean;
   /** Clear dependent selections when this field changes. */
   resetOnChange?: string[];
+  /** Derive dependent values atomically after resetting this field's dependents. */
+  patchOnChange?: (value: unknown, draft: Partial<T>) => Partial<T>;
   /** Context label for the shared plain-Git repository add control. */
   repositoryAddLabelKey?: string;
   /** Metadata key for a stored secret's presence (never its value). */

@@ -98,7 +98,11 @@ it("generates current-user commands without elevation, keeping system commands u
 });
 
 it("generates one-click uninstall commands for each platform and install scope", () => {
-  expect(runnerUninstallCommand("linux")).toBe(`sudo sh -c 'd="/var/lib/runner-agent"; if [ -x "$d/runner-service" ]; then "$d/runner-service" service uninstall --name runner-agent || exit 1; fi; rm -rf "$d" && [ ! -e "$d" ] && echo "主机代理 已卸载：注册和安装目录均已删除。"'`);
+  for (const name of ["ferry-runner-agent", "runner-agent"]) {
+    expect(runnerUninstallCommand("linux")).toContain(`/var/lib/${name}`);
+    expect(runnerUninstallCommand("linux")).toContain(`service uninstall --name ${name}`);
+  }
+  expect(runnerUninstallCommand("linux")).toContain('b="$d/ferry-runner-service"');
   // Success is reported in the window the command was pasted into, never silently.
   for (const platform of ["linux", "macos", "windows"] as const) for (const scope of ["system", "user"] as const)
     expect(runnerUninstallCommand(platform, scope), `${platform}/${scope}`).toContain("主机代理 已卸载");
@@ -150,7 +154,7 @@ echo 'unix uninstall verified'
   expect(execFileSync("sh", ["-c", script], { encoding: "utf8", env })).toContain("unix uninstall verified");
 });
 
-it.skipIf(process.platform !== "win32")("parses the elevated uninstall payload and runs the current-user uninstall against a fixture Runner", { timeout: 30_000 }, () => {
+it.skipIf(process.platform !== "win32")("parses the elevated uninstall payload and runs new and legacy current-user uninstalls", { timeout: 30_000 }, () => {
   const system = runnerUninstallCommand("windows", "system");
   const payloads = [...system.matchAll(/-EncodedCommand'?,? '?([A-Za-z0-9+/=]{20,})/g)].map(m => m[1]!);
   const user = runnerUninstallCommand("windows", "user");
@@ -172,15 +176,17 @@ $savedLocal = $env:LOCALAPPDATA
 try {
   $env:LOCALAPPDATA = Join-Path $sandbox 'local'
   $env:FIXTURE_ARGS = Join-Path $sandbox 'args.txt'
-  $root = Join-Path $env:LOCALAPPDATA 'runner-agent'
+  foreach ($serviceName in @('ferry-runner-agent', 'runner-agent')) {
+  $binaryName = if ($serviceName -eq 'runner-agent') { 'runner-service.exe' } else { 'ferry-runner-service.exe' }
+  $root = Join-Path $env:LOCALAPPDATA $serviceName
   # Installed: the registration is removed through the Runner, then all files.
   $null = New-Item -ItemType Directory -Path (Join-Path $root 'versions')
-  Copy-Item $fixture (Join-Path $root 'runner-service.exe')
+  Copy-Item $fixture (Join-Path $root $binaryName)
   Set-Content (Join-Path $root 'service.json') '{}'
   $env:FIXTURE_FAIL = '0'
   $reported = & { ${user} } 6>&1 | Out-String
   if ($reported -notlike '*主机代理 已卸载*') { throw "Success must be reported: $reported" }
-  if ((Get-Content $env:FIXTURE_ARGS) -ne 'service uninstall --name runner-agent --user') { throw 'Wrong uninstall arguments' }
+  if ((Get-Content $env:FIXTURE_ARGS) -ne "service uninstall --name $serviceName --user") { throw 'Wrong uninstall arguments' }
   if (Test-Path -LiteralPath $root) { throw 'Installation directory must be removed' }
   # Not installed: succeeds without invoking anything.
   Remove-Item $env:FIXTURE_ARGS
@@ -188,11 +194,12 @@ try {
   if (Test-Path $env:FIXTURE_ARGS) { throw 'Nothing should run when not installed' }
   # A failed deregistration keeps the files, so it can be retried.
   $null = New-Item -ItemType Directory -Path $root
-  Copy-Item $fixture (Join-Path $root 'runner-service.exe')
+  Copy-Item $fixture (Join-Path $root $binaryName)
   $env:FIXTURE_FAIL = '1'
   $failed = $false
   try { & { ${user} } | Out-Null } catch { $failed = $true }
-  if (-not $failed -or -not (Test-Path (Join-Path $root 'runner-service.exe'))) { throw 'Failure must be reported and keep the installation' }
+  if (-not $failed -or -not (Test-Path (Join-Path $root $binaryName))) { throw 'Failure must be reported and keep the installation' }
+  }
 } finally {
   $env:LOCALAPPDATA = $savedLocal
   Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue

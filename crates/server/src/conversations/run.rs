@@ -441,7 +441,9 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
             return Err(error(StatusCode::CONFLICT, "conversations.bindingChanged"));
         }
         let channel = crate::hosts::remote::open(&s, &scope.workspace_id, &config.host_id).await?;
-        let probe = channel.agent_probe(config.runtime, &config.cwd).await?;
+        let probe = channel
+            .agent_probe(config.runtime, &config.cwd, Some(&binding))
+            .await?;
         if !probe.platform_tools {
             return Err(error(
                 StatusCode::CONFLICT,

@@ -3,7 +3,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { AutoField, FieldControl } from "../../shared/forms/auto-form";
 import { commonText } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
-import { Checkbox } from "../../shared/ui/checkbox";
+import { Switch } from "../../shared/ui/switch";
 import { Input } from "../../shared/ui/input";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import type { FormField } from "../../shared/resources/types";
@@ -86,13 +86,13 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-3">
-            <label className="flex items-center gap-2 text-sm"><Checkbox checked={row.default !== undefined} disabled={readOnly} onCheckedChange={checked => update(index, { default: checked ? row.type === "boolean" ? false : row.type === "integer" ? 0 : "" : undefined })} />{t("useDefault")}</label>
+            <label className="flex items-center gap-2 text-sm"><Switch checked={row.default !== undefined} disabled={readOnly} onCheckedChange={checked => update(index, { default: checked ? row.type === "boolean" ? false : row.type === "integer" ? 0 : "" : undefined })} />{t("useDefault")}</label>
             {row.default !== undefined && <AutoField label={t("defaultValue")} help={row.secret ? t("secretDefaultHelp") : undefined}>
               {row.type === "boolean" ? <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={String(row.default)} disabled={readOnly} onChange={event => update(index, { default: event.target.value === "true" })}><option value="true">{commonText("common.yes")}</option><option value="false">{commonText("common.no")}</option></select>
                 : <Input type={row.type === "integer" ? "number" : "text"} step={row.type === "integer" ? 1 : undefined} value={String(row.default)} disabled={readOnly} onChange={event => update(index, { default: row.type === "integer" ? event.target.value === "" ? "" : Number(event.target.value) : event.target.value })} />}
             </AutoField>}
           </div>
-          {row.type === "string" && <label className="flex items-start gap-2 pt-1 text-sm"><Checkbox checked={!!row.secret} disabled={readOnly} onCheckedChange={checked => update(index, { secret: !!checked })} /><span>{t("secretReference")}<span className="mt-1 block text-xs text-muted-foreground">{t("secretDefaultHelp")}</span></span></label>}
+          {row.type === "string" && <label className="flex items-start gap-2 pt-1 text-sm"><Switch checked={!!row.secret} disabled={readOnly} onCheckedChange={checked => update(index, { secret: !!checked })} /><span>{t("secretReference")}<span className="mt-1 block text-xs text-muted-foreground">{t("secretDefaultHelp")}</span></span></label>}
         </div>
         {row.type !== "boolean" && <details className="space-y-3">
           <summary className="cursor-pointer text-sm font-medium">{t("validationRules")}</summary>

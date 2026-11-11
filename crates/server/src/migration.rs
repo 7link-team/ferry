@@ -5,6 +5,7 @@
 use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 mod access_addresses;
+mod preview_ingress;
 mod account_otp;
 mod account_preferences;
 mod identity_avatars;
@@ -20,6 +21,7 @@ mod holes;
 mod holes_sources;
 mod login_guard;
 mod notification_center;
+mod monitoring;
 mod platform_monitor;
 mod platform_storage;
 mod workflow_node_logs;
@@ -170,6 +172,8 @@ impl MigratorTrait for Migrator {
             Box::new(notification_center::Migration),
             Box::new(account_otp::Migration),
             Box::new(identity_avatars::Migration),
+            Box::new(monitoring::Migration),
+            Box::new(preview_ingress::Migration),
             Box::new(marketplace_platform::Migration),
         ]
     }
