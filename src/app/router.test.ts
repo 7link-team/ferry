@@ -88,6 +88,11 @@ describe("platform route boundary", () => {
     expect(parse(`/workspaces/${workspace}/nodes`).workspace).toBe(workspace);
     expect(parse('/platform/users').workspace).toBe('_platform');
   });
+  it("routes platform template sources", () => {
+    expect(parse("/platform/marketplace-sources", "")).toMatchObject({ workspace: "_platform", item: "marketplace-sources", mode: "list" });
+    expect(parse("/platform/marketplace-sources/123/edit", "")).toMatchObject({ item: "marketplace-sources", id: "123", mode: "edit" });
+    expect(href(parse("/platform/marketplace-sources/new", ""), {})).toBe("/en-US/platform/marketplace-sources/new");
+  });
   it("round trips list, create, detail and edit pages", () => {
     for (const path of ["/platform/users", "/platform/workspaces/new", "/platform/users/123", "/platform/users/123/edit", "/platform/settings/1/edit"]) {
       expect(href(parse(path), {})).toBe(`/en-US${path}`);

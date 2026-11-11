@@ -63,7 +63,7 @@ function parseRoute(pathname: string, search: string): Route {
     .split("/");
   if (workspace === "_platform") {
     const mode = item === "new" ? "new" : item ? (third === "edit" ? "edit" : "view") : "list";
-    return { workspace, group: "platform", item: ["users", "workspaces", "settings", "server-nodes", "monitor"].includes(group) ? group : "workspaces",
+    return { workspace, group: "platform", item: ["users", "workspaces", "settings", "server-nodes", "monitor", "marketplace-sources"].includes(group) ? group : "workspaces",
       mode, ...(mode === "view" || mode === "edit" ? { id: item } : {}) };
   }
   if (group === "workflow" && item === "credentials") return {workspace,group:"ops",item:"ai-models",mode:third === "new" ? "new" : "list"};

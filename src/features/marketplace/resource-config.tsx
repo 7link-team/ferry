@@ -10,6 +10,7 @@ import {
 } from "../../shared/resources/config";
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import type { Navigation } from "../../shared/routing/types";
+import { marketProviders, trustLabel } from "./labels";
 
 export interface MarketSource {
   id: string;
@@ -30,20 +31,23 @@ export interface MarketSource {
 export interface MarketEntry {
   id: string;
   source_id: string;
+  source_name: string;
+  trust: string;
   entry_key: string;
   name: string;
   description: string;
   content: string;
   parameters: string;
   version: number;
+  package_version: string;
+  kind: string;
+  compatible: boolean;
+  incompatible_reason: string | null;
+  readme: string;
+  files: string[];
 }
 
-export const marketProviders = [
-  { value: "github", label: "GitHub" },
-  { value: "gitlab", label: "GitLab" },
-  { value: "gitee", label: "Gitee" },
-  { value: "codeup", label: "Codeup" },
-];
+export { marketProviders } from "./labels";
 
 export const marketInstall = (
   workspace: string,
@@ -52,6 +56,8 @@ export const marketInstall = (
   label: "导入应用模板",
   labelKey: "resource-domain:template.importApp",
   permission: "marketplace.install",
+  disabled: (r: MarketEntry) => !r.compatible,
+  disabledReason: (r: MarketEntry) => r.incompatible_reason ?? "",
   action: async (r: MarketEntry) => {
     const created = await runItemAction<{ id: string }>(
       workspace,
@@ -188,6 +194,17 @@ export function marketplaceLists({
               labelKey: "resource-domain:market.sourceId",
               type: "text",
             },
+        {
+          key: "trust",
+          label: "来源类型",
+          labelKey: "resource-domain:market.sourceKind",
+          type: "select",
+          options: [
+            { value: "official", label: "官方", labelKey: "resource-domain:market.official" },
+            { value: "community", label: "社区", labelKey: "resource-domain:market.community" },
+            { value: "workspace", label: "本空间", labelKey: "resource-domain:market.workspaceSource" },
+          ],
+        },
       ],
       columns: [
         {
@@ -200,6 +217,22 @@ export function marketplaceLists({
           key: "description",
           label: "说明",
           labelKey: "common-domain:common.description",
+        },
+        {
+          key: "source_name",
+          label: "来源",
+          labelKey: "resource-domain:market.source",
+          render: (r) => (
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+              <span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground">{trustLabel(r.trust)}</span>
+              <span className="min-w-0 break-words">{r.source_name}</span>
+            </span>
+          ),
+        },
+        {
+          key: "package_version",
+          label: "版本",
+          labelKey: "resource-domain:market.packageVersion",
         },
         {
           key: "entry_key",
@@ -334,6 +367,29 @@ export function marketplaceForms({
               labelKey: "common-domain:common.description",
               type: "textarea",
               span: 2,
+            },
+            {
+              key: "package_version",
+              label: "版本",
+              labelKey: "resource-domain:market.packageVersion",
+              type: "text",
+            },
+            {
+              key: "readme",
+              label: "说明文档",
+              labelKey: "resource-domain:market.readme",
+              type: "textarea",
+              span: 2,
+              when: (d) => !!d.readme,
+            },
+            {
+              key: "files",
+              label: "附带配置文件",
+              labelKey: "resource-domain:market.files",
+              type: "custom",
+              span: 2,
+              when: (d) => Array.isArray(d.files) && d.files.length > 0,
+              render: ({ draft }) => <ul className="list-disc space-y-1 pl-5 text-sm">{(draft.files as string[]).map((f) => <li key={f} className="break-all">{f}</li>)}</ul>,
             },
             {
               key: "content",

@@ -20,13 +20,14 @@ import {PlatformMailTest} from "./PlatformMailTest";
 import {PlatformMailTemplates} from "./PlatformMailTemplates";
 import {AutoField} from "../shared/forms/auto-form";
 import { href,navigate,useRoute } from "./router";
+import { platformMarketplaceForm, platformMarketplaceList } from "../features/marketplace/platform-sources";
 
 type Row = Record<string, unknown> & { id: string; name: string; email: string; slug: string; active: boolean; is_superadmin: boolean; relation?: string; my_role?: string; last_login_at?:number|null;last_login_ip?:string|null;created_at?:number };
 /** Whether the user created the workspace, joined it, or only reaches it as a platform administrator. */
 export const myRole = (relation: string | undefined, role: string | undefined) =>
   relation === "owner" ? commonText("resource-domain:platform.ownerSelf") : relation === "member" ? commonText("resource-domain:platform.joined", { role }) : commonText("resource-domain:platform.notMember");
-const labels: Record<string, string> = { workspaces: "resource-domain:platform.workspaces", users: "resource-domain:platform.users", monitor: "resource-domain:monitor.title", settings: "resource-domain:platform.settings" };
-const permissions = new Set(["users.update", "workspaces.create", "workspaces.update", "settings.update"]);
+const labels: Record<string, string> = { workspaces: "resource-domain:platform.workspaces", users: "resource-domain:platform.users", monitor: "resource-domain:monitor.title", "marketplace-sources": "resource-domain:platform.marketplaceSources", settings: "resource-domain:platform.settings" };
+const permissions = new Set(["users.update", "workspaces.create", "workspaces.update", "settings.update", "marketplace-sources.create", "marketplace-sources.update", "marketplace-sources.delete", "marketplace-sources.sync"]);
 const edit = { label: "编辑", labelKey: "common-domain:common.edit", to: (r: Row) => ({ id: r.id, mode: "edit" as const }) };
 const workspaceEntry = (id: string) => ({ workspace: id, group: nav[0]!.key, item: nav[0]!.items[0]!.key, mode: "list" as const });
 function WorkspaceOverview({draft}:{draft:Partial<Row>}) {
@@ -72,6 +73,7 @@ const lists: Record<string, ListConfig<Row>> = {
     actions: [{ label: "查看", labelKey: "common-domain:common.view", to: r => ({ id: r.id, mode: "view" as const }) }, edit, { label: "进入工作空间", labelKey: "resource-domain:platform.enter", icon: <LogIn className="size-4" />, to: r => workspaceEntry(r.id) }],
     toolbar: { create: { label: "创建工作空间", labelKey: "common-domain:auth.createWorkspace" }, import: false, export: false }, empty: "还没有工作空间，创建后即可配置主机和部署。", emptyKey: "resource-domain:platform.noWorkspaces",
   },
+  "marketplace-sources": platformMarketplaceList() as unknown as ListConfig<Row>,
 };
 const forms: Record<string, FormConfig<Row>> = {
   users: { resource: "users", endpoint: "/platform/users", heading: r => r.name, blank: {}, sections: [{ fields: [
@@ -163,6 +165,7 @@ const forms: Record<string, FormConfig<Row>> = {
     {key:"analytics_origins",label:"允许访问的域名",labelKey:"resource-domain:platform.scriptOrigins",type:"textarea",span:2,placeholder:"https://analytics.example.com",helpKey:"resource-domain:platform.originsHelp"},
   ]}
 ] },
+  "marketplace-sources": platformMarketplaceForm() as unknown as FormConfig<Row>,
 };
 
 export function Platform({ identity, reload, headerActions }: { identity: Identity; reload: () => void; onSignedOut: () => void; headerActions?: ReactNode }) {
