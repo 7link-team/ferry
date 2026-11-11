@@ -181,7 +181,8 @@ pub async fn update(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>,
         .await?
         .rows_affected;
     if n == 0 {
-        return Err(ApiError::localized(StatusCode::CONFLICT, crate::i18n::Message::new("marketplace.sourceChanged")));
+        let key = if scoped(&tx, id).await?.sync_lease_until > now { "marketplace.waitForSync" } else { "marketplace.sourceChanged" };
+        return Err(ApiError::localized(StatusCode::CONFLICT, crate::i18n::Message::new(key)));
     }
     crate::accounts::platform::audit(&s, &tx, &admin.0.user, "update", "marketplace-sources", id, json!({"name":b.name,"trust":b.trust,"enabled":b.enabled})).await?;
     tx.commit().await?;
@@ -191,8 +192,15 @@ pub async fn update(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>,
 pub async fn delete(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>) -> Result<StatusCode> {
     let tx = s.db.begin().await?;
     check_admin(&tx, &admin).await?;
-    let row = scoped(&tx, id).await?;
-    if row.sync_lease_until > db::now() {
+    scoped(&tx, id).await?;
+    let removed = sources::Entity::delete_many()
+        .filter(sources::Column::Id.eq(id))
+        .filter(sources::Column::WorkspaceId.eq(PLATFORM))
+        .filter(sources::Column::SyncLeaseUntil.lte(db::now()))
+        .exec(&tx)
+        .await?
+        .rows_affected;
+    if removed == 0 {
         return Err(ApiError::localized(StatusCode::CONFLICT, crate::i18n::Message::new("marketplace.waitForSync")));
     }
     entries::Entity::delete_many()
@@ -200,7 +208,6 @@ pub async fn delete(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>)
         .filter(entries::Column::SourceId.eq(id))
         .exec(&tx)
         .await?;
-    sources::Entity::delete_by_id(i64::from(id)).exec(&tx).await?;
     crate::accounts::platform::audit(&s, &tx, &admin.0.user, "delete", "marketplace-sources", id, json!({"imported_templates_preserved":true})).await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
@@ -225,6 +232,32 @@ pub(crate) async fn claim(s: &AppState, id: i64) -> Result<bool> {
 }
 
 /// Reads a public bundle without credentials and replaces this source's catalog; failure keeps it.
+/// Replaces the catalog and marks the source idle, but only while this instance still owns the lease.
+pub(crate) async fn commit_sync(s: &AppState, id: i64, actor: i64, packages: Vec<super::index::PackageVersion>, interval: i64, deadline: std::time::Instant) -> Result<usize> {
+    let tx = s.db.begin().await?;
+    let total = super::store::replace_entries(s, &tx, PLATFORM, id, actor, packages, deadline).await?;
+    let now = db::now();
+    let owned = sources::Entity::update_many()
+        .col_expr(sources::Column::State, Expr::value("idle"))
+        .col_expr(sources::Column::LastError, Expr::value(""))
+        .col_expr(sources::Column::SyncedAt, Expr::value(now))
+        .col_expr(sources::Column::SyncedBy, Expr::value(actor))
+        .col_expr(sources::Column::NextSyncAt, Expr::value(now + interval))
+        .col_expr(sources::Column::SyncOwner, Expr::value(""))
+        .col_expr(sources::Column::SyncLeaseUntil, Expr::value(0))
+        .filter(sources::Column::Id.eq(id))
+        .filter(sources::Column::SyncOwner.eq(s.instance_id.clone()))
+        .exec(&tx)
+        .await?
+        .rows_affected;
+    if owned == 0 {
+        // Lease expired and another instance took over: dropping `tx` rolls back the replaced entries.
+        return Err(ApiError::localized(StatusCode::CONFLICT, crate::i18n::Message::new("marketplace.syncing")));
+    }
+    tx.commit().await?;
+    Ok(total)
+}
+
 pub(crate) async fn synchronize_platform(s: &AppState, id: i64, actor: i64) -> Result<usize> {
     if !claim(s, id).await? {
         return Err(ApiError::localized(StatusCode::CONFLICT, crate::i18n::Message::new("marketplace.syncing")));
@@ -237,27 +270,11 @@ pub(crate) async fn synchronize_platform(s: &AppState, id: i64, actor: i64) -> R
         let config: Source = serde_json::from_str(&row.config).map_err(|_| bad("marketplace.configCorrupt"))?;
         let text = super::fetch(&config, None, false, timeout).await?;
         let packages = super::index::parse_bundle(&text, &super::ferry_version(), "en-US")?;
-        let tx = s.db.begin().await?;
-        let total = super::store::replace_entries(s, &tx, PLATFORM, id, actor, packages, deadline).await?;
-        let now = db::now();
-        sources::Entity::update_many()
-            .col_expr(sources::Column::State, Expr::value("idle"))
-            .col_expr(sources::Column::LastError, Expr::value(""))
-            .col_expr(sources::Column::SyncedAt, Expr::value(now))
-            .col_expr(sources::Column::SyncedBy, Expr::value(actor))
-            .col_expr(sources::Column::NextSyncAt, Expr::value(now + interval))
-            .col_expr(sources::Column::SyncOwner, Expr::value(""))
-            .col_expr(sources::Column::SyncLeaseUntil, Expr::value(0))
-            .filter(sources::Column::Id.eq(id))
-            .filter(sources::Column::SyncOwner.eq(s.instance_id.clone()))
-            .exec(&tx)
-            .await?;
-        tx.commit().await?;
-        Ok(total)
+        commit_sync(s, id, actor, packages, interval, deadline).await
     }
     .await;
     if let Err(error) = &result {
-        sources::Entity::update_many()
+        let recorded = sources::Entity::update_many()
             .col_expr(sources::Column::State, Expr::value("failed"))
             .col_expr(sources::Column::LastError, Expr::value(error.stored()))
             .col_expr(sources::Column::NextSyncAt, Expr::value(db::now() + interval))
@@ -266,7 +283,10 @@ pub(crate) async fn synchronize_platform(s: &AppState, id: i64, actor: i64) -> R
             .filter(sources::Column::Id.eq(id))
             .filter(sources::Column::SyncOwner.eq(s.instance_id.clone()))
             .exec(&s.db)
-            .await?;
+            .await;
+        if let Err(write) = recorded {
+            tracing::warn!(source = id, %write, sync_error = %error, "记录平台模板来源同步失败状态失败");
+        }
     }
     result
 }
@@ -429,6 +449,39 @@ mod sync_tests {
         assert!(claim(&s, id).await.unwrap());
         super::super::recover(&s).await.unwrap();
         assert_eq!(scoped(&s.db, id.into()).await.unwrap().state, "syncing");
+    }
+
+    #[tokio::test]
+    async fn commit_aborts_when_lease_was_taken_over() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let id = platform_source(&s, "http://127.0.0.1:9").await;
+        sources::Entity::update_many()
+            .col_expr(sources::Column::SyncOwner, Expr::value("other-instance"))
+            .col_expr(sources::Column::SyncLeaseUntil, Expr::value(db::now() + 60_000))
+            .filter(sources::Column::Id.eq(id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let packages = super::super::index::parse_bundle(&bundle().to_string(), &semver::Version::new(0, 3, 0), "en-US").unwrap();
+        let error = commit_sync(&s, id, 1, packages, 3_600_000, std::time::Instant::now() + std::time::Duration::from_secs(20)).await.err().expect("lease lost must abort");
+        assert_eq!(error.0, StatusCode::CONFLICT);
+        assert_eq!(entries::Entity::find().filter(entries::Column::SourceId.eq(id)).count(&s.db).await.unwrap(), 0, "no entries committed");
+    }
+
+    #[tokio::test]
+    async fn delete_and_edit_wait_for_running_sync() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let id = platform_source(&s, "http://127.0.0.1:9").await;
+        assert!(claim(&s, id).await.unwrap());
+        let deleted = delete(State(s.clone()), account(1, true), Path(id.into())).await.err().unwrap();
+        assert_eq!(deleted.2.as_ref().map(|m| m.key.as_str()), Some("marketplace.waitForSync"));
+        let version = scoped(&s.db, id.into()).await.unwrap().version;
+        let mut b = body("Renamed");
+        b.version = version;
+        let edited = update(State(s.clone()), account(1, true), Path(id.into()), Json(b)).await.err().unwrap();
+        assert_eq!(edited.0, StatusCode::CONFLICT);
+        assert_eq!(edited.2.as_ref().map(|m| m.key.as_str()), Some("marketplace.waitForSync"));
+        assert!(scoped(&s.db, id.into()).await.is_ok());
     }
 
     #[tokio::test]

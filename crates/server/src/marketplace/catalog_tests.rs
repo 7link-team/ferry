@@ -143,6 +143,36 @@ async fn install_requires_config_create_permission_when_files_present() {
 }
 
 #[tokio::test]
+async fn search_matches_localized_names() {
+    let (_dir, s) = crate::agents::tests::setup().await;
+    source(&s, 0, "official", true, &bundle("web", false, "app")).await;
+    let query = HashMap::from([("q".to_owned(), "网站".to_owned())]);
+    let Json(found) = with_locale(Locale::ZhCn, list(State(s.clone()), crate::agents::tests::admin(1), Query(query))).await.unwrap();
+    assert_eq!(found["total"], 1);
+}
+
+#[tokio::test]
+async fn list_rows_omit_heavy_fields_detail_keeps_them() {
+    let (_dir, s) = crate::agents::tests::setup().await;
+    let platform = source(&s, 0, "official", true, &bundle("redis", true, "app")).await;
+    let row = &items(&s, 1).await[0];
+    assert!(row.get("content").is_none() && row.get("readme").is_none() && row.get("parameters").is_none());
+    assert!(row["meta"].get("icon").is_none());
+    assert_eq!(row["files"], json!(["redis-start"]));
+    let Json(detail) = get(State(s.clone()), crate::agents::tests::admin(1), Path(("w".into(), entry_of(&s, platform).await))).await.unwrap();
+    assert!(detail["content"].is_string() && detail.get("readme").is_some() && detail["meta"].get("icon").is_some());
+}
+
+#[tokio::test]
+async fn other_workspace_cannot_read_or_install_own_entries_by_id() {
+    let (_dir, s) = crate::agents::tests::setup().await;
+    let own = source(&s, 1, "workspace", true, &bundle("own", false, "app")).await;
+    let entry = entry_of(&s, own).await;
+    assert_eq!(get(State(s.clone()), crate::agents::tests::admin(2), Path(("w".into(), entry))).await.err().unwrap().0, StatusCode::NOT_FOUND);
+    assert_eq!(install_entry(&s, crate::agents::tests::admin(2), entry).await.err().unwrap().0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn list_name_follows_request_locale() {
     let (_dir, s) = crate::agents::tests::setup().await;
     source(&s, 0, "official", true, &bundle("web", false, "app")).await;

@@ -13,6 +13,16 @@ fn timeout() -> ApiError {
     ApiError::localized(axum::http::StatusCode::BAD_REQUEST, crate::i18n::Message::new("marketplace.syncTimeout"))
 }
 
+/// All localized names and descriptions, so search works in the reader's language.
+fn search_text(meta: &serde_json::Value) -> String {
+    ["name", "description"]
+        .iter()
+        .filter_map(|k| meta.get(*k).and_then(serde_json::Value::as_object))
+        .flat_map(|m| m.values().filter_map(serde_json::Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub(crate) async fn replace_entries(
     s: &AppState,
     tx: &sea_orm::DatabaseTransaction,
@@ -55,6 +65,7 @@ pub(crate) async fn replace_entries(
             meta: Set(Some(meta.to_string())),
             files: Set(Some(serde_json::to_string(&files).unwrap())),
             readme: Set(Some(p.readme)),
+            search_text: Set(Some(search_text(&meta))),
             compatible: Set(i64::from(p.compatible)),
             digest: Set(p.digest),
             created_by: Set(actor),

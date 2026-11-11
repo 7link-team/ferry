@@ -47,6 +47,11 @@ describe("workspace market list", () => {
     expect(install.disabledReason!(row)).toBe("Needs a newer Ferry");
     expect(install.disabled!(entry())).toBe(false);
   });
+  it("shows a dash instead of the synthetic 0.0.0 for legacy index entries", () => {
+    const column = list().columns.find(c => c.key === "package_version")!;
+    expect(column.render!(entry({ package_version: "0.0.0" }))).toBe("—");
+    expect(column.render!(entry({ package_version: "1.2.0" }))).toBe("1.2.0");
+  });
   it("labels each source kind and shows the version", () => {
     const columns = list().columns;
     expect(columns.some(c => c.key === "package_version")).toBe(true);

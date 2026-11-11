@@ -1391,6 +1391,7 @@ pub mod marketplace_entries {
         pub meta: Option<String>,
         pub files: Option<String>,
         pub readme: Option<String>,
+        pub search_text: Option<String>,
         pub compatible: i64,
         pub digest: String,
         pub created_by: i64,

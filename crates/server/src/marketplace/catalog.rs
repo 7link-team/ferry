@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 
 const ENTRIES: Spec = Spec {
-    search: &["name", "description"],
+    search: &["name", "description", "search_text"],
     filters: &["source_id", "package_version"],
     sortable: &["name", "updated_at"],
     default_sort: "name",
@@ -58,20 +58,30 @@ fn localize(row: &entries::Model, meta: &Value) -> (String, String) {
     (name, description)
 }
 
-fn entry_json(row: entries::Model, sources: &HashMap<i64, (String, String)>) -> Value {
-    let meta: Value = row.meta.as_deref().and_then(|m| serde_json::from_str(m).ok()).unwrap_or_else(|| json!({}));
+fn entry_json(row: entries::Model, sources: &HashMap<i64, (String, String)>, detail: bool) -> Value {
+    let mut meta: Value = row.meta.as_deref().and_then(|m| serde_json::from_str(m).ok()).unwrap_or_else(|| json!({}));
     let files: Value = row.files.as_deref().and_then(|f| serde_json::from_str(f).ok()).unwrap_or_else(|| json!([]));
     let file_names: Vec<Value> = files.as_array().map(|a| a.iter().map(|f| f["name"].clone()).collect()).unwrap_or_default();
     let (name, description) = localize(&row, &meta);
     let (source_name, trust) = sources.get(&row.source_id).cloned().unwrap_or_default();
     let reason = meta["incompatible"].as_str().map(|key| crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new(key)));
-    json!({
+    if !detail {
+        if let Some(object) = meta.as_object_mut() {
+            object.remove("icon");
+        }
+    }
+    let mut value = json!({
         "id": Id::from(row.id), "source_id": Id::from(row.source_id), "source_name": source_name, "trust": trust,
-        "entry_key": row.entry_key, "name": name, "description": description, "content": row.content,
-        "parameters": row.parameters, "version": row.version, "updated_at": row.updated_at,
-        "package_version": row.package_version, "kind": row.kind, "compatible": row.compatible != 0,
-        "incompatible_reason": reason, "meta": meta, "readme": row.readme.unwrap_or_default(), "files": file_names,
-    })
+        "entry_key": row.entry_key, "name": name, "description": description, "version": row.version,
+        "updated_at": row.updated_at, "package_version": row.package_version, "kind": row.kind,
+        "compatible": row.compatible != 0, "incompatible_reason": reason, "meta": meta, "files": file_names,
+    });
+    if detail {
+        value["content"] = json!(row.content);
+        value["parameters"] = json!(row.parameters);
+        value["readme"] = json!(row.readme.unwrap_or_default());
+    }
+    value
 }
 
 pub async fn list(State(s): State<AppState>, scope: Scope, Query(mut raw): Query<HashMap<String, String>>) -> Result<Json<Value>> {
@@ -80,7 +90,7 @@ pub async fn list(State(s): State<AppState>, scope: Scope, Query(mut raw): Query
     let q = ListQuery::parse(&ENTRIES, &raw)?;
     let visible = visible(&s.db, &scope, trust.as_deref()).await?;
     let (rows, total) = resource::list_with::<entries::Entity, entries::Model>(&s.db, &ENTRIES, entries::Entity::find(), visible.condition.clone(), &q).await?;
-    let items: Vec<Value> = rows.into_iter().map(|r| entry_json(r, &visible.sources)).collect();
+    let items: Vec<Value> = rows.into_iter().map(|r| entry_json(r, &visible.sources, false)).collect();
     Ok(Json(json!({"items":items,"total":total,"page":q.page,"page_size":q.page_size})))
 }
 
@@ -93,7 +103,7 @@ async fn visible_entry(conn: &impl ConnectionTrait, scope: &Scope, id: Id) -> Re
 pub async fn get(State(s): State<AppState>, scope: Scope, Path((_, id)): Path<(String, Id)>) -> Result<Json<Value>> {
     scope.require("marketplace.read")?;
     let (row, visible) = visible_entry(&s.db, &scope, id).await?;
-    Ok(Json(entry_json(row, &visible.sources)))
+    Ok(Json(entry_json(row, &visible.sources, true)))
 }
 
 #[derive(Deserialize)]

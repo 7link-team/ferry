@@ -23,6 +23,7 @@ const COLUMNS: &[(&str, &str, Kind)] = &[
     ("marketplace_entries", "meta", Kind::LongText),
     ("marketplace_entries", "files", Kind::LongText),
     ("marketplace_entries", "readme", Kind::LongText),
+    ("marketplace_entries", "search_text", Kind::LongText),
     ("marketplace_entries", "compatible", Kind::Number(1)),
     ("marketplace_entries", "digest", Kind::Text(64, "")),
     ("marketplace_entries", "created_by", Kind::Number(0)),

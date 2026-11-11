@@ -233,6 +233,7 @@ export function marketplaceLists({
           key: "package_version",
           label: "版本",
           labelKey: "resource-domain:market.packageVersion",
+          render: (r) => (r.package_version === "0.0.0" ? "—" : r.package_version),
         },
         {
           key: "entry_key",
