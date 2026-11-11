@@ -170,6 +170,17 @@ pub async fn list<E: EntityTrait, M: FromQueryResult + Send + Sync>(
     page(conn, select, query).await
 }
 
+/// Like `list`, but the caller supplies the tenancy condition (e.g. own rows plus shared platform rows).
+pub async fn list_with<E: EntityTrait, M: FromQueryResult + Send + Sync>(
+    conn: &impl ConnectionTrait,
+    spec: &Spec,
+    select: Select<E>,
+    scope: Condition,
+    query: &ListQuery,
+) -> Result<(Vec<M>, u64)> {
+    page(conn, select.filter(Condition::all().add(scope).add(filters::<E>(spec, query)?)), query).await
+}
+
 /// Deliberately global: caller must have obtained a platform Admin extractor.
 pub async fn global_list<E: EntityTrait, M: FromQueryResult + Send + Sync>(
     conn: &impl ConnectionTrait,

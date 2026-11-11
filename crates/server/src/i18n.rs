@@ -1329,6 +1329,7 @@ mod tests {
             include_str!("marketplace/index.rs"),
             include_str!("marketplace/store.rs"),
             include_str!("marketplace/platform.rs"),
+            include_str!("marketplace/catalog.rs"),
             include_str!("templates.rs"),
             include_str!("pipelines/actions.rs"),
             include_str!("pipelines/actions_run.rs"),

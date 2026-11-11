@@ -2,6 +2,9 @@
 pub(crate) mod index;
 pub(crate) mod store;
 pub mod platform;
+pub mod catalog;
+#[cfg(test)]
+mod catalog_tests;
 use crate::error::{ApiError, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -472,12 +475,6 @@ const SOURCES: Spec = Spec {
     sortable: &["name", "updated_at"],
     default_sort: "name",
 };
-const ENTRIES: Spec = Spec {
-    search: &["name", "description"],
-    filters: &["source_id"],
-    sortable: &["name", "updated_at"],
-    default_sort: "name",
-};
 #[derive(Deserialize)]
 pub struct Body {
     name: String,
@@ -548,9 +545,6 @@ fn source_json(row: sources::Model) -> Result<Value> {
     })?;
     for(k,v) in json!({"id":Id::from(row.id),"name":row.name,"repository_id":Id::from(row.repository_id),"state":row.state,"last_error":crate::i18n::display_stored(&row.last_error),"synced_at":row.synced_at,"version":row.version,"updated_at":row.updated_at}).as_object().unwrap(){object.insert(k.clone(),v.clone());}
     Ok(value)
-}
-fn entry_json(row: entries::Model) -> Value {
-    json!({"id":Id::from(row.id),"source_id":Id::from(row.source_id),"entry_key":row.entry_key,"name":row.name,"description":row.description,"content":row.content,"parameters":row.parameters,"version":row.version,"updated_at":row.updated_at})
 }
 async fn scoped(conn: &impl ConnectionTrait, scope: &Scope, id: Id) -> Result<sources::Model> {
     sources::Entity::find_by_id(i64::from(id))
@@ -743,63 +737,7 @@ pub async fn delete_source(
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
-pub async fn list(
-    State(s): State<AppState>,
-    scope: Scope,
-    Query(raw): Query<HashMap<String, String>>,
-) -> Result<Json<Value>> {
-    scope.require("marketplace.read")?;
-    let q = ListQuery::parse(&ENTRIES, &raw)?;
-    let (rows, total) = resource::list::<entries::Entity, entries::Model>(
-        &s.db,
-        &ENTRIES,
-        entries::Entity::find(),
-        &scope.workspace_id,
-        &q,
-    )
-    .await?;
-    Ok(Json(
-        json!({"items":rows.into_iter().map(entry_json).collect::<Vec<_>>(),"total":total,"page":q.page,"page_size":q.page_size}),
-    ))
-}
-pub async fn get(
-    State(s): State<AppState>,
-    scope: Scope,
-    Path((_, id)): Path<(String, Id)>,
-) -> Result<Json<Value>> {
-    scope.require("marketplace.read")?;
-    let row = entries::Entity::find_by_id(i64::from(id))
-        .filter(entries::Column::WorkspaceId.eq(scope.workspace_id))
-        .one(&s.db)
-        .await?
-        .ok_or_else(ApiError::missing)?;
-    Ok(Json(entry_json(row)))
-}
-#[derive(Deserialize)]
-pub struct Install {
-    version: i64,
-}
-pub async fn install(
-    State(s): State<AppState>,
-    scope: Scope,
-    Path((_, id)): Path<(String, Id)>,
-    Json(b): Json<Install>,
-) -> Result<(StatusCode, Json<Value>)> {
-    scope.require("marketplace.install")?;
-    let row = entries::Entity::find_by_id(i64::from(id))
-        .filter(entries::Column::WorkspaceId.eq(scope.workspace_id))
-        .one(&s.db)
-        .await?
-        .ok_or_else(ApiError::missing)?;
-    if row.version != b.version {
-        return Err(ApiError::localized(
-            axum::http::StatusCode::CONFLICT,
-            crate::i18n::Message::new("marketplace.catalogChanged"),
-        ));
-    }
-    let body=serde_json::from_value(json!({"name":row.name,"description":row.description,"content":row.content,"parameters":row.parameters})).map_err(|_|ApiError::localized(axum::http::StatusCode::BAD_REQUEST, crate::i18n::Message::new("marketplace.templateCorrupt")))?;
-    crate::templates::apps::create(State(s), scope, Json(body)).await
-}
+pub use catalog::{get, install, list};
 pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) -> Result<usize> {
     let deadline = std::time::Instant::now() + timeout;
     scope.require("marketplace-sources.sync")?;

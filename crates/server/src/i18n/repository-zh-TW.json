@@ -669,6 +669,8 @@
   "marketplace.indexObjectRequired": "索引需為含 version 和 templates 的 JSON 物件。",
   "marketplace.indexVersionInvalid": "索引需為version 1（不超過500個範本）或schemaVersion 2（不超過500個套件）。",
   "marketplace.templateInvalid": "每個範本需有唯一有效的 key 及 1–60 字名稱。",
+  "marketplace.incompatible": "此範本版本與目前的 Ferry 不相容，無法匯入。",
+  "marketplace.configNameExhausted": "設定範本名稱衝突過多，請先重新命名既有的同名設定範本。",
   "marketplace.trustInvalid": "平台來源標識只能是官方或社群。",
   "marketplace.syncIntervalInvalid": "同步間隔需為1–168小時。",
   "marketplace.platformHttpsRequired": "平台來源只能使用 HTTPS 端點。",

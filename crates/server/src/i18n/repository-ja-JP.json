@@ -669,6 +669,8 @@
   "marketplace.indexObjectRequired": "インデックスには version と templates を含む JSON オブジェクトを指定してください。",
   "marketplace.indexVersionInvalid": "インデックスは version 1（テンプレート500件以内）または schemaVersion 2（パッケージ500件以内）である必要があります。",
   "marketplace.templateInvalid": "各テンプレートには一意で有効な key と1～60文字の名前が必要です。",
+  "marketplace.incompatible": "このテンプレートバージョンは現在の Ferry と互換性がないため、インポートできません。",
+  "marketplace.configNameExhausted": "設定テンプレート名の競合が多すぎます。先に同名の既存設定テンプレートの名前を変更してください。",
   "marketplace.trustInvalid": "プラットフォームソースは公式またはコミュニティのいずれかを指定してください。",
   "marketplace.syncIntervalInvalid": "同期間隔は1～168時間で指定してください。",
   "marketplace.platformHttpsRequired": "プラットフォームソースは HTTPS エンドポイントのみ使用できます。",
