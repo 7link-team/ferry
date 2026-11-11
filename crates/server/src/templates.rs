@@ -252,14 +252,10 @@ fn instance_action(token: &str) -> bool {
 }
 /// A substituted value contains, or joins its neighbours into, a template action.
 fn unresolved(action: &str) -> ApiError {
-    let mut chars = action.chars();
-    let mut excerpt: String = chars.by_ref().take(80).collect();
-    if chars.next().is_some() {
-        excerpt.push('\u{2026}');
-    }
     ApiError::localized(
         StatusCode::BAD_REQUEST,
-        crate::i18n::Message::new("blueprint.templateUnresolved").with("action", excerpt),
+        crate::i18n::Message::new("blueprint.templateUnresolved")
+            .with("action", crate::blueprint::template::excerpt(action)),
     )
 }
 #[derive(Clone, Deserialize, Serialize)]
@@ -707,8 +703,17 @@ fn expand(
                 {
                     output.push_str(&text[start..end + 2]);
                 } else if instance_aware && instance_action(token) {
-                    kept.push((output.len(), end + 2 - start));
-                    output.push_str(&text[start..end + 2]);
+                    // Rendered output is stored without the values, so `.Values`
+                    // references inside kept actions become literals now.
+                    let action = match values {
+                        Some(values) => crate::blueprint::template::inline_values(
+                            &text[start..end + 2],
+                            values,
+                        )?,
+                        None => text[start..end + 2].to_owned(),
+                    };
+                    kept.push((output.len(), action.len()));
+                    output.push_str(&action);
                 } else {
                     return Err(ApiError::localized(
                         axum::http::StatusCode::BAD_REQUEST,
@@ -721,7 +726,9 @@ fn expand(
             if !kept.is_empty() {
                 instance_references(text, definitions, kind, used)?;
             }
-            if instance_aware && values.is_some() {
+            // Blueprint strings always reach the instance phase; a config string only
+            // when it holds instance actions (plain configs render as before).
+            if values.is_some() && (kind == Kind::Blueprint || !kept.is_empty()) {
                 // Every `{{` left in the output must be exactly a kept action.
                 let mut kept = kept.into_iter();
                 let mut offset = 0;
@@ -738,6 +745,8 @@ fn expand(
                         }
                     }
                 }
+                // The stored text must parse for the instance phase as written.
+                crate::blueprint::template::check(&output)?;
             }
             Ok(json!(output))
         }
@@ -2087,6 +2096,33 @@ jobs:
     fn error_key(error: ApiError) -> String {
         error.2.as_ref().unwrap().key.to_string()
     }
+    /// Instance `nats-2` (index 2) with an EMPTY value map: stored output must not need values.
+    fn instance_context() -> crate::blueprint::template::Context {
+        use crate::blueprint::template::{Context, Instance, Member};
+        let ports = BTreeMap::from([("cluster".to_owned(), 6222)]);
+        Context {
+            values: BTreeMap::new(),
+            instance: Some(Instance {
+                role: "nats".into(),
+                index: 2,
+                name: "nats-2".into(),
+                host: "10.0.0.3".into(),
+                ports: ports.clone(),
+            }),
+            members: BTreeMap::from([(
+                "nats".to_owned(),
+                (0..2)
+                    .map(|i| Member {
+                        name: format!("nats-{i}"),
+                        index: i,
+                        host: format!("10.0.0.{}", i + 1),
+                        ports: ports.clone(),
+                    })
+                    .collect(),
+            )]),
+            driver: "stack".into(),
+        }
+    }
     fn blueprint_template() -> Value {
         json!({
           "apiVersion": "ferry/blueprint-v1",
@@ -2128,7 +2164,7 @@ jobs:
         assert_eq!(role["ports"][0]["published"], 4222);
         assert_eq!(
             role["ports"][1]["published"],
-            "{{ add .Values.cluster_base .Instance.Index }}"
+            "{{ add 6222 .Instance.Index }}"
         );
         let service = &role["service"];
         assert_eq!(service["image"], "nats:2.10");
@@ -2139,11 +2175,37 @@ jobs:
         );
         assert_eq!(
             service["command"][4],
-            "{{ if .Values.tls }}--tls{{ else }}--no-tls{{ end }}"
+            "{{ if 1 }}--tls{{ else }}--no-tls{{ end }}"
         );
         assert_eq!(service["env"][0]["value"], "{{ .Deployment.Driver }}");
         assert_eq!(service["env"][1]["value"], "4222");
         assert_eq!(service["env"][2]["valueFrom"], "variable/nats-token");
+        // The stored text renders per instance without any parameter values.
+        let instance = |field: &Value| {
+            crate::blueprint::template::render_text(
+                field.as_str().unwrap(),
+                &instance_context(),
+                crate::blueprint::template::Phase::Instance,
+            )
+            .unwrap()
+        };
+        assert_eq!(instance(&role["ports"][1]["published"]), "6224");
+        assert_eq!(instance(&service["command"][1]), "nats-2");
+        assert_eq!(
+            instance(&service["command"][3]),
+            "nats://10.0.0.1:6222,nats://10.0.0.2:6222,"
+        );
+        assert_eq!(instance(&service["command"][4]), "--tls");
+        let off = BTreeMap::from([
+            ("token".into(), json!("nats-token")),
+            ("tls".into(), json!(false)),
+        ]);
+        let rendered = render_content(&content, BLUEPRINT_PARAMETERS, &off, Kind::App).unwrap();
+        let out: Value = serde_json::from_str(&rendered).unwrap();
+        assert_eq!(
+            instance(&out["roles"][0]["service"]["command"][4]),
+            "--no-tls"
+        );
         // A parameter referenced only inside a kept action must still be declared.
         let undeclared = content.replace("if .Values.tls", "if .Values.missing");
         assert_eq!(
@@ -2174,7 +2236,8 @@ jobs:
             ),
             "blueprint.instancesOdd"
         );
-        // Values must not smuggle template actions into the instance phase.
+        // Values must not smuggle template actions into the instance phase, even in a
+        // blueprint string that holds no instance action of its own.
         let mut smuggled = token.clone();
         smuggled.insert("tag".into(), json!("{{ .Instance.Host }}"));
         assert_eq!(
@@ -2192,7 +2255,46 @@ jobs:
         let output = config_content(content, params, &BTreeMap::new()).unwrap();
         assert_eq!(
             output,
-            content.replace("port={{ .Values.port }}", "port=4222")
+            content
+                .replace("port={{ .Values.port }}", "port=4222")
+                .replace("{{ if .Values.tls }}", "{{ if 1 }}")
+                .replace("{{ add .Values.port 1 }}", "{{ add 4222 1 }}")
+        );
+        assert_eq!(
+            crate::blueprint::template::render_text(
+                &output,
+                &instance_context(),
+                crate::blueprint::template::Phase::Instance
+            )
+            .unwrap(),
+            "server_name=nats-2\nroutes=[nats://10.0.0.1:6222 nats://10.0.0.2:6222 ]\ntls {}\nport=4222\nnext=4223\n"
+        );
+        // Non-secret plain values inside block bodies are substituted at phase 1;
+        // the block tags stay verbatim.
+        assert_eq!(
+            config_content(
+                "{{ range .Role \"nats\" }}{{ .Values.port }},{{ end }}{{ if .Instance.Index }}{{ .Values.tls }}{{ end }}",
+                params,
+                &BTreeMap::new()
+            )
+            .unwrap(),
+            "{{ range .Role \"nats\" }}4222,{{ end }}{{ if .Instance.Index }}true{{ end }}"
+        );
+        // String values inline as quoted literals.
+        let mode = r#"[{"name":"mode","type":"string","default":"say \"hi\""}]"#;
+        let stored =
+            config_content("{{ if .Values.mode }}on{{ end }}", mode, &BTreeMap::new()).unwrap();
+        assert_eq!(stored, "{{ if \"say \\\"hi\\\"\" }}on{{ end }}");
+        let empty = BTreeMap::from([("mode".into(), json!(""))]);
+        let stored = config_content("{{ if .Values.mode }}on{{ end }}", mode, &empty).unwrap();
+        assert_eq!(
+            crate::blueprint::template::render_text(
+                &stored,
+                &instance_context(),
+                crate::blueprint::template::Phase::Instance
+            )
+            .unwrap(),
+            ""
         );
         assert_eq!(
             error_key(
@@ -2227,6 +2329,15 @@ jobs:
             config_content(template, params, &values).unwrap(),
             "a}}{ .Instance.Name }} {{ .Instance.Index }}"
         );
+        // Without instance actions a config renders exactly as before, braces included.
+        let plain = "a={{ .Values.name }}";
+        for value in ["{{ x }}", "{", "}}"] {
+            let values = BTreeMap::from([("name".into(), json!(value))]);
+            assert_eq!(
+                config_content(plain, params, &values).unwrap(),
+                format!("a={value}")
+            );
+        }
     }
     #[test]
     fn secret_inside_config_block_rejected() {

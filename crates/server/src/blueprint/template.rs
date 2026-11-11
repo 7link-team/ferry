@@ -155,12 +155,75 @@ fn fail<T>(message: Message) -> Result<T> {
 
 /// Fails with `message`, quoting the offending action (truncated) as `{action}`.
 fn at<T>(message: Message, action: &str) -> Result<T> {
+    fail(message.with("action", excerpt(action)))
+}
+
+/// An action as quoted in error messages, truncated to `MAX_ACTION_CHARS`.
+pub(crate) fn excerpt(action: &str) -> String {
     let mut chars = action.chars();
     let mut excerpt: String = chars.by_ref().take(MAX_ACTION_CHARS).collect();
     if chars.next().is_some() {
         excerpt.push('…');
     }
-    fail(message.with("action", excerpt))
+    excerpt
+}
+
+/// Rewrites one action so each `.Values` reference becomes a literal: integers stay
+/// integers, booleans become `1`/`0` (same truthiness), strings become quoted string
+/// literals. The result renders later without any values. Actions without `.Values`
+/// references are returned unchanged.
+pub(crate) fn inline_values(action: &str, values: &BTreeMap<String, Value>) -> Result<String> {
+    let Some(inner) = action
+        .strip_prefix("{{")
+        .and_then(|rest| rest.strip_suffix("}}"))
+    else {
+        return syntax(action);
+    };
+    let tokens = tokens(inner, action)?;
+    if !tokens
+        .iter()
+        .any(|t| matches!(t, Token::Field(f) if f.starts_with("Values.")))
+    {
+        return Ok(action.to_owned());
+    }
+    let quote = |s: &str, out: &mut String| {
+        out.push('"');
+        out.push_str(&s.replace('\\', "\\\\").replace('"', "\\\""));
+        out.push('"');
+    };
+    let mut out = String::from("{{");
+    for token in &tokens {
+        out.push(' ');
+        match token {
+            Token::Field(f) => match f.strip_prefix("Values.") {
+                Some(name) => match lookup(values, name) {
+                    Some(Value::Number(n)) if n.is_i64() => out.push_str(&n.to_string()),
+                    Some(Value::Bool(b)) => out.push(if *b { '1' } else { '0' }),
+                    // A literal holding braces could end the action early or start a new one.
+                    Some(Value::String(v)) if !v.contains("{{") && !v.contains("}}") => {
+                        quote(v, &mut out)
+                    }
+                    Some(_) => return at(Message::new("blueprint.templateUnresolved"), action),
+                    None => {
+                        return fail(
+                            Message::new("blueprint.templateValueMissing").with("name", name),
+                        );
+                    }
+                },
+                None => {
+                    out.push('.');
+                    out.push_str(f);
+                }
+            },
+            Token::Str(v) => quote(v, &mut out),
+            Token::Int(n) => out.push_str(&n.to_string()),
+            Token::Ident(word) => out.push_str(word),
+            Token::Open => out.push('('),
+            Token::Close => out.push(')'),
+        }
+    }
+    out.push_str(" }}");
+    Ok(out)
 }
 
 fn syntax<T>(action: &str) -> Result<T> {
@@ -301,6 +364,7 @@ enum Field {
 #[derive(Debug)]
 enum Expr {
     Int(i64),
+    Str(String),
     Values(String),
     Instance(Field),
     InstancePort(String),
@@ -489,6 +553,7 @@ fn expr(cur: &mut Cursor, depth: usize) -> Result<Expr> {
 fn argument(cur: &mut Cursor, depth: usize) -> Result<Expr> {
     match cur.next() {
         Some(Token::Int(n)) => Ok(Expr::Int(*n)),
+        Some(Token::Str(s)) => Ok(Expr::Str(s.clone())),
         Some(Token::Open) => {
             let inner = expr(cur, enter(depth, cur.raw)?)?;
             match cur.next() {
@@ -707,6 +772,7 @@ fn eval(expr: &Expr, ctx: &Context, member: Option<&Member>, raw: &str) -> Resul
     let current = || member.map_or_else(|| syntax(raw), Ok);
     Ok(match expr {
         Expr::Int(n) => json!(n),
+        Expr::Str(s) => json!(s),
         Expr::Values(path) => missing_value(ctx, path)?.clone(),
         Expr::Instance(f) => {
             let i = instance()?;
@@ -1033,7 +1099,6 @@ mod tests {
             "{{ range .Values.name }}{{ end }}",
             "{{ add 1 }}",
             "{{ .Instance.Port }}",
-            "{{ \"lit\" }}",
             "{{ add (1 2 }}",
         ] {
             assert_eq!(key(check(bad).unwrap_err()), syntax, "{bad}");
@@ -1249,6 +1314,58 @@ bad: {{ .Values.name 1 }} tail";
         // Known names inside kept actions pass and stay verbatim.
         let text = "{{ if .Values.name }}{{ add .Values.client_port .Instance.Index }}{{ end }}";
         assert_eq!(render_text(text, &ctx(), Phase::Values).unwrap(), text);
+    }
+
+    #[test]
+    fn string_literals_evaluate_and_values_inline_as_literals() {
+        assert_eq!(
+            render_text(
+                "{{ if \"\" }}a{{ else }}{{ \"b\" }}{{ end }}",
+                &ctx(),
+                Phase::Instance
+            )
+            .unwrap(),
+            "b"
+        );
+        let values = BTreeMap::from([
+            ("n".to_owned(), json!(-5)),
+            ("on".to_owned(), json!(true)),
+            ("off".to_owned(), json!(false)),
+            ("s".to_owned(), json!("say \"hi\" \\ {")),
+            ("bad".to_owned(), json!("x}}")),
+        ]);
+        assert_eq!(
+            inline_values("{{ add .Values.n (add .Instance.Index 1) }}", &values).unwrap(),
+            "{{ add -5 ( add .Instance.Index 1 ) }}"
+        );
+        assert_eq!(
+            inline_values("{{ if .Values.on }}", &values).unwrap(),
+            "{{ if 1 }}"
+        );
+        assert_eq!(
+            inline_values("{{ if .Values.off }}", &values).unwrap(),
+            "{{ if 0 }}"
+        );
+        let text = inline_values("{{ if .Values.s }}", &values).unwrap();
+        assert_eq!(text, "{{ if \"say \\\"hi\\\" \\\\ {\" }}");
+        assert_eq!(
+            render_text(
+                &format!("{text}{{{{ \"x\" }}}}{{{{ end }}}}"),
+                &ctx(),
+                Phase::Instance
+            )
+            .unwrap(),
+            "x"
+        );
+        assert_eq!(inline_values("{{ end }}", &values).unwrap(), "{{ end }}");
+        assert_eq!(
+            key(inline_values("{{ if .Values.bad }}", &values).unwrap_err()),
+            "blueprint.templateUnresolved"
+        );
+        assert_eq!(
+            key(inline_values("{{ if .Values.none }}", &values).unwrap_err()),
+            "blueprint.templateValueMissing"
+        );
     }
 
     #[test]
