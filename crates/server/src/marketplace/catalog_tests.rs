@@ -122,6 +122,27 @@ async fn install_renames_conflicting_config_templates() {
 }
 
 #[tokio::test]
+async fn install_rewrites_blueprint_role_file_references() {
+    let (_dir, s) = crate::agents::tests::setup().await;
+    let blueprint = json!({"apiVersion":"ferry/blueprint-v1","kind":"Blueprint","metadata":{"name":"mq"},
+        "roles":[{"name":"nats","instances":{"min":1,"max":3,"default":1},"identity":"stable",
+            "service":{"image":"nats:2","files":[{"path":"/etc/nats.conf","fromTemplate":"nats.conf"}]}}]});
+    let text = json!({"schemaVersion":2,"packages":[{"key":"mq","kind":"app",
+        "meta":{"name":{"en-US":"MQ"},"category":"messaging","topology":"cluster","drivers":["docker"]},
+        "versions":[{"version":"1.0.0","blueprint":blueprint,
+            "files":[{"name":"nats.conf","content":"server_name: {{ .Instance.Name }}"}]}]}]}).to_string();
+    let platform = source(&s, 0, "official", true, &text).await;
+    let existing = serde_json::from_value(json!({"name":"nats.conf","content":"mine","parameters":"[]"})).unwrap();
+    crate::templates::configs::create(State(s.clone()), crate::agents::tests::admin(1), Json(existing)).await.unwrap();
+    let created = install_entry(&s, crate::agents::tests::admin(1), entry_of(&s, platform).await).await.unwrap();
+    let config = config_templates::Entity::find().filter(config_templates::Column::WorkspaceId.eq(1)).filter(config_templates::Column::Name.eq("nats.conf-2")).one(&s.db).await.unwrap().unwrap();
+    let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let template = app_templates::Entity::find_by_id(i64::from(id)).one(&s.db).await.unwrap().unwrap();
+    let content: Value = serde_json::from_str(&template.content).unwrap();
+    assert_eq!(content["roles"][0]["service"]["files"][0]["fromTemplate"], Id::from(config.id).to_string());
+}
+
+#[tokio::test]
 async fn install_incompatible_entry_rejected() {
     let (_dir, s) = crate::agents::tests::setup().await;
     let platform = source(&s, 0, "community", true, &bundle("build", false, "pipeline")).await;

@@ -136,15 +136,18 @@ async fn free_config_name(conn: &impl ConnectionTrait, workspace: Id, name: &str
     candidates.into_iter().find(|c| !taken.contains(c)).ok_or_else(|| bad(StatusCode::CONFLICT, "marketplace.configNameExhausted"))
 }
 
-/// Points `fromTemplate` references that name a package file at the imported config template ID.
+/// Points `fromTemplate` references that name a package file at the imported config template ID,
+/// in application services and in blueprint role services alike.
 fn rewrite_references(content: &mut Value, imported: &HashMap<String, String>) {
-    if let Some(services) = content.get_mut("services").and_then(Value::as_array_mut) {
-        for service in services {
-            if let Some(files) = service.get_mut("files").and_then(Value::as_array_mut) {
-                for file in files {
-                    if let Some(id) = file.get("fromTemplate").and_then(Value::as_str).and_then(|n| imported.get(n)) {
-                        file["fromTemplate"] = json!(id);
-                    }
+    let services: Vec<&mut Value> = match content.get("kind").and_then(Value::as_str) {
+        Some("Blueprint") => content.get_mut("roles").and_then(Value::as_array_mut).into_iter().flatten().filter_map(|r| r.get_mut("service")).collect(),
+        _ => content.get_mut("services").and_then(Value::as_array_mut).into_iter().flatten().collect(),
+    };
+    for service in services {
+        if let Some(files) = service.get_mut("files").and_then(Value::as_array_mut) {
+            for file in files {
+                if let Some(id) = file.get("fromTemplate").and_then(Value::as_str).and_then(|n| imported.get(n)) {
+                    file["fromTemplate"] = json!(id);
                 }
             }
         }
