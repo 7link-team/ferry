@@ -237,13 +237,14 @@
   "blueprint.driverUnknown": "未知的驅動鍵；僅允許 native、docker、compose、stack、k8s。",
   "blueprint.updateInvalid": "update.maxParallel 和 update.healthTimeout 必須至少為 1。",
   "blueprint.stableMaxParallel": "包含有狀態（stable）角色的藍圖要求 update.maxParallel 為 1。",
-  "blueprint.templateSyntax": "範本語法錯誤：每個運算式都必須閉合，range 與 if 必須有對應的 end，不支援空白裁剪標記，且只能使用受支援的運算式。",
-  "blueprint.templateDepth": "範本的 range/if 區塊與括號最多巢狀 8 層。",
+  "blueprint.templateSyntax": "範本語法錯誤（{action}）：每個運算式都必須閉合，range 與 if 必須有對應的 end，不支援空白裁剪標記，且只能使用受支援的運算式。",
+  "blueprint.templateDepth": "範本巢狀過深（{action}）：range/if 區塊與括號最多巢狀 8 層。",
   "blueprint.templateFunctionUnknown": "不支援的範本函式 {name}；僅支援 add。",
   "blueprint.templateFieldUnknown": "不支援的範本欄位 {field}。",
   "blueprint.templateValueMissing": "範本參數 {name} 沒有值。",
   "blueprint.templateRoleUnknown": "範本參照了未知角色 {role}。",
   "blueprint.templatePortUnknown": "範本參照了未知連接埠 {port}。",
-  "blueprint.templateIntegerRequired": "add 的運算元必須是整數，且結果不能超出整數範圍。",
-  "blueprint.templateUnresolved": "轉譯後的範本仍包含未解析的運算式：缺少執行個體資料，或參數值中包含範本語法。"
+  "blueprint.templateIntegerRequired": "{action} 中 add 的運算元必須是整數，且結果不能超出整數範圍。",
+  "blueprint.templateUnresolved": "範本運算式 {action} 轉譯後仍殘留範本語法：參數值不能包含或拼接出範本運算式。",
+  "blueprint.templateInstanceMissing": "內部錯誤：轉譯執行個體階段範本時缺少執行個體資料。"
 }

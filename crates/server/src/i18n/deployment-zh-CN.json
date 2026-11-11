@@ -237,13 +237,14 @@
   "blueprint.driverUnknown": "未知的驱动键；仅允许 native、docker、compose、stack、k8s。",
   "blueprint.updateInvalid": "update.maxParallel 和 update.healthTimeout 必须至少为 1。",
   "blueprint.stableMaxParallel": "包含有状态（stable）角色的蓝图要求 update.maxParallel 为 1。",
-  "blueprint.templateSyntax": "模板语法错误：每个表达式都必须闭合，range 和 if 必须有对应的 end，不支持空白裁剪标记，且只能使用受支持的表达式。",
-  "blueprint.templateDepth": "模板的 range/if 块与括号最多嵌套 8 层。",
+  "blueprint.templateSyntax": "模板语法错误（{action}）：每个表达式都必须闭合，range 和 if 必须有对应的 end，不支持空白裁剪标记，且只能使用受支持的表达式。",
+  "blueprint.templateDepth": "模板嵌套过深（{action}）：range/if 块与括号最多嵌套 8 层。",
   "blueprint.templateFunctionUnknown": "不支持的模板函数 {name}；仅支持 add。",
   "blueprint.templateFieldUnknown": "不支持的模板字段 {field}。",
   "blueprint.templateValueMissing": "模板参数 {name} 没有值。",
   "blueprint.templateRoleUnknown": "模板引用了未知角色 {role}。",
   "blueprint.templatePortUnknown": "模板引用了未知端口 {port}。",
-  "blueprint.templateIntegerRequired": "add 的操作数必须是整数，且结果不能超出整数范围。",
-  "blueprint.templateUnresolved": "渲染后的模板仍包含未解析的表达式：缺少实例数据，或参数值中包含模板语法。"
+  "blueprint.templateIntegerRequired": "{action} 中 add 的操作数必须是整数，且结果不能超出整数范围。",
+  "blueprint.templateUnresolved": "模板表达式 {action} 渲染后仍残留模板语法：参数值不能包含或拼接出模板表达式。",
+  "blueprint.templateInstanceMissing": "内部错误：渲染实例阶段模板时缺少实例数据。"
 }

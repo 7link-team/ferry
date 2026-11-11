@@ -11,6 +11,8 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 const MAX_DEPTH: usize = 8;
+/// Longest action excerpt quoted in an error message.
+const MAX_ACTION_CHARS: usize = 80;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Phase {
@@ -52,12 +54,9 @@ pub fn check(text: &str) -> Result<()> {
 
 pub fn render_text(text: &str, ctx: &Context, phase: Phase) -> Result<String> {
     let nodes = parse(text)?;
-    let mut out = String::new();
+    let mut out = Rendered::default();
     render(&nodes, ctx, phase, None, &mut out)?;
-    if phase == Phase::Instance {
-        unresolved(&out)?;
-    }
-    Ok(out)
+    out.finish()
 }
 
 /// 整串是单个表达式时返回类型值（端口为整数），否则返回字符串。
@@ -66,12 +65,15 @@ pub fn render_value(text: &str, ctx: &Context, phase: Phase) -> Result<Value> {
     let mut significant = nodes
         .iter()
         .filter(|n| !matches!(n, Node::Text(t) if t.trim().is_empty()));
-    if let (Some(Node::Output { expr, .. }), None) = (significant.next(), significant.next()) {
+    if let (Some(Node::Output { raw, expr }), None) = (significant.next(), significant.next()) {
         if phase == Phase::Values && !matches!(expr, Expr::Values(_)) {
+            value_refs(expr, ctx)?;
             return Ok(Value::String(text.to_owned()));
         }
-        let value = eval(expr, ctx, None)?;
-        unresolved(&stringify(&value))?;
+        let value = eval(expr, ctx, None, raw)?;
+        if stringify(&value).contains("{{") {
+            return at(Message::new("blueprint.templateUnresolved"), raw);
+        }
         return Ok(value);
     }
     render_text(text, ctx, phase).map(Value::String)
@@ -94,15 +96,18 @@ fn fail<T>(message: Message) -> Result<T> {
     Err(ApiError::localized(StatusCode::BAD_REQUEST, message))
 }
 
-fn syntax<T>() -> Result<T> {
-    fail(Message::new("blueprint.templateSyntax"))
+/// Fails with `message`, quoting the offending action (truncated) as `{action}`.
+fn at<T>(message: Message, action: &str) -> Result<T> {
+    let mut chars = action.chars();
+    let mut excerpt: String = chars.by_ref().take(MAX_ACTION_CHARS).collect();
+    if chars.next().is_some() {
+        excerpt.push('…');
+    }
+    fail(message.with("action", excerpt))
 }
 
-fn unresolved(text: &str) -> Result<()> {
-    if text.contains("{{") {
-        return fail(Message::new("blueprint.templateUnresolved"));
-    }
-    Ok(())
+fn syntax<T>(action: &str) -> Result<T> {
+    at(Message::new("blueprint.templateSyntax"), action)
 }
 
 // ---------------------------------------------------------------- lexing
@@ -128,21 +133,19 @@ fn segments(text: &str) -> Result<Vec<Segment<'_>>> {
     while let Some(relative) = text[offset..].find("{{") {
         let start = offset + relative;
         let Some(len) = text[start + 2..].find("}}") else {
-            return syntax();
+            return syntax(&text[start..]);
         };
         let end = start + 2 + len;
+        let raw = &text[start..end + 2];
         let inner = &text[start + 2..end];
         // Whitespace trim markers `{{-` / `-}}` are not part of the subset.
         if inner.starts_with('-') || inner.ends_with('-') {
-            return syntax();
+            return syntax(raw);
         }
         if start > offset {
             out.push(Segment::Text(&text[offset..start]));
         }
-        out.push(Segment::Action {
-            raw: &text[start..end + 2],
-            inner,
-        });
+        out.push(Segment::Action { raw, inner });
         offset = end + 2;
     }
     if offset < text.len() {
@@ -155,7 +158,7 @@ fn word_byte(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
 }
 
-fn tokens(inner: &str) -> Result<Vec<Token>> {
+fn tokens(inner: &str, raw: &str) -> Result<Vec<Token>> {
     let bytes = inner.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
@@ -177,7 +180,7 @@ fn tokens(inner: &str) -> Result<Vec<Token>> {
                     i += 1;
                 }
                 if i == start + 1 {
-                    return syntax();
+                    return syntax(raw);
                 }
                 out.push(Token::Field(inner[start + 1..i].to_owned()));
             }
@@ -186,13 +189,13 @@ fn tokens(inner: &str) -> Result<Vec<Token>> {
                 i += 1;
                 loop {
                     match bytes.get(i) {
-                        None => return syntax(),
+                        None => return syntax(raw),
                         Some(b'"') => break,
                         Some(b'\\') => {
                             match bytes.get(i + 1) {
                                 Some(b'"') => s.push('"'),
                                 Some(b'\\') => s.push('\\'),
-                                _ => return syntax(),
+                                _ => return syntax(raw),
                             }
                             i += 2;
                         }
@@ -212,7 +215,7 @@ fn tokens(inner: &str) -> Result<Vec<Token>> {
                     i += 1;
                 }
                 let Ok(n) = inner[start..i].parse::<i64>() else {
-                    return syntax();
+                    return syntax(raw);
                 };
                 out.push(Token::Int(n));
             }
@@ -222,7 +225,7 @@ fn tokens(inner: &str) -> Result<Vec<Token>> {
                 }
                 out.push(Token::Ident(inner[start..i].to_owned()));
             }
-            _ => return syntax(),
+            _ => return syntax(raw),
         }
     }
     Ok(out)
@@ -290,13 +293,13 @@ fn parse(text: &str) -> Result<Vec<Node<'_>>> {
     let mut iter = segments(text)?.into_iter();
     match block(&mut iter, 0, false)? {
         (nodes, Stop::Eof) => Ok(nodes),
-        _ => syntax(),
+        (_, Stop::Else(raw) | Stop::End(raw)) => syntax(raw),
     }
 }
 
-fn enter(depth: usize) -> Result<usize> {
+fn enter(depth: usize, raw: &str) -> Result<usize> {
     if depth >= MAX_DEPTH {
-        return fail(Message::new("blueprint.templateDepth"));
+        return at(Message::new("blueprint.templateDepth"), raw);
     }
     Ok(depth + 1)
 }
@@ -315,14 +318,15 @@ fn block<'a>(
             }
             Segment::Action { raw, inner } => (raw, inner),
         };
-        match action(&tokens(inner)?, in_range)? {
+        match action(&tokens(inner, raw)?, in_range, raw)? {
             Action::Output(expr) => nodes.push(Node::Output { raw, expr }),
             Action::Else => return Ok((nodes, Stop::Else(raw))),
             Action::End => return Ok((nodes, Stop::End(raw))),
             Action::Range(role) => {
-                let (body, stop) = block(iter, enter(depth)?, true)?;
-                let Stop::End(end) = stop else {
-                    return syntax();
+                let (body, end) = match block(iter, enter(depth, raw)?, true)? {
+                    (body, Stop::End(end)) => (body, end),
+                    (_, Stop::Else(stray)) => return syntax(stray),
+                    (_, Stop::Eof) => return syntax(raw),
                 };
                 nodes.push(Node::Range {
                     open: raw,
@@ -332,15 +336,16 @@ fn block<'a>(
                 });
             }
             Action::If(cond) => {
-                let inner_depth = enter(depth)?;
+                let inner_depth = enter(depth, raw)?;
                 let (then, stop) = block(iter, inner_depth, in_range)?;
                 let (otherwise, end) = match stop {
                     Stop::End(end) => (None, end),
                     Stop::Else(else_raw) => match block(iter, inner_depth, in_range)? {
                         (other, Stop::End(end)) => (Some((else_raw, other)), end),
-                        _ => return syntax(),
+                        (_, Stop::Else(stray)) => return syntax(stray),
+                        (_, Stop::Eof) => return syntax(raw),
                     },
-                    Stop::Eof => return syntax(),
+                    Stop::Eof => return syntax(raw),
                 };
                 nodes.push(Node::If {
                     open: raw,
@@ -359,6 +364,7 @@ struct Cursor<'t> {
     tokens: &'t [Token],
     pos: usize,
     in_range: bool,
+    raw: &'t str,
 }
 
 impl Cursor<'_> {
@@ -371,16 +377,17 @@ impl Cursor<'_> {
     fn string(&mut self) -> Result<String> {
         match self.next() {
             Some(Token::Str(s)) => Ok(s.clone()),
-            _ => syntax(),
+            _ => syntax(self.raw),
         }
     }
 }
 
-fn action(tokens: &[Token], in_range: bool) -> Result<Action> {
+fn action(tokens: &[Token], in_range: bool, raw: &str) -> Result<Action> {
     let mut cur = Cursor {
         tokens,
         pos: 1,
         in_range,
+        raw,
     };
     let keyword = match tokens.first() {
         Some(Token::Ident(word)) => word.as_str(),
@@ -389,7 +396,7 @@ fn action(tokens: &[Token], in_range: bool) -> Result<Action> {
     let action = match keyword {
         "range" => {
             if cur.next() != Some(&Token::Field("Role".into())) {
-                return syntax();
+                return syntax(raw);
             }
             Action::Range(cur.string()?)
         }
@@ -402,7 +409,7 @@ fn action(tokens: &[Token], in_range: bool) -> Result<Action> {
         }
     };
     if cur.pos < tokens.len() {
-        return syntax();
+        return syntax(raw);
     }
     Ok(action)
 }
@@ -426,10 +433,10 @@ fn argument(cur: &mut Cursor, depth: usize) -> Result<Expr> {
     match cur.next() {
         Some(Token::Int(n)) => Ok(Expr::Int(*n)),
         Some(Token::Open) => {
-            let inner = expr(cur, enter(depth)?)?;
+            let inner = expr(cur, enter(depth, cur.raw)?)?;
             match cur.next() {
                 Some(Token::Close) => Ok(inner),
-                _ => syntax(),
+                _ => syntax(cur.raw),
             }
         }
         Some(Token::Field(path)) => {
@@ -439,7 +446,7 @@ fn argument(cur: &mut Cursor, depth: usize) -> Result<Expr> {
         Some(Token::Ident(name)) if name != "add" => {
             fail(Message::new("blueprint.templateFunctionUnknown").with("name", name.as_str()))
         }
-        _ => syntax(),
+        _ => syntax(cur.raw),
     }
 }
 
@@ -471,31 +478,75 @@ fn field(cur: &mut Cursor, path: &str) -> Result<Expr> {
 
 // ---------------------------------------------------------------- rendering
 
-fn render(
-    nodes: &[Node],
+/// Render output plus the bookkeeping `finish` needs to prove the result re-parses.
+#[derive(Default)]
+struct Rendered<'a> {
+    text: String,
+    /// Output offset of every action copied verbatim (`Phase::Values` only).
+    kept: Vec<(usize, &'a str)>,
+    /// Output span of every evaluated action, for blaming a stray `{{`.
+    evaluated: Vec<(usize, usize, &'a str)>,
+}
+
+impl<'a> Rendered<'a> {
+    fn keep(&mut self, raw: &'a str) {
+        self.kept.push((self.text.len(), raw));
+        self.text.push_str(raw);
+    }
+
+    fn substitute(&mut self, raw: &'a str, value: &Value) {
+        let start = self.text.len();
+        self.text.push_str(&stringify(value));
+        self.evaluated.push((start, self.text.len(), raw));
+    }
+
+    /// Every `{{` in the output must be exactly a kept action. A value that contains
+    /// `{{`, or whose braces join a neighbour into one, would change how the output
+    /// re-parses, so it is rejected as unresolved and blamed on that value's action.
+    fn finish(self) -> Result<String> {
+        let mut kept = self.kept.iter();
+        let mut offset = 0;
+        while let Some(relative) = self.text[offset..].find("{{") {
+            let start = offset + relative;
+            match kept.next() {
+                Some(&(pos, raw)) if pos == start => offset = start + raw.len(),
+                _ => {
+                    let blame = self
+                        .evaluated
+                        .iter()
+                        .find(|(from, to, _)| *from <= start + 1 && start < *to)
+                        .map_or(&self.text[start..], |(_, _, raw)| raw);
+                    return at(Message::new("blueprint.templateUnresolved"), blame);
+                }
+            }
+        }
+        Ok(self.text)
+    }
+}
+
+fn render<'a>(
+    nodes: &[Node<'a>],
     ctx: &Context,
     phase: Phase,
     member: Option<&Member>,
-    out: &mut String,
+    out: &mut Rendered<'a>,
 ) -> Result<()> {
     for node in nodes {
         match (node, phase) {
-            (Node::Text(t), _) => out.push_str(t),
+            (Node::Text(t), _) => out.text.push_str(t),
             (
                 Node::Output {
+                    raw,
                     expr: e @ Expr::Values(_),
-                    ..
                 },
                 Phase::Values,
-            ) => {
-                let text = stringify(&eval(e, ctx, member)?);
-                // Phase-1 output is re-parsed later; a value must not inject actions.
-                unresolved(&text)?;
-                out.push_str(&text);
+            ) => out.substitute(raw, &eval(e, ctx, member, raw)?),
+            (Node::Output { raw, expr }, Phase::Values) => {
+                value_refs(expr, ctx)?;
+                out.keep(raw);
             }
-            (Node::Output { raw, .. }, Phase::Values) => out.push_str(raw),
-            (Node::Output { expr, .. }, Phase::Instance) => {
-                out.push_str(&stringify(&eval(expr, ctx, member)?))
+            (Node::Output { raw, expr }, Phase::Instance) => {
+                out.substitute(raw, &eval(expr, ctx, member, raw)?)
             }
             (
                 Node::Range {
@@ -503,9 +554,9 @@ fn render(
                 },
                 Phase::Values,
             ) => {
-                out.push_str(open);
+                out.keep(open);
                 render(body, ctx, phase, member, out)?;
-                out.push_str(end);
+                out.keep(end);
             }
             (Node::Range { role, body, .. }, Phase::Instance) => {
                 let Some(members) = ctx.members.get(role) else {
@@ -520,23 +571,25 @@ fn render(
             (
                 Node::If {
                     open,
+                    cond,
                     then,
                     otherwise,
                     end,
-                    ..
                 },
                 Phase::Values,
             ) => {
-                out.push_str(open);
+                value_refs(cond, ctx)?;
+                out.keep(open);
                 render(then, ctx, phase, member, out)?;
                 if let Some((else_raw, other)) = otherwise {
-                    out.push_str(else_raw);
+                    out.keep(else_raw);
                     render(other, ctx, phase, member, out)?;
                 }
-                out.push_str(end);
+                out.keep(end);
             }
             (
                 Node::If {
+                    open,
                     cond,
                     then,
                     otherwise,
@@ -544,7 +597,7 @@ fn render(
                 },
                 Phase::Instance,
             ) => {
-                if truthy(&eval(cond, ctx, member)?) {
+                if truthy(&eval(cond, ctx, member, open)?) {
                     render(then, ctx, phase, member, out)?;
                 } else if let Some((_, other)) = otherwise {
                     render(other, ctx, phase, member, out)?;
@@ -555,6 +608,23 @@ fn render(
     Ok(())
 }
 
+/// `Phase::Values` keeps non-`.Values` actions verbatim but still requires every
+/// `.Values` name they reference to exist, so a typo fails at phase 1.
+fn value_refs(expr: &Expr, ctx: &Context) -> Result<()> {
+    match expr {
+        Expr::Values(path) => missing_value(ctx, path).map(|_| ()),
+        Expr::Add(a, b) => value_refs(a, ctx).and_then(|()| value_refs(b, ctx)),
+        _ => Ok(()),
+    }
+}
+
+fn missing_value<'c>(ctx: &'c Context, path: &str) -> Result<&'c Value> {
+    lookup(&ctx.values, path).map_or_else(
+        || fail(Message::new("blueprint.templateValueMissing").with("name", path)),
+        Ok,
+    )
+}
+
 fn port(ports: &BTreeMap<String, u16>, name: &str) -> Result<Value> {
     match ports.get(name) {
         Some(p) => Ok(json!(p)),
@@ -562,24 +632,25 @@ fn port(ports: &BTreeMap<String, u16>, name: &str) -> Result<Value> {
     }
 }
 
-fn eval(expr: &Expr, ctx: &Context, member: Option<&Member>) -> Result<Value> {
+/// Evaluates `expr`; `raw` is the enclosing action, quoted in errors.
+fn eval(expr: &Expr, ctx: &Context, member: Option<&Member>, raw: &str) -> Result<Value> {
+    // A missing instance is a caller bug (phase 2 always supplies one), not a template error.
     let instance = || {
-        ctx.instance
-            .as_ref()
-            .map_or_else(|| fail(Message::new("blueprint.templateUnresolved")), Ok)
+        ctx.instance.as_ref().map_or_else(
+            || {
+                Err(ApiError::localized(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Message::new("blueprint.templateInstanceMissing"),
+                ))
+            },
+            Ok,
+        )
     };
     // The parser admits member fields only inside `range`, where a member is always set.
-    let current = || member.map_or_else(syntax, Ok);
+    let current = || member.map_or_else(|| syntax(raw), Ok);
     Ok(match expr {
         Expr::Int(n) => json!(n),
-        Expr::Values(path) => match lookup(&ctx.values, path) {
-            Some(v) => v.clone(),
-            None => {
-                return fail(
-                    Message::new("blueprint.templateValueMissing").with("name", path.as_str()),
-                );
-            }
-        },
+        Expr::Values(path) => missing_value(ctx, path)?.clone(),
         Expr::Instance(f) => {
             let i = instance()?;
             match f {
@@ -596,20 +667,17 @@ fn eval(expr: &Expr, ctx: &Context, member: Option<&Member>) -> Result<Value> {
                 Field::Name => json!(m.name),
                 Field::Index => json!(m.index),
                 Field::Host => json!(m.host),
-                Field::Role => return syntax(),
+                Field::Role => return syntax(raw),
             }
         }
         Expr::MemberPort(name) => port(&current()?.ports, name)?,
         Expr::Driver => json!(ctx.driver),
         Expr::Add(a, b) => {
-            let a = eval(a, ctx, member)?.as_i64();
-            let b = eval(b, ctx, member)?.as_i64();
-            match (a, b) {
-                (Some(a), Some(b)) => match a.checked_add(b) {
-                    Some(sum) => json!(sum),
-                    None => return fail(Message::new("blueprint.templateIntegerRequired")),
-                },
-                _ => return fail(Message::new("blueprint.templateIntegerRequired")),
+            let a = eval(a, ctx, member, raw)?.as_i64();
+            let b = eval(b, ctx, member, raw)?.as_i64();
+            match a.zip(b).and_then(|(a, b)| a.checked_add(b)) {
+                Some(sum) => json!(sum),
+                None => return at(Message::new("blueprint.templateIntegerRequired"), raw),
             }
         }
     })
@@ -964,8 +1032,10 @@ mod tests {
         );
         let mut c = ctx();
         c.instance = None;
+        // A missing instance is a caller bug with its own key, not an unresolved template.
         let e = render_text("{{ .Instance.Name }}", &c, Phase::Instance).unwrap_err();
-        assert_eq!(key(e), "blueprint.templateUnresolved");
+        assert_eq!(e.0, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(key(e), "blueprint.templateInstanceMissing");
         let e = render_value("{{ .Values.injected }}", &ctx(), Phase::Instance).unwrap_err();
         assert_eq!(key(e), "blueprint.templateUnresolved");
     }
@@ -996,5 +1066,131 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    fn action_param(e: crate::error::ApiError) -> (String, String) {
+        let m = e.2.expect("localized error");
+        (m.key, m.params.get("action").cloned().unwrap_or_default())
+    }
+
+    #[test]
+    fn errors_quote_the_failing_action() {
+        let text = "image: {{ .Values.name }}
+routes: {{ range .Role \"nats\" }}{{ .Host }}{{ end }}
+bad: {{ .Values.name 1 }} tail";
+        assert_eq!(
+            action_param(check(text).unwrap_err()),
+            (
+                "blueprint.templateSyntax".into(),
+                "{{ .Values.name 1 }}".into()
+            )
+        );
+        // Unclosed blocks blame the opening tag; stray tags blame themselves.
+        assert_eq!(
+            action_param(check("a {{ if .Instance.Index }} b").unwrap_err()).1,
+            "{{ if .Instance.Index }}"
+        );
+        assert_eq!(action_param(check("a {{end}} b").unwrap_err()).1, "{{end}}");
+        assert_eq!(
+            action_param(check("x {{ .Values.name").unwrap_err()).1,
+            "{{ .Values.name"
+        );
+        let deep = "{{ if .Instance.Index }}".repeat(8)
+            + "{{ if .Deployment.Driver }}"
+            + &"{{ end }}".repeat(9);
+        assert_eq!(
+            action_param(check(&deep).unwrap_err()),
+            (
+                "blueprint.templateDepth".into(),
+                "{{ if .Deployment.Driver }}".into()
+            )
+        );
+        let e = render_text("n={{ add .Values.name 1 }}", &ctx(), Phase::Instance).unwrap_err();
+        assert_eq!(
+            action_param(e),
+            (
+                "blueprint.templateIntegerRequired".into(),
+                "{{ add .Values.name 1 }}".into()
+            )
+        );
+        let e = render_text("x {{ .Values.injected }} y", &ctx(), Phase::Instance).unwrap_err();
+        assert_eq!(
+            action_param(e),
+            (
+                "blueprint.templateUnresolved".into(),
+                "{{ .Values.injected }}".into()
+            )
+        );
+        // Long actions are truncated to 80 characters plus an ellipsis.
+        let long = format!("{{{{ .Values.{} 1 }}}}", "a".repeat(100));
+        let (_, quoted) = action_param(check(&long).unwrap_err());
+        assert_eq!(quoted.chars().count(), 81);
+        assert!(quoted.starts_with("{{ .Values.aaa") && quoted.ends_with('…'));
+    }
+
+    #[test]
+    fn values_phase_output_reparses_at_brace_boundary() {
+        let mut c = ctx();
+        c.values.insert("x".into(), json!("a{"));
+        c.values.insert("y".into(), json!("{b"));
+        c.values.insert("z".into(), json!("}"));
+        for (text, blamed) in [
+            ("{{ .Values.x }}{{ .Instance.Name }}", "{{ .Values.x }}"),
+            ("{{ .Values.x }}{{ .Values.y }}", "{{ .Values.x }}"),
+            ("{{ .Values.x }}{b", "{{ .Values.x }}"),
+            (
+                "{{ if .Instance.Index }}{{ .Values.x }}{{ end }}",
+                "{{ .Values.x }}",
+            ),
+        ] {
+            let e = render_text(text, &c, Phase::Values).expect_err(text);
+            assert_eq!(
+                action_param(e),
+                ("blueprint.templateUnresolved".into(), blamed.into()),
+                "{text}"
+            );
+        }
+        // A lone brace that does not touch another brace is fine and round-trips.
+        for text in [
+            "{{ .Values.x }} {{ .Instance.Name }}",
+            "{{ .Values.z }}{{ .Instance.Name }}",
+            "{{ .Instance.Name }}{{ .Values.y }}",
+        ] {
+            let phase1 = render_text(text, &c, Phase::Values).unwrap();
+            assert_eq!(
+                render_text(&phase1, &c, Phase::Instance).unwrap(),
+                render_text(text, &c, Phase::Instance).unwrap(),
+                "{text}"
+            );
+        }
+        // The instance phase rejects the same joins.
+        let e = render_text("{{ .Values.x }}{{ .Values.y }}", &c, Phase::Instance).unwrap_err();
+        assert_eq!(key(e), "blueprint.templateUnresolved");
+    }
+
+    #[test]
+    fn values_phase_checks_names_inside_blocks() {
+        for text in [
+            "{{ if .Values.nope }}a{{ end }}",
+            "{{ add .Values.nope 1 }}",
+            "{{ add 1 (add .Instance.Index .Values.nope) }}",
+            "{{ range .Role \"nats\" }}{{ .Values.nope }}{{ end }}",
+            "{{ range .Role \"nats\" }}{{ if .Index }}{{ add .Port \"cluster\" .Values.nope }}{{ end }}{{ end }}",
+            "{{ if .Instance.Index }}a{{ else }}{{ .Values.nope }}{{ end }}",
+        ] {
+            let e = render_text(text, &ctx(), Phase::Values).expect_err(text);
+            let m = e.2.expect("localized error");
+            assert_eq!(m.key, "blueprint.templateValueMissing", "{text}");
+            assert_eq!(
+                m.params.get("name").map(String::as_str),
+                Some("nope"),
+                "{text}"
+            );
+        }
+        let e = render_value("{{ add .Values.nope 1 }}", &ctx(), Phase::Values).unwrap_err();
+        assert_eq!(key(e), "blueprint.templateValueMissing");
+        // Known names inside kept actions pass and stay verbatim.
+        let text = "{{ if .Values.name }}{{ add .Values.client_port .Instance.Index }}{{ end }}";
+        assert_eq!(render_text(text, &ctx(), Phase::Values).unwrap(), text);
     }
 }

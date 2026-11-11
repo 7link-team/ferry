@@ -237,13 +237,14 @@
   "blueprint.driverUnknown": "不明なドライバーキーです。使用できるのは native、docker、compose、stack、k8s です。",
   "blueprint.updateInvalid": "update.maxParallel と update.healthTimeout は 1 以上にしてください。",
   "blueprint.stableMaxParallel": "stable ロールを含むブループリントでは update.maxParallel を 1 にする必要があります。",
-  "blueprint.templateSyntax": "テンプレートの構文エラー：各アクションは閉じられている必要があり、range と if には対応する end が必要です。空白トリムマーカーは使用できず、サポートされている式のみ使用できます。",
-  "blueprint.templateDepth": "テンプレートの range/if ブロックと括弧のネストは最大 8 階層までです。",
+  "blueprint.templateSyntax": "テンプレートの構文エラー（{action}）：各アクションは閉じられている必要があり、range と if には対応する end が必要です。空白トリムマーカーは使用できず、サポートされている式のみ使用できます。",
+  "blueprint.templateDepth": "テンプレートのネストが深すぎます（{action}）：range/if ブロックと括弧のネストは最大 8 階層までです。",
   "blueprint.templateFunctionUnknown": "サポートされていないテンプレート関数 {name} です。使用できるのは add のみです。",
   "blueprint.templateFieldUnknown": "サポートされていないテンプレートフィールド {field} です。",
   "blueprint.templateValueMissing": "テンプレートパラメーター {name} に値がありません。",
   "blueprint.templateRoleUnknown": "テンプレートが不明なロール {role} を参照しています。",
   "blueprint.templatePortUnknown": "テンプレートが不明なポート {port} を参照しています。",
-  "blueprint.templateIntegerRequired": "add のオペランドは整数で、結果も整数の範囲内である必要があります。",
-  "blueprint.templateUnresolved": "レンダリング後のテンプレートに未解決の式が残っています。インスタンス情報が不足しているか、値にテンプレート構文が含まれています。"
+  "blueprint.templateIntegerRequired": "{action} の add のオペランドは整数で、結果も整数の範囲内である必要があります。",
+  "blueprint.templateUnresolved": "テンプレート式 {action} の結果に未解決のテンプレート構文が残っています。値にテンプレートアクションを含めたり、組み合わせて作ったりすることはできません。",
+  "blueprint.templateInstanceMissing": "内部エラー：インスタンス情報なしでインスタンスフェーズのテンプレートがレンダリングされました。"
 }
