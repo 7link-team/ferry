@@ -13,5 +13,12 @@
   "holes.tooLarge": "요청 본문이 미리보기 한도인 64MiB를 초과합니다.",
   "holes.automatic": "이 미리보기는 파이프라인 또는 워크플로가 관리하므로 취소만 할 수 있습니다.",
   "holes.reviewClosed": "이 미리보기는 검토 대기 중이 아닙니다.",
-  "holes.notReady": "로컬 서비스가 제한 시간 내에 준비되지 않았습니다: {detail}"
+  "holes.notReady": "로컬 서비스가 제한 시간 내에 준비되지 않았습니다: {detail}",
+  "holes.entryInvalid": "진입점 설정이 잘못되었습니다. 방식, IP 및 포트 범위를 확인하세요.",
+  "holes.entryRisk": "공개 접근 위험을 명시적으로 확인하세요. 자동 공개는 관리자의 별도 승인이 필요합니다.",
+  "holes.entryBind": "미리보기 수신 바인딩에 실패했습니다. 로컬 IP와 권한을 확인하세요.",
+  "holes.entryPorts": "설정된 범위에 사용 가능한 포트가 없습니다.",
+  "holes.entryBinary": "cloudflared를 시작할 수 없습니다. 이 노드의 실행 파일 경로와 권한을 확인하세요.",
+  "holes.entryUnavailable": "진입점을 사용할 수 없습니다. 연결기와 네트워크를 확인한 후 수동으로 다시 시도하세요.",
+  "holes.entryTimeout": "임시 터널이 45초 안에 준비되지 않았습니다. 기존 진입점은 유지됩니다."
 }

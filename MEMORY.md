@@ -1,3 +1,15 @@
+# 当前事项清单
+- PREVIEW-INGRESS-01｜ACCEPTANCE｜三入口源码本地交付完成，提交以本分支HEAD为准；用户确认IP/Quick显式公开并确认风险，保留隔离。设计docs/preview-holes-design.md第20节。Direct，无子代理。
+- 验证｜cargo test --workspace PASS（Temp/preview-ingress-workspace-tests-delivery.log）：sandbox16/3ignored、protocol7、Runner54/7ignored及integration3+12、server668/9ignored、doc0。前端全量82文件630PASS/1skip（preview-ingress-all-ui-tests-direct.log）；workspace check PASS（preview-ingress-check-verified.log）。最终tsc/Vite生产构建PASS（preview-ingress-ui-build-accepted.log），主题生成校验PASS；最终server/Runner嵌入dist构建PASS（preview-ingress-build-accepted.log）。
+- 真实验收｜最终26项PASS，data/maintenance/preview-holes-20261111-082533/result.json（Temp/preview-ingress-live-accepted.log）。真实Runner/Vite/Chrome/已安装cloudflared：三入口、公开确认阻止未确认提交、Cookie剥离、API/资源/WS/HMR/沙箱、默认不搬迁、显式切换与旧入口回收、根域名修改/清空兼容、撤销断连接、Runner下线、Windows强杀服务回收其cloudflared。1440/900/390/320布局无整页横向溢出；英文/马来文390截图及中文320公开确认已视觉复核，说明可见且内部滚动/操作栏可达。
+- 两轮评审｜Self-review PASS（范围/复用/架构/回归/复杂度/持久状态）；Final acceptance review PASS（已授权三入口及风险确认/默认/切换/256位token/隔离/生命周期/六语/响应式，限上述实际环境）。不冒称生产或用户验收。
+- 过程记录｜新旧测试主机ID冲突改独立ID710001；Bash缺失以测试PATH补Git解决；串行测试占用exe导致LNK1104，停止本次串行后最终默认并行全量PASS。Quick首次导航DNS未解析，脚本加60秒公网就绪等待；后续一次连接器创建409原因未确认，保留08:18失败记录；最终完整重跑含两条Quick PASS。Platform section补description备用文案后已生产构建/真实可见断言通过。未弱化断言/删除测试/修改无关业务。
+- 决策｜domain保留32随机字节/256位/52字符Base32；IP及Quick无访问鉴权，手工每次确认，自动公开须管理员独立开关且默认关闭。普通PATCH同模式不重连，显式reconnect_ingress才重连。默认/启用只控制新建和切换；domain根域名变更/清空仍沿用原迁移/停用规则。Quick需本机CLI，200 in-flight/无SSE/无SLA/地址变化；无自动公网降级/重试/重启重放。
+- 限制｜真实验收为Windows单机隔离环境；未做Linux强杀/真实多节点故障/PG或MySQL连接验收，未提供Figma或原生App/物理键盘验收。沿用现有编译/大包警告。入口可用表示资源/租约有效，不保证公网DNS和三方服务即时可达。
+- 隔离｜design/preview-ingress-modes，C盘独立worktree与target。不改主目录、4291、共享Runner或外部Cloudflare。未做真实库迁移/合并/推送/部署。仅提交源码/文档，排除data/maintenance、dist、日志和二进制。
+- 下一步｜本期无源码待办；本地提交仅含25个源码/文档文件，worktree状态以git status为准。等待另一进程完成共享服务工作，再协调集成监控分支d56de5a及本预览提交；推荐部署前在目标Linux/三库/多节点环境补验收，不能直接替换共享服务。
+
+# 历史交付与依据
 # Task State - monitoring health v1
 
 ## 当前事项清单（2026-11-11）
@@ -2347,3 +2359,34 @@ Python py_compile、actionlint v1.7.12（官方发布checksum验证；未装shel
 2026-11-10最新检查点：4291已备份更新alpha.15/PID26112/index-D8FlvvKb.js；38类原记录、密钥、实例及环境保全，原会话200、普通账号平台设置403。备份pre-preview-domains-20261110-021351，证据preview-domain-local-final-20261110。Linux旧失败原始附件alpha13-preview-ci-evidence.zip保留：夹具后台进程未监听；最终夹具采用独立Node进程和启动就绪检查，待Linux实际执行。官方故障证据preview-domain-linux-validation/github-{status,incidents-unresolved}.json及run-*.html，事故https://stspg.io/7yw63xl9ztrv。曾因磁盘满构建失败，使用cargo clean -p ferry-server清理31.5GiB生成缓存后构建PASS，业务/备份/证据未动；后续构建使用CARGO_INCREMENTAL=0。
 
 Monitoring checkpoint: initial 6 focused Rust tests and 75 existing UI regressions PASS; initial typecheck fixed then PASS. Initial frontend build FAIL due D disk ENOSPC. Moved only this worktree to C via verified Move-Item and repaired Git metadata; rerun build. Cargo target remains private C:/Users/FullStack/AppData/Local/Temp/ferry-monitoring-health-target. New tests/changes since initial run require rerun. No Docker CLI or installed WSL available; live Linux engines not yet verified.
+
+## Active continuation — preview ingress / security (2026-11-11)
+- Branch design/preview-ingress-modes at d56de5a; monitoring source delivery separate, no merge/push/deployment.
+- User approved domain/LAN-IP-port design and requires long secure subdomain tokens. Verified rand0.8 thread_rng32bytes -> lossless52char Base32; exact decode/hash/expiry/revocation reused. Documented section18 and ADR; no code change needed.
+- Actual HTTP: local4291 alpha.18/server_mode=false; public ferry.7link.top alpha.12/server_mode=true; different instance IDs. Public default urllib403; browser User-Agent200. Old Host allow-list removed in alpha.13/46284b3. Exact failing previewHost/tunnel target not verified; not fixed.
+- Shared processes/configuration untouched; no real token output. This turn source/history and actual HTTP verified; Rust tests/build NOT_RUN (docs only). Source token requirement PASS; live preview acceptance pending.
+- Remaining: finish ingress design/review matrix; port auth browserPoC with opaque sandbox origin, Cookie stripping and wildcardCORS. Port secrecy is not auth; do not weaken isolation. Port pool/lease/cluster/model undefined.
+- Next: read-only verify intended public tunnel destination if configuration available; do not restart other process services. Complete design before implementation.
+
+## Preview options evaluation — 2026-11-11
+- User requests platform preview settings, default commonly used entry, manual selection and switching, plus optional free Cloudflare Quick Tunnel.
+- Official Quick Tunnel docs fetched: no account/domain, temporary changing hostname, no uptime guarantee, max200 in-flight requests then429, noSSE. allowed-mail browserOTP documented but installed-version/runtime compatibility untested.
+- Section19 design draft added: separate addressing(domain/IP-port) from transport(fixedCloudflared); temporary tunnel candidate is not unlimited or production-stable. Do not substitute random third-party hostname for256bit bearer authentication.
+- Proposed semantics (not yet user-confirmed): default applies to future creations; existing preview pins actual entry; explicit switch prepares/validates before commit and retires old entry; failure preserves original, no silent public fallback. Exact in-flight connection closure/lease/auth contracts pending.
+- No UI/code/process/config/migration changed. Need security/browserPoC + complete review matrix before implementation. User-facing recommendation pending; docs diff check only, no build/tests for docs-only change.
+
+## Implementation checkpoint — preview ingress
+- Implemented source: optional encrypted holes.ingress_config + additive migration/protected down; three-scheme platform config and scoped preview-ingresses options; public admin/per-manual acknowledgement + separate automatic approval; prepare-before-transaction resources with drop cleanup, port ownership/bind/pool, isolated Quick CLI config/http2, Windows job containment, locks lease15s/45s and explicit reconnect after restart/offline. No silent fallback or auto replay.
+- Domain-root change/clear behavior intentionally preserved. Default MODE changes only future creations. Same-mode PATCH is ordinary edit unless reconnect_ingress=true; regression caught accidental token rotation and was fixed, not test-weakened.
+- UI shared form/list only; public warnings/ack/disabled submit/loading/retry/offline actions, six locales. Focused UI18PASS after fixing test harness to use installed react-dom (no new dependency); initial imported unavailable testing-library failed collection, corrected.
+- First Rust focused run13PASS/1FAIL exposed accidental rotation; fixed. Latest Rust focused test rebuild pending (Temp/preview-ingress-tests-final.log), new Windows dependency features cause rebuild. Workspace check passed before latest small changes. Build frontend currently running (preview-ingress-build-ui.log).
+- Real acceptance extends existing scripts/test-preview-holes.mjs; use FERRY_BINARY/private target, FERRY_RUNNER_BINARY/private target, PREVIEW_QUICK_BINARY installed cloudflared, PLAYWRIGHT_CHROME_PATH cached Chrome. Not run against final implementation yet. Prior synthetic tunnelPoC is not final acceptance.
+- Next: finish focused Rust and frontend build, fix actual failures; build embedded server+Runner in private target; run extended real preview script including Quick, then fullworkspace/frontend checks and two reviews. No commit/deploy yet.
+
+## Verification checkpoint — live preview PASS (first final implementation run)
+- Workspace check verified via Node child exit0 (preview-ingress-check-verified.log). Embedded server+Runner build exit0 (preview-ingress-build-verified.log); PowerShell stderr had earlier misleading wrapper exit1 despite Cargo finished, replaced with direct child exit capture.
+- Full frontend direct Vitest run:82files/630PASS/1existing skip, exit0 (preview-ingress-all-ui-tests-direct.log). Earlier PowerShell-captured run had CLIXML reader interference; direct logs are authoritative. Focused Rust17PASS, including3real-network new lifecycle tests (preview-ingress-tests-final.log).
+- Actual server + realRunner + realVite + Chrome + installedcloudflared extended script PASS25check entries, evidence data/maintenance/preview-holes-20261111-075107/result.json. Tested domain baseline, realIP form acknowledgement/save/forward/cookie stripping/defaultstability/switch, settings/form/list/detail4widths, Quick actualassets/API/HMR/opaqueisolation/revoke. Synthetic data only; no shared service/config touched.
+- Screenshot self-review Phone320 settings and publicform: no horizontal overflow, fixed save/action bars; checkbox is reachable by internal scroll and successful real interaction verified. Additional en/ms-MY warning/settings screenshots and Windowsforced-exit JobObject cleanup added to script; rerun pending after fullworkspace suite releases executables.
+- Current running full Rust workspace: Temp/preview-ingress-workspace-tests.log, tool session52800. Avoid rebuilding/launching shared target executables concurrently with workspace integration builds on Windows. Latest tiny frontend effect fix reapplies defaults when navigating edit→new without unmount; rerun focused UI/build before final second live run.
+- Next: wait fullworkspace result; rebuild frontend+embeddedserver for latestUIeffect; rerun extended live script with en/ms and forcedexit; persist evidence, self-review + originalacceptance, precise localcommit. No merge/push/deploy.

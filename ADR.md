@@ -688,3 +688,18 @@ Alternatives considered: remove existing alert rules; replace host monitoring; b
 Tradeoffs: runtime state is explicitly process/container/task evidence, not protocol quorum. HTTP/TCP originate on server network.
 Cluster identity: Swarm observations include the Cluster ID returned by a bounded read-only `docker info` command. Only observations with the same cluster identity merge replica demand; independent clusters in a host group remain separate. Missing identity is unknown evidence, never an inferred shared cluster.
 Scope: docs/监控与应用健康一期设计.md. No phase-two protocols/log/scripts/heartbeat/automatic repair. No existing data migration or shared service update. Status: implementation in isolated worktree, not accepted.
+
+## 2026-11-11 Preview token strength
+- Decision: user requires long secure subdomain tokens; preserve 32 cryptographically random bytes (256 bits), losslessly represented as52 lowercase unpadded Base32 characters. No shortening.
+- Reason: existing implementation satisfies strength and DNS63-character label limit.
+- Alternatives considered: shorter tokens rejected; no regeneration or schema change required.
+- Tradeoffs: bearer links remain sensitive to disclosure through DNS/proxies or sharing; randomness does not prevent disclosure.
+- Scope: existing encrypted storage, hash lookup, expiry/revocation and sandbox remain. LAN port auth requires browser PoC/design.
+- Status: source verified, no runtime change/deployment.
+
+## 2026-11-11 Public preview ingress accepted
+- Decision: user explicitly chooses all three schemes together, with clear caution for insecure schemes. Domain keeps256-bit token auth; IP port and Quick Tunnel are opt-in public ingress with per-manual-operation acknowledgement and separate admin opt-in for public automatic previews.
+- Reason: real Chrome tests show opaque sandbox breaks cookie bootstrap/SW authentication; keep isolation and label public exposure honestly.
+- Alternatives: defer new ingress rejected by user; silently weakening sandbox or pretending random Cloudflare hostname is256-bit auth rejected.
+- Scope/tradeoffs: section20 design; publicly reachable addresses are not credentials, IP ports reusable, Quick ephemeral/noSSE/200in-flight/noSLA. No automatic public fallback, no live migration/restart, no external DNS changes. Existing domain token semantics preserved.
+- Status: implemented and verified in isolated Windows worktree; final full Rust/frontend tests and real Runner/Chrome/Quick 26-check acceptance PASS (2026-11-11). No merge/push/deployment/live migration. Linux/multi-node/PG/MySQL live acceptance remains separate.

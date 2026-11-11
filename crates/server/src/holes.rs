@@ -6,6 +6,7 @@
 //! route and everything that keeps its connections bounded.
 
 mod domain;
+pub(crate) mod ingress;
 mod owned;
 mod proxy;
 #[cfg(test)]
@@ -43,6 +44,7 @@ use std::time::Duration;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/{workspace}/holes", get(list).post(create))
+        .route("/{workspace}/preview-ingresses", get(ingress_options))
         .route(
             "/{workspace}/holes/{id}",
             get(detail).patch(update).delete(remove),
@@ -58,6 +60,15 @@ const SPEC: Spec = Spec {
     sortable: &["name", "created_at", "expires_at"],
     default_sort: "-created_at",
 };
+async fn ingress_options(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>> {
+    scope.require("holes.read")?;
+    let config = crate::accounts::addresses::Configuration::load(&s, &s.db).await?;
+    Ok(Json(json!({"items": [
+        {"id":"domain","available":!config.preview_domain.is_empty(),"public_access":false},
+        {"id":"ip_port","available":config.preview.preview_ip_enabled && config.preview.preview_public_acknowledged,"public_access":true},
+        {"id":"cloudflare","available":config.preview.preview_quick_enabled && config.preview.preview_public_acknowledged,"public_access":true}
+    ],"total":3,"page":1,"page_size":3,"default_mode":config.preview.preview_default_mode})))
+}
 /// The validity periods offered; anything else is refused.
 const TTL_HOURS: [i64; 4] = [1, 8, 24, 168];
 const HOUR_MS: i64 = 3_600_000;
@@ -121,6 +132,12 @@ pub(crate) async fn views(
     let mut values = Vec::with_capacity(rows.len());
     for row in rows {
         let url = link(s, &row).await?;
+        let entry = ingress::Entry::read(s, &row)?;
+        let mode = entry.as_ref().map_or("domain", |e| e.mode.as_str());
+        let available = match &entry {
+            Some(entry) => !url.is_empty() && ingress::available(s, &row, entry).await?,
+            None => state(&row, now) == "active" && !url.is_empty(),
+        };
         values.push(json!({
             "id": Id::from(row.id),
             "host_id": Id::from(row.host_id),
@@ -129,6 +146,9 @@ pub(crate) async fn views(
             "target_port": row.target_port,
             "strip_prefix": row.strip_prefix,
             "url": url,
+            "ingress_mode": mode,
+            "ingress_available": available,
+            "public_access": mode != "domain",
             "state": state(&row, now),
             "expires_at": row.expires_at,
             "revoked_at": row.revoked_at,
@@ -164,6 +184,11 @@ pub(crate) async fn views(
 
 /// Root-relative: only the browser knows the external scheme and host.
 pub(crate) async fn link(s: &AppState, row: &holes::Model) -> Result<String> {
+    if let Some(entry) = ingress::Entry::read(s, row)? {
+        if entry.mode != "domain" {
+            return Ok(format!("{}/", entry.origin));
+        }
+    }
     let config = crate::accounts::addresses::Configuration::load(s, &s.db).await?;
     if config.preview_domain.is_empty() {
         return Ok(String::new());
@@ -248,6 +273,9 @@ pub struct CreateBody {
     #[serde(default = "default_strip")]
     strip_prefix: bool,
     ttl_hours: i64,
+    ingress_mode: Option<String>,
+    #[serde(default)]
+    public_access_acknowledged: bool,
 }
 fn default_strip() -> bool {
     true
@@ -259,18 +287,20 @@ pub async fn create(
     Json(body): Json<CreateBody>,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("holes.create")?;
-    crate::accounts::addresses::Configuration::load(&s, &s.db)
-        .await?
-        .require_preview()?;
+    let config = crate::accounts::addresses::Configuration::load(&s, &s.db).await?;
+    let mode = ingress::chosen(
+        &config,
+        body.ingress_mode.as_deref(),
+        body.public_access_acknowledged,
+        false,
+    )?;
     let name = checked_name(&body.name)?;
     let ttl = checked_ttl(body.ttl_hours)?;
     if !(1..=65535).contains(&body.target_port) {
         return Err(invalid());
     }
-    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
-    let row = insert(
+    let mut row = prepare_row(
         &s,
-        &tx,
         &scope,
         NewHole {
             host_id: body.host_id,
@@ -283,6 +313,11 @@ pub async fn create(
         },
     )
     .await?;
+    let prepared = ingress::prepare(&s, &row, &config, &mode).await?;
+    row.ingress_config = Some(prepared.entry.seal(&s, &row)?);
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    insert_row(&tx, &scope, &row).await?;
+    ingress::activate(&tx, &s, &row, &prepared).await?;
     let id = Id::from(row.id);
     crate::hosts::activity_in(
         &s,
@@ -292,10 +327,12 @@ pub async fn create(
         "holes",
         &id,
         json!({"name": row.name, "host_id": body.host_id, "target_port": row.target_port,
-               "strip_prefix": row.strip_prefix, "ttl_hours": body.ttl_hours}),
+               "strip_prefix": row.strip_prefix, "ttl_hours": body.ttl_hours,
+               "ingress_mode": mode, "public_access_acknowledged":body.public_access_acknowledged}),
     )
     .await?;
     tx.commit().await?;
+    ingress::publish(&s, &row, prepared);
     Ok((StatusCode::CREATED, Json(view(&s, &scope, id).await?)))
 }
 
@@ -313,16 +350,11 @@ pub(crate) struct NewHole {
 
 /// The one place a preview row is created: the host must be a runner host in
 /// the caller's workspace, and only a hash and a sealed copy of the token are kept.
-async fn insert(
-    s: &AppState,
-    conn: &impl ConnectionTrait,
-    scope: &Scope,
-    new: NewHole,
-) -> Result<holes::Model> {
+async fn prepare_row(s: &AppState, scope: &Scope, new: NewHole) -> Result<holes::Model> {
     hosts::Entity::find_by_id(i64::from(new.host_id))
         .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(hosts::Column::Connection.eq("runner"))
-        .one(conn)
+        .one(&s.db)
         .await?
         .ok_or_else(invalid)?;
     let id = s.next_id()?;
@@ -338,6 +370,7 @@ async fn insert(
         strip_prefix: new.strip_prefix,
         token_hash: crate::hosts::runner::fingerprint(&token),
         token_sealed: String::new(),
+        ingress_config: None,
         expires_at: new.expires_at,
         revoked_at: 0,
         revoked_by: 0,
@@ -358,10 +391,21 @@ async fn insert(
         reviewed_by: 0,
     };
     row.token_sealed = s.vault.seal(&token, &aad(&row))?;
+    Ok(row)
+}
+
+async fn insert_row(conn: &impl ConnectionTrait, scope: &Scope, row: &holes::Model) -> Result<()> {
+    // Recheck inside the transaction: a host may have been deleted while a tunnel started.
+    hosts::Entity::find_by_id(row.host_id)
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(hosts::Column::Connection.eq("runner"))
+        .one(conn)
+        .await?
+        .ok_or_else(invalid)?;
     holes::Entity::insert(row.clone().into_active_model())
         .exec(conn)
         .await?;
-    Ok(row)
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -371,6 +415,11 @@ pub struct UpdateBody {
     strip_prefix: Option<bool>,
     /// Present means "extend": the new expiry counts from now.
     ttl_hours: Option<i64>,
+    ingress_mode: Option<String>,
+    #[serde(default)]
+    public_access_acknowledged: bool,
+    #[serde(default)]
+    reconnect_ingress: bool,
 }
 
 pub async fn update(
@@ -380,6 +429,32 @@ pub async fn update(
     Json(body): Json<UpdateBody>,
 ) -> Result<Json<Value>> {
     scope.require("holes.update")?;
+    let mut replacement = None;
+    if let Some(mode) = body.ingress_mode.as_deref() {
+        let mut row = find(&s.db, &scope, id).await?;
+        if row.source_kind != "manual" || row.revoked_at > 0 || row.version != body.version {
+            return Err(changed());
+        }
+        let current_mode =
+            ingress::Entry::read(&s, &row)?.map_or_else(|| "domain".into(), |entry| entry.mode);
+        if body.reconnect_ingress || current_mode != mode {
+            let config = crate::accounts::addresses::Configuration::load(&s, &s.db).await?;
+            let mode =
+                ingress::chosen(&config, Some(mode), body.public_access_acknowledged, false)?;
+            if let Some(hours) = body.ttl_hours {
+                row.expires_at = db::now() + checked_ttl(hours)?;
+            }
+            if row.expires_at <= db::now() {
+                return Err(ingress::error("holes.notActive"));
+            }
+            let token = crate::hosts::runner::secret();
+            row.token_hash = crate::hosts::runner::fingerprint(&token);
+            row.token_sealed = s.vault.seal(&token, &aad(&row))?;
+            let prepared = ingress::prepare(&s, &row, &config, &mode).await?;
+            row.ingress_config = Some(prepared.entry.seal(&s, &row)?);
+            replacement = Some((row, prepared));
+        }
+    }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let old = find(&tx, &scope, id).await?;
     if old.revoked_at > 0 {
@@ -398,6 +473,17 @@ pub async fn update(
     let now = db::now();
     let mut row = old.clone().into_active_model();
     let mut details = serde_json::Map::new();
+    if let Some((next, prepared)) = &replacement {
+        row.token_hash = Set(next.token_hash.clone());
+        row.token_sealed = Set(next.token_sealed.clone());
+        row.ingress_config = Set(next.ingress_config.clone());
+        ingress::activate(&tx, &s, next, prepared).await?;
+        details.insert("ingress_mode".into(), json!(prepared.entry.mode));
+        details.insert(
+            "public_access_acknowledged".into(),
+            json!(body.public_access_acknowledged),
+        );
+    }
     if let Some(name) = &body.name {
         let name = checked_name(name)?;
         details.insert("name".into(), json!(name));
@@ -426,6 +512,11 @@ pub async fn update(
     )
     .await?;
     tx.commit().await?;
+    if let Some((row, prepared)) = replacement {
+        proxy::close(old.id);
+        ingress::stop(&s, old.id).await;
+        ingress::publish(&s, &row, prepared);
+    }
     Ok(Json(view(&s, &scope, id).await?))
 }
 
@@ -460,6 +551,7 @@ pub async fn revoke(
     .await?;
     tx.commit().await?;
     proxy::close(old.id);
+    ingress::stop(&s, old.id).await;
     crate::workflows::preview::nudge(&s.db, &old).await?;
     Ok(Json(view(&s, &scope, id).await?))
 }
@@ -485,6 +577,7 @@ pub async fn remove(
     .await?;
     tx.commit().await?;
     proxy::close(old.id);
+    ingress::stop(&s, old.id).await;
     crate::workflows::preview::nudge(&s.db, &old).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -550,7 +643,7 @@ pub async fn monitor(s: AppState, mut drain: tokio::sync::watch::Receiver<bool>)
     let owner = format!("holes-probe:{}", s.instance_id);
     loop {
         tokio::select! {
-            _ = drain.changed() => break,
+            _ = drain.changed() => { ingress::tick(&s, true).await; break; },
             _ = tick.tick() => {
                 if let Err(error) = probe_round(&s, &owner).await {
                     tracing::warn!(%error, "预览穿透探测失败");
@@ -559,6 +652,7 @@ pub async fn monitor(s: AppState, mut drain: tokio::sync::watch::Receiver<bool>)
                     tracing::warn!(%error, "预览穿透来源回收失败");
                 }
                 proxy::forget_stale();
+                ingress::tick(&s, false).await;
             }
         }
     }

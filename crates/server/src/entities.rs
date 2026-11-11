@@ -301,6 +301,7 @@ pub mod holes {
         pub strip_prefix: bool,
         pub token_hash: String,
         pub token_sealed: String,
+        pub ingress_config: Option<String>,
         pub expires_at: i64,
         pub revoked_at: i64,
         pub revoked_by: i64,

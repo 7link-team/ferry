@@ -13,5 +13,12 @@
   "holes.tooLarge": "リクエスト本文がプレビューの上限 64 MiB を超えています。",
   "holes.automatic": "このプレビューはパイプラインまたはワークフローが管理しているため、取り消しのみ可能です。",
   "holes.reviewClosed": "このプレビューは確認待ちではありません。",
-  "holes.notReady": "ローカルサービスが時間内に応答可能になりませんでした：{detail}"
+  "holes.notReady": "ローカルサービスが時間内に応答可能になりませんでした：{detail}",
+  "holes.entryInvalid": "入口設定が無効です。方式、IP、ポート範囲を確認してください。",
+  "holes.entryRisk": "公開アクセスのリスクを確認してください。自動公開には管理者の個別許可が必要です。",
+  "holes.entryBind": "プレビューの待受に失敗しました。ローカルIPと権限を確認してください。",
+  "holes.entryPorts": "設定範囲に空きポートがありません。",
+  "holes.entryBinary": "cloudflaredを起動できません。このノードの実行パスと権限を確認してください。",
+  "holes.entryUnavailable": "入口を利用できません。コネクターとネットワークを確認し手動で再試行してください。",
+  "holes.entryTimeout": "一時トンネルが45秒以内に準備できませんでした。既存の入口は維持されます。"
 }

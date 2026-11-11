@@ -1,5 +1,6 @@
 import { Ban, Check, Copy, ExternalLink, Eye, Pencil, Radar, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+import { useEffect, useState } from "react";
 import { api, errorText } from "../../shared/api/api";
 import { base, deleteResource, named } from "../../shared/api/resource";
 import { AutoField } from "../../shared/forms/auto-form";
@@ -60,6 +61,12 @@ export interface Hole {
   reviewed_by: string;
   /** Write-only: present on create, and on edit only to extend from now. */
   ttl_hours?: number | undefined;
+  ingress_mode?: string | undefined;
+  current_ingress_mode?: string | undefined;
+  ingress_available?: boolean | undefined;
+  public_access?: boolean | undefined;
+  public_access_acknowledged?: boolean | undefined;
+  reconnect_ingress?: boolean | undefined;
 }
 
 const key = (value: string) => `holes:${value}`;
@@ -286,8 +293,60 @@ function Validity({
   );
 }
 
+type EntryOptions = {items: {id: string; available: boolean; public_access: boolean}[]; default_mode: string};
+function IngressChoice({ workspace, draft, readOnly, onPatch, onValidityChange }: {
+  workspace: string; draft: Partial<Hole>; readOnly: boolean; onPatch: (patch: Partial<Hole>) => void; onValidityChange: (blocked: boolean) => void;
+}) {
+  const [options, setOptions] = useState<EntryOptions>();
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => { onValidityChange(!readOnly && (!options || (!!draft.ingress_mode && draft.ingress_mode !== "domain" && !draft.public_access_acknowledged))); }, [readOnly, options, draft.ingress_mode, draft.public_access_acknowledged, onValidityChange]);
+  useEffect(() => {
+    if (readOnly) return;
+    setError("");
+    let live = true;
+    void api<EntryOptions>(`${base(workspace, "preview-ingresses")}`).then(value => {
+      if (!live) return;
+      setOptions(value);
+      if (!draft.id && !draft.ingress_mode && value.items.some(item => item.id === value.default_mode && item.available)) {
+        onPatch({ ingress_mode: value.default_mode, public_access_acknowledged: false });
+      }
+    }).catch(cause => live && setError(errorText(cause)));
+    return () => { live = false; };
+    // Defaults are applied once on mount; user edits must not restart the request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace, readOnly, attempt, draft.id]);
+  if (readOnly) return <div className="space-y-2 break-words"><div>{text(`mode.${draft.ingress_mode ?? "domain"}`)}</div>
+    <div>{text(draft.public_access ? "publicAccess" : "tokenAccess")}</div>
+    <div>{text(draft.ingress_available === false ? "entryOffline" : "entryReady")}</div>
+    {draft.public_access && <p className="text-destructive">{text(`warning.${draft.ingress_mode}`)}</p>}
+  </div>;
+  return <div className="min-w-0 space-y-3">
+    {error && <div><p role="alert" className="break-words text-destructive">{error}</p><Button type="button" variant="outline" onClick={() => setAttempt(value => value + 1)}>{commonText("common.retry")}</Button></div>}
+    <Select value={draft.ingress_mode ?? "keep"} disabled={!options} onValueChange={value => onPatch({ingress_mode: value === "keep" ? undefined : value, reconnect_ingress: value !== "keep", public_access_acknowledged: false})}>
+      <SelectTrigger className="min-h-11 w-full min-w-0" aria-label={text("ingressMode")}><SelectValue placeholder={commonText("common.select")} /></SelectTrigger>
+      <SelectContent>
+        {!!draft.id && <SelectItem value="keep">{text("keepIngress", { mode: text(`mode.${draft.current_ingress_mode ?? "domain"}`) })}</SelectItem>}
+        {options?.items.map(item => <SelectItem key={item.id} value={item.id} disabled={!item.available}>{text(`mode.${item.id}`)}{!item.available ? ` · ${text("notConfigured")}` : ""}</SelectItem>)}
+      </SelectContent>
+    </Select>
+    {!options && !error && <p role="status">{commonText("common.loading")}</p>}
+    <p className="break-words text-sm text-muted-foreground">{text(draft.id ? "switchHelp" : "defaultHelp")}</p>
+    {!!draft.ingress_mode && draft.ingress_mode !== "domain" && <div role="note" className="space-y-3 rounded-md border border-destructive/40 p-3">
+      <p className="break-words text-sm text-destructive">{text(`warning.${draft.ingress_mode}`)}</p>
+      <p className="break-words text-sm text-muted-foreground">{text("compatibilityWarning")}</p>
+      <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm">
+        <input type="checkbox" className="mt-1 size-5 shrink-0" required checked={draft.public_access_acknowledged === true}
+          onChange={event => onPatch({public_access_acknowledged: event.target.checked})} />
+        <span className="min-w-0 break-words">{text("acknowledgePublic")}</span>
+      </label>
+    </div>}
+  </div>;
+}
+
 function PreviewLink({ draft }: { draft: Partial<Hole> }) {
   const link = previewLink(draft);
+  if (draft.ingress_available === false || !draft.url) return <AutoField label={text("url")}><p className="break-words text-sm text-muted-foreground">{text("entryOffline")}</p></AutoField>;
   return (
     <AutoField label={text("url")}>
       <div className="flex min-w-0 items-start gap-2">
@@ -363,6 +422,7 @@ export function holesLists({
       ],
       columns: [
         { key: "name", label: "Name", labelKey: key("name"), sortable: true },
+        { key: "ingress_mode", label: "Ingress", labelKey: key("ingressMode"), render: row => <div className="space-y-1"><div>{text(`mode.${row.ingress_mode ?? "domain"}`)}</div><Badge variant={row.public_access ? "destructive" : "outline"}>{text(row.public_access ? "publicAccess" : "tokenAccess")}</Badge>{row.ingress_available === false && <div className="text-xs text-muted-foreground">{text("entryOffline")}</div>}</div> },
         {
           key: "source_kind",
           label: "Source",
@@ -432,10 +492,12 @@ export function holesLists({
           labelKey: key("copyLink"),
           icon: <Copy className="size-4" />,
           action: copyLink,
+          when: row => row.ingress_available !== false,
         },
         {
           label: "打开预览",
           labelKey: key("open"),
+          when: row => row.ingress_available !== false,
           icon: <ExternalLink className="size-4" />,
           action: async (row) => {
             window.open(previewLink(row), "_blank", "noopener,noreferrer");
@@ -521,6 +583,10 @@ export function holesForms({
         version: row.version,
         ttl_hours: undefined,
         url: undefined,
+        current_ingress_mode: row.ingress_mode ?? "domain",
+        ingress_mode: undefined,
+        public_access_acknowledged: false,
+        reconnect_ingress: false,
       }),
       /** Revoked is terminal and automatic previews belong to their source: the server rejects both edits. */
       readOnly: (row) => row.state === "revoked" || !manual(row),
@@ -530,6 +596,9 @@ export function holesForms({
           title: "Tunnel",
           titleKey: key("section.tunnel"),
           fields: [
+            { key: "ingress_mode", label: "Ingress", labelKey: key("ingressMode"), type: "custom", span: 2,
+              required: draft => !draft.id,
+              render: ({draft,readOnly,onPatch,onValidityChange}) => <IngressChoice workspace={workspace} draft={draft} readOnly={readOnly} onPatch={onPatch} onValidityChange={onValidityChange} /> },
             {
               key: "name",
               label: "Name",

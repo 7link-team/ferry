@@ -45,9 +45,8 @@ pub(crate) async fn open_owned(
     request: OwnedRequest,
 ) -> Result<holes::Model> {
     scope.require("holes.create")?;
-    crate::accounts::addresses::Configuration::load(s, &s.db)
-        .await?
-        .require_preview()?;
+    let config = crate::accounts::addresses::Configuration::load(s, &s.db).await?;
+    let mode = ingress::chosen(&config, None, false, true)?;
     let name = checked_name(if request.name.trim().is_empty() {
         &request.source_ref
     } else {
@@ -65,10 +64,8 @@ pub(crate) async fn open_owned(
         + request
             .review_minutes
             .map_or(UNREVIEWED_TTL_MS, |minutes| minutes * 60_000);
-    let tx = crate::variables::transaction(s, scope.workspace_id).await?;
-    let row = insert(
+    let mut row = prepare_row(
         s,
-        &tx,
         scope,
         NewHole {
             host_id: request.host_id,
@@ -89,6 +86,11 @@ pub(crate) async fn open_owned(
         },
     )
     .await?;
+    let prepared = ingress::prepare(s, &row, &config, &mode).await?;
+    row.ingress_config = Some(prepared.entry.seal(s, &row)?);
+    let tx = crate::variables::transaction(s, scope.workspace_id).await?;
+    insert_row(&tx, scope, &row).await?;
+    ingress::activate(&tx, s, &row, &prepared).await?;
     crate::hosts::activity_in(
         s,
         &tx,
@@ -98,10 +100,12 @@ pub(crate) async fn open_owned(
         &Id::from(row.id),
         json!({"name": row.name, "host_id": request.host_id, "target_port": row.target_port,
                "source_kind": request.source_kind, "source_id": Id::from(request.source_id),
-               "source_ref": request.source_ref, "review_minutes": request.review_minutes}),
+               "source_ref": request.source_ref, "review_minutes": request.review_minutes,
+               "ingress_mode": mode, "public_access_acknowledged": mode != "domain"}),
     )
     .await?;
     tx.commit().await?;
+    ingress::publish(s, &row, prepared);
     Ok(row)
 }
 

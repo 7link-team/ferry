@@ -5,6 +5,7 @@
 use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 mod access_addresses;
+mod preview_ingress;
 mod account_otp;
 mod account_preferences;
 mod identity_avatars;
@@ -171,6 +172,7 @@ impl MigratorTrait for Migrator {
             Box::new(account_otp::Migration),
             Box::new(identity_avatars::Migration),
             Box::new(monitoring::Migration),
+            Box::new(preview_ingress::Migration),
         ]
     }
 }

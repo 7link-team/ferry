@@ -13,5 +13,12 @@
   "holes.tooLarge": "The request body exceeds the 64 MiB preview limit.",
   "holes.automatic": "This preview is managed by a pipeline or workflow. It can only be revoked.",
   "holes.reviewClosed": "This preview is not waiting for review.",
-  "holes.notReady": "The local service did not become reachable in time: {detail}"
+  "holes.notReady": "The local service did not become reachable in time: {detail}",
+  "holes.entryInvalid": "Invalid preview ingress configuration. Check the enabled scheme, IP addresses and port range.",
+  "holes.entryRisk": "Explicitly acknowledge public access before using this scheme. Automatic public previews require separate administrator approval.",
+  "holes.entryBind": "Cannot bind the preview listener. Check the local IP and permissions.",
+  "holes.entryPorts": "No free port is available in the configured preview range.",
+  "holes.entryBinary": "Cannot start cloudflared. Check its executable path and permissions on this server node.",
+  "holes.entryUnavailable": "The preview ingress is unavailable. Check the connector and network, then retry explicitly.",
+  "holes.entryTimeout": "The temporary tunnel did not become ready within 45 seconds. The original ingress was kept."
 }

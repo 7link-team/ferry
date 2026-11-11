@@ -14,6 +14,8 @@ pub(crate) struct Configuration {
     pub public_url: String,
     #[serde(default)]
     pub preview_domain: String,
+    #[serde(flatten)]
+    pub preview: crate::holes::ingress::Settings,
 }
 impl Configuration {
     pub fn read(s: &AppState, row: &platform_state::Model) -> Result<Self> {
@@ -38,7 +40,7 @@ impl Configuration {
         Self::read(s, &row)
     }
     pub fn view(&self) -> Value {
-        json!({"public_url": self.public_url, "preview_domain": self.preview_domain})
+        serde_json::to_value(self).unwrap_or_else(|_| json!({}))
     }
     pub fn update(&mut self, patch: &serde_json::Map<String, Value>) -> Result<()> {
         for (key, target) in [
@@ -94,6 +96,7 @@ impl Configuration {
         {
             return Err(invalid());
         }
+        self.preview.update(patch)?;
         Ok(())
     }
     pub fn require_preview(&self) -> Result<()> {

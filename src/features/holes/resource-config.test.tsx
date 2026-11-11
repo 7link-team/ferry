@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { act, useState, type ReactNode } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { api } from "../../shared/api/api";
 import { i18n } from "../../shared/i18n/i18n";
 import { setLocale } from "../../shared/i18n/locale";
@@ -31,7 +33,10 @@ beforeEach(async () => {
   setLocale("en-US", false);
   await i18n.changeLanguage("en-US");
 });
-afterEach(() => { vi.clearAllMocks(); vi.restoreAllMocks(); });
+let mounted: Root | undefined;
+let container: HTMLDivElement;
+afterEach(async () => { if (mounted) await act(async () => mounted?.unmount()); mounted = undefined; container?.remove(); vi.clearAllMocks(); vi.restoreAllMocks(); });
+async function mount(node: ReactNode) { container = document.createElement("div"); document.body.append(container); mounted = createRoot(container); await act(async () => mounted!.render(node)); }
 
 it("keeps holes out of the menu but routable under hosts for list, create, detail and edit", () => {
   const host = nav.find((group) => group.key === "host")!;
@@ -49,7 +54,7 @@ it("lists the required columns with a 5-second default refresh", () => {
   expect(config.resource).toBe("holes");
   expect(config.defaultRefresh).toBe(5);
   expect(config.columns.map((column) => column.key)).toEqual([
-    "name", "source_kind", "host_name", "target_port", "state", "probe_state", "active_connections", "expires_at", "review_state", "created_by_name",
+    "name", "ingress_mode", "source_kind", "host_name", "target_port", "state", "probe_state", "active_connections", "expires_at", "review_state", "created_by_name",
   ]);
   expect(config.filters!.map((filter) => filter.key)).toEqual(["q", "host_id", "state"]);
   expect(config.emptyKey).toBe("holes:empty");
@@ -152,10 +157,10 @@ it("edits only name, path mode and validity, and treats revoked records as read-
   expect(edit).toMatchObject({ name: "Web", strip_prefix: true, version: 4 });
   expect(edit.ttl_hours).toBeUndefined();
   const visible = (draft: Partial<Hole>) => fields().filter((field) => !field.when || field.when(draft)).map((field) => field.key);
-  expect(visible(edit)).toEqual(["name", "host_id", "target_port", "ttl_hours"]);
-  expect(visible(config.blank)).toEqual(["name", "host_id", "target_port", "ttl_hours"]);
+  expect(visible(edit)).toEqual(["ingress_mode", "name", "host_id", "target_port", "ttl_hours"]);
+  expect(visible(config.blank)).toEqual(["ingress_mode", "name", "host_id", "target_port", "ttl_hours"]);
   expect(visible(row())).toEqual([
-    "name", "host_id", "target_port", "url", "state", "probe_state", "probe_error",
+    "ingress_mode", "name", "host_id", "target_port", "url", "state", "probe_state", "probe_error",
     "active_connections", "expires_at", "created_by_name", "created_at", "updated_at", "usage",
   ]);
   expect(visible(row({ state: "revoked", revoked_at: 5, probe_error: "" }))).toContain("revoked_at");
@@ -168,6 +173,53 @@ it("ships every holes message in six non-empty locales", () => {
     expect(values, key).toHaveLength(6);
     for (const value of values) expect(value.trim(), key).not.toBe("");
   }
+});
+
+function EntryHarness({ editing = false }: {editing?: boolean}) {
+  const [draft, setDraft] = useState<Partial<Hole>>(editing ? {...row(), ...formConfig().editValues!(row({ingress_mode:"ip_port"}))} : formConfig().blank);
+  const [blocked, setBlocked] = useState(true);
+  const entry = fields().find(field => field.key === "ingress_mode")!;
+  return <>{entry.render!({workspace:"ops",draft,readOnly:false,onPatch:patch=>setDraft(value=>({...value,...patch})),onValidityChange:setBlocked})}
+    <button disabled={blocked}>test-submit</button><output data-testid="entry-draft">{JSON.stringify(draft)}</output></>;
+}
+
+it("applies the configured default and blocks public creation until explicitly acknowledged", async () => {
+  vi.mocked(api).mockResolvedValueOnce({items:[{id:"domain",available:true,public_access:false},{id:"ip_port",available:true,public_access:true}],default_mode:"ip_port"});
+  await mount(<EntryHarness />);
+  expect(container.textContent).toContain("HTTP is unencrypted");
+  expect(api).toHaveBeenCalledWith("/workspaces/ops/preview-ingresses");
+  const submit = Array.from(container.querySelectorAll("button")).find(button=>button.textContent==="test-submit")!;
+  expect(submit.disabled).toBe(true);
+  await act(async()=>{container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();});
+  expect(submit.disabled).toBe(false);
+  expect(JSON.parse(container.querySelector("output")!.textContent!)).toMatchObject({ingress_mode:"ip_port",public_access_acknowledged:true});
+});
+
+it("preserves an existing entry when platform defaults change and supports retry after options fail", async () => {
+  vi.mocked(api).mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({items:[{id:"domain",available:true,public_access:false}],default_mode:"domain"});
+  await mount(<EntryHarness editing />);
+  expect(container.querySelector('[role="alert"]')).toBeTruthy();
+  const submit = Array.from(container.querySelectorAll("button")).find(button=>button.textContent==="test-submit")!;
+  expect(submit.disabled).toBe(true);
+  const retry = Array.from(container.querySelectorAll("button")).find(button=>/retry/i.test(button.textContent??""))!;
+  await act(async()=>{retry.click();});
+  expect(container.textContent).toContain("Keep current:");
+  expect(submit.disabled).toBe(false);
+  const draft = JSON.parse(container.querySelector("output")!.textContent!);
+  expect(draft.current_ingress_mode).toBe("ip_port");
+  expect(draft.ingress_mode).toBeUndefined();
+  expect(draft.reconnect_ingress).toBe(false);
+});
+
+it("shows public exposure on details and hides copy/open actions for an offline ingress", async () => {
+  const draft=row({ingress_mode:"cloudflare",public_access:true,ingress_available:false});
+  const field=fields().find(field=>field.key==="ingress_mode")!;
+  await mount(<>{field.render!({workspace:"ops",draft,readOnly:true,onPatch:vi.fn(),onValidityChange:vi.fn()})}</>);
+  expect(container.textContent).toContain("Public Internet access");
+  expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+  expect(api).not.toHaveBeenCalled();
+  expect(action("holes:open").when!(draft)).toBe(false);
+  expect(action("holes:copyLink").when!(draft)).toBe(false);
 });
 
 it.each([

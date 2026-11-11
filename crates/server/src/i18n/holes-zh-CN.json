@@ -13,5 +13,12 @@
   "holes.tooLarge": "请求体超过预览的 64 MiB 上限。",
   "holes.automatic": "该预览由流水线或工作流托管，只能撤销。",
   "holes.reviewClosed": "该预览当前不在等待验收。",
-  "holes.notReady": "本地服务未在规定时间内就绪：{detail}"
+  "holes.notReady": "本地服务未在规定时间内就绪：{detail}",
+  "holes.entryInvalid": "预览入口配置无效，请检查启用方案、IP 地址和端口范围。",
+  "holes.entryRisk": "使用此方案前必须明确确认公开访问风险；自动公开预览还需管理员单独授权。",
+  "holes.entryBind": "无法绑定预览监听端口，请检查本机 IP 和权限。",
+  "holes.entryPorts": "配置的预览端口范围内没有可用端口。",
+  "holes.entryBinary": "无法启动 cloudflared，请检查此服务节点的可执行文件路径和权限。",
+  "holes.entryUnavailable": "预览入口不可用，请检查连接器和网络后手动重试。",
+  "holes.entryTimeout": "临时隧道未在 45 秒内就绪；已有入口保持不变。"
 }
