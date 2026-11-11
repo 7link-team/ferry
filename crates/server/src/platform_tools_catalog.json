@@ -7,7 +7,11 @@
     "signature": "async fn list_activity(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
     "definitions": [],
     "permission_checks": [
-      "activity.read"
+      "activity.read",
+      "hosts.read",
+      "pipelines.read",
+      "repositories.read",
+      "workflows.read"
     ],
     "permission": "activity.read"
   },

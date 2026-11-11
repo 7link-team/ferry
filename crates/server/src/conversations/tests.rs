@@ -7,23 +7,48 @@ use sea_orm::TransactionTrait;
 async fn audit_conversation_update_records_committed_before_after_and_rejects_stale_write() {
     let (_dir, s, id) = seeded().await;
     let old = find(&s.db, &admin(1), id).await.unwrap();
-    let body = || Update { title: "Renamed audit room".into(), state: "archived".into(), version: old.version };
-    update(State(s.clone()), admin(1), Path(("1".into(), id)), Json(body())).await.unwrap();
+    let body = || Update {
+        title: "Renamed audit room".into(),
+        state: "archived".into(),
+        version: old.version,
+    };
+    update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id)),
+        Json(body()),
+    )
+    .await
+    .unwrap();
     let entries = crate::entities::activity::Entity::find()
         .filter(crate::entities::activity::Column::ResourceId.eq(id))
         .filter(crate::entities::activity::Column::Action.eq("update"))
-        .all(&s.db).await.unwrap();
+        .all(&s.db)
+        .await
+        .unwrap();
     assert_eq!(entries.len(), 1);
     let details: Value = serde_json::from_str(&entries[0].details).unwrap();
     assert_eq!(details["changes"]["title"]["before"], old.title);
     assert_eq!(details["changes"]["title"]["after"], "Renamed audit room");
     assert_eq!(details["changes"]["state"]["before"], old.state);
     assert_eq!(details["changes"]["state"]["after"], "archived");
-    assert!(update(State(s.clone()), admin(1), Path(("1".into(), id)), Json(body())).await.is_err());
+    assert!(
+        update(
+            State(s.clone()),
+            admin(1),
+            Path(("1".into(), id)),
+            Json(body())
+        )
+        .await
+        .is_err()
+    );
     let count = crate::entities::activity::Entity::find()
         .filter(crate::entities::activity::Column::ResourceId.eq(id))
         .filter(crate::entities::activity::Column::Action.eq("update"))
-        .all(&s.db).await.unwrap().len();
+        .all(&s.db)
+        .await
+        .unwrap()
+        .len();
     assert_eq!(count, 1);
 }
 
@@ -35,20 +60,49 @@ async fn audit_current_titles_preserve_workspace_permissions_and_room_membership
     assert_eq!(titles.len(), 1);
     let mut denied = owner.clone();
     denied.permissions.remove("conversations.read");
-    assert!(audit_titles(&s.db, &denied, vec![id.into()]).await.unwrap().is_empty());
+    assert!(
+        audit_titles(&s.db, &denied, vec![id.into()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let mut stranger = admin(1);
     stranger.user.id = 2.into();
-    assert!(audit_titles(&s.db, &stranger, vec![id.into()]).await.unwrap().is_empty());
-    assert!(audit_titles(&s.db, &admin(2), vec![id.into()]).await.unwrap().is_empty());
+    assert!(
+        audit_titles(&s.db, &stranger, vec![id.into()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        audit_titles(&s.db, &admin(2), vec![id.into()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
     use crate::entities::ai_chat_members as members;
     members::Entity::insert(members::ActiveModel {
         id: sea_orm::Set(s.next_id().unwrap().into()),
         workspace_id: sea_orm::Set(1),
         conversation_id: sea_orm::Set(id.into()),
         user_id: sea_orm::Set(2),
-    }).exec(&s.db).await.unwrap();
-    assert_eq!(audit_titles(&s.db, &stranger, vec![id.into()]).await.unwrap().len(), 1);
-    assert!(audit_titles(&s.db, &admin(2), vec![id.into()]).await.unwrap().is_empty());
+    })
+    .exec(&s.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        audit_titles(&s.db, &stranger, vec![id.into()])
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        audit_titles(&s.db, &admin(2), vec![id.into()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]

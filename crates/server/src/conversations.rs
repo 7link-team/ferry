@@ -589,7 +589,16 @@ async fn remove(
         .exec(&tx)
         .await?;
     conversations::Entity::delete_by_id(id).exec(&tx).await?;
-    crate::hosts::activity_in(&s, &tx, &scope, "delete", "conversations", &id, json!({"name":c.title})).await?;
+    crate::hosts::activity_in(
+        &s,
+        &tx,
+        &scope,
+        "delete",
+        "conversations",
+        &id,
+        json!({"name":c.title}),
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(json!({"ok":true})))
 }
