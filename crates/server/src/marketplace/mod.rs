@@ -930,6 +930,7 @@ pub async fn recover(s: &AppState) -> Result<()> {
             ))),
         )
         .filter(sources::Column::State.eq("syncing"))
+        .filter(sources::Column::WorkspaceId.ne(platform::PLATFORM))
         .exec(&s.db)
         .await?;
     Ok(())

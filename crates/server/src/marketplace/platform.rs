@@ -197,6 +197,213 @@ pub async fn delete(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>)
     Ok(StatusCode::NO_CONTENT)
 }
 
+const LEASE_MS: i64 = 60_000;
+
+/// Takes the sync lease for one platform source; true only for the single winner.
+pub(crate) async fn claim(s: &AppState, id: i64) -> Result<bool> {
+    let now = db::now();
+    Ok(sources::Entity::update_many()
+        .col_expr(sources::Column::SyncOwner, Expr::value(s.instance_id.clone()))
+        .col_expr(sources::Column::SyncLeaseUntil, Expr::value(now + LEASE_MS))
+        .col_expr(sources::Column::State, Expr::value("syncing"))
+        .filter(sources::Column::Id.eq(id))
+        .filter(sources::Column::WorkspaceId.eq(PLATFORM))
+        .filter(sources::Column::SyncLeaseUntil.lte(now))
+        .exec(&s.db)
+        .await?
+        .rows_affected
+        == 1)
+}
+
+/// Reads a public bundle without credentials and replaces this source's catalog; failure keeps it.
+pub(crate) async fn synchronize_platform(s: &AppState, id: i64, actor: i64) -> Result<usize> {
+    if !claim(s, id).await? {
+        return Err(ApiError::localized(StatusCode::CONFLICT, crate::i18n::Message::new("marketplace.syncing")));
+    }
+    let timeout = std::time::Duration::from_secs(20);
+    let deadline = std::time::Instant::now() + timeout;
+    let row = scoped(&s.db, id.into()).await?;
+    let interval = row.sync_interval.max(3600) * 1000;
+    let result: Result<usize> = async {
+        let config: Source = serde_json::from_str(&row.config).map_err(|_| bad("marketplace.configCorrupt"))?;
+        let text = super::fetch(&config, None, false, timeout).await?;
+        let packages = super::index::parse_bundle(&text, &super::ferry_version(), "en-US")?;
+        let tx = s.db.begin().await?;
+        let total = super::store::replace_entries(s, &tx, PLATFORM, id, actor, packages, deadline).await?;
+        let now = db::now();
+        sources::Entity::update_many()
+            .col_expr(sources::Column::State, Expr::value("idle"))
+            .col_expr(sources::Column::LastError, Expr::value(""))
+            .col_expr(sources::Column::SyncedAt, Expr::value(now))
+            .col_expr(sources::Column::SyncedBy, Expr::value(actor))
+            .col_expr(sources::Column::NextSyncAt, Expr::value(now + interval))
+            .col_expr(sources::Column::SyncOwner, Expr::value(""))
+            .col_expr(sources::Column::SyncLeaseUntil, Expr::value(0))
+            .filter(sources::Column::Id.eq(id))
+            .filter(sources::Column::SyncOwner.eq(s.instance_id.clone()))
+            .exec(&tx)
+            .await?;
+        tx.commit().await?;
+        Ok(total)
+    }
+    .await;
+    if let Err(error) = &result {
+        sources::Entity::update_many()
+            .col_expr(sources::Column::State, Expr::value("failed"))
+            .col_expr(sources::Column::LastError, Expr::value(error.stored()))
+            .col_expr(sources::Column::NextSyncAt, Expr::value(db::now() + interval))
+            .col_expr(sources::Column::SyncOwner, Expr::value(""))
+            .col_expr(sources::Column::SyncLeaseUntil, Expr::value(0))
+            .filter(sources::Column::Id.eq(id))
+            .filter(sources::Column::SyncOwner.eq(s.instance_id.clone()))
+            .exec(&s.db)
+            .await?;
+    }
+    result
+}
+
+pub async fn sync(State(s): State<AppState>, admin: Admin, Path(id): Path<Id>) -> Result<Json<Value>> {
+    check_admin(&s.db, &admin).await?;
+    scoped(&s.db, id).await?;
+    let total = synchronize_platform(&s, id.into(), admin.0.user.id.into()).await?;
+    crate::accounts::platform::audit(&s, &s.db, &admin.0.user, "sync", "marketplace-sources", id, json!({"templates":total})).await?;
+    Ok(Json(json!({"templates": total})))
+}
+
+/// Background worker: synchronizes enabled platform sources whose interval elapsed.
+pub async fn scheduler(s: AppState, mut drain: tokio::sync::watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! { _ = drain.changed() => break, _ = tick.tick() => {} }
+        let now = db::now();
+        let due = match sources::Entity::find()
+            .filter(sources::Column::WorkspaceId.eq(PLATFORM))
+            .filter(sources::Column::Enabled.eq(1))
+            .filter(sources::Column::NextSyncAt.lte(now))
+            .filter(sources::Column::SyncLeaseUntil.lte(now))
+            .all(&s.db)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::warn!(%error, "读取平台模板来源失败");
+                continue;
+            }
+        };
+        for row in due {
+            match synchronize_platform(&s, row.id, 0).await {
+                Ok(total) => tracing::info!(source = row.id, total, "平台模板来源已同步"),
+                Err(error) if error.0 == StatusCode::CONFLICT => {}
+                Err(error) => tracing::warn!(source = row.id, %error, "平台模板来源同步失败"),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod sync_tests {
+    use super::tests::{account, body, superadmin};
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Serves each response in order, one connection per response.
+    async fn fixture(responses: Vec<(u16, String)>) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            for (status, body) in responses {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                while !bytes.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let mut part = [0u8; 1024];
+                    let n = stream.read(&mut part).await.unwrap();
+                    if n == 0 { break; }
+                    bytes.extend_from_slice(&part[..n]);
+                }
+                let _ = stream.write_all(format!("HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
+            }
+        });
+        address
+    }
+    fn wrapped(index: &Value) -> String {
+        use base64::Engine;
+        json!({"content": base64::engine::general_purpose::STANDARD.encode(index.to_string()), "encoding": "base64"}).to_string()
+    }
+    fn bundle() -> Value {
+        let app = json!({"apiVersion":"ferry/v1","kind":"Application","metadata":{"name":"web"},"services":[{"name":"web","image":"busybox:1.36"}]});
+        json!({"schemaVersion":2,"packages":[{"key":"web","kind":"app","meta":{"name":{"en-US":"Website"},"category":"web","topology":"single","drivers":["docker"]},"versions":[{"version":"1.0.0","blueprint":app},{"version":"1.1.0","blueprint":app}]}]})
+    }
+    async fn platform_source(s: &AppState, api_base: &str) -> i64 {
+        let (_, Json(created)) = create(State(s.clone()), superadmin(s).await, Json(body("Official"))).await.unwrap();
+        let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+        let mut config: Value = serde_json::from_str(&scoped(&s.db, id).await.unwrap().config).unwrap();
+        config["api_base"] = json!(api_base);
+        sources::Entity::update_many()
+            .col_expr(sources::Column::Config, Expr::value(config.to_string()))
+            .filter(sources::Column::Id.eq(id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        id.into()
+    }
+
+    #[tokio::test]
+    async fn lease_claim_is_exclusive() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let id = platform_source(&s, "http://127.0.0.1:9").await;
+        assert!(claim(&s, id).await.unwrap());
+        assert!(!claim(&s, id).await.unwrap());
+        sources::Entity::update_many()
+            .col_expr(sources::Column::SyncLeaseUntil, Expr::value(db::now() - 1))
+            .filter(sources::Column::Id.eq(id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        assert!(claim(&s, id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn platform_sync_success_and_failure_keep_previous_entries() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let api = fixture(vec![(200, wrapped(&bundle())), (500, "{}".into())]).await;
+        let id = platform_source(&s, &api).await;
+        assert_eq!(synchronize_platform(&s, id, 1).await.unwrap(), 2);
+        let row = scoped(&s.db, id.into()).await.unwrap();
+        assert_eq!(row.state, "idle");
+        assert_eq!(row.synced_by, 1);
+        assert_eq!(row.sync_owner, "");
+        assert!(row.next_sync_at > db::now());
+        assert!(synchronize_platform(&s, id, 0).await.is_err());
+        let row = scoped(&s.db, id.into()).await.unwrap();
+        assert_eq!(row.state, "failed");
+        assert!(!row.last_error.is_empty());
+        assert!(row.next_sync_at > db::now());
+        assert_eq!(row.sync_lease_until, 0);
+        let kept = entries::Entity::find().filter(entries::Column::SourceId.eq(id)).count(&s.db).await.unwrap();
+        assert_eq!(kept, 2);
+        let Json(listed) = get(State(s.clone()), account(1, true), Path(id.into())).await.unwrap();
+        assert_eq!(listed["entry_count"], 2);
+    }
+
+    #[tokio::test]
+    async fn manual_sync_rejected_while_leased() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let id = platform_source(&s, "http://127.0.0.1:9").await;
+        assert!(claim(&s, id).await.unwrap());
+        assert_eq!(synchronize_platform(&s, id, 1).await.err().unwrap().0, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn recover_ignores_platform_rows() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let id = platform_source(&s, "http://127.0.0.1:9").await;
+        assert!(claim(&s, id).await.unwrap());
+        super::super::recover(&s).await.unwrap();
+        assert_eq!(scoped(&s.db, id.into()).await.unwrap().state, "syncing");
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

@@ -262,6 +262,7 @@ async fn main() -> anyhow::Result<()> {
         drain_rx.clone(),
     ));
     let cron_task = tokio::spawn(cron_jobs::scheduler(s.clone(), cron_rx, drain_rx.clone()));
+    let marketplace_task = tokio::spawn(marketplace::platform::scheduler(s.clone(), drain_rx.clone()));
     let runner_auto_update_task = tokio::spawn(hosts::runner::automatic_updates(
         s.clone(),
         drain_rx.clone(),
@@ -358,6 +359,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/api/platform/marketplace-sources",get(marketplace::platform::list).post(marketplace::platform::create))
         .route("/api/platform/marketplace-sources/{id}",get(marketplace::platform::get).patch(marketplace::platform::update).delete(marketplace::platform::delete))
+        .route("/api/platform/marketplace-sources/{id}/synchronizations",post(marketplace::platform::sync))
         .route("/api/platform/server-nodes",get(accounts::platform::server_nodes))
         .route("/api/platform/monitor/activity",get(accounts::platform::list_activity))
         .route("/api/platform/monitor/database",get(platform_monitor::database::overview))
@@ -454,6 +456,7 @@ async fn main() -> anyhow::Result<()> {
     repository_analysis_task.await?;
     recovery_task.await?;
     cron_task.await?;
+    marketplace_task.await?;
     workflow_task.await?;
     conversation_task.await?;
     deployment_task.await?;
