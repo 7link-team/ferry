@@ -124,11 +124,13 @@ pub(super) fn merge<'a>(lists: impl IntoIterator<Item = &'a Value>) -> Value {
     }
     json!(out)
 }
-/// Each blueprint host's compiled application, as stored in a revision's `rendered`.
-pub(super) fn rendered(targets: &[HostTarget]) -> Result<String> {
+/// Each blueprint host's compiled application and the snapshot file names its own artifact
+/// references, as stored in a revision's `rendered`.
+pub(super) fn rendered(targets: &[HostTarget], files: &[Vec<String>]) -> Result<String> {
     serde_json::to_string_pretty(&json!({"targets": targets
         .iter()
-        .map(|t| json!({"host_id": t.host_id, "manifest": t.app.manifest}))
+        .zip(files)
+        .map(|(t, files)| json!({"host_id": t.host_id, "manifest": t.app.manifest, "files": files}))
         .collect::<Vec<_>>()}))
     .map_err(|_| {
         ApiError::localized(
@@ -428,16 +430,26 @@ pub(super) async fn execute(
             crate::i18n::Message::new("deployment.error.063"),
         ));
     }
-    // A blueprint host runs its own compiled application, stored with the revision.
-    let mut manifests = BTreeMap::new();
+    // A blueprint host runs its own compiled application with only its own snapshot files.
+    // Everything is checked before any target starts, so a damaged revision fails cleanly.
+    let mut per_host = BTreeMap::new();
     if app.target_kind == "blueprint" {
-        let doc: Value = serde_json::from_str(&rev.rendered).unwrap_or_default();
-        for target in doc["targets"].as_array().into_iter().flatten() {
-            if let (Some(host), Some(manifest)) =
-                (target["host_id"].as_str(), target["manifest"].as_str())
-            {
-                manifests.insert(host.to_owned(), manifest.to_owned());
-            }
+        let all = open_snapshot(&s.vault, rev)?;
+        let Some(plans) = stored_plans(&rev.rendered, &all).filter(|plans| {
+            rows.iter()
+                .all(|row| plans.contains_key(&row.host_id.to_string()))
+        }) else {
+            let mut output = StoredText::new();
+            output.push_message(Message::new("deployment.error.063"));
+            return Ok((false, output.stored()));
+        };
+        for (host, (manifest, files)) in plans {
+            let own: BTreeMap<String, String> = files
+                .iter()
+                .map(|name| (name.clone(), all[name].clone()))
+                .collect();
+            let sealed = seal_snapshot(&s.vault, rev.workspace_id, rev.id, &own)?;
+            per_host.insert(host, (manifest, sealed));
         }
     }
     let mut output = StoredText::new();
@@ -470,18 +482,10 @@ pub(super) async fn execute(
             .await?;
         let mut host_app = host_app(app, row.host_id.into(), app.manifest.clone());
         let mut host_revision = rev.clone();
-        if app.target_kind == "blueprint" {
-            let manifest = manifests
-                .get(&row.host_id.to_string())
-                .cloned()
-                .ok_or_else(|| {
-                    ApiError::localized(
-                        axum::http::StatusCode::BAD_REQUEST,
-                        crate::i18n::Message::new("deployment.error.063"),
-                    )
-                })?;
+        if let Some((manifest, sealed)) = per_host.get(&row.host_id.to_string()) {
             host_app.manifest = manifest.clone();
-            host_revision.manifest = manifest;
+            host_revision.manifest = manifest.clone();
+            host_revision.variable_snapshot = Some(sealed.clone());
         }
         host_revision.artifact = row.artifact;
         host_revision.expected_hash = row.expected_hash;
@@ -554,6 +558,37 @@ pub(super) async fn execute(
     Ok((true, output.stored()))
 }
 
+/// Host id → (compiled application, own snapshot files) from a blueprint revision's
+/// `rendered`; `None` when any entry is missing, malformed, or names a file the sealed
+/// snapshot does not hold.
+fn stored_plans(
+    rendered: &str,
+    snapshot: &BTreeMap<String, String>,
+) -> Option<BTreeMap<String, (String, Vec<String>)>> {
+    let doc: Value = serde_json::from_str(rendered).ok()?;
+    let mut plans = BTreeMap::new();
+    for target in doc["targets"].as_array()? {
+        let host = target["host_id"].as_str()?;
+        let manifest = target["manifest"].as_str()?;
+        manifest::parse(manifest).ok()?;
+        let files = target["files"]
+            .as_array()?
+            .iter()
+            .map(|name| {
+                name.as_str()
+                    .filter(|name| snapshot.contains_key(*name))
+                    .map(str::to_owned)
+            })
+            .collect::<Option<Vec<_>>>()?;
+        if plans
+            .insert(host.to_owned(), (manifest.to_owned(), files))
+            .is_some()
+        {
+            return None;
+        }
+    }
+    Some(plans)
+}
 pub(super) async fn remove(conn: &impl ConnectionTrait, workspace: Id, app: i64) -> Result<()> {
     targets::Entity::delete_many()
         .filter(targets::Column::WorkspaceId.eq(workspace))

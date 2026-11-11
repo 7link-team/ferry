@@ -234,8 +234,8 @@ async fn check_blueprint(
         let pointer = "/service/artifact/pipeline";
         if let Some(pipeline) = role.pointer(pointer).and_then(Value::as_str) {
             scope.require("pipelines.read")?;
-            let id =
-                crate::pipelines::artifacts::pipeline_id(conn, scope.workspace_id, pipeline).await?;
+            let id = crate::pipelines::artifacts::pipeline_id(conn, scope.workspace_id, pipeline)
+                .await?;
             *role.pointer_mut(pointer).unwrap() = json!(id.to_string());
         }
     }
@@ -1439,13 +1439,18 @@ async fn trigger(
                 crate::i18n::Message::new("deployment.error.040"),
             ));
         }
+        // The sealed snapshot is the union; each blueprint host records the names its own
+        // artifact references so execution uploads only those to it.
         let mut files = BTreeMap::new();
+        let mut names = Vec::new();
         for (metadata, rows, configs) in &bound {
-            files.extend(environment_files(s, metadata, rows, &r.mode)?);
-            files.extend(config_files(s, metadata, rows, configs)?);
+            let mut own = environment_files(s, metadata, rows, &r.mode)?;
+            own.extend(config_files(s, metadata, rows, configs)?);
+            names.push(own.keys().cloned().collect::<Vec<_>>());
+            files.extend(own);
         }
         let rendered = if r.target_kind == "blueprint" {
-            groups::rendered(&hosts)?
+            groups::rendered(&hosts, &names)?
         } else {
             manifest::render_for(&manifest::parse_for(&r.manifest, &r.mode)?, &r.mode)?
         };

@@ -544,3 +544,177 @@ async fn blueprint_variables_are_found_in_compiled_applications() {
     hosts::Entity::delete_by_id(792).exec(&s.db).await.unwrap();
     assert_eq!(applications(&r).unwrap().len(), 2);
 }
+
+async fn config(s: &AppState, id: i64, name: &str, content: &str, parameters: &str) {
+    use crate::entities::config_templates as t;
+    t::Entity::insert(t::ActiveModel {
+        id: Set(id),
+        workspace_id: Set(1),
+        name: Set(name.into()),
+        description: Set(String::new()),
+        content: Set(content.into()),
+        parameters: Set(parameters.into()),
+        version: Set(1),
+        created_at: Set(1),
+        updated_at: Set(1),
+        ..Default::default()
+    })
+    .exec(&s.db)
+    .await
+    .unwrap();
+}
+
+async fn secret(s: &AppState, id: i64, name: &str, value: &str) {
+    crate::entities::variables::Entity::insert(crate::entities::variables::ActiveModel {
+        id: Set(id),
+        workspace_id: Set(1),
+        name: Set(name.into()),
+        scope: Set("global".into()),
+        scope_ref: Set(0),
+        kind: Set("secret".into()),
+        description: Set(String::new()),
+        value: Set(s
+            .vault
+            .seal(value, &crate::vault::aad("1", "variables", &id.to_string()))
+            .unwrap()),
+        version: Set(1),
+        created_at: Set(1),
+        updated_at: Set(1),
+    })
+    .exec(&s.db)
+    .await
+    .unwrap();
+}
+
+/// Two roles on two hosts; each role's env and config use a secret of its own.
+async fn two_roles(s: &AppState, hosts: [i64; 2]) -> String {
+    const PASSWORD: &str = r#"[{"name":"password","type":"string","secret":true}]"#;
+    config(
+        s,
+        611,
+        "alpha-conf",
+        "role=alpha\npassword={{ .Values.password }}\n",
+        PASSWORD,
+    )
+    .await;
+    config(
+        s,
+        612,
+        "bravo-conf",
+        "role=bravo\npassword={{ .Values.password }}\n",
+        PASSWORD,
+    )
+    .await;
+    secret(s, 621, "alpha-env", "ALPHA-ENV-SECRET").await;
+    secret(s, 622, "alpha-file", "ALPHA-FILE-SECRET").await;
+    secret(s, 623, "bravo-env", "BRAVO-ENV-SECRET").await;
+    secret(s, 624, "bravo-file", "BRAVO-FILE-SECRET").await;
+    let role = |name: &str| {
+        json!({
+            "name": name,
+            "instances": {"min": 1, "max": 1, "default": 1},
+            "identity": "stateless",
+            "service": {
+                "image": format!("{name}:1"),
+                "env": [{"name": "TOKEN", "valueFrom": format!("variable/{name}-env")}],
+                "files": [{"path": "/etc/app.conf", "fromTemplate": format!("{name}-conf"),
+                           "values": {"password": format!("{name}-file")}}]
+            }
+        })
+    };
+    let manifest = json!({
+        "apiVersion": "ferry/blueprint-v1",
+        "kind": "Blueprint",
+        "metadata": {"name": "pair"},
+        "roles": [role("alpha"), role("bravo")],
+        "drivers": {"docker": {"supported": true}}
+    })
+    .to_string();
+    let binding = json!({"driver": "docker", "roles": {
+        "alpha": [{"hostId": hosts[0].to_string(), "address": "10.0.0.1"}],
+        "bravo": [{"hostId": hosts[1].to_string(), "address": "10.0.0.2"}]
+    }});
+    create_app(
+        s,
+        json!({"name": "pair", "manifest": manifest, "mode": "docker",
+               "target_kind": "blueprint", "target_ref": "0", "workdir": "/srv",
+               "blueprint_binding": binding}),
+    )
+    .await
+    .unwrap()
+}
+
+fn uploaded(host: i64) -> String {
+    let fake = crate::hosts::fake::get(host);
+    let files = fake.files.lock().unwrap();
+    files.values().cloned().collect::<Vec<_>>().join("\n")
+}
+
+#[tokio::test]
+async fn blueprint_hosts_receive_only_their_own_files() {
+    let (_dir, s) = fixture(&[801, 802]).await;
+    let id = two_roles(&s, [801, 802]).await;
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let rev = revision(&s, &apply_preview(&s, &id, &preview).await.unwrap()).await;
+    // The sealed revision snapshot still holds every host's files.
+    let all = open_snapshot(&s.vault, &rev).unwrap();
+    assert_eq!(all.len(), 4);
+    let (ok, output) = execute(&s, &rev).await.unwrap();
+    assert!(ok, "{output}");
+
+    let alpha = uploaded(801);
+    assert!(alpha.contains("ALPHA-ENV-SECRET") && alpha.contains("ALPHA-FILE-SECRET"));
+    assert!(!alpha.contains("BRAVO"), "{alpha}");
+    let bravo = uploaded(802);
+    assert!(bravo.contains("BRAVO-ENV-SECRET") && bravo.contains("BRAVO-FILE-SECRET"));
+    assert!(!bravo.contains("ALPHA"), "{bravo}");
+    // Each host's file set is recorded with its application for replay.
+    let rendered: Value = serde_json::from_str(&rev.rendered).unwrap();
+    for target in rendered["targets"].as_array().unwrap() {
+        assert_eq!(target["files"].as_array().unwrap().len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn blueprint_execution_rejects_damaged_targets_before_running() {
+    let (_dir, s) = fixture(&[811, 812]).await;
+    let id = create_app(&s, body(&[811, 812])).await.unwrap();
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let applied = apply_preview(&s, &id, &preview).await.unwrap();
+    let rev = revision(&s, &applied).await;
+    let mut rendered: Value = serde_json::from_str(&rev.rendered).unwrap();
+    let missing = {
+        let mut doc = rendered.clone();
+        doc["targets"].as_array_mut().unwrap().pop();
+        doc.to_string()
+    };
+    rendered["targets"][0]["files"] = json!([".config-unknown.txt"]);
+    for damaged in [missing, rendered.to_string(), "not json".to_owned()] {
+        let mut broken = rev.clone();
+        broken.rendered = damaged;
+        let (ok, output) = execute(&s, &broken).await.unwrap();
+        assert!(!ok);
+        assert!(output.contains("deployment.error.063"), "{output}");
+        let states: Vec<String> = target_rows(&s, &applied)
+            .await
+            .into_iter()
+            .map(|t| t.state)
+            .collect();
+        assert_eq!(states, ["pending", "pending"]);
+    }
+    // Finishing the failed revision settles the untouched targets as skipped.
+    finish(&s, &rev, "failed", "").await.unwrap();
+    assert!(
+        target_rows(&s, &applied)
+            .await
+            .iter()
+            .all(|t| t.state == "skipped")
+    );
+    assert!(
+        crate::hosts::fake::get(811)
+            .files
+            .lock()
+            .unwrap()
+            .is_empty()
+    );
+}
