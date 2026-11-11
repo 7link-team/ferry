@@ -171,7 +171,7 @@ it("creates missing optional objects including a complete strategy and handles e
   const readiness = [...host.querySelectorAll("label")].find(
     (l) => l.textContent === "就绪检查（HTTP）",
   )!;
-  await act(async () => readiness.querySelector("button")!.click());
+  await act(async () => (readiness.control as HTMLButtonElement).click());
   expect(parse(latest).services[0].resources).toEqual({
     limits: { cpu: "500m" },
   });

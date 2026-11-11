@@ -1,3 +1,4 @@
+import { AutoField } from "../../shared/forms/auto-form";
 import { Switch } from "../../shared/ui/switch";
 import { NotificationParameters } from "../notifications/NotificationParameters";
 import { WorkflowAssetContext } from "./WorkflowAssets";
@@ -122,14 +123,11 @@ function Check({
   change: (value: boolean) => void;
 }) {
   return (
-    <label className="flex items-center gap-2 text-sm">
-      <Switch
+    <AutoField label={label} className="min-w-40"><Switch
         checked={value}
         disabled={readOnly}
         onCheckedChange={(checked) => change(checked)}
-      />
-      <FieldCaption label={label} />
-    </label>
+      /></AutoField>
   );
 }
 function Rows<T>({

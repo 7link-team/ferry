@@ -508,7 +508,14 @@ pub async fn update(
         action,
         "workflows",
         &id,
-        json!({"revision_id":Id::from(revision.id),"version":row.version}),
+        json!({"name":row.name,"revision_id":Id::from(revision.id),"version":row.version,
+            "definition_changed":current.definition != row.definition,
+            "changes":crate::hosts::activity_changes(
+                json!({"name":current.name,"description":current.description,"group_id":Id::from(current.group_id),
+                    "lifecycle":current.lifecycle,"draft_revision_id":Id::from(current.draft_revision_id)}),
+                json!({"name":row.name,"description":row.description,"group_id":Id::from(row.group_id),
+                    "lifecycle":row.lifecycle,"draft_revision_id":Id::from(row.draft_revision_id)})
+            )}),
     )
     .await?;
     tx.commit().await?;

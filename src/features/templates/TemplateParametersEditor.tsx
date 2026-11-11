@@ -86,13 +86,13 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-3">
-            <label className="flex items-center gap-2 text-sm"><Switch checked={row.default !== undefined} disabled={readOnly} onCheckedChange={checked => update(index, { default: checked ? row.type === "boolean" ? false : row.type === "integer" ? 0 : "" : undefined })} />{t("useDefault")}</label>
+            <AutoField label={<>{t("useDefault")}</>} className="min-w-40"><Switch checked={row.default !== undefined} disabled={readOnly} onCheckedChange={checked => update(index, { default: checked ? row.type === "boolean" ? false : row.type === "integer" ? 0 : "" : undefined })} /></AutoField>
             {row.default !== undefined && <AutoField label={t("defaultValue")} help={row.secret ? t("secretDefaultHelp") : undefined}>
               {row.type === "boolean" ? <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={String(row.default)} disabled={readOnly} onChange={event => update(index, { default: event.target.value === "true" })}><option value="true">{commonText("common.yes")}</option><option value="false">{commonText("common.no")}</option></select>
                 : <Input type={row.type === "integer" ? "number" : "text"} step={row.type === "integer" ? 1 : undefined} value={String(row.default)} disabled={readOnly} onChange={event => update(index, { default: row.type === "integer" ? event.target.value === "" ? "" : Number(event.target.value) : event.target.value })} />}
             </AutoField>}
           </div>
-          {row.type === "string" && <label className="flex items-start gap-2 pt-1 text-sm"><Switch checked={!!row.secret} disabled={readOnly} onCheckedChange={checked => update(index, { secret: !!checked })} /><span>{t("secretReference")}<span className="mt-1 block text-xs text-muted-foreground">{t("secretDefaultHelp")}</span></span></label>}
+          {row.type === "string" && <AutoField label={t("secretReference")} help={t("secretDefaultHelp")} className="min-w-40"><Switch checked={!!row.secret} disabled={readOnly} onCheckedChange={checked => update(index, { secret: !!checked })} /></AutoField>}
         </div>
         {row.type !== "boolean" && <details className="space-y-3">
           <summary className="cursor-pointer text-sm font-medium">{t("validationRules")}</summary>
@@ -101,7 +101,7 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
             {row.type === "string" && <AutoField label={t("enumChoices")} help={t("enumChoicesHelp")} className="sm:col-span-2"><textarea className="min-h-24 w-full rounded-md border bg-background p-3 text-sm" value={row.enum?.join("\n") ?? ""} disabled={readOnly} onChange={event => update(index, { enum: event.target.value === "" ? undefined : event.target.value.split("\n") })} /></AutoField>}
           </div>
         </details>}
-        </>}
+       </>}
         <code className="block min-w-0 break-all border-t border-border/70 pt-2 text-xs text-muted-foreground">{`{{ .Values.${row.name} }}`}</code>
         </div>
       </fieldset>)}
@@ -110,7 +110,7 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
         while (parsed.some(row => row.name === `parameter_${number}`)) number++;
         onChange(JSON.stringify([...parsed, { name: `parameter_${number}`, type: "string" }], null, 2));
       }}><Plus className="size-4" />{t("addParameter")}</Button>}
-    </>}
+   </>}
     {invalid && <p role="alert" className="text-sm text-destructive">{t("parameterNamesInvalid")}</p>}
   </section>;
 }

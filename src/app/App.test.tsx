@@ -46,9 +46,9 @@ it("keeps notification templates and deliveries in tabs under one grouped mainte
   history.replaceState({}, "", "/zh-CN/workspaces/2/notification-templates");
   await act(async () => root.render(<App />));
   const sidebar = host.querySelector('nav[aria-label="维护"]')!;
-  expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["邮件", "短信", "第三方平台", "成员", "智能体", "角色", "模型", "配置项"]);
+  expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["邮件", "短信", "第三方平台", "智能体", "成员", "角色", "模型", "配置项"]);
   expect(sidebar.querySelector('[aria-current="page"]')?.textContent).toBe("邮件");
-  expect(sidebar.querySelector('[role="group"][aria-label="身份与权限"]')?.textContent).toContain("成员智能体角色");
+  expect(sidebar.querySelector('[role="group"][aria-label="身份与权限"]')?.textContent).toContain("智能体成员角色");
   const related = host.querySelector('nav[aria-label="通知页面"]')!;
   expect([...related.querySelectorAll("a")].map(a => a.textContent)).toEqual(["邮件", "通知模板", "发送记录"]);
   expect(related.querySelector('[aria-current="page"]')?.textContent).toBe("通知模板");

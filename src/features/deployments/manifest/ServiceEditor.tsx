@@ -509,8 +509,8 @@ export function ServiceEditor({
           const enabled = plain(healthPath) != null;
           return (
             <section key={key} className="space-y-3">
-              <label className="flex items-center gap-2 text-sm">
-                <Switch
+              <AutoField label={<>{label}（HTTP）
+              </>} className="min-w-40"><Switch
                   disabled={readOnly}
                   checked={enabled}
                   onCheckedChange={(checked) =>
@@ -526,9 +526,7 @@ export function ServiceEditor({
                         : undefined,
                     )
                   }
-                />
-                {label}（HTTP）
-              </label>
+                /></AutoField>
               {enabled && (
                 <div className={grid}>
                   {text(

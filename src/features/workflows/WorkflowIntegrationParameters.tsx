@@ -1,3 +1,4 @@
+import { AutoField } from "../../shared/forms/auto-form";
 import { Switch } from "../../shared/ui/switch";
 import { FieldCaption } from "../../shared/forms/FieldHelp";
 import { Dialog } from "radix-ui";
@@ -71,7 +72,7 @@ function Field({
         <span className="block font-medium"><FieldCaption label={<>
           {label}
           {required ? ` · ${t("required")}` : ""}
-        </>} help={name === "directory" ? t("integration.gitDirectoryHelp") : undefined} /></span>
+       </>} help={name === "directory" ? t("integration.gitDirectoryHelp") : undefined} /></span>
         {spec.type === "boolean" ? (
           <select className={control} aria-label={label} disabled={readOnly} value={value === undefined ? "" : String(value)} onChange={event => change(event.target.value === "" ? undefined : event.target.value === "true")}>
             <option value="">{t("selectValue")}</option>
@@ -316,16 +317,16 @@ export function WorkflowIntegrationParameters({
         }}/>
         <p className="text-xs leading-5 text-muted-foreground">{t("integration.connectionHelp")}</p>
         {repositories.error && <p role="alert" className="text-sm text-destructive">{repositories.error}</p>}
-        {clone && !!value.connection_id && repositories.connection?.provider !== "git" && <label className="flex min-h-11 items-center gap-2 text-sm"><Switch   disabled={readOnly} checked={batch} onCheckedChange={checked => {
+        {clone && !!value.connection_id && repositories.connection?.provider !== "git" && <AutoField label={<>{t("actions.cloneMultiple")}</>} className="min-w-40"><Switch   disabled={readOnly} checked={batch} onCheckedChange={checked => {
           const next = {...value};
           if (checked) next.repositories = repositories.repositories.filter(row => row.url === value.url).map(({url,name,full_name}) => ({url,name,full_name}));
           else delete next.repositories;
           change(next);
-        }}/>{t("actions.cloneMultiple")}</label>}
+        }}/></AutoField>}
         {batch && <>
           <p className="text-xs leading-5 text-muted-foreground">{t("integration.cloneBatchHelp")}</p>
           {readOnly ? <ul className="space-y-1 text-sm">{(value.repositories as CloneRepository[]).map(row => <li key={row.url} className="break-all">{row.full_name || row.name}</li>)}</ul> : <RepositoryMultiSelect rows={repositories.repositories} selected={value.repositories as CloneRepository[]} disabled={repositories.loading || !!repositories.error} change={rows => change({...value,repositories:rows.map(({url,name,full_name})=>({url,name,...(full_name?{full_name}:{})})),url:rows[0]?.url ?? ""})} />}
-        </>}
+       </>}
         {!!value.connection_id && !batch && !readOnly && repositories.connection?.provider !== "git" && !spec.type.endsWith("repository.list") && <label className="block space-y-2 text-sm">
           <span className="block font-medium"><FieldCaption label={t("integration.chooseRepository")} /></span>
           <select className={control} aria-label={t("integration.chooseRepository")} value={gitNetwork ? String(value.url ?? "") : ""} required={gitNetwork} disabled={repositories.loading} onChange={event => {

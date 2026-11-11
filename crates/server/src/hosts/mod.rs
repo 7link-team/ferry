@@ -1234,6 +1234,39 @@ where
     })
 }
 
+/// Compare caller-selected public fields only. Never pass a credential/config model.
+pub(crate) fn activity_changes(before: Value, after: Value) -> Value {
+    let keys: std::collections::BTreeSet<_> = before.as_object().into_iter().flat_map(|v| v.keys())
+        .chain(after.as_object().into_iter().flat_map(|v| v.keys())).collect();
+    let mut changes = serde_json::Map::new();
+    for key in keys {
+        if before.get(key) != after.get(key) {
+            changes.insert(key.clone(), json!({
+                "before":before.get(key), "after":after.get(key),
+                "before_present":before.get(key).is_some(), "after_present":after.get(key).is_some()
+            }));
+        }
+    }
+    Value::Object(changes)
+}
+
+#[cfg(test)]
+#[test]
+fn audit_changes_preserve_false_zero_null_absence_and_actual_deltas() {
+    let before = json!({"enabled":true,"count":1,"same":"x","removed":null,"nested":{"x":1}});
+    let after = json!({"enabled":false,"count":0,"same":"x","added":null,"nested":{"x":2}});
+    let changes = activity_changes(before.clone(), after);
+    assert_eq!(changes["enabled"]["after"], false);
+    assert_eq!(changes["count"]["after"], 0);
+    assert!(changes.get("same").is_none());
+    assert_eq!(changes["removed"]["before_present"], true);
+    assert_eq!(changes["removed"]["after_present"], false);
+    assert_eq!(changes["added"]["before_present"], false);
+    assert_eq!(changes["added"]["after_present"], true);
+    assert_eq!(changes["nested"]["before"]["x"], 1);
+    assert_eq!(activity_changes(before.clone(), before), json!({}));
+}
+
 pub async fn activity(
     s: &AppState,
     scope: &Scope,
@@ -1345,6 +1378,36 @@ pub async fn list_activity(
         &query,
     )
     .await?;
+    let conversation_names = crate::conversations::audit_titles(
+        &s.db,
+        &scope,
+        rows.iter().filter(|row| row.resource == "conversations").map(|row| row.resource_id).collect(),
+    ).await?;
+    let mut resource_names: HashMap<(String, i64), String> = conversation_names.into_iter()
+        .map(|(id, name)| (("conversations".into(), id), name)).collect();
+    // Resolve current labels only for resources the caller can read in this workspace.
+    // Historic details.name always takes precedence in the UI.
+    use crate::entities::{pipelines, workflows, repositories, hosts as nodes};
+    macro_rules! current_names {
+        ($resource:literal, $entity:ident, $permission:literal) => {
+            if scope.permissions.contains($permission) {
+                let ids: Vec<i64> = rows.iter().filter(|row| row.resource == $resource)
+                    .map(|row| row.resource_id).collect();
+                if !ids.is_empty() {
+                    let names = $entity::Entity::find().select_only()
+                        .columns([$entity::Column::Id, $entity::Column::Name])
+                        .filter($entity::Column::WorkspaceId.eq(scope.workspace_id))
+                        .filter($entity::Column::Id.is_in(ids))
+                        .into_tuple::<(i64, String)>().all(&s.db).await?;
+                    resource_names.extend(names.into_iter().map(|(id, name)| (($resource.into(), id), name)));
+                }
+            }
+        };
+    }
+    current_names!("pipelines", pipelines, "pipelines.read");
+    current_names!("workflows", workflows, "workflows.read");
+    current_names!("repositories", repositories, "repositories.read");
+    current_names!("hosts", nodes, "hosts.read");
     let items: Vec<Value> = rows
         .iter()
         .map(|row| {
@@ -1354,6 +1417,7 @@ pub async fn list_activity(
                 "action": row.action,
                 "resource": row.resource,
                 "resource_id": Id::from(row.resource_id),
+                "resource_name": resource_names.get(&(row.resource.clone(), row.resource_id)),
                 "details": serde_json::from_str::<Value>(&row.details).unwrap_or(json!({})),
                 "created_at": row.created_at,
             })
@@ -1362,6 +1426,29 @@ pub async fn list_activity(
     Ok(Json(
         json!({"items": items, "total": total, "page": query.page, "page_size": query.page_size}),
     ))
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn audit_current_resource_names_require_read_permission_and_matching_workspace() {
+    use crate::agents::tests::{admin, setup};
+    let (_dir, s) = setup().await;
+    for id in [1, 2] {
+        activity(&s, &admin(1), "run", "hosts", &Id::from(id), json!({})).await.unwrap();
+    }
+    let Json(result) = list_activity(State(s.clone()), admin(1), Query(HashMap::new())).await.unwrap();
+    let rows = result["items"].as_array().unwrap();
+    assert!(rows.iter().find(|r| r["resource_id"] == "1").unwrap()["resource_name"].is_string());
+    assert!(matches!(&rows.iter().find(|r| r["resource_id"] == "2").unwrap()["resource_name"], Value::Null));
+    let mut denied = admin(1);
+    denied.permissions.remove("hosts.read");
+    let Json(result) = list_activity(State(s.clone()), denied, Query(HashMap::new())).await.unwrap();
+    assert!(result["items"].as_array().unwrap().iter().all(|r| matches!(&r["resource_name"], Value::Null)));
+    let Json(result) = list_activity(State(s.clone()), admin(2), Query(HashMap::new())).await.unwrap();
+    assert!(result["items"].as_array().unwrap().is_empty());
+    let mut denied = admin(1);
+    denied.permissions.remove("activity.read");
+    assert!(list_activity(State(s), denied, Query(HashMap::new())).await.is_err());
 }
 
 /// Resource counts and state distribution for the dashboard, in one round trip.

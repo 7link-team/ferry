@@ -491,7 +491,7 @@ it("selects a whole Codeup group across pages without duplicates and saves the r
  let current:Record<string,unknown>={};
  function Harness(){const [node,setNode]=useState(()=>newNode(emptyGraph(),'integration.codeup.repository.clone','Clone'));current=node.params;return <WorkflowAssetContext.Provider value={{workspace:'11',workflow:''}}><WorkflowNodeParameters node={node} readOnly={false} invalid={()=>{}} update={params=>setNode(n=>({...n,params}))}/></WorkflowAssetContext.Provider>;}
  await act(async()=>root.render(<Harness/>));await input(t('integration.connection'),'7');
- const batch=[...host.querySelectorAll('label')].find(label=>label.textContent===t('actions.cloneMultiple'))!.querySelector<HTMLButtonElement>('[role="switch"]')!;
+ const batch=[...host.querySelectorAll('label')].find(label=>label.textContent===t('actions.cloneMultiple'))!.control as HTMLButtonElement;
  await act(async()=>batch.click());
  expect(calls.mock.calls.some(([path])=>String(path).includes('page=2'))).toBe(true);
  const group=[...host.querySelectorAll('label')].find(label=>label.textContent==='team · 2')!.querySelector<HTMLInputElement>('input')!;

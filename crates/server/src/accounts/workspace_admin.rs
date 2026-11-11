@@ -294,7 +294,10 @@ pub async fn update_role(
         "update",
         "roles",
         &id,
-        json!({"name":name,"permissions":permissions}),
+        json!({"name":name,"permissions":permissions,"changes":crate::hosts::activity_changes(
+            json!({"name":old.name,"permissions":role_permissions(&old)?}),
+            json!({"name":name,"permissions":permissions})
+        )}),
     )
     .await?;
     tx.commit().await?;

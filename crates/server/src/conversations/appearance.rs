@@ -48,10 +48,15 @@ pub(super) async fn update(
         }
     }
     let mut config: Value = serde_json::from_str(&c.config).map_err(|_| invalid())?;
+    let changes = crate::hosts::activity_changes(
+        config.get("appearance").map(|value| json!({"appearance":value})).unwrap_or(json!({})),
+        json!({"appearance":body}),
+    );
     config["appearance"] = serde_json::to_value(&body).unwrap();
     c.config = config.to_string();
     c.version += 1;
     c.updated_at = db::now();
+    let title = c.title.clone();
     c.into_active_model().reset_all().update(&tx).await?;
     crate::hosts::activity_in(
         &s,
@@ -60,7 +65,7 @@ pub(super) async fn update(
         "update",
         "conversations",
         &id,
-        json!({"appearance":body}),
+        json!({"name":title,"appearance":body,"changes":changes}),
     )
     .await?;
     tx.commit().await?;
@@ -97,6 +102,26 @@ mod tests {
             "dots"
         );
         assert!(preserve(&c.config, "{\"model\":\"new\"}").contains("dots"));
+        let audit = crate::entities::activity::Entity::find()
+            .filter(crate::entities::activity::Column::ResourceId.eq(id))
+            .filter(crate::entities::activity::Column::Action.eq("update"))
+            .one(&s.db).await.unwrap().unwrap();
+        let details: Value = serde_json::from_str(&audit.details).unwrap();
+        assert_eq!(details["name"], c.title);
+        assert_eq!(details["appearance"]["color"], "#182634");
+        assert_eq!(details["changes"]["appearance"]["after"]["color"], "#182634");
+        assert_eq!(details["changes"]["appearance"]["before"], Value::Null);
+        assert_eq!(details["changes"]["appearance"]["before_present"], false);
+        let changed = Appearance { color: "#334455".into(), ..body() };
+        update(State(s.clone()), admin(1), Path(("1".into(), id)), Json(changed)).await.unwrap();
+        let audits = crate::entities::activity::Entity::find()
+            .filter(crate::entities::activity::Column::ResourceId.eq(id))
+            .filter(crate::entities::activity::Column::Action.eq("update"))
+            .all(&s.db).await.unwrap();
+        let details: Vec<Value> = audits.iter().map(|a| serde_json::from_str(&a.details).unwrap()).collect();
+        let delta = details.iter().find(|v| v["appearance"]["color"] == "#334455").unwrap();
+        assert_eq!(delta["changes"]["appearance"]["before"]["color"], "#182634");
+        assert_eq!(delta["changes"]["appearance"]["after"]["color"], "#334455");
         let mut other = admin(1);
         other.user.id = 999.into();
         assert!(
