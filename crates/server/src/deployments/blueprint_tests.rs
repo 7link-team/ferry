@@ -407,6 +407,38 @@ async fn binding_frozen_after_first_revision() {
 }
 
 #[tokio::test]
+async fn free_text_name_and_rename_keep_compiled_hosts() {
+    let (_dir, s) = fixture(&[771, 772]).await;
+    let mut b = body(&[771, 772]);
+    b["name"] = json!("NATS cluster");
+    let id = create_app(&s, b).await.unwrap();
+    let before = preview_of(&s, &id, None).await.unwrap();
+    let desired: Value = serde_json::from_str(before["desired"].as_str().unwrap()).unwrap();
+    let plans = groups::compiled(&row(&s, &id).await).unwrap();
+    let manifest: Value = serde_json::from_str(&plans[0].manifest).unwrap();
+    // Compiled applications are named by the blueprint, never by the deployment.
+    assert_eq!(manifest["metadata"]["name"], "nats");
+    assert_eq!(desired["targets"].as_array().unwrap().len(), 2);
+
+    let mut b = body(&[771, 772]);
+    b["name"] = json!("Messaging (renamed)");
+    b["version"] = json!(row(&s, &id).await.version);
+    update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id.clone())),
+        Json(serde_json::from_value(b).unwrap()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(row(&s, &id).await.name, "Messaging (renamed)");
+    let after = preview_of(&s, &id, None).await.unwrap();
+    assert_eq!(after["desired"], before["desired"]);
+    assert_eq!(after["target_hashes"], before["target_hashes"]);
+    assert_eq!(after["expected_hash"], before["expected_hash"]);
+}
+
+#[tokio::test]
 async fn blueprint_rollback_replays_stored_targets() {
     let (_dir, s) = fixture(&[761, 762]).await;
     let id = create_app(&s, body(&[761, 762])).await.unwrap();

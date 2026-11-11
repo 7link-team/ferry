@@ -9,6 +9,9 @@
   },
   "description": {
     "zh-CN": "两个或更多无状态 Nginx Web 实例分布在不同主机，前置 Nginx 负载均衡器，其 upstream 由 Ferry 按实例绑定生成。",
+    "zh-TW": "兩個或更多無狀態 Nginx Web 實例分布於不同主機，前置 Nginx 負載平衡器，其 upstream 由 Ferry 依實例綁定產生。",
+    "ja-JP": "別々のホストに配置した 2 台以上のステートレスな Nginx Web インスタンスと、その前段の Nginx ロードバランサー。upstream は Ferry がインスタンスの割り当てから生成します。",
+    "ko-KR": "서로 다른 호스트에 배치된 2개 이상의 무상태 Nginx 웹 인스턴스와 그 앞단의 Nginx 로드 밸런서이며, upstream은 Ferry가 인스턴스 바인딩에서 생성합니다.",
     "en-US": "Two or more stateless Nginx web instances on distinct hosts behind an Nginx load balancer whose upstream Ferry generates from the instance binding.",
     "ms-MY": "Dua atau lebih instans web Nginx tanpa keadaan pada hos berbeza di belakang pengimbang beban Nginx yang upstreamnya dijana oleh Ferry daripada pengikatan instans."
   },

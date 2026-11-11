@@ -307,8 +307,10 @@ struct Target {
 }
 
 /// Compiles a stored (phase-1) blueprint text and a validated binding into one ferry/v2
-/// Application per host. `.Values` are already inlined, so only instance actions remain.
-pub fn compile(bp_text: &str, binding: &Binding, app_name: &str) -> Result<Vec<HostPlan>> {
+/// Application per host, named after the blueprint (`metadata.name`, owned by the template
+/// and stable across deployment renames). `.Values` are already inlined, so only instance
+/// actions remain.
+pub fn compile(bp_text: &str, binding: &Binding) -> Result<Vec<HostPlan>> {
     let bp = model::parse(bp_text)?;
     let adapter = adapter(&binding.driver)?;
     let driver = adapter.id();
@@ -363,7 +365,7 @@ pub fn compile(bp_text: &str, binding: &Binding, app_name: &str) -> Result<Vec<H
         let mut doc = json!({
             "apiVersion": "ferry/v2",
             "kind": "Application",
-            "metadata": {"name": app_name},
+            "metadata": {"name": bp.metadata.name},
             "services": target.services,
         });
         if let Some(strategy) = &bp.strategy {
@@ -458,14 +460,14 @@ mod tests {
     #[test]
     fn native_three_hosts_one_application_each() {
         let b = binding("native", &[three_hosts("nats")]);
-        let plans = compile(&nats_native(), &b, "mq").unwrap();
+        let plans = compile(&nats_native(), &b).unwrap();
         assert_eq!(plans.len(), 3);
         for (i, plan) in plans.iter().enumerate() {
             assert_eq!(plan.host_id, Id::from(i as i64 + 1));
             let d = doc(plan);
             assert_eq!(d["apiVersion"], "ferry/v2");
             assert_eq!(d["kind"], "Application");
-            assert_eq!(d["metadata"]["name"], "mq");
+            assert_eq!(d["metadata"]["name"], "demo");
             assert_eq!(d["strategy"]["type"], "recreate");
             let services = d["services"].as_array().unwrap();
             assert_eq!(services.len(), 1);
@@ -506,7 +508,7 @@ mod tests {
             "compose",
             &[("nats", &[(7, "10.0.0.7"), (7, "10.0.0.7"), (7, "10.0.0.7")])],
         );
-        let plans = compile(&text, &b, "mq").unwrap();
+        let plans = compile(&text, &b).unwrap();
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].host_id, Id::from(7));
         let d = doc(&plans[0]);
@@ -525,7 +527,7 @@ mod tests {
         assert_eq!((inst.host.as_str(), inst.ports["client"]), ("nats-1", 4222));
         let split = binding("compose", &[("nats", &[(7, "a"), (8, "b"), (7, "a")])]);
         assert_eq!(
-            err_key(compile(&text, &split, "mq")).0,
+            err_key(compile(&text, &split)).0,
             "blueprint.bindingComposeSingleHost"
         );
     }
@@ -554,7 +556,7 @@ mod tests {
     #[test]
     fn colocated_sentinel_and_redis_share_host_application() {
         let b = binding("docker", &[three_hosts("redis"), three_hosts("sentinel")]);
-        let plans = compile(&redis_sentinel(26379, "tcp"), &b, "cache").unwrap();
+        let plans = compile(&redis_sentinel(26379, "tcp"), &b).unwrap();
         assert_eq!(plans.len(), 3);
         for (i, plan) in plans.iter().enumerate() {
             let d = doc(plan);
@@ -579,26 +581,26 @@ mod tests {
     #[test]
     fn colocated_instances_with_same_published_port_rejected() {
         let b = binding("docker", &[three_hosts("redis"), three_hosts("sentinel")]);
-        let (key, params) = err_key(compile(&redis_sentinel(6379, "tcp"), &b, "cache"));
+        let (key, params) = err_key(compile(&redis_sentinel(6379, "tcp"), &b));
         assert_eq!(key, "blueprint.portConflict");
         assert_eq!(params["instance"], "sentinel-0");
         assert_eq!(params["other"], "redis-0");
         assert_eq!(params["port"], "6379/tcp");
         // Same number on another protocol does not collide.
-        assert!(compile(&redis_sentinel(6379, "udp"), &b, "cache").is_ok());
+        assert!(compile(&redis_sentinel(6379, "udp"), &b).is_ok());
     }
 
     #[test]
     fn compiled_manifest_passes_driver_validation() {
         let b = binding("docker", &[three_hosts("redis"), three_hosts("sentinel")]);
-        for plan in compile(&redis_sentinel(26379, "tcp"), &b, "cache").unwrap() {
+        for plan in compile(&redis_sentinel(26379, "tcp"), &b).unwrap() {
             assert!(manifest::parse_for(&plan.manifest, "docker").is_ok());
         }
         // A driver-level rule (docker forbids replicas) surfaces unchanged.
         let mut v: Value = serde_json::from_str(&redis_sentinel(26379, "tcp")).unwrap();
         v["roles"][0]["service"]["replicas"] = json!(2);
         assert_eq!(
-            err_key(compile(&v.to_string(), &b, "cache")).0,
+            err_key(compile(&v.to_string(), &b)).0,
             "deployment.manifest.028"
         );
         // Native requires published == container.
@@ -606,7 +608,7 @@ mod tests {
         v["roles"][0]["ports"][0]["published"] = json!(14222);
         let b = binding("native", &[three_hosts("nats")]);
         assert_eq!(
-            err_key(compile(&v.to_string(), &b, "mq")).0,
+            err_key(compile(&v.to_string(), &b)).0,
             "deployment.manifest.036"
         );
     }
@@ -626,7 +628,7 @@ mod tests {
                        "periodSeconds": "{{ add 10 .Instance.Index }}"}}}),
         )]);
         let b = binding("docker", &[three_hosts("redis")]);
-        let plans = compile(&text, &b, "cache").unwrap();
+        let plans = compile(&text, &b).unwrap();
         for (i, plan) in plans.iter().enumerate() {
             let s = &doc(plan)["services"][0];
             // String fields in the schema receive text.
@@ -643,16 +645,16 @@ mod tests {
     fn stack_rejected_until_p2b() {
         let b = binding("stack", &[three_hosts("nats")]);
         assert_eq!(
-            err_key(compile(&nats_native(), &b, "mq")).0,
+            err_key(compile(&nats_native(), &b)).0,
             "blueprint.driverNotYetSupported"
         );
         let b = binding("k8s", &[three_hosts("nats")]);
         assert_eq!(
-            err_key(compile(&nats_native(), &b, "mq")).0,
+            err_key(compile(&nats_native(), &b)).0,
             "blueprint.driverNotImplemented"
         );
         let b = binding("podman", &[three_hosts("nats")]);
-        let (key, params) = err_key(compile(&nats_native(), &b, "mq"));
+        let (key, params) = err_key(compile(&nats_native(), &b));
         assert_eq!(
             (key.as_str(), params["driver"].as_str()),
             ("blueprint.driverUnsupported", "podman")
@@ -663,20 +665,17 @@ mod tests {
     fn inconsistent_inputs_return_errors() {
         let b = binding("native", &[]);
         assert_eq!(
-            err_key(compile(&nats_native(), &b, "mq")).0,
+            err_key(compile(&nats_native(), &b)).0,
             "blueprint.bindingRoleMissing"
         );
         let mut v: Value = serde_json::from_str(&nats_native()).unwrap();
         v["roles"][0]["ports"][0]["published"] = json!("{{ .Instance.Name }}");
         let b = binding("native", &[three_hosts("nats")]);
-        let (key, params) = err_key(compile(&v.to_string(), &b, "mq"));
+        let (key, params) = err_key(compile(&v.to_string(), &b));
         assert_eq!(
             (key.as_str(), params["role"].as_str()),
             ("blueprint.portInvalid", "nats")
         );
-        assert_eq!(
-            err_key(compile("{}", &b, "mq")).0,
-            "blueprint.invalidDocument"
-        );
+        assert_eq!(err_key(compile("{}", &b)).0, "blueprint.invalidDocument");
     }
 }

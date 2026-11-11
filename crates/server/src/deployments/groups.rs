@@ -57,7 +57,7 @@ fn host_app(app: &apps::Model, host: Id, manifest: String) -> apps::Model {
 /// it was stored, so readers that only need the compiled services never fail on a host change.
 pub(crate) fn compiled(app: &apps::Model) -> Result<Vec<HostPlan>> {
     let binding = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
-    crate::blueprint::compile::compile(&app.manifest, &binding, &app.name)
+    crate::blueprint::compile::compile(&app.manifest, &binding)
 }
 /// Validates a binding against this workspace's current hosts, then compiles every host's plan.
 pub(super) async fn compile(
@@ -65,7 +65,6 @@ pub(super) async fn compile(
     workspace: Id,
     manifest: &str,
     b: &binding::Binding,
-    name: &str,
 ) -> Result<Vec<HostPlan>> {
     let bp = crate::blueprint::model::parse(manifest)?;
     let known = hosts::Entity::find()
@@ -79,7 +78,7 @@ pub(super) async fn compile(
         })
         .collect();
     binding::validate(&bp, b, &known)?;
-    crate::blueprint::compile::compile(manifest, b, name)
+    crate::blueprint::compile::compile(manifest, b)
 }
 /// Every host a new revision of `app` deploys to, in target order: host-group members share
 /// the deployment manifest; a blueprint compiles one application per bound host.
@@ -90,7 +89,7 @@ pub(super) async fn targets(
 ) -> Result<Vec<HostTarget>> {
     if app.target_kind == "blueprint" {
         let b = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
-        return Ok(compile(conn, workspace, &app.manifest, &b, &app.name)
+        return Ok(compile(conn, workspace, &app.manifest, &b)
             .await?
             .into_iter()
             .map(|plan| HostTarget {

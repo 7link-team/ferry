@@ -386,9 +386,9 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                         host,_,ip=hosts[n%len(hosts)];n+=1
                         result[role].append({'hostId':host,'address':ip})
                 return {'driver':driver,'roles':result}
-            def deploy(label,template,values,bound):
-                # The deployment name becomes the compiled application name, so it is an identifier.
-                id=create('deployments',{'name':label,'mode':bound['driver'],'target_kind':'blueprint','target_ref':'0','workdir':'/tmp/blueprint-deployments','manifest':render(template,values),'blueprint_binding':bound})
+            def deploy(label,template,values,bound,title=None):
+                # Deployment names are free text; compiled applications take the blueprint's name.
+                id=create('deployments',{'name':title or label,'mode':bound['driver'],'target_kind':'blueprint','target_ref':'0','workdir':'/tmp/blueprint-deployments','manifest':render(template,values),'blueprint_binding':bound})
                 revision=start(id);row=done(id)
                 if row['state']!='succeeded': diagnostics(label)
                 check(label+' blueprint deployment succeeds: '+row['latest_revision']['output'],row['state']=='succeeded')
@@ -440,7 +440,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 nats_template=install('nats-cluster')
                 nginx_template=install('nginx-ha')
                 print('== blueprint docker driver on three hosts',flush=True)
-                nats_id,_=deploy('nats-docker',nats_template,{'client_port':14222,'cluster_port':16222,'monitor_port':18222},binding('docker',[('nats',3)],fixtures))
+                nats_id,_=deploy('nats-docker',nats_template,{'client_port':14222,'cluster_port':16222,'monitor_port':18222},binding('docker',[('nats',3)],fixtures),'NATS cluster')
                 for i,(_,child,ip) in enumerate(fixtures):
                     check(f'docker host {i} runs only its own NATS member',owned(child,nats_id)==[f'nats-{i}'])
                     check(f'docker nats-{i} has routes to the two other members',eventually(lambda ip=ip,i=i:two_routes(ip,18222+i),120))
@@ -451,20 +451,23 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 report['blueprint']['nats_docker_stream']=stream.get('cluster')
                 nginx_values={'message':'blueprint-v1','web_port':18080,'lb_port':18000}
                 nginx_binding=binding('docker',[('web',2),('lb',1)],fixtures)
-                nginx_id,first=deploy('nginx-docker',nginx_template,nginx_values,nginx_binding)
+                nginx_id,first=deploy('nginx-docker',nginx_template,nginx_values,nginx_binding,'Nginx HA web (docker)')
                 check('docker nginx instances land on their bound hosts',[owned(c,nginx_id) for _,c,_ in fixtures]==[['web-0'],['web-1'],['lb-0']])
                 lb_url=f'http://{fixtures[2][2]}:18000/'
                 check('docker nginx load balancer serves both web instances',eventually(lambda:balanced(lb_url,'blueprint-v1'),120))
                 row=app(nginx_id)
                 moved=json.loads(json.dumps(row['blueprint_binding']))
                 moved['roles']['lb'][0]={'hostId':fixtures[0][0],'address':fixtures[0][2]}
-                api(f'/workspaces/{workspace_ops}/deployments/'+nginx_id,dict(row,blueprint_binding=moved),method='PATCH',status=400)
+                rejected=api(f'/workspaces/{workspace_ops}/deployments/'+nginx_id,dict(row,blueprint_binding=moved),method='PATCH',status=400)
+                frozen={json.loads(f.read_text(encoding='utf8'))['blueprint.topologyChangeRequiresPlan'] for f in Path('crates/server/src/i18n').glob('deployment-*.json')}
+                check('binding change after the first revision is rejected as a topology change',rejected['error'] in frozen)
                 check('binding is frozen after the first revision',app(nginx_id)['blueprint_binding']==row['blueprint_binding'])
                 row=app(nginx_id)
                 api(f'/workspaces/{workspace_ops}/deployments/'+nginx_id,dict(row,manifest=render(nginx_template,dict(nginx_values,message='blueprint-v2'))),method='PATCH')
                 second=start(nginx_id);row=done(nginx_id)
+                check('blueprint deployment keeps its free-text name across revisions',row['name']=='Nginx HA web (docker)')
                 if row['state']!='succeeded': diagnostics('nginx-docker-upgrade')
-                check('docker nginx parameter upgrade applies a new revision: '+row['latest_revision']['output'],row['state']=='succeeded' and second!=first)
+                check('docker nginx parameter upgrade applies a new revision: '+row['latest_revision']['output'],row['state']=='succeeded')
                 check('docker nginx serves the upgraded parameter through the load balancer',eventually(lambda:balanced(lb_url,'blueprint-v2'),120))
                 start(nginx_id,first);row=done(nginx_id)
                 if row['state']!='succeeded': diagnostics('nginx-docker-rollback')

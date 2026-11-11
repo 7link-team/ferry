@@ -246,7 +246,7 @@ async fn check_blueprint(
         )
     })?;
     let name = b.name.trim().to_owned();
-    for plan in groups::compile(conn, scope.workspace_id, &manifest, &binding, &name).await? {
+    for plan in groups::compile(conn, scope.workspace_id, &manifest, &binding).await? {
         if manifest::parse_for(&plan.manifest, &b.mode)?
             .services
             .iter()

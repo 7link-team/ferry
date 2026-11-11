@@ -62,7 +62,7 @@ fn compile_version(key: &str, version: &Value) -> Rendered {
     assert_eq!(drivers, ["compose", "docker"], "{key}");
     let mut rendered = Rendered::new();
     for driver in drivers {
-        let plans = compile::compile(&stored, &sample_binding(&bp, driver), key)
+        let plans = compile::compile(&stored, &sample_binding(&bp, driver))
             .unwrap_or_else(|e| panic!("{key} {driver}: {:?}", e.2));
         assert_eq!(plans.len(), if driver == "compose" { 1 } else { 3 });
         for plan in &plans {
@@ -98,6 +98,12 @@ fn official_blueprints_compile_for_supported_drivers() {
                 continue;
             }
             assert_eq!(package["meta"]["topology"], "cluster", "{key}");
+            for field in ["name", "description"] {
+                for locale in ["zh-CN", "zh-TW", "en-US", "ms-MY", "ja-JP", "ko-KR"] {
+                    let text = package["meta"][field][locale].as_str().unwrap_or_default();
+                    assert!(!text.trim().is_empty(), "{key} {field} {locale}");
+                }
+            }
             assert_eq!(
                 package["meta"]["drivers"],
                 json!(["docker", "compose"]),
