@@ -3,7 +3,7 @@ use super::*;
 use crate::agents::tests::admin;
 use crate::entities::deployment_revision_targets as targets;
 use crate::platform_tools::tests::setup;
-use sea_orm::Set;
+use sea_orm::{PaginatorTrait, Set};
 
 const CONF: &str = "server_name={{ .Instance.Name }}\nroutes={{ range .Role \"nats\" }}{{ .Host }}:{{ .Port \"cluster\" }},{{ end }}\n";
 
@@ -404,6 +404,153 @@ async fn binding_frozen_after_first_revision() {
     b["description"] = json!("same topology");
     update_with(b).await.unwrap();
     assert_eq!(row(&s, &id).await.description, "same topology");
+}
+
+async fn update_body(s: &AppState, id: &str, mut b: Value) -> Result<()> {
+    b["version"] = json!(row(s, id).await.version);
+    update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id.into())),
+        Json(serde_json::from_value(b).unwrap()),
+    )
+    .await
+    .map(|_| ())
+}
+
+/// Applies an outdated preview: first as captured (stale record version), then re-sent with
+/// the current version, which must still fail because the edit discarded the preview.
+async fn assert_stale_preview_rejected(s: &AppState, id: &str, preview: &Value) {
+    let error = apply_preview(s, id, preview).await.unwrap_err();
+    assert_eq!(key(error), "deployment.error.030");
+    let mut body = run_body(preview, "");
+    body.version = row(s, id).await.version;
+    let error = apply(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id.into())),
+        Json(body),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(key(error), "deployment.error.040");
+    assert_eq!(revision_count(s, id).await, 0);
+}
+
+async fn revision_count(s: &AppState, id: &str) -> u64 {
+    revisions::Entity::find()
+        .filter(revisions::Column::DeploymentId.eq(i64::from(id.parse::<Id>().unwrap())))
+        .count(&s.db)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn blueprint_apply_rejects_preview_after_manifest_edit() {
+    let (_dir, s) = fixture(&[831, 832]).await;
+    let id = create_app(&s, body(&[831, 832])).await.unwrap();
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let mut b = body(&[831, 832]);
+    b["manifest"] = json!(blueprint("nats:3"));
+    update_body(&s, &id, b).await.unwrap();
+    assert_stale_preview_rejected(&s, &id, &preview).await;
+}
+
+#[tokio::test]
+async fn blueprint_apply_rejects_preview_after_binding_edit() {
+    let (_dir, s) = fixture(&[833, 834, 835]).await;
+    let id = create_app(&s, body(&[833, 834])).await.unwrap();
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    update_body(&s, &id, body(&[833, 835])).await.unwrap();
+    assert_stale_preview_rejected(&s, &id, &preview).await;
+}
+
+#[tokio::test]
+async fn blueprint_preview_rejects_host_moved_to_other_workspace() {
+    let (_dir, s) = fixture(&[836, 837]).await;
+    let id = create_app(&s, body(&[836, 837])).await.unwrap();
+    hosts::Entity::update_many()
+        .col_expr(hosts::Column::WorkspaceId, Expr::value(2))
+        .filter(hosts::Column::Id.eq(837))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let error = preview_of(&s, &id, None).await.unwrap_err();
+    assert_eq!(key(error), "blueprint.bindingHostUnknown");
+    assert_eq!(revision_count(&s, &id).await, 0);
+    assert_eq!(row(&s, &id).await.preview_artifact, "");
+}
+
+#[tokio::test]
+async fn blueprint_rejects_non_string_pipeline_reference() {
+    let (_dir, s) = fixture(&[838]).await;
+    // A numeric id would skip the name-to-id lookup (and its pipelines.read check) and only
+    // become text later, during compilation.
+    let mut manifest: Value = serde_json::from_str(&blueprint("nats:2")).unwrap();
+    manifest["drivers"] = json!({"native": {"supported": true}});
+    let service = &mut manifest["roles"][0]["service"];
+    service.as_object_mut().unwrap().remove("image");
+    service["artifact"] = json!({"source": "pipeline", "pipeline": 424242, "path": "bin/nats"});
+    let mut b = body(&[838]);
+    b["manifest"] = json!(manifest.to_string());
+    b["mode"] = json!("native");
+    b["blueprint_binding"]["driver"] = json!("native");
+    let error = create_app(&s, b).await.unwrap_err();
+    assert_eq!(key(error), "blueprint.serviceInvalid");
+}
+
+/// Applies and runs a first revision; `failing` hosts exit non-zero.
+async fn run_first(s: &AppState, id: &str, failing: &[i64]) -> bool {
+    for host in failing {
+        crate::hosts::fake::get(*host)
+            .fail
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    let preview = preview_of(s, id, None).await.unwrap();
+    let rev = revision(s, &apply_preview(s, id, &preview).await.unwrap()).await;
+    let (ok, output) = execute(s, &rev).await.unwrap();
+    finish(s, &rev, if ok { "succeeded" } else { "failed" }, &output)
+        .await
+        .unwrap();
+    ok
+}
+
+#[tokio::test]
+async fn binding_editable_after_first_revision_failed_everywhere() {
+    let (_dir, s) = fixture(&[841, 842, 843]).await;
+    let id = create_app(&s, body(&[841, 842])).await.unwrap();
+    assert!(!run_first(&s, &id, &[841, 842]).await);
+    assert_eq!(row(&s, &id).await.revision_number, 1);
+    update_body(&s, &id, body(&[841, 843])).await.unwrap();
+    assert!(
+        row(&s, &id)
+            .await
+            .blueprint_binding
+            .unwrap()
+            .contains("843")
+    );
+}
+
+#[tokio::test]
+async fn binding_frozen_once_any_host_deployed() {
+    // The first host succeeds and the second fails: the revision failed, but one host now
+    // runs this topology.
+    let (_dir, s) = fixture(&[844, 845, 846]).await;
+    let id = create_app(&s, body(&[844, 845])).await.unwrap();
+    assert!(!run_first(&s, &id, &[845]).await);
+    assert_eq!(row(&s, &id).await.current_revision, 0);
+    assert_eq!(
+        key(update_body(&s, &id, body(&[844, 846])).await.unwrap_err()),
+        "blueprint.topologyChangeRequiresPlan"
+    );
+    // A fully successful first revision freezes the binding as well.
+    let (_dir2, s2) = fixture(&[847, 848, 849]).await;
+    let id2 = create_app(&s2, body(&[847, 848])).await.unwrap();
+    assert!(run_first(&s2, &id2, &[]).await);
+    assert_eq!(
+        key(update_body(&s2, &id2, body(&[847, 849])).await.unwrap_err()),
+        "blueprint.topologyChangeRequiresPlan"
+    );
 }
 
 #[tokio::test]

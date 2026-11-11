@@ -381,6 +381,21 @@ pub(super) async fn current(conn: &impl ConnectionTrait, workspace: Id, app: i64
         .await?;
     Ok(json!(rows.into_iter().map(|r|json!({"host_id":Id::from(r.host_id),"current_revision":Id::from(r.current_revision)})).collect::<Vec<_>>()))
 }
+/// Whether some host runs a revision of this deployment: a host's target state is recorded
+/// only when its own step succeeded, so a first revision that failed on every host leaves the
+/// topology undeployed. Uncertain targets keep the deployment in `needs-review`, which blocks
+/// edits until an operator acknowledges it.
+pub(super) async fn deployed(conn: &impl ConnectionTrait, app: &apps::Model) -> Result<bool> {
+    if app.current_revision != 0 {
+        return Ok(true);
+    }
+    let any = current::Entity::find()
+        .filter(current::Column::WorkspaceId.eq(app.workspace_id))
+        .filter(current::Column::DeploymentId.eq(app.id))
+        .one(conn)
+        .await?;
+    Ok(any.is_some())
+}
 pub(super) async fn settle(conn: &impl ConnectionTrait, revision: i64) -> Result<()> {
     targets::Entity::update_many()
         .col_expr(targets::Column::State, Expr::value("needs-review"))

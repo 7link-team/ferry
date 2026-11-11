@@ -248,7 +248,18 @@ fn validate(b: &Blueprint) -> Result<()> {
 
 fn validate_service(role: &Role) -> Result<()> {
     match role.service.as_object() {
-        Some(service) if !service.contains_key("name") && !service.contains_key("ports") => Ok(()),
+        // A pipeline is referenced by name or id text, which deployment checks resolve (and
+        // authorize) before storage; a number would bypass that and be stringified later.
+        Some(service)
+            if !service.contains_key("name")
+                && !service.contains_key("ports")
+                && service
+                    .get("artifact")
+                    .and_then(|a| a.get("pipeline"))
+                    .is_none_or(Value::is_string) =>
+        {
+            Ok(())
+        }
         _ => fail(Message::new("blueprint.serviceInvalid").with("role", &role.name)),
     }
 }
@@ -512,6 +523,16 @@ mod tests {
         let mut v = nats();
         v["roles"][0]["service"]["name"] = json!("x");
         assert_eq!(err_key(&v), "blueprint.serviceInvalid");
+        for pipeline in [json!(7), json!(null), json!(["build"])] {
+            let mut v = nats();
+            v["roles"][0]["service"]["artifact"] =
+                json!({"source": "pipeline", "pipeline": pipeline, "path": "bin/nats"});
+            assert_eq!(err_key(&v), "blueprint.serviceInvalid", "{pipeline}");
+        }
+        let mut v = nats();
+        v["roles"][0]["service"]["artifact"] =
+            json!({"source": "pipeline", "pipeline": "7", "path": "bin/nats"});
+        assert!(parse_v(&v).is_ok());
         let mut v = nats();
         v["metadata"]["name"] = json!("Bad Name");
         assert_eq!(err_key(&v), "blueprint.nameInvalid");

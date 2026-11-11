@@ -5,6 +5,7 @@ use crate::hosts::channel::{ByteStream, DirEntry, FileMeta, HostChannel, Output,
 use crate::hosts::remote::Host;
 use futures::StreamExt;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
@@ -17,6 +18,9 @@ pub(crate) struct FakeHost {
     pub commands: Mutex<Vec<String>>,
     /// Remote path → content written by `write_file`.
     pub files: Mutex<BTreeMap<String, String>>,
+    /// When set, deployment scripts (`set -eu; ...`) exit non-zero before changing anything,
+    /// as on a host without a usable container runtime; image pulls still succeed.
+    pub fail: AtomicBool,
 }
 
 static HOSTS: LazyLock<Mutex<HashMap<i64, Arc<FakeHost>>>> = LazyLock::new(Default::default);
@@ -55,6 +59,13 @@ impl HostChannel for Channel {
     }
     async fn exec(&self, command: &str, _: Duration) -> Result<Output> {
         self.0.commands.lock().unwrap().push(command.into());
+        if command.starts_with("set -eu") && self.0.fail.load(Ordering::SeqCst) {
+            return Ok(Output {
+                code: 1,
+                stdout: String::new(),
+                stderr: "fake failure".into(),
+            });
+        }
         if command.starts_with("docker image inspect") {
             return Ok(ok(format!("[\"example/image@{DIGEST}\"]\n")));
         }

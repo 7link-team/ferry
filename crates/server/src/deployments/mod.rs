@@ -507,8 +507,8 @@ pub async fn update(
             crate::i18n::Message::new("deployment.error.007"),
         ));
     }
-    // Revisions pin per-host targets; moving instances needs a new deployment plan.
-    if r.revision_number > 0 && binding != r.blueprint_binding {
+    // Once a host runs this topology, moving instances needs a new deployment plan.
+    if binding != r.blueprint_binding && groups::deployed(&s.db, &r).await? {
         return Err(ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("blueprint.topologyChangeRequiresPlan"),
