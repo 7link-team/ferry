@@ -190,7 +190,7 @@ fn validate(b: &Blueprint) -> Result<()> {
     let mut names = BTreeSet::new();
     let mut total = 0u32;
     for role in &b.roles {
-        if !valid_identifier(&role.name) {
+        if role.name.len() > 56 || !valid_identifier(&role.name) {
             return fail(Message::new("blueprint.roleNameInvalid").with("role", &role.name));
         }
         if !names.insert(role.name.as_str()) {
@@ -215,6 +215,21 @@ fn validate(b: &Blueprint) -> Result<()> {
             && (target == &role.name || !names.contains(target.as_str()))
         {
             return fail(Message::new("blueprint.colocateInvalid").with("role", &role.name));
+        }
+    }
+    let targets: BTreeMap<&str, &str> = b
+        .roles
+        .iter()
+        .filter_map(|r| Some((r.name.as_str(), r.placement.colocate_with.as_deref()?)))
+        .collect();
+    for role in &b.roles {
+        let mut seen = BTreeSet::from([role.name.as_str()]);
+        let mut current = role.name.as_str();
+        while let Some(next) = targets.get(current).copied() {
+            if !seen.insert(next) {
+                return fail(Message::new("blueprint.colocateInvalid").with("role", &role.name));
+            }
+            current = next;
         }
     }
     validate_endpoints(b)?;
@@ -399,6 +414,26 @@ mod tests {
         assert_eq!(err_key(&v), "blueprint.colocateInvalid");
         v["roles"][1]["placement"]["colocateWith"] = json!("exporter");
         assert_eq!(err_key(&v), "blueprint.colocateInvalid");
+    }
+
+    #[test]
+    fn colocate_cycles_rejected() {
+        let mut v = nats();
+        v["roles"][0]["placement"]["colocateWith"] = json!("exporter");
+        assert_eq!(err_key(&v), "blueprint.colocateInvalid");
+        let mut v = nats();
+        v["roles"][0]["placement"]["colocateWith"] = json!("gateway");
+        v["roles"][2]["placement"]["colocateWith"] = json!("exporter");
+        assert_eq!(err_key(&v), "blueprint.colocateInvalid");
+    }
+
+    #[test]
+    fn role_name_length_capped() {
+        let mut v = nats();
+        v["roles"][2]["name"] = json!("a".repeat(56));
+        assert!(parse_v(&v).is_ok());
+        v["roles"][2]["name"] = json!("a".repeat(57));
+        assert_eq!(err_key(&v), "blueprint.roleNameInvalid");
     }
 
     #[test]
