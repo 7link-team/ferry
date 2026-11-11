@@ -262,5 +262,6 @@
   "blueprint.bindingColocateCount": "角色 {role} 与 {target} 同机部署，两者的实例数必须相同。",
   "blueprint.bindingColocateHost": "实例 {instance} 必须与 {target} 位于同一主机。",
   "blueprint.bindingComposeSingleHost": "compose 驱动要求所有实例位于同一台主机。",
-  "blueprint.bindingComposeNeedsSingleHost": "此蓝图要求部分角色分布在不同主机且不允许单机部署，因此不能使用 compose 驱动。"
+  "blueprint.bindingComposeNeedsSingleHost": "此蓝图要求部分角色分布在不同主机且不允许单机部署，因此不能使用 compose 驱动。",
+  "blueprint.portConflict": "实例 {instance} 与 {other} 在同一主机上发布了相同端口 {port}。"
 }

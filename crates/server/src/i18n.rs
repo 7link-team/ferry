@@ -1339,6 +1339,7 @@ mod tests {
             include_str!("marketplace/platform.rs"),
             include_str!("marketplace/catalog.rs"),
             include_str!("blueprint/binding.rs"),
+            include_str!("blueprint/compile.rs"),
             include_str!("blueprint/model.rs"),
             include_str!("blueprint/template.rs"),
             include_str!("templates.rs"),

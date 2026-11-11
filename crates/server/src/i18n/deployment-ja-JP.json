@@ -262,5 +262,6 @@
   "blueprint.bindingColocateCount": "ロール {role} は {target} と同じホストに配置されるため、インスタンス数が同じである必要があります。",
   "blueprint.bindingColocateHost": "インスタンス {instance} は {target} と同じホストで実行する必要があります。",
   "blueprint.bindingComposeSingleHost": "compose ドライバーでは、すべてのインスタンスを 1 台のホストに配置する必要があります。",
-  "blueprint.bindingComposeNeedsSingleHost": "このブループリントは一部のロールを別々のホストに配置する必要があり、単一ホストでの配置を許可していないため、compose ドライバーは使用できません。"
+  "blueprint.bindingComposeNeedsSingleHost": "このブループリントは一部のロールを別々のホストに配置する必要があり、単一ホストでの配置を許可していないため、compose ドライバーは使用できません。",
+  "blueprint.portConflict": "インスタンス {instance} と {other} が同じホストで同じポート {port} を公開しています。"
 }

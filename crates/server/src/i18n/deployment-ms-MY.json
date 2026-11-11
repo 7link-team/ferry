@@ -262,5 +262,6 @@
   "blueprint.bindingColocateCount": "Peranan {role} diletakkan bersama {target}, jadi kedua-duanya mesti mempunyai bilangan instans yang sama.",
   "blueprint.bindingColocateHost": "Instans {instance} mesti berjalan pada hos yang sama dengan {target}.",
   "blueprint.bindingComposeSingleHost": "Pemacu compose memerlukan semua instans berada pada satu hos.",
-  "blueprint.bindingComposeNeedsSingleHost": "Pelan tindakan ini memerlukan hos berbeza untuk sesetengah peranan dan tidak membenarkan penggunaan satu hos, jadi pemacu compose tidak boleh digunakan."
+  "blueprint.bindingComposeNeedsSingleHost": "Pelan tindakan ini memerlukan hos berbeza untuk sesetengah peranan dan tidak membenarkan penggunaan satu hos, jadi pemacu compose tidak boleh digunakan.",
+  "blueprint.portConflict": "Instans {instance} dan {other} menerbitkan port yang sama {port} pada satu hos."
 }
