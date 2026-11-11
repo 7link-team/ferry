@@ -2304,6 +2304,25 @@ mod blueprint_binding_tests {
     }
 
     #[tokio::test]
+    async fn injected_value_rejected_in_instance_config() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        template(
+            &s,
+            504,
+            "mixed",
+            "name={{ .Instance.Name }}\nhost={{ .Values.host }}\n",
+            r#"[{"name":"host","type":"string"}]"#,
+        )
+        .await;
+        let file = json!([{"path":"/etc/mixed.conf","fromTemplate":"mixed","values":{"host":"{{ .Instance.Host }}"}}]);
+        let r = app(json!([service("nats-0", file)]));
+        let err = bindings(&s.db, &r, &r.manifest, Some(&contexts()))
+            .await
+            .unwrap_err();
+        assert_eq!(key(err), "blueprint.templateUnresolved");
+    }
+
+    #[tokio::test]
     async fn secret_marker_survives_instance_rendering() {
         let (_dir, s) = crate::agents::tests::setup().await;
         template(
