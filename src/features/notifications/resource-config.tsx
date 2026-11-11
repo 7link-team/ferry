@@ -13,6 +13,11 @@ import { NotificationVariables } from "./NotificationVariables";
 const key = (name: string) => `notifications:${name}`;
 const field = (name: string, type: FormField<AnyRow>["type"] = "text", more: Partial<FormField<AnyRow>> = {}): FormField<AnyRow> => ({ key: name, label: "", labelKey: key(name), type, ...more });
 export const notificationProviders: Option[] = ["SMTP", "Aliyun SMS", "Tencent SMS", "WeCom", "DingTalk", "Feishu", "Lark", "Slack", "Telegram", "Discord", "Google Chat", "Webhook"].map(value => ({ value, label: value }));
+const channelProviders = {
+  email: notificationProviders.filter(p => p.value === "SMTP"),
+  sms: notificationProviders.filter(p => isSms(p.value)),
+  platforms: notificationProviders.filter(p => p.value !== "SMTP" && !isSms(p.value)),
+};
 const formats = [{ value: "text", label: "", labelKey: key("text") }, { value: "html", label: "HTML" }];
 const states = ["sending", "succeeded", "failed", "unknown"].map(value => ({ value, label: "", labelKey: key(value) }));
 const languageOptions = supportedLocales.map(value => ({ value, label: value }));
@@ -59,7 +64,7 @@ export function notificationLists({ workspace, navigate }: ResourceConfigContext
   const configs: Record<string, ListConfig<AnyRow>> = {
     "notification-channels": list<AnyRow>({ resource: "notification-channels", permissionResource: "notifications", rowKey: r => r.id,
       filters: [{ key: "q", label: "", labelKey: key("name"), type: "text" }, { key: "provider", label: "", labelKey: key("provider"), type: "select", options: notificationProviders }],
-      columns: [{ key: "name", label: "", labelKey: key("name"), sortable: true }, { key: "provider", label: "", labelKey: key("provider") }, { key: "language", label: "", labelKey: key("language") }, { key: "enabled", label: "", labelKey: key("enabled"), render: r => t(r.enabled ? "common-domain:common.yes" : "common-domain:common.no") }, { key: "created_at", label: "", labelKey: key("created_at"), sortable: true, render: r => cronDate(r.created_at) }],
+      columns: [{ key: "name", label: "", labelKey: key("name"), sortable: true }, { key: "provider", label: "", labelKey: key("provider") }, { key: "enabled", label: "", labelKey: key("enabled"), render: r => t(r.enabled ? "common-domain:common.yes" : "common-domain:common.no") }, { key: "created_at", label: "", labelKey: key("created_at"), sortable: true, render: r => cronDate(r.created_at) }],
       actions: [sendAction(workspace, navigate), ...actions("notification-channels")], toolbar: { create: true },
     }),
     "notification-templates": list<AnyRow>({ resource: "notification-templates", permissionResource: "notifications", rowKey: r => r.id,
@@ -77,9 +82,9 @@ export function notificationLists({ workspace, navigate }: ResourceConfigContext
     fixed:{provider:providers.map(p => p.value).join(",")},
     filters:(base.filters ?? []).filter(f => f.key !== "provider" || providers.length > 1).map(f => f.key === "provider" ? {...f,options:providers} : f),
   });
-  configs["notification-channels"] = scoped(notificationProviders.filter(p => p.value === "SMTP"));
-  configs["notification-sms"] = scoped(notificationProviders.filter(p => isSms(p.value)));
-  configs["notification-platforms"] = scoped(notificationProviders.filter(p => p.value !== "SMTP" && !isSms(p.value)));
+  configs["notification-channels"] = scoped(channelProviders.email);
+  configs["notification-sms"] = scoped(channelProviders.sms);
+  configs["notification-platforms"] = scoped(channelProviders.platforms);
   return configs;
 }
 
@@ -89,7 +94,7 @@ export function notificationForms({ workspace, navigate, permissions }: Resource
       blank: { name: "", description: "", provider: "WeCom", enabled: true, language: "en-US", role_ids: [], security: "starttls", port: 587, recipients: [], sms_region: "ap-guangzhou", sms_parameter_names: [] },
       editValues: r => ({ ...r, webhook: "", password: "", signing_secret: "", bearer_token: "", bot_token: "", sms_secret_key: "" }),
       viewActions: [sendAction(workspace, navigate)],
-      sections: [{ titleKey: key("basics"), fields: [field("name", "text", { required: true, max: 120 }), field("enabled", "switch"), field("provider", "select", { required: true, options: notificationProviders, resetOnChange: ["webhook", "signing_secret", "bot_token", "bearer_token", "chat_id", "thread_id"] }), field("language", "select", { required: true, options: languageOptions }), field("description", "textarea", { span: 2, max: 2048 })] },
+      sections: [{ titleKey: key("basics"), fields: [field("name", "text", { required: true, max: 120 }), field("enabled", "switch"), field("provider", "select", { required: true, options: notificationProviders, resetOnChange: ["webhook", "signing_secret", "bot_token", "bearer_token", "chat_id", "thread_id"] }), field("description", "textarea", { span: 2, max: 2048 })] },
         { titleKey: key("connection"), fields: [
           field("webhook", "password", { when: r => notSmtp(r) && r.provider !== "Telegram", stored: "has_webhook", width: "full", span: 2 }),
           field("bot_token", "password", { when: r => r.provider === "Telegram", stored: "has_secret" }), field("chat_id", "text", { when: r => r.provider === "Telegram", required: true }), field("thread_id", "text", { when: r => r.provider === "Telegram" }),
@@ -113,8 +118,15 @@ export function notificationForms({ workspace, navigate, permissions }: Resource
     }),
   };
   const base = configs["notification-channels"]!;
-  configs["notification-channels"] = {...base,blank:{...base.blank,provider:"SMTP"}};
-  configs["notification-sms"] = {...base,blank:{...base.blank,provider:"Aliyun SMS"}};
-  configs["notification-platforms"] = base;
+  const scoped = (providers: Option[]): FormConfig<AnyRow> => ({
+    ...base,
+    blank: { ...base.blank, provider: providers[0]!.value },
+    sections: base.sections.map(section => ({ ...section, fields: section.fields.map(field => field.key === "provider"
+      ? { ...field, options: providers, disabled: () => providers.length === 1 }
+      : field) })),
+  });
+  configs["notification-channels"] = scoped(channelProviders.email);
+  configs["notification-sms"] = scoped(channelProviders.sms);
+  configs["notification-platforms"] = scoped(channelProviders.platforms);
   return configs;
 }

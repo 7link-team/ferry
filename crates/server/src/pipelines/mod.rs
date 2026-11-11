@@ -595,7 +595,7 @@ pub async fn update(
         )
         .await?);
     }
-    crate::definitions::record(
+    let audit_revision = crate::definitions::record(
         &s,
         &tx,
         scope.workspace_id,
@@ -629,7 +629,15 @@ pub async fn update(
         "update",
         "pipelines",
         &id,
-        json!({"name": name}),
+        json!({"name":name,"revision_id":Id::from(audit_revision.id),"definition_changed":current.definition != body.stored_definition()?,
+            "changes":crate::hosts::activity_changes(
+                json!({"name":current.name,"description":current.description,"group_id":Id::from(current.group_id),
+                    "repository_id":Id::from(current.repository_id),"application_id":Id::from(current.application_id),
+                    "target_kind":current.target_kind,"target_ref":Id::from(current.target_ref)}),
+                json!({"name":name,"description":body.description.trim(),"group_id":Id::reference(body.group_id.as_deref().unwrap_or(""))?,
+                    "repository_id":Id::reference(&body.repository_id)?,"application_id":Id::reference(body.application_id.as_deref().unwrap_or(""))?,
+                    "target_kind":body.target_kind,"target_ref":Id::reference(&body.target_ref)?})
+            )}),
     )
     .await?;
     tx.commit().await?;

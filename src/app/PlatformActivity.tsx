@@ -30,7 +30,6 @@ const config = {
   columns: [base.columns[0]!,
     { key: "workspace_name", label: "Scope / workspace", labelKey: "resource-domain:monitor.activityScope", render: (row: Record<string, unknown>) => row.workspace_id === "0" ? commonText("resource-domain:monitor.activityPlatform") : String(row.workspace_name || row.workspace_id) },
     ...base.columns.slice(1),
-    { key: "resource_id", label: "Resource ID", labelKey: "resource-domain:monitor.activityResourceId" },
   ],
 };
 export function PlatformActivity() {

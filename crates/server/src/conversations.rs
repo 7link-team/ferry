@@ -82,6 +82,28 @@ async fn find(conn: &impl ConnectionTrait, scope: &Scope, id: Id) -> Result<conv
     }
     Ok(c)
 }
+/// Current titles for legacy audit entries, using the conversation list's visibility rules.
+/// These are display hints, never historical snapshots or a bypass of room membership.
+pub(crate) async fn audit_titles(
+    conn: &impl ConnectionTrait,
+    scope: &Scope,
+    ids: Vec<i64>,
+) -> Result<HashMap<i64, String>> {
+    if ids.is_empty() || scope.require("conversations.read").is_err() {
+        return Ok(HashMap::new());
+    }
+    Ok(conversations::Entity::find()
+        .select_only()
+        .columns([conversations::Column::Id, conversations::Column::Title])
+        .filter(conversations::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(conversations::Column::Id.is_in(ids))
+        .filter(groups::visible(scope))
+        .into_tuple::<(i64, String)>()
+        .all(conn)
+        .await?
+        .into_iter()
+        .collect())
+}
 pub(super) async fn available(
     conn: &impl ConnectionTrait,
     scope: &Scope,
@@ -321,7 +343,7 @@ async fn create(
             owner_id: scope.user.id.into(),
             agent_id: agent.id,
             revision_id: agent.revision_id,
-            title,
+            title: title.clone(),
             state: "active".into(),
             config: serde_json::to_string(&config).unwrap(),
             binding: serde_json::to_string(&binding).unwrap(),
@@ -343,7 +365,7 @@ async fn create(
         "create",
         "conversations",
         &id,
-        json!({"agent_id":agent_id}),
+        json!({"name":title,"agent_id":agent_id}),
     )
     .await?;
     tx.commit().await?;
@@ -510,6 +532,10 @@ async fn update(
         scope.require("conversations.run")?;
         c.native_session_id.clear();
     }
+    let changes = crate::hosts::activity_changes(
+        json!({"title":c.title,"state":c.state}),
+        json!({"title":body.title.trim(),"state":body.state}),
+    );
     c.title = body.title.trim().into();
     c.state = body.state.clone();
     c.version += 1;
@@ -522,7 +548,7 @@ async fn update(
         "update",
         "conversations",
         &id,
-        json!({"state":body.state}),
+        json!({"name":body.title.trim(),"state":body.state,"changes":changes}),
     )
     .await?;
     tx.commit().await?;
@@ -563,7 +589,7 @@ async fn remove(
         .exec(&tx)
         .await?;
     conversations::Entity::delete_by_id(id).exec(&tx).await?;
-    crate::hosts::activity_in(&s, &tx, &scope, "delete", "conversations", &id, json!({})).await?;
+    crate::hosts::activity_in(&s, &tx, &scope, "delete", "conversations", &id, json!({"name":c.title})).await?;
     tx.commit().await?;
     Ok(Json(json!({"ok":true})))
 }

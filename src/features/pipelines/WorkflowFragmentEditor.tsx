@@ -11,7 +11,6 @@ import { StepMap } from "./ActionMapFields";
 import { ActionInputs } from "./ActionInputs";
 import { actionPresets } from "./action-inputs";
 import { ActionsConditionField, ActionsShellField, ActionsPhase } from "./ActionsExecutionFields";
-import { FieldCaption } from "../../shared/forms/FieldHelp";
 import { artifactNames } from "./action-references";
 const YamlEditor = lazy(() => import("./YamlEditor").then(module => ({ default: module.YamlEditor })));
 
@@ -59,7 +58,7 @@ export function WorkflowFragmentEditor({ source, job, index, original, readOnly,
     {field("timeout-minutes", executionText("editor.timeout"))}
     </ActionsPhase>
     <ActionsPhase phase="after">
-    {typeof step["continue-on-error"] === "string" ? field("continue-on-error", t("continueOnError")) : <label className="flex min-h-10 items-center gap-2 text-sm"><Switch  disabled={readOnly} checked={step["continue-on-error"] === true} onCheckedChange={checked => update({ "continue-on-error": checked })} /><FieldCaption label={t("continueOnError")} /></label>}
+    {typeof step["continue-on-error"] === "string" ? field("continue-on-error", t("continueOnError")) : <AutoField label={t("continueOnError")} className="min-w-40"><Switch  disabled={readOnly} checked={step["continue-on-error"] === true} onCheckedChange={checked => update({ "continue-on-error": checked })} /></AutoField>}
     </ActionsPhase>
     <ActionFragmentYaml source={source} job={job} index={index} original={original} readOnly={readOnly} onChange={onChange} />
   </div>;

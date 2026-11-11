@@ -313,7 +313,7 @@ pub(super) async fn members(
     Path((_, id)): Path<(String, Id)>,
     Json(mut body): Json<Members>,
 ) -> Result<Json<Value>> {
-    use crate::entities::{ai_chat_agents as agents, ai_chat_members as people, workspace_members};
+    use crate::entities::{ai_chat_agents as agents, ai_chat_members as people, workspace_members, users};
     scope.require("conversations.update")?;
     let c = find(&s.db, &scope, id).await?;
     if c.owner_id != i64::from(scope.user.id) || !groups::is_group(&s.db, id).await? {
@@ -380,6 +380,37 @@ pub(super) async fn members(
             return Err(ApiError::missing());
         }
     }
+    let previous_people: Vec<i64> = people::Entity::find()
+        .select_only().column(people::Column::UserId)
+        .filter(people::Column::ConversationId.eq(id))
+        .into_tuple().all(&tx).await?;
+    let previous_agents: Vec<i64> = agents::Entity::find()
+        .select_only().column(agents::Column::AgentId)
+        .filter(agents::Column::ConversationId.eq(id))
+        .filter(agents::Column::State.ne("removed"))
+        .into_tuple().all(&tx).await?;
+    let next_people: Vec<i64> = body.member_ids.iter().copied().map(i64::from).collect();
+    let next_agents: Vec<i64> = body.agent_ids.iter().copied().map(i64::from).collect();
+    let people_names: HashMap<i64, String> = users::Entity::find()
+        .select_only().columns([users::Column::Id, users::Column::Name])
+        .filter(users::Column::Id.is_in(previous_people.iter().chain(&next_people).copied()))
+        .into_tuple::<(i64, String)>().all(&tx).await?.into_iter().collect();
+    let agent_names: HashMap<i64, String> = ai_agents::Entity::find()
+        .select_only().columns([ai_agents::Column::Id, ai_agents::Column::Name])
+        .filter(ai_agents::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(ai_agents::Column::Id.is_in(previous_agents.iter().chain(&next_agents).copied()))
+        .into_tuple::<(i64, String)>().all(&tx).await?.into_iter().collect();
+    let changes = |before: &[i64], after: &[i64], names: &HashMap<i64, String>| json!({
+        "added": after.iter().copied().filter(|id| !before.contains(id))
+            .map(|id| json!({"id":Id::from(id),"name":names.get(&id)})).collect::<Vec<_>>(),
+        "removed": before.iter().copied().filter(|id| !after.contains(id))
+            .map(|id| json!({"id":Id::from(id),"name":names.get(&id)})).collect::<Vec<_>>(),
+    });
+    let membership = json!({
+        "members": changes(&previous_people, &next_people, &people_names),
+        "agents": changes(&previous_agents, &next_agents, &agent_names),
+    });
+    let title = c.title.clone();
     people::Entity::delete_many()
         .filter(people::Column::ConversationId.eq(id))
         .exec(&tx)
@@ -441,7 +472,7 @@ pub(super) async fn members(
     c.version += 1;
     c.updated_at = db::now();
     c.into_active_model().reset_all().update(&tx).await?;
-    crate::hosts::activity_in(&s, &tx, &scope, "members", "conversations", &id, json!({})).await?;
+    crate::hosts::activity_in(&s, &tx, &scope, "members", "conversations", &id, json!({"name":title,"membership":membership})).await?;
     tx.commit().await?;
     Ok(Json(json!({"ok":true})))
 }
@@ -463,6 +494,37 @@ mod tests {
     use super::*;
     use crate::agents::tests::admin;
     use crate::conversations::tests::{seeded, sent};
+    #[tokio::test]
+    async fn membership_audit_records_names_and_actual_deltas_in_the_write_transaction() {
+        use crate::entities::{activity, ai_chat_members as people, ai_chat_agents as agents};
+        let (_dir, s, id) = seeded().await;
+        let c = find(&s.db, &admin(1), id).await.unwrap();
+        let version = s.next_id().unwrap();
+        people::Entity::insert(people::Model {
+            id: version.into(), workspace_id: 1, conversation_id: id.into(), user_id: 2,
+        }.into_active_model()).exec(&s.db).await.unwrap();
+        agents::Entity::insert(agents::Model {
+            id: s.next_id().unwrap().into(), workspace_id: 1, conversation_id: id.into(),
+            agent_id: c.agent_id, revision_id: c.revision_id, config: c.config.clone(),
+            binding: c.binding.clone(), native_session_id: String::new(), state: "active".into(),
+        }.into_active_model()).exec(&s.db).await.unwrap();
+        let mut owner = admin(1);
+        owner.user.is_superadmin = true;
+        let request = || Json(Members { version, member_ids: vec![], agent_ids: vec![] });
+        members(State(s.clone()), owner.clone(), Path(("1".into(), id)), request()).await.unwrap();
+        let row = activity::Entity::find().filter(activity::Column::ResourceId.eq(id))
+            .filter(activity::Column::Action.eq("members")).one(&s.db).await.unwrap().unwrap();
+        let details: Value = serde_json::from_str(&row.details).unwrap();
+        assert_eq!(details["name"], c.title);
+        assert_eq!(details["membership"]["members"]["added"][0]["id"], "1");
+        assert!(details["membership"]["members"]["added"][0]["name"].is_string());
+        assert_eq!(details["membership"]["members"]["removed"][0]["id"], "2");
+        assert_eq!(details["membership"]["agents"]["removed"][0]["id"], json!(Id::from(c.agent_id)));
+        assert_eq!(details["membership"]["agents"]["removed"][0]["name"], "Test Agent");
+        assert!(members(State(s.clone()), owner, Path(("1".into(), id)), request()).await.is_err());
+        assert_eq!(activity::Entity::find().filter(activity::Column::ResourceId.eq(id))
+            .filter(activity::Column::Action.eq("members")).count(&s.db).await.unwrap(), 1);
+    }
     use sea_orm::sea_query::Expr;
 
     async fn idle(s: &AppState, id: Id) {

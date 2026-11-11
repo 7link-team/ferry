@@ -32,8 +32,8 @@ export function ExecutionPolicyFields({ value = defaultExecutionPolicy, readOnly
     </div>)}
   </dl>;
   return <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
-    <label className="flex min-h-9 items-center gap-2 text-sm"><Switch  disabled={readOnly} checked={value.enabled} onCheckedChange={checked => onChange({ ...value, enabled: checked })} />{executionText("hostExecution.enabled")}</label>
-    <label className="flex min-h-9 items-center gap-2 text-sm"><Switch  disabled={readOnly} checked={value.shared} onCheckedChange={checked => onChange({ ...value, shared: checked })} />{executionText("hostExecution.shared")}</label>
+    <AutoField label={<>{executionText("hostExecution.enabled")}</>} className="min-w-40"><Switch  disabled={readOnly} checked={value.enabled} onCheckedChange={checked => onChange({ ...value, enabled: checked })} /></AutoField>
+    <AutoField label={<>{executionText("hostExecution.shared")}</>} className="min-w-40"><Switch  disabled={readOnly} checked={value.shared} onCheckedChange={checked => onChange({ ...value, shared: checked })} /></AutoField>
     <AutoField label={executionText("hostExecution.capacity")}><Input className="w-24" type="number" min={1} max={64} step={1} aria-label={executionText("hostExecution.capacity")} aria-invalid={invalid} disabled={readOnly} value={Number.isNaN(value.capacity) ? "" : value.capacity} onChange={event => onChange({ ...value, capacity: event.target.valueAsNumber })} /></AutoField>
   </div>;
 }

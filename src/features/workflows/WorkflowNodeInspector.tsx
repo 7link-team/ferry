@@ -1,3 +1,4 @@
+import { AutoField } from "../../shared/forms/auto-form";
 import { Switch } from "../../shared/ui/switch";
 import { FieldCaption } from "../../shared/forms/FieldHelp";
 import { Dialog, DropdownMenu } from "radix-ui";
@@ -747,27 +748,21 @@ export function WorkflowNodeInspector({
                         >[0],
                       )}
                     </p>
-                    <label className="flex items-center gap-2 text-sm">
-                      <Switch
+                    <AutoField label={t("inspector.executeOnce")} className="min-w-40"><Switch
                         checked={node.settings?.execute_once === true}
                         disabled={readOnly}
                         onCheckedChange={(checked) =>
                           settings({ execute_once: checked })
                         }
-                      />
-                      <FieldCaption label={t("inspector.executeOnce")} />
-                    </label>
+                      /></AutoField>
                     {canPinNode(node) && (
-                      <label className="flex items-center gap-2 text-sm">
-                        <Switch
+                      <AutoField label={t("inspector.alwaysOutput")} className="min-w-40"><Switch
                           checked={node.settings?.always_output === true}
                           disabled={readOnly}
                           onCheckedChange={(checked) =>
                             settings({ always_output: checked })
                           }
-                        />
-                        <FieldCaption label={t("inspector.alwaysOutput")} />
-                      </label>
+                        /></AutoField>
                     )}
                     <label className="block space-y-2 text-sm">
                       <span><FieldCaption label={<>{t("inspector.notes")}</>} /></span>

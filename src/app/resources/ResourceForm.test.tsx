@@ -5,6 +5,9 @@ import { DEFAULT_ACTIONS } from "../../features/pipelines/actions-workflow";
 import { i18n } from "../../shared/i18n/i18n";
 import { formConfigs } from "../resources";
 import { ResourceActionDialog, ResourceForm } from "./ResourceForm";
+import { notificationForms } from "../../features/notifications/resource-config";
+import { activityList } from "../../features/activity/resource-config";
+import { renderToStaticMarkup } from "react-dom/server";
 vi.mock("../../features/pipelines/YamlEditor", () => ({
   YamlEditor: ({ value, readOnly, onChange }: { value: string; readOnly: boolean; onChange: (value: string) => void }) =>
     <textarea aria-label="GitHub Actions YAML" value={value} readOnly={readOnly} onChange={event => onChange(event.target.value)} />,
@@ -27,6 +30,87 @@ it("keeps resource groups and individual actions in read-only permission summari
   expect(summary.querySelectorAll('[role="checkbox"]')).toHaveLength(0);
 });
 const perms = new Set(["variables.read", "variables.update", "variables.reveal"]);
+
+it.each([
+  ["email", "notification-channels", "SMTP", ["SMTP"]],
+  ["sms", "notification-sms", "Aliyun SMS", ["Aliyun SMS", "Tencent SMS"]],
+  ["platforms", "notification-platforms", "WeCom", ["WeCom", "DingTalk", "Feishu", "Lark", "Slack", "Telegram", "Discord", "Google Chat", "Webhook"]],
+] as const)("keeps %s notification creation in its channel category", async (scope, key, provider, providers) => {
+  history.replaceState({}, "", `/zh-CN/workspaces/ops/notification-channels/new?scope=${scope}`);
+  const config = notificationForms({ workspace: "ops", navigate: () => {} })[key]!;
+  const fields = config.sections.flatMap(section => section.fields);
+  expect(fields.find(field => field.key === "provider")!.options).toEqual(providers.map(value => ({ value, label: value })));
+  await act(async () => root.render(<ResourceForm config={config} workspace="ops" permissions={new Set(["notifications.create", "notifications.read"])} />));
+  const frame = [...host.querySelectorAll('[data-auto-field]')].find(el => el.querySelector('[role="combobox"]')?.textContent === provider)!;
+  expect(frame).toBeTruthy();
+  expect((frame.querySelector('[role="combobox"]') as HTMLButtonElement).disabled).toBe(scope === "email");
+  expect(fields.some(field => field.key === "language")).toBe(false);
+});
+
+it("preserves legacy channel language without exposing it as a connection setting", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/notification-channels/10/edit?scope=email");
+  stored = { id: "10", name: "Mail", provider: "SMTP", language: "ms-MY", enabled: true, version: 3, role_ids: [], host: "smtp.example.invalid", port: 587, security: "starttls", from: "sender@example.invalid", recipients: [] };
+  const config = notificationForms({ workspace: "ops", navigate: () => {} })["notification-channels"]!;
+  await act(async () => root.render(<ResourceForm config={config} workspace="ops" permissions={new Set(["notifications.read", "notifications.update"])} />));
+  expect(host.querySelector('[name="language"]')).toBeNull();
+  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  const saved = requests.find(request => request.method === "PATCH")!;
+  expect(JSON.parse(saved.body!)).toMatchObject({ provider: "SMTP", language: "ms-MY", version: 3 });
+});
+
+it("identifies audit targets by their recorded name and resource ID without inventing missing names", () => {
+  const render = activityList().columns.find(column => column.key === "resource_id")!.render!;
+  const row = { id: "1", actor_name: "Owner", action: "delete", resource: "hosts", resource_id: "987654321", details: { name: "<old host>" }, created_at: 1 };
+  expect(renderToStaticMarkup(<>{render(row)}</>)).toContain("&lt;old host&gt;");
+  expect(renderToStaticMarkup(<>{render(row)}</>)).toContain("987654321");
+  expect(renderToStaticMarkup(<>{render({ ...row, details: null })}</>)).toContain("987654321");
+  expect(renderToStaticMarkup(<>{render({ ...row, resource_id: "0", details: {} })}</>)).toContain("—");
+});
+
+it("explains conversation appearance changes and distinguishes current names from snapshots", async () => {
+  await i18n.changeLanguage("zh-CN");
+  try {
+    const columns = activityList().columns;
+    const row = { id: "1", actor_name: "Owner", action: "update", resource: "conversations", resource_id: "113508939366141952", resource_name: "验收会话", details: { appearance: { color: "#d8e9df", image: null, pattern: "diagonal" } }, created_at: 1 };
+    const cell = (key: string, value = row) => renderToStaticMarkup(<>{columns.find(c => c.key === key)!.render!(value)}</>);
+    expect(cell("action")).toBe("修改");
+    expect(cell("resource")).not.toContain("conversations");
+    expect(cell("resource_id")).toContain("验收会话");
+    expect(cell("resource_id")).toContain("当前名称");
+    const text = cell("details");
+    expect(text).toContain("修改会话背景");
+    expect(text).toContain("自然手绘");
+    expect(text).toContain("#d8e9df");
+    expect(text).toContain("未设置");
+    expect(text).toContain("查看详情");
+    expect(text).not.toContain("<pre");
+    const snapshot = { ...row, details: { name: "历史名称", appearance: row.details.appearance } };
+    expect(cell("resource_id", snapshot)).toContain("历史名称");
+    expect(cell("resource_id", snapshot)).not.toContain("验收会话");
+    expect(cell("resource_id", snapshot)).not.toContain("当前名称");
+  } finally { await i18n.changeLanguage("en-US"); }
+});
+
+it("localizes audit actions, explains saved states and never offers empty JSON as details", async () => {
+  await i18n.changeLanguage("zh-CN");
+  try {
+    const columns = activityList().columns;
+    const render = (action: string, details: unknown, key = "details") => renderToStaticMarkup(<>{columns.find(c => c.key === key)!.render!({ id:"1",resource:"conversations",resource_id:"2",action,details })}</>);
+    for (const action of ["members", "run", "decision", "retract-message", "enroll-token", "notification.test", "runner-update"]) {
+      expect(render(action, {}, "action")).not.toBe(action);
+    }
+    expect(render("members", {})).toContain("未记录变更详情");
+    expect(render("members", {})).not.toContain("<details");
+    expect(render("update", null)).not.toContain("<details");
+    expect(render("update", {state:"archived"})).toContain("已归档");
+    expect(render("run", {turn_id:"123"})).toContain("执行回合 ID");
+    const membership = {members:{added:[{id:"1",name:"Alice <Admin>"}],removed:[{id:"2"}]},agents:{added:[],removed:[{id:"3",name:"Agent"}]}};
+    const text = render("members", {membership});
+    expect(text).toContain("新增成员");expect(text).toContain("Alice &lt;Admin&gt; (1)");
+    expect(text).toContain("移除成员");expect(text).toContain("移除智能体");
+    expect(render("members", {membership:{members:{added:[],removed:[]},agents:{added:[],removed:[]}}})).toContain("名单未变化");
+  } finally { await i18n.changeLanguage("en-US"); }
+});
 
 it.each([false, true])("matches conditional secret required markers and save validation; enabled=%s", async enabled => {
   history.replaceState({}, "", "/zh-CN/workspaces/ops/variables/10/edit");
