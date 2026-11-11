@@ -40,7 +40,7 @@
 - Next: catalog regression and full-result inspection complete; finish scoped provision review before updating 4291. Then implement confirmed session policy and DSH adapter, preserving workspace/Agent authorization and isolation. Existing service/Runner processes remain unchanged.
 
 ## 当前事项清单（2026-11-11）
-- INTEGRATE-MAIN-01｜已完成｜用户授权合并main；整合保留main 8f4a884、监控d56de5a及预览8a27a57，业务代码自动合并，ADR/MEMORY保留双方记录。集成验收全部PASS，合并提交/本地main状态以Git为准；未推送、部署、迁移真实库或重启共享服务。
+- INTEGRATE-MAIN-01｜已完成｜用户授权合并main；整合保留main 8f4a884、监控d56de5a及预览8a27a57，业务代码自动合并，ADR/MEMORY保留双方记录。集成验收全部PASS，合并提交1dcc9de；用户随后明确授权推送main，远端同步结果以Git为准。未部署、迁移真实库或重启共享服务。
 | ROLE-DETAIL-63 | 待用户验收 | 复现demo开发角色详情权限挤成串，修正ResourceForm多选只读为资源分组+已选数+独立标签；保留未知选项，编辑依赖/权限/接口不变。40项ResourceForm测试/前端构建/实际4291四宽度19组70项权限展示PASS；截图人工复核；备份pre-role-summary-20261111-103421，PID15384，无新迁移，原数据与双Runner保全。docs/角色权限只读展示.md；058232f已提交推送。 |
 | AGENT-PROVISIONING-64 | 已核实缺口，待方案 | 新主机CLI不自动安装；CLI自定义API配置未下发；API型模型不能建立Agent会话；仅Runner主机支持会话。自动工作目录按会话+Agent分开，但原生CLI配置沿用系统用户，无OS强制隔离；手动目录可重用。已向用户明确，当前未擅自实现。 |
 | MARKET-SOURCES-65 | 待验证 | 设计docs/应用市场与集群模板设计.md已获批。P1（平台级公开多源+内置官方来源id=1→7link-team/ferry main marketplace/index.json、索引v2、市场合并、带配置文件导入）在worktree D:/Projects/github/ferry-marketplace-p1 分支feature/marketplace-p1，提交1b1769b..bf0f6c6（11个）；opus整分支审查3重要+8次要全部修复（M6无测试，见ledger）。独立target（D:/Projects/github/ferry-marketplace-p1/target；共用主仓库target会混入另一会话ferry-protocol产物）重跑：cargo 685/0失败、HTTP33、浏览器四宽度5、前端构建、npm 633 PASS，证据data/maintenance/marketplace-p1/。用户决定：先保留分支不合入main；合入后用真实GitHub同步验收一次；接着写P2计划。未推送、未更新4291、未发布。 |
@@ -2508,4 +2508,4 @@ Monitoring checkpoint: initial 6 focused Rust tests and 75 existing UI regressio
 - 最终合并内容：cargo test --workspace 777 PASS/20既有ignored（server669、Runner67+integration5/12、protocol8、sandbox16）；前端83文件640 PASS/1既有skip。cargo check --workspace、主题生成校验、TypeScript/Vite生产构建及嵌入最终dist的server/Runner构建PASS。日志Temp/preview-merge-{workspace-tests,ui-tests,ui-build,check,build}.log。
 - 隔离真实监控7组PASS：Temp/monitoring-health-Xl5wDJ/report.json；真实预览26项PASS：data/maintenance/preview-holes-20261111-093505/result.json。包含HTTP/TCP阈值与通知/应用未知/权限、三入口与切换/确认/撤销/沙箱/API/WS/Windows强杀子进程回收、四宽度与英/马来文手机页面。最终Malay监控320及预览设置390截图已视觉复核。
 - Self-review PASS（范围、双方代码/状态保留、复用、架构、回归、复杂度、持久状态、无生成物）；原始合并要求验收PASS，源提交均为合并结果祖先，最终Git复核主工作区及独立worktree。无推送或部署；Linux/真实多节点/PG/MySQL验收边界沿用功能交付说明，既有忽略项与警告不改。
-- 下一步：本地main合并无源码待办；远端同步与部署未包含在本次合并指令中，需要用户后续明确指示。所有测试资源均隔离，未重启现有服务。
+- 下一步：用户已追加授权推送main；本地合并与远端同步结果以Git为准，无源码待办。部署不在本次授权范围，未重启现有服务。推送仅沿用已通过的集成验证，本次只更新交付记录。
