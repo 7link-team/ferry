@@ -1,9 +1,9 @@
 //! Structured native CLI execution. The caller owns authorization, persistence,
 //! directory exclusion and host/user/native-session binding; no shell is used.
 pub(crate) mod platform;
-mod probe;
+pub(super) mod probe;
 mod protocol;
-pub(super) use probe::probe;
+pub(super) mod provision;
 #[cfg(test)]
 mod tests;
 
@@ -89,9 +89,20 @@ fn validate(request: &Request) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn command(request: &Request) -> Command {
-    let executable = probe::executable(request.runtime);
-    let command = match request.runtime {
+    command_with(
+        request,
+        &provision::Environment {
+            executable: probe::executable(request.runtime),
+            home: None,
+        },
+    )
+}
+
+fn command_with(request: &Request, environment: &provision::Environment) -> Command {
+    let executable = &environment.executable;
+    let mut command = match request.runtime {
         Runtime::Codex => {
             let mut c = native_command(
                 executable
@@ -145,10 +156,11 @@ fn command(request: &Request) -> Command {
             }
             c
         }
-        Runtime::Gemini | Runtime::Qwen | Runtime::Opencode => {
+        Runtime::Gemini | Runtime::Qwen | Runtime::Opencode | Runtime::Dsh => {
             let name = match request.runtime {
                 Runtime::Gemini => "gemini",
                 Runtime::Qwen => "qwen",
+                Runtime::Dsh => "dsh",
                 _ => "opencode",
             };
             let mut c = native_command(executable.as_deref().unwrap_or(std::path::Path::new(name)));
@@ -179,12 +191,12 @@ fn command(request: &Request) -> Command {
             c
         }
     };
+    environment.apply(&mut command);
     command
 }
 
 fn native_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let program = std::path::Path::new(program.as_ref());
-    #[cfg(windows)]
     let mut command = if program
         .extension()
         .is_some_and(|ext| matches!(ext.to_str(), Some("js" | "mjs" | "cjs")))
@@ -193,18 +205,18 @@ fn native_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
             .and_then(|path| {
                 std::env::split_paths(&path)
                     .filter(|directory| directory.is_absolute())
-                    .map(|directory| directory.join("node.exe"))
+                    .map(|directory| {
+                        directory.join(if cfg!(windows) { "node.exe" } else { "node" })
+                    })
                     .find(|path| path.is_file())
             })
             .unwrap_or_else(|| program.with_extension("requires-node-exe"));
         let mut command = Command::new(node);
-        command.arg(program);
+        command.arg(native_path(program));
         command
     } else {
         Command::new(program)
     };
-    #[cfg(not(windows))]
-    let mut command = Command::new(program);
     // Keep native user login/config discovery, exclude the platform service's
     // enrollment tokens, database credentials and arbitrary inherited secrets.
     command.env_clear();
@@ -223,6 +235,7 @@ fn native_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
                 | "LANG"
                 | "LC_ALL"
                 | "PATHEXT"
+                | "DSH_HOME"
         ) {
             command.env(key, value);
         }
@@ -230,19 +243,76 @@ fn native_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     command
 }
 
-pub(super) async fn run(
+/// Node/npm's path utilities do not consistently handle Windows verbatim paths.
+/// Keep canonical paths for binding checks; normalize only subprocess inputs.
+fn native_path(path: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(windows)]
+    if let Some(value) = path.to_str() {
+        if let Some(unc) = value.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{unc}").into();
+        }
+        if let Some(disk) = value.strip_prefix(r"\\?\") {
+            return disk.into();
+        }
+    }
+    path.to_owned()
+}
+
+// Uses DSH's public permission service, rather than editing its persisted logs.
+// No imported packages, credentials, or platform business logic are embedded.
+const DSH_PERMISSIONS: &str = r#"
+export const name = 'runtime-permissions';
+export const inject = ['agents', 'permissionPresets'];
+export function apply(ctx) {
+  const enforce = ({agent}) => {
+    ctx.permissionPresets.set(agent.session, 'read-only');
+    process.stdout.write(JSON.stringify({jsonrpc:'2.0',method:'agent_runtime/permissions',
+      params:{sessionId:agent.session.id,preset:'read-only'}}) + '\n');
+  };
+  ctx.on('agent/created', enforce);
+  for (const agent of ctx.agents.list()) enforce({agent});
+  ctx.on('session/event', (session, event) => {
+    if (event.type === 'turn/end') {
+      process.stdout.write(JSON.stringify({jsonrpc:'2.0',method:'agent_runtime/turn_end',
+        params:{sessionId:session.id,reason:event.data.reason.kind}}) + '\n');
+    }
+  });
+}
+"#;
+
+#[cfg(test)]
+async fn run(
+    request: Request,
+    events: mpsc::Sender<Event>,
+    inputs: mpsc::Receiver<Input>,
+    cancel: watch::Receiver<bool>,
+) -> Result<Outcome> {
+    let state = tempfile::tempdir()?;
+    run_managed(state.path(), request, events, inputs, cancel).await
+}
+
+pub(super) async fn run_managed(
+    state_dir: &std::path::Path,
     request: Request,
     events: mpsc::Sender<Event>,
     inputs: mpsc::Receiver<Input>,
     cancel: watch::Receiver<bool>,
 ) -> Result<Outcome> {
     validate(&request)?;
+    let environment = provision::environment(
+        state_dir,
+        request.runtime,
+        &request.cwd,
+        false,
+        request.binding.as_ref(),
+    )
+    .await?;
     // A kernel lock stays held until native process cleanup completes. Canonical
     // paths also exclude symlink/drive aliases and separate Runner processes.
     let directory = tokio::fs::canonicalize(&request.cwd).await?;
     let _lock = directory_lock(&directory)?;
     if let Some(binding) = &request.binding {
-        let inspected = probe(request.runtime, &request.cwd).await?;
+        let inspected = probe::probe_with(request.runtime, &request.cwd, &environment).await?;
         ensure!(
             inspected.canonical_directory.as_deref() == Some(&binding.canonical_directory)
                 && inspected.execution_user == binding.execution_user
@@ -251,7 +321,7 @@ pub(super) async fn run(
             "Agent execution identity changed; create a new conversation"
         );
     }
-    let command = command(&request);
+    let command = command_with(&request, &environment);
     #[cfg(unix)]
     let mut command = command;
     #[cfg(unix)]
@@ -393,6 +463,29 @@ async fn run_command(
     };
     let mut mcp = None;
     let mut _extension = None;
+    let mut _runtime_policy = None;
+    if request.runtime == Runtime::Dsh {
+        // ACP has no mode setter. Apply the official permission service to every
+        // new or restored Agent before admitting a prompt, including descendants.
+        // A read-only sandbox can escalate only through our per-call approval path.
+        let plugin = tempfile::Builder::new()
+            .prefix("runtime-permissions-")
+            .suffix(".mjs")
+            .tempfile()?;
+        tokio::fs::write(plugin.path(), DSH_PERMISSIONS).await?;
+        let url = reqwest::Url::from_file_path(native_path(plugin.path()))
+            .map_err(|_| anyhow::anyhow!("invalid runtime policy path"))?;
+        let patch = tempfile::Builder::new()
+            .prefix("runtime-permissions-")
+            .suffix(".yml")
+            .tempfile()?;
+        let body = serde_json::json!([{"insert":[{"id":"runtime-permissions","name":url.as_str(),
+            "inject":["agents","permissionPresets"]}]}]);
+        tokio::fs::write(patch.path(), serde_json::to_vec(&body)?).await?;
+        command.arg("--patch").arg(native_path(patch.path()));
+        command.env("DSH_PERMISSION_MODE", "read-only");
+        _runtime_policy = Some((plugin, patch));
+    }
     if let Some(bridge) = &bridge {
         command
             .env("FERRY_PLATFORM_BRIDGE_URL", &bridge.url)
@@ -401,14 +494,14 @@ async fn run_command(
             .to_string_lossy()
             .replace('\\', "/");
         mcp = Some(
-            serde_json::json!({"name":"ferry","command":executable,"args":["platform-mcp"],"env":[
+            serde_json::json!({"name":"ferry","command":executable,"args":["ferry-mcp"],"env":[
             {"name":"FERRY_PLATFORM_BRIDGE_URL","value":bridge.url}, {"name":"FERRY_PLATFORM_BRIDGE_TOKEN","value":bridge.token}]}),
         );
         match request.runtime {
             Runtime::Codex => {
                 for (key, value) in [
                     ("command", serde_json::json!(executable)),
-                    ("args", serde_json::json!(["platform-mcp"])),
+                    ("args", serde_json::json!(["ferry-mcp"])),
                     (
                         "env_vars",
                         serde_json::json!([
@@ -435,7 +528,7 @@ async fn run_command(
                 }
             }
             Runtime::Claude => {
-                command.arg("--mcp-config").arg(serde_json::json!({"mcpServers":{"ferry":{"command":executable,"args":["platform-mcp"]}}}).to_string());
+                command.arg("--mcp-config").arg(serde_json::json!({"mcpServers":{"ferry":{"command":executable,"args":["ferry-mcp"]}}}).to_string());
             }
             Runtime::Pi => {
                 let file = tempfile::Builder::new()
@@ -450,7 +543,7 @@ async fn run_command(
         }
     }
     command
-        .current_dir(&request.cwd)
+        .current_dir(native_path(std::path::Path::new(&request.cwd)))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

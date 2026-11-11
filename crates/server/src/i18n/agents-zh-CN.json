@@ -3,5 +3,6 @@
   "agents.changed": "智能体 已变更，请刷新后保存。",
   "agents.probeUnsupported": "环境检测需要使用支持此能力的新版 Runner 连接。",
   "permission.group.ai-agents": "智能体",
-  "permission.action.probe": "检测环境"
+  "permission.action.probe": "检测环境",
+  "agents.runtimeSetupFailed": "无法准备智能体运行环境。请检查 Runner 安装策略、Node/npm、网络和版本配置；启用配置隔离时请使用默认托管工作目录。"
 }

@@ -1,3 +1,4 @@
+import { Switch } from "../../shared/ui/switch";
 import { NotificationParameters } from "../notifications/NotificationParameters";
 import { WorkflowAssetContext } from "./WorkflowAssets";
 import { FieldCaption, FieldHelpContext } from "../../shared/forms/FieldHelp";
@@ -122,11 +123,10 @@ function Check({
 }) {
   return (
     <label className="flex items-center gap-2 text-sm">
-      <input
-        type="checkbox"
+      <Switch
         checked={value}
         disabled={readOnly}
-        onChange={(event) => change(event.target.checked)}
+        onCheckedChange={(checked) => change(checked)}
       />
       <FieldCaption label={label} />
     </label>

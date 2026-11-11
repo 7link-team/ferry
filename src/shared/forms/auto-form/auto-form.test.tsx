@@ -4,6 +4,36 @@ import { afterEach,beforeEach,expect,it,vi } from "vitest";
 import { i18n } from "../../i18n/i18n";
 import { AutoField,AutoForm,FieldControl,selectDisplay } from "./auto-form";
 
+it("associates boolean setting labels with a switch and submits actual booleans", async () => {
+  const save = vi.fn();
+  await act(async () => root.render(<AutoForm fields={{ enabled: { name: "Enable feature", type: "switch", value: false } }} onValuesSubmit={save} />));
+  const control = host.querySelector<HTMLButtonElement>('[role="switch"]')!;
+  const label = host.querySelector<HTMLLabelElement>('label[data-auto-label]')!;
+  expect(label.htmlFor).toBe(control.id);
+  expect(control.getAttribute("aria-checked")).toBe("false");
+  await act(async () => label.click());
+  expect(control.getAttribute("aria-checked")).toBe("true");
+  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(save).toHaveBeenLastCalledWith({ enabled: true });
+  await act(async () => control.click());
+  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(save).toHaveBeenLastCalledWith({ enabled: false });
+});
+
+it("keeps disabled switches inert and renders readonly booleans as text", async () => {
+  const change = vi.fn();
+  await act(async () => root.render(<FieldControl name="enabled" field={{ name: "Enabled", type: "switch" }} value={false} disabled onChange={change} />));
+  const control = host.querySelector<HTMLButtonElement>('[role="switch"]')!;
+  expect(control.disabled).toBe(true);
+  await act(async () => control.click());
+  expect(change).not.toHaveBeenCalled();
+  for (const value of [true, false]) {
+    await act(async () => root.render(<FieldControl name="enabled" field={{ name: "Enabled", type: "switch" }} value={value} readonly onChange={change} />));
+    expect(host.querySelector("button,input")).toBeNull();
+    expect(host.textContent).toBe(value ? "是" : "否");
+  }
+});
+
 it("shows a red required marker for native constraints and removes it when optional", async () => {
   for (const required of [true, false, true]) {
     await act(async () => root.render(<AutoField label="Value"><input required={required} /></AutoField>));
@@ -68,6 +98,7 @@ it("keeps unavailable selected multiselect entries visible instead of dropping t
   expect(change).not.toHaveBeenCalled();
 });
 beforeEach(() => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   void i18n.changeLanguage("zh-CN");
   localStorage.setItem("ui.locale", "zh-CN");
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

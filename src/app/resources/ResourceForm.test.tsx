@@ -109,6 +109,25 @@ it("merges custom action field patches without nesting them or dropping sibling 
   await act(async () => document.querySelector<HTMLFormElement>('[role="dialog"] form')!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   expect(action).toHaveBeenCalledWith({}, { enabled: true, channels: ["Operations", "Development"] });
 });
+it("saves derived dependent fields atomically after clearing stale selections", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/variables/new");
+  const config = {
+    resource: "variables", heading: () => "Schedule",
+    blank: { action: "pipeline", target_kind: "pipeline", target_ref: "OLD", inputs: { old: true }, scope: "build" },
+    sections: [{ fields: [{ key: "action", label: "Action", type: "text" as const,
+      resetOnChange: ["target_kind", "target_ref", "inputs"],
+      patchOnChange: (value: unknown) => ({ target_kind: String(value), inputs: {} }),
+    }] }],
+  };
+  await act(async () => root.render(<ResourceForm config={config} workspace="ops" permissions={new Set(["variables.create"])} />));
+  const input = host.querySelector<HTMLInputElement>('input[name="action"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "workflow");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(JSON.parse(requests.find(request => request.method === "POST")!.body!)).toMatchObject({ action: "workflow", target_kind: "workflow", target_ref: "", inputs: {}, scope: "build" });
+});
 it("copies an immutable public field and disables copying an empty value", async () => {
   const writeText = vi.fn(async () => {});
   vi.stubGlobal("navigator", { clipboard: { writeText } });

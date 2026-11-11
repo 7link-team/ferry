@@ -88,6 +88,7 @@ pub trait HostChannel: Send + Sync {
         &self,
         _runtime: ferry_protocol::agent::Runtime,
         _cwd: &str,
+        _binding: Option<&ferry_protocol::agent::Binding>,
     ) -> Result<ferry_protocol::agent::Probe> {
         Err(ApiError::localized(
             axum::http::StatusCode::CONFLICT,

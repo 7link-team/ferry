@@ -85,12 +85,12 @@ it("translates platform policy settings without resetting an unsaved switch", as
   vi.stubGlobal("fetch", fetcher);
   await act(async () => root.render(<Platform identity={{ user: { id: "1", name: "Operator", email: "operator@example.invalid", is_superadmin: true }, workspaces: [] }} reload={() => {}} onSignedOut={() => {}} />));
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(tab => tab.textContent === commonText("resource-domain:runner.settings"))!.click());
-  await act(async () => host.querySelector<HTMLButtonElement>('[role="checkbox"]')!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>('[role="switch"]')!.click());
   const before = fetcher.mock.calls.length;
   for (const locale of locales) {
     await language(locale);
     expect(host.textContent).toContain(commonText("resource-domain:runner.defaultAutoHelp"));
-    expect(host.querySelector('[role="checkbox"]')!.getAttribute("aria-checked")).toBe("true");
+    expect(host.querySelector('[role="switch"]')!.getAttribute("aria-checked")).toBe("true");
   }
   expect(fetcher.mock.calls.length).toBe(before);
 });

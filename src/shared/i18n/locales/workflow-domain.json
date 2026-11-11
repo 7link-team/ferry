@@ -2144,20 +2144,20 @@
     "Jenis aliran kerja"
   ],
   "kind.actions": [
-    "Build pipeline",
-    "构建流水线",
-    "建置流水線",
-    "ビルドパイプライン",
-    "빌드 파이프라인",
-    "Saluran binaan"
+    "Pipeline",
+    "流水线",
+    "流水線",
+    "パイプライン",
+    "파이프라인",
+    "Saluran paip"
   ],
   "kind.nodes": [
-    "Node workflow",
-    "节点工作流",
-    "節點工作流程",
-    "ノードワークフロー",
-    "노드 워크플로",
-    "Aliran kerja nod"
+    "Workflow",
+    "工作流",
+    "工作流",
+    "ワークフロー",
+    "워크플로",
+    "Aliran kerja"
   ],
   "kindHelp.actions": [
     "Build, test and deploy · GitHub Actions YAML",

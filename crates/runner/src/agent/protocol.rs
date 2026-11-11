@@ -31,6 +31,10 @@ pub(super) struct Protocol {
     /// A new invocation gets a distinct token namespace, even if native ids repeat.
     scope: String,
     next_request: u64,
+    acp_tools: HashMap<String, String>,
+    acp_model: Option<String>,
+    dsh_policy_sessions: std::collections::HashSet<String>,
+    dsh_outcome: Option<Outcome>,
 }
 
 impl Protocol {
@@ -46,6 +50,10 @@ impl Protocol {
             usage: None,
             scope,
             next_request: 0,
+            acp_tools: HashMap::new(),
+            acp_model: None,
+            dsh_policy_sessions: std::collections::HashSet::new(),
+            dsh_outcome: None,
         }
     }
 
@@ -55,7 +63,7 @@ impl Protocol {
                 "clientInfo":{"name":"agent_runtime","version":env!("CARGO_PKG_VERSION")}}}),
             Runtime::Claude => json!({"type":"control_request","request_id":"initialize",
                 "request":{"subtype":"initialize","hooks":{}}}),
-            Runtime::Gemini | Runtime::Qwen | Runtime::Opencode => {
+            Runtime::Gemini | Runtime::Qwen | Runtime::Opencode | Runtime::Dsh => {
                 json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
                 "protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false},
                 "clientInfo":{"name":"agent_runtime","version":env!("CARGO_PKG_VERSION")}}})
@@ -72,7 +80,7 @@ impl Protocol {
         match self.request.runtime {
             Runtime::Codex => self.codex(value),
             Runtime::Claude => self.claude(value),
-            Runtime::Gemini | Runtime::Qwen | Runtime::Opencode => self.acp(value),
+            Runtime::Gemini | Runtime::Qwen | Runtime::Opencode | Runtime::Dsh => self.acp(value),
             Runtime::Pi => self.pi(value),
         }
     }
@@ -93,7 +101,7 @@ impl Protocol {
                 "request_id":pending.native_id,"response":if allow {
                     json!({"behavior":"allow","updatedInput":pending.input})
                 } else { json!({"behavior":"deny","message":"The user declined this tool request."}) }}}),
-            Runtime::Gemini | Runtime::Qwen | Runtime::Opencode => {
+            Runtime::Gemini | Runtime::Qwen | Runtime::Opencode | Runtime::Dsh => {
                 let outcome = if allow {
                     json!({"outcome":"selected","optionId":pending.input["allow_once"]})
                 } else {

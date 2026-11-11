@@ -1,84 +1,98 @@
-# 当前事项清单
-- PREVIEW-INGRESS-01｜ACCEPTANCE｜三入口源码本地交付完成，提交以本分支HEAD为准；用户确认IP/Quick显式公开并确认风险，保留隔离。设计docs/preview-holes-design.md第20节。Direct，无子代理。
-- 验证｜cargo test --workspace PASS（Temp/preview-ingress-workspace-tests-delivery.log）：sandbox16/3ignored、protocol7、Runner54/7ignored及integration3+12、server668/9ignored、doc0。前端全量82文件630PASS/1skip（preview-ingress-all-ui-tests-direct.log）；workspace check PASS（preview-ingress-check-verified.log）。最终tsc/Vite生产构建PASS（preview-ingress-ui-build-accepted.log），主题生成校验PASS；最终server/Runner嵌入dist构建PASS（preview-ingress-build-accepted.log）。
-- 真实验收｜最终26项PASS，data/maintenance/preview-holes-20261111-082533/result.json（Temp/preview-ingress-live-accepted.log）。真实Runner/Vite/Chrome/已安装cloudflared：三入口、公开确认阻止未确认提交、Cookie剥离、API/资源/WS/HMR/沙箱、默认不搬迁、显式切换与旧入口回收、根域名修改/清空兼容、撤销断连接、Runner下线、Windows强杀服务回收其cloudflared。1440/900/390/320布局无整页横向溢出；英文/马来文390截图及中文320公开确认已视觉复核，说明可见且内部滚动/操作栏可达。
-- 两轮评审｜Self-review PASS（范围/复用/架构/回归/复杂度/持久状态）；Final acceptance review PASS（已授权三入口及风险确认/默认/切换/256位token/隔离/生命周期/六语/响应式，限上述实际环境）。不冒称生产或用户验收。
-- 过程记录｜新旧测试主机ID冲突改独立ID710001；Bash缺失以测试PATH补Git解决；串行测试占用exe导致LNK1104，停止本次串行后最终默认并行全量PASS。Quick首次导航DNS未解析，脚本加60秒公网就绪等待；后续一次连接器创建409原因未确认，保留08:18失败记录；最终完整重跑含两条Quick PASS。Platform section补description备用文案后已生产构建/真实可见断言通过。未弱化断言/删除测试/修改无关业务。
-- 决策｜domain保留32随机字节/256位/52字符Base32；IP及Quick无访问鉴权，手工每次确认，自动公开须管理员独立开关且默认关闭。普通PATCH同模式不重连，显式reconnect_ingress才重连。默认/启用只控制新建和切换；domain根域名变更/清空仍沿用原迁移/停用规则。Quick需本机CLI，200 in-flight/无SSE/无SLA/地址变化；无自动公网降级/重试/重启重放。
-- 限制｜真实验收为Windows单机隔离环境；未做Linux强杀/真实多节点故障/PG或MySQL连接验收，未提供Figma或原生App/物理键盘验收。沿用现有编译/大包警告。入口可用表示资源/租约有效，不保证公网DNS和三方服务即时可达。
-- 隔离｜design/preview-ingress-modes，C盘独立worktree与target。不改主目录、4291、共享Runner或外部Cloudflare。未做真实库迁移/合并/推送/部署。仅提交源码/文档，排除data/maintenance、dist、日志和二进制。
-- 下一步｜本期无源码待办；本地提交仅含25个源码/文档文件，worktree状态以git status为准。等待另一进程完成共享服务工作，再协调集成监控分支d56de5a及本预览提交；推荐部署前在目标Linux/三库/多节点环境补验收，不能直接替换共享服务。
+## COMMIT-ALL delivery checkpoint (2026-11-11)
+- User authorized committing/pushing all current main changes. Reviewed90 source/docs/test files; moved accidental root test log into ignored data/maintenance; secret-pattern scan and staged diffcheck PASS. Main matched origin/main before commit; no branch merge required. Other marketplace branch remains separate as recorded below.
+- Verification: frontend83 files637 PASS/1 existing skip, npm build/typecheck/server build PASS; cargo check --workspace PASS. Full Rust test run:755 PASS,5 missing-sh environment failures,20 ignored; existing Git Bash added only to test PATH, checkout4/4 and workflow-host12/12 retests PASS (all5 failures resolved; no code changes/test weakening). Evidence commit-all-{workspace-tests,workspace-check,checkout-retest,host-shell-retest}.log. Self-review and commit scope/source-only acceptance PASS. Commit/push final status is authoritative in Git history and origin/main; local4291 readiness remains recorded in BOOLEAN-CONTROLS.
 
-# 历史交付与依据
-# Task State - monitoring health v1
+## BOOLEAN-CONTROLS active checkpoint (2026-11-11)
+- User requests all boolean checkboxes visually consistent/larger, asks if common CRUD defect. Confirmed shared FieldControl maps switch to16px Checkbox; custom editors also use native checkboxes. Direct execution; tightly shared UI/state semantics, no delegation. Design: real Radix switch (existing dependency) for boolean settings,44px touch control and inline label/track row in AutoField; Checkbox remains for multi-selection and explicit confirmations with20px visual+44px target; native selection/confirmation controls get consistent20px styling and44px labels. Settings keep explicit-save/validation/permissions and readonly text semantics. No API/schema/business changes.
+- Scope: shared auto-form, accessibility label/help recognition, shared toggle primitives and custom boolean fields in workflows/pipelines/host policy/models/templates/notification/health settings. Preserve table/menu selection semantics, confirmation checkboxes and theme tokens; verify dark/light,keyboard,disabled,readonly,long labels and four widths. Next: implement shared controls and bounded callsite migration, document full review contract, run focused/shared regression + production build, real browser interactions/screenshots, update4291 after backup. Other staged/unstaged work retained.
+
+- TESTING checkpoint: final full frontend regression83 files PASS,637 tests PASS/1 existing skip (`boolean-controls-tests-verified.log`); npm production build/typecheck PASS. Fixed regression test selectors for actual switches and added missing JSDOM ResizeObserver; removed cron component's type import cycle through its minimal input contract. Real Chromium production frontend PASS label click/keyboard Space/44px targets/no page overflow at1440/900/390/320 and light/dark; final screenshots visually reviewed. Evidence `boolean-controls-browser/result.json` and final browser log. No API/schema/permission change; custom checkbox selection semantics retained. Diffcheck/LF PASS. Server embed rebuild running; next copy candidate, backup/update4291 with reused preservation script, check asset match and original runners online; preserve unrelated edits/staging. Figma/physical mobile keyboard not verified.
+
+- FINAL checkpoint: frontend83 files/637 tests PASS,1 existing skip; production frontend/typecheck and embedded server build PASS (3 existing dead-code warnings). Real Chromium production bundle light/dark/four widths/keyboard/label click PASS; screenshots reviewed; disabled/readonly and selection regression tests PASS. Local4291 updated PID62164; backup `data/backups/pre-boolean-controls-20261111-163946`; schema/16 business tables/keys/instance preserved. Served entry asset `/assets/index-mG8LlzTf.js` byte-matches dist, original2 runners online (`boolean-controls-local-readiness.json`). Self-review scope/reuse/architecture/regression/complexity/durable state and original requirement acceptance PASS. No commit/push/release; unrelated staging retained. Next: no implementation or local-update work outstanding; user refresh4291 for visual acceptance. Figma/physical mobile keyboard unverified.
+
+## CRON-FORM-SIMPLIFICATION active checkpoint (2026-11-11)
+- User requested removing redundant action/target-kind selection and hiding module to prevent cross-module creation from a form. Direct execution. Reuse existing route group's default scope (App.tsx), remove editable module field, derive build/deploy target kind on action change, retain host/host-group selection. No API/schema/permission changes. Extend shared FormField with optional atomic patchOnChange after existing resetOnChange; main form and action dialog honor it. Clear stale target/environment/entry/inputs and keep inputs an object. Existing stored rows retain their scope.
+- ACCEPTANCE PASS: shared form/scheduling/i18n53 tests PASS including atomic derived values and clearing validation on workflow unmount; final production frontend and embedded server builds PASS. Embedded Chromium PASS hidden module/derived targets, host/group retained, deployment-marketplace switch, build action switching clears inputs, correct scope/target stored, actual execution/deep link and four widths. Screenshot visually reviewed. Updated4291 PID52148; backup pre-cron-form-simplification-20261111-155611, schema/16 business tables/keys/instance unchanged, embedded asset matches dist and both original Runners online. Evidence data/maintenance/cron-form-simplification-{tests-final,build-final,server-build,browser}.log, local-{update,readiness}.json; screenshots workflow-cron-browser. Shared-field reuse, scope/architecture/regression/complexity/durable-state self-review and original requirement acceptance PASS; diffcheck/LF PASS. Mobile physical keyboard/Figma not verified. No commit/push/release; other task edits/staging untouched. Next: no implementation/update work outstanding; user refresh4291 to accept simplified scheduling form.
+
+## WORKFLOW-TERMINOLOGY checkpoint (2026-11-11)
+- User requested consistent short labels: menus/targets/counts/notification sources Pipeline / Workflow; actions Trigger pipeline / Trigger workflow. Six locales updated through existing i18n; no route/resource/permission/runtime changes. Direct execution, no delegation. Relevant frontend22/22, npm and embedded server production builds PASS; final embedded Chromium PASS exact short sidebar links/action/target selectors and real execution/deep links at four widths. Initial Vite-source browser timed out loading; final production-binary rerun passed without weakening assertions (workflow-terminology-browser-final.log). Updated4291 PID59680, backup pre-workflow-terminology-20261111-154021; schema,16 business tables,keys,instance preserved; asset byte-match and both Runners online PASS. Scope/reuse/architecture/regression/complexity/durable-state self-review and original-request acceptance PASS; diffcheck/LF PASS. Other staged/unstaged tasks preserved, no commit/push/release. Next: no implementation work remains; user refresh4291 to inspect short labels.
+
+## WORKFLOW-SCHEDULE active checkpoint (2026-11-11)
+- User requested node workflows in shared cron jobs (/cron-jobs/new?scope=build). Direct execution, no subagents. Scope: published active workflow, explicit manual entry + schema-based inputs, current publication per occurrence, saved actor reauthorized per execution, production mode ignores pins; shared cron retry/overlap/timeout/recovery policy unchanged.
+- IMPLEMENTATION: cron Body adds entry_node_id and inputs with serde defaults inside existing config JSON (no DB migration). workflows/run reuses create_as plus schedule_request validator; trigger_kind schedule, mode production. Cron validates/schedules/tracks/recovers workflow-executions, detail link uses workflow ID+execution query; deletion reference guard. Shared CRUD action/target/environment reset linkage and existing WorkflowRunInputs reused via new scheduling custom field.
+- ACCEPTANCE PASS: cron3/3 including recovery/revocation; workflow run regression20/20; frontend6/6; cargo check, npm typecheck, production UI and embedded server builds PASS. Design/review PRD §25 and ADR persisted. Isolated real HTTP25 checks PASS including actual timer, published version/mode, actual node output excluding pins, cross-space404, invalid inputs, original pipeline/host/retry/drain behavior. Embedded Chromium PASS required-input blocking, creation/run/deep-link and four widths1280/900/390/320; desktop/mobile/execution screenshots visually inspected. Figma/physical mobile keyboard not tested, explicitly documented. Initial HTTP harness wrongly expected200 for publication201; corrected exact status and reran successfully, original log retained.
+- LOCAL4291 UPDATED: PID24796; backup data/backups/pre-workflow-cron-20261111-152804; schema,16 business tables,keys,instance retained. Readiness PASS bundle index-Bc9DzpqA.js matches dist bytes; both existing Runners online and untouched. Evidence data/maintenance/workflow-cron-{server-test-final,run-regression,ui-test,http-output-final,browser-final,ui-build,server-build}.log; local-{update,readiness}.json; browser screenshots. Self-review and original scoped requirement review PASS; diffcheck and LF PASS. No staging/commit/push/release; other tasks' changes retained.
+- Next: no implementation/deployment work outstanding for node workflow scheduling; user can refresh /zh-CN/workspaces/109124836738990080/cron-jobs/new?scope=build and select workflow action. Prior SESSION-POLICY and legacy service-registration rename remain separate pending work.
+
+## RUNNER-IDENTITY checkpoint (2026-11-11)
+- Naming implementation and scoped self-review/acceptance PASS: new default ferry-runner-agent, bootstrap ferry-runner(.exe), supervisor ferry-runner-service(.exe), signed staged worker ferry-runner(.exe), Actions remote process ferry-actions-worker(.exe), canonical ferry-mcp with platform-mcp alias. MCP server/tools already branded; no generated product Skill exists. Third-party names and protocol enums unchanged.
+- Compatibility boundary explicitly disclosed to user: existing runner-agent registration, supervisor path and state remain compatible; a worker upgrade does NOT rename the old supervisor/OS service registration. New default resolution prefers new installation, reuses legacy if only legacy configuration exists, preserves custom names; explicit state-dir is not redirected. Both new and legacy UI uninstall paths work.
+- Verified: Runner67PASS/8existing ignored; CLI5/5PASS including real per-process default/legacy/new/custom resolution; Windows native current-user service6/6PASS; Actions24/24PASS against final server and renamed remote worker; UI28PASS/1Unix-platform skip; canonical+legacy MCP black-box PASS; server/runner build, typecheck/frontend build, diff-check PASS. Logs data/maintenance/ferry-runner-naming-{unit-final,cli-compat,native,actions,ui-final,build-final,typecheck,frontend-build}.log. Original native suite used prior compatible isolated server; Actions suite used final newly built server. Linux/macOS native service execution not run here.
+- No naming update to existing4291 processes, no naming commit/push/release. Earlier CLI27 files remain staged; naming edits unstaged; AGENTS/CLAUDE/marketplace files excluded. docs/agent-runtime-provisioning.md and ADR record design/limits. Scope/architecture/reuse/regression self-review PASS; no schema change or business-data mutation.
+- Outstanding prior task: confirmed SESSION-POLICY still not implemented. Next concrete action: inspect accounts/auth.rs and session schema/migration conventions; design additive access/refresh rotation for confirmed30min/14day fixed-expiry policy, then implement with authorization/logout/rotation regression tests. Do not claim complete overall backlog or auto-migration of legacy service names.
+
+## Current continuation checkpoint (2026-11-11)
+- DSH / AGENT-PROVISIONING ACCEPTANCE PASS (2026-11-11): official DSH0.2.2-rc.1 install/flags/failed-upgrade preservation PASS; real Server+Runner+DSH deterministic-provider E2E8/8 and Codex compatibility6/6 PASS (dsh-runtime-http.json, agent-runtime-http.json). Build/check/typecheck/frontend build PASS; full workspace suite Runner67PASS and other suites PASS, Server649PASS/2 missing-cygpath environment failures/9ignored, then Git usr/bin PATH host12/12 PASS covering both failures. Do NOT claim original full run was green. Evidence agent-dsh-workspace-delivery.log,dsh-host-environment-retest.log,dsh-final-check.log,dsh-final-typecheck.log. Native failures use root-session turn/end receipt; AgentProbe optional binding separates execution preflight from manual path rejection; non-DSH legacy identities preserved. Local4291 backed-up update PASS: serverPID50364, RunnerPIDs89000/90432, both online; schema/business rows/keys/instance unchanged; backup data/backups/pre-agent-dsh-20261111-141308, receipt dsh-local-update.json. Actual served index-V9YsdHne.js contains DeepSeek Harness (earlier models-* asset glob was incorrect). Build uses CARGO_INCREMENTAL=0 and per-server dev/test debug=0 flags to avoid disk/PDB limits; logs of failures retained.27 feature files staged, NOT committed/pushed/released; AGENTS/CLAUDE/market docs excluded. Other thread monitoring uses isolated C target; first coordination delivered, post-upgrade PID message transport failed; shared state has current PIDs. No vendor inference claimed. CLI stage self-review/acceptance complete. Next active task: confirmed SESSION-POLICY design/implementation; keep CLI changes intact.
+- AGENT-PROVISIONING-64: implementation wired; six real official npm runtimes PASS (Codex 0.167.1, Claude 2.1.74, Gemini 0.68.0, Qwen 0.27.2, OpenCode 1.19.5, Pi 0.73.1). Evidence: data/maintenance/agent-provision-live-*.log. Real isolated server+Runner acceptance PASS: agent-runtime-http.json (six checks). No vendor inference claimed.
+- Full workspace tests finished: server650PASS/1FAIL/9ignored; Runner61PASS/8ignored and preceding workspace suites PASS. Log agent-provision-workspace-final-tests.log. The only failure: server translation catalog omitted agents.runtimeSetupFailed. Six server agents locale files now synchronized with existing frontend translations; focused regression PASS (1/1, exit0; agent-provision-catalog-regression.log). Original full run remains recorded as FAIL; do not overwrite that evidence or claim a new full run. Existing successful check/build logs retained. No local service update/commit/release yet.
+- Confirmed SESSION-POLICY: access 30 minutes, refresh 14 days, automatic renewal default on, active users only; rotate refresh secret without extending original 14-day deadline; logout revokes both. Duration changes apply to new logins; disabling automatic renewal immediately blocks subsequent automatic refresh. Preserve Cookie authentication; no parallel JWT system. IMPLEMENTATION NOT STARTED. Existing auth still slides sessions by 14 days on every authenticated request. Requires design, additive migration and security regression tests before deployment.
+- Confirmed DSH identity: user answered DeepSeek Harness. Verified official https://github.com/deepseek-ai/deepseek-harness (default branch master), npm @deepseek-ai/dsh. Official docs/cli-help.md supports headless --json, --session-id, permission modes; MCP plugin configuration and DSH_HOME exist. Node engine >=24.9.0. Runtime now includes DSH; official install PASS; final acceptance in progress. Grok/Kimi also require actual adapters and verified official identities. DSH ACP is NOT drop-in: upstream explicitly lacks session/load and modes; uses session/resume and session/set_config_option. See docs/agent-runtime-provisioning.md for verified source links.
+- Next: catalog regression and full-result inspection complete; finish scoped provision review before updating 4291. Then implement confirmed session policy and DSH adapter, preserving workspace/Agent authorization and isolation. Existing service/Runner processes remain unchanged.
 
 ## 当前事项清单（2026-11-11）
-| 编号 | 状态 | 事项与下一步/证据 |
-|---|---|---|
-| MONITORING-HEALTH-V1 | 待验证 | 一期代码、隔离API/通知/浏览器验收PASS；独立分支本地交付。待另一Agent/DSH进程完成后集成，再进行目标运行环境及用户验收；未合并/推送/部署。 |
+- INTEGRATE-MAIN-01｜已完成｜用户授权合并main；整合保留main 8f4a884、监控d56de5a及预览8a27a57，业务代码自动合并，ADR/MEMORY保留双方记录。集成验收全部PASS，合并提交/本地main状态以Git为准；未推送、部署、迁移真实库或重启共享服务。
+| ROLE-DETAIL-63 | 待用户验收 | 复现demo开发角色详情权限挤成串，修正ResourceForm多选只读为资源分组+已选数+独立标签；保留未知选项，编辑依赖/权限/接口不变。40项ResourceForm测试/前端构建/实际4291四宽度19组70项权限展示PASS；截图人工复核；备份pre-role-summary-20261111-103421，PID15384，无新迁移，原数据与双Runner保全。docs/角色权限只读展示.md；058232f已提交推送。 |
+| AGENT-PROVISIONING-64 | 已核实缺口，待方案 | 新主机CLI不自动安装；CLI自定义API配置未下发；API型模型不能建立Agent会话；仅Runner主机支持会话。自动工作目录按会话+Agent分开，但原生CLI配置沿用系统用户，无OS强制隔离；手动目录可重用。已向用户明确，当前未擅自实现。 |
+| MARKET-SOURCES-65 | 待验证 | 设计docs/应用市场与集群模板设计.md已获批。P1（平台级公开多源+内置官方来源id=1→7link-team/ferry main marketplace/index.json、索引v2、市场合并、带配置文件导入）在worktree D:/Projects/github/ferry-marketplace-p1 分支feature/marketplace-p1，提交1b1769b..bf0f6c6（11个）；opus整分支审查3重要+8次要全部修复（M6无测试，见ledger）。独立target（D:/Projects/github/ferry-marketplace-p1/target；共用主仓库target会混入另一会话ferry-protocol产物）重跑：cargo 685/0失败、HTTP33、浏览器四宽度5、前端构建、npm 633 PASS，证据data/maintenance/marketplace-p1/。用户决定：先保留分支不合入main；合入后用真实GitHub同步验收一次；接着写P2计划。未推送、未更新4291、未发布。 |
+| CONTAINER-MGMT-66 | 待处理 | 用户提出：主机详情新增“容器管理”tab，兼容docker/containerd/OrbStack等，管理容器/镜像/网络/存储卷基础操作；Swarm/Stack级不做，统一走应用部署模板。现状无容器管理，部署仅通过modes.rs执行docker。已确认：先只做Docker Engine API兼容（Docker/OrbStack/Colima/Podman等），containerd原生以后再说。设计讨论中，未实现。参照docs/prd/应用高可用拓扑与多部署驱动方案.md §11。方案讨论中，未实现。 |
+| IDENTITY-AVATARS-62 | 待用户验收 | 默认人物/像素、缩写/表情/上传已接个人/Agent/消息/导航；46项前端PASS；server全量646PASS/5项Git Shell PATH失败，补PATH后checkout4+host12全PASS；新增迁移roundtrip/账号隔离/Agent省略保留/会话权限PASS；隔离真实HTTP保存/拒绝5项PASS；四宽度及英文/马来语暗色、图片裁剪PASS。旧agent_models前置查询问题已修正。4291已备份更新，最新PID15384，数据/密钥/实例/双Runner89776/20820保全；新增identity_avatars仅两nullable列。证据identity-members，文档会话成员与身份头像.md；eb0bcaa已提交推送；无生产发布。 |
 
-## Objective
-Three monitoring object levels: reuse host system monitoring; observe service instances; combine application entry availability and replica evidence. Reuse shared alerts/notifications.
+| CONVERSATION-MEMBERS-61 | 待用户验收 | 单聊/群聊成员右侧面板、当前会话内Agent实时状态/最近结果、成员详情/有权限发起Agent单聊；复用1秒轮询/权限/创建接口。当前状态与最近失败分开；不公开其他会话活动，不编造人类在线状态。前端状态/创建权限/失败与成功测试及四宽度暗色浏览器PASS，已随62更新4291/PID15384；Figma/物理触控/原生App未测。 |
+| HEADER-DIVIDERS-59 | 待处理 | 用户讨论顶部平台管理、外观、个人之间短分隔线；尚未实施。 |
+| FEATURE-REVIEW-60 | 待处理 | 用户要求核对现有功能缺口；已查发布失败/CLI自定义API/通知历史保留等，待完成源码与证据评审。 |
 
-## Current Phase
-ACCEPTANCE
 
-## Current Step
-Scoped source delivery complete; verification and two review passes recorded. Local commit on isolated branch; inspect Git HEAD for its identity. User/live-environment acceptance remains separate.
+| HEADER-WORKSPACE-ORDER-57 | 待验证 | f19e2df：空间列表直开、平台管理原位；创建/加入固定底部居中、上方分割线，仅列表滚动。前后端构建/App35及实际4291四宽度、120额外空间滚动/入口位置/创建加入路由PASS，测试空间仅浏览器mock未落库。4291/PID16548，备份pre-header-fixed-footer-20261111-091442；数据/密钥/双Runner保全。证据mobile-navigation/header-fixed-footer-{browser.json,local-update.json,many-320.png}；待用户验收，未发新版。 |
+| MOBILE-APP-NAV-58 | 待验证 | 3b5864d已提交推送；手机320–767px底部四个授权候选入口+更多，平台同步四入口；工作空间/监控二级菜单改顶部选择，详情沿用独立URL，路由切换重置弹层。业务页隐藏页脚、登录注册保留，Desktop/Pad保留原导航。前后端最终构建、App35项测试、实际4291五宽度1440/900/767/390/320及返回刷新/仅hosts.read菜单/匿名登录页脚PASS，已审390工作流和320平台截图。备份pre-mobile-navigation-delivery-20261111-000338后更新4291/PID49460，原数据/密钥/实例/双Runner89776与20820保全，无新增迁移；证据mobile-navigation/{local-browser.json,delivery-local-update.json,tests.log,frontend-final-build.log,server-delivery-build.log}；设计docs/移动端导航.md。5201临时服务已停；物理触屏/键盘与原生App未测，待用户验收；未另发新版、不改alpha.16标签。 |
 
-## Execution / isolation
-- Direct execution; coupled contracts did not benefit from delegation. No subagents.
-- Worktree C:/Users/FullStack/Projects/ferry-monitoring-health-v1; branch feature/monitoring-health-v1; base 058232f.
-- Private CARGO_TARGET_DIR=C:/Users/FullStack/AppData/Local/Temp/ferry-monitoring-health-target; temporary databases and dynamically allocated ports.
-- Preserve main D:/Projects/github/ferry and other Agent/DSH changes. No restart/replacement of 4291 (coordination PID15384) or Runner89776/20820. Shared services and data untouched.
+| RELEASE-ALPHA16-56 | 待处理 | alpha.18/59a7764标签已推送，发布CI42861744332为25成功/3失败/1跳过，未公开发版。失败为Intel macOS打包退出134、仓库OAuth界面用例在旧设置节查找公开地址、Runner stderr断言不匹配。下一步分别核查原始日志并修复，候选必须纳入头部位置纠正；不移动旧标签。线上核实alpha.12。alpha.16因异步状态栈溢出失败；Box::pin修复真实Runner验收通过，server641PASS加补临时GitShell PATH后checkout4/host12PASS覆盖原5环境失败。alpha.17又暴露旧验收：三库升级未声明已定义通知权限、公开站点字段/手机页脚/站点tab仍按旧契约断言；已精确更新权限增量及公开字段白名单，本地完整登录/SMTP/脚本/路由、流水线模板/节点编辑/弹窗布局PASS（release-alpha17/），其余受影响页面补测中。所有失败候选标签不移动、失败注释及ZIP保留。4291/PID16548运行f19e2df修正（版本元数据alpha.18；新标签待发布CI问题解决），原数据/密钥/双Runner保全，无新迁移；未更新远程生产。历史证据release-alpha16/ci/及mobile-navigation/stack-fix-local-update.json；编译缓存官方清理21.7GiB后关闭增量，业务文件与证据保留。 |
 
-## Completed Work
-- Design/source audit and full review matrix with actual SQLite/PostgreSQL/MySQL generated DDL; additive migration with destructive-down protection.
-- HTTP/TCP checks, configurable evaluation/retention, runtime observations through existing HostChannel, CRUD/history/workspace permissions/audit/version fencing.
-- Native/systemd, Docker, Compose, Swarm parsers; running-revision evidence and explicit unknown/stale states.
-- Application entry/healthy/expected/unknown counts and per-service/instance evidence; shared alert events and notification delivery. Existing host and deployment-failure alerts preserved.
-- Swarm Cluster ID from bounded read-only Docker command; same-cluster managers merge demand, independent clusters stay separate; identity regression PASS.
-- Shared resource configurations/navigation, six-language catalogs; long-name column constraint and explicit action icons. Check list uses view/delete; edit/history/policy remain accessible in detail.
+登录logo交付（LOGIN-LOGO-SIZE-55）：用户确认效果通过；6e34285已推送，桌面160/手机128px与2x高清资源，原图1254×1254。4291/PID56472已更新，备份pre-alpha16-logo-20261110-214543；四宽度及截图验证见release-alpha16/{logo-browser.json,local-update.json,login-390.png}，公开发布由56跟进。
 
-## Confirmed Constraints / Decisions
-- Configurable defaults: interval30s, timeout5s, failures3, recoveries2, stale90s, raw history7d.
-- Entry-up + known replica failure=degraded; confirmed entry-down=unavailable; insufficient fresh evidence=unknown. Separate entry/healthy/unknown evidence. No automatic repair.
-- V1 HTTP/TCP and built-in runtime observations only. MQTT/log/scripts/heartbeat deferred. HTTP/TCP originate on server network; runtime evidence does not prove protocol quorum.
-- No historical automatic check creation, live migration, shared service update, merge, push or release in this delivery.
+| FORM-FIELD-ORDER-54 | 待验证 | 按用户纠正重做：S3前缀最后、SSH跳板机最后、OAuth可选地址后置、SMTP连接/发件/加密在可选认证前；必填红星补齐平台S3/Turnstile/OAuth/SMTP、模型/价格及测试邮箱，AutoField识别原生必填、SecretField补标，条件必填与CRUD保存校验共用；已有密钥保留不误要求重填，S3仍兼容默认凭据链。最终全前端621PASS/1skip、末次定向52PASS、前后端build及diff检查PASS；隔离Chrome四宽度44项+已有密钥保留PASS，桌面/手机截图复审。已备份更新4291/PID74684，40类原记录/密钥/实例/环境保全，无迁移，双Runner89776/20820未重启；实际4291四宽度顺序/红星/配置未变PASS。证据form-field-order/required-{browser,local-browser,local-update,review}.json，备份pre-form-required-order-20261110-212729。直接执行、自审/需求复核通过；前轮证据仅历史，待用户重新刷新验收，未提交推送发布；原生App/物理软键盘未测。 |
+| ACCOUNT-OTP-52 | 待验证 | 密码+TOTP、平台绑定开关/个人扫码验证/一次性恢复码及重置解绑/独立登录验证已备份更新4291/PID47352；默认关闭，不绑定真实账号。前端618PASS/1skip、server646PASS/9ignore（含7项OTP安全测试）、最终前后端build及差异检查PASS；隔离Chrome绑定/四宽度/独立二维码解码/下载登录/重放/重启/重置撤销及解除PASS（account-otp/acceptance.json、browser-theme-final.log）。暗色Portal前景色及FormActions满行按钮已修复，暗色标题/标签/操作文字4.5:1对比度与主题过渡后截图复验PASS，已审最终桌面/手机明暗图；原失败断言/截图保留。新增account_otp_v1空表，39类原记录及user_otp/密钥/实例/环境保全，双Runner89776/20820未动；最终备份pre-account-otp-title-theme-20261110-201558、theme-local-update.json，实际4291平台/个人四宽度PASS（local-browser.json）。待用户物理验证器扫码；未提交推送发布。 |
+| SITE-TITLE-PREFIX-53 | 待验证 | 前后端默认标签前缀均改false，存量显式设置保留；异步配置前不加前缀，关闭后刷新不闪现。延迟配置/可见性单测、隔离Chrome初始HTML/延迟1.2秒配置/重复刷新及站点中英马来四宽度12截图PASS（account-otp/acceptance.json、site-settings-browser.log及site-settings/）。已随52备份更新4291/PID47352，实际4291延迟配置与重复刷新无前缀闪现PASS（local-browser.json）；待用户验收，未提交推送发布。 |
 
-## Verification
-- cargo test --workspace PASS (monitoring-workspace-complete.log): sandbox16/3ignored; protocol7; Runner54/7ignored plus integration3+12; server662/9ignored; doc suites0. This full run preceded the final cluster-identity change.
-- Final cluster-identity monitoring regressions12PASS (monitoring-cluster-final.log); cargo check --workspace PASS after that change (monitoring-check-final.log).
-- Frontend all82 files/627PASS/1existing skip (monitoring-ui-clean.log); final layout shared form/table/i18n54PASS (monitoring-layout-tests.log); final npm build including typecheck PASS (monitoring-delivery-ui.log).
-- Final server build after final dist PASS (monitoring-delivery-server.log).
-- Final actual isolated HTTP/TCP/API, unified local webhook trigger/recovery, workspace isolation/version conflict, unavailable runtime unknown, phone form saving a120-character name, four-width pages and English/Malay forms:7groupsPASS (monitoring-delivery-acceptance.log).
-- Final evidence C:/Users/FullStack/AppData/Local/Temp/monitoring-health-VcgIDN/report.json with22 screenshots. Desktop/Pad/Phone, Malay long text and final tablet/phone long-name tables visually inspected. No page overflow/browser exceptions.
-- git diff/cached diff checks PASS; LF verified; only scoped source/docs staged, no build/log/test artifacts.
-- Earlier failures retained: missing Bash/cygpath paths, incomplete catalogs, PowerShell Unicode/CLIXML handling; fixed without changing unrelated business code or weakening tests. Parallel UI run had2 timeouts; complete serial run passed.
+| HOST-UPLOAD-50 | 待验证 | 已备份更新4291/PID50112，确认后多文件/文件夹/拖拽、逐文件与总体进度/速度/大小/百分比、ACK、关闭提示/停止/显式重试及POSIX非递归rwx权限接口/弹窗。真实隔离Windows Runner多文件/空文件/目录层级/2MiB限速实时进度/403显式重试/下载逐字节/无权限403/跨空间404/Windows拒绝chmod/四宽度PASS（host-upload/acceptance.json及截图）；前端613PASS/1skip、server639PASS/9ignore、最终前后端build及MCP293目录PASS。修复SSH写入关闭丢失诊断；无Docker/WSL/sshd，原生POSIX权限及生产主机未实连，线上原因未确认。39表/密钥/实例/环境保全，无迁移，原双Runner89776/20820未重启；备份pre-sms-s3-upload-brand-20261110-165319、sms-providers/sms-local-update.json。待用户及生产验收；未提交推送发布。 |
+| BRAND-ICON-51 | 待验证 | 对比Downloads/logo.png与logo2.png的240/80/32/16px明暗图后推荐并采用logo2，原样复制到public/brand/logo.png；生成16～512PNG/六尺寸ICO，登录/两类导航/标签页/触屏均替换，旧原创资产与导出mjs已移除，Python/Pillow可复现。前端/最终server build PASS，4291已备份更新/PID85652，39表/密钥/实例/环境保全，无迁移，双Runner89776/20820未重启；实际四宽度/登录明暗及所有资产逐字节匹配PASS（user-logo/{comparison.png,local-browser.json,logo2-local-update.json}），已查看实际暗色登录图。备份pre-user-logo2-20261110-174943；未提交推送发布，待用户刷新审图。 |
 
-## Review / Acceptance
-- Self-review: scope/reuse/architecture/regression/complexity/durable state PASS.
-- Final acceptance review: authorized v1 implementation and isolated executable criteria PASS within environments listed above. No claim of user/production or live Linux-engine acceptance.
+| S3-PREFIX-48 | 待验证 | 已随50更新4291/PID50112：可选S3相对子路径、统一PrefixStore读写删、空兼容、六语校验及有存量禁止直接切换。内存3项、真实SeaweedFS4.53八项PASS（s3-prefix/real-s3.log）、最终server639PASS/9ignore及build PASS；39表与密钥/实例/环境保全，无迁移。待用户验收，环境前缀变更仍须先迁移；未提交推送发布。 |
+| NOTIFICATION-SMS-49 | 待验证 | 已随50备份更新4291/PID50112：阿里云ACS3/腾讯云TC3短信、空间独立密钥/审核模板/有序参数、共享权限/Agent/幂等发送记录与manual/workflow/Actions/MCP；维护通知可折叠组含邮件/短信/三方入口，模板/记录为tab。最终隔离Chrome六语相关及四宽度配置/回读/预览/跨空间/禁用拒绝PASS（sms-providers/acceptance.json、browser-final.log及截图），实际4291入口/导航四宽度PASS（host-upload/local-browser.json）；未实发商业短信、未验手机回执。前端613PASS/1skip、server639PASS/9ignore、前后端build PASS（Git测试PATH已补，首轮失败保留）。39表/密钥/实例/环境保全，无迁移，双Runner未动；设计docs/统一通知设计.md。待用户验收，未提交推送发布。 |
 
-## Known Issues / Risks
-- Windows test host has no live systemd/Docker/Compose/Swarm engines; parser/aggregation tests are not real-engine acceptance. PostgreSQL/MySQL SQL generation only, no live connections.
-- Figma/native App/physical mobile keyboard not available. MQTT/log/scripts/heartbeat remain excluded v2 scope.
-- Existing code warnings and frontend bundle-size warning retained; no unrelated cleanup.
+| NOTIFICATION-CENTER-47 | 待验证 | 通知独立入口，顶部tab含通知/模板/发送记录；维护分身份与权限（成员/智能体/角色）、模型服务、配置与审计，按权限隐藏空组，旧URL/权限不变。已备份更新4291/PID38988，39表/密钥/实例/环境保全、无新增迁移，双Runner89776/20820保留；App34PASS、前端608PASS/1既有skip、前后端build及实际4291四宽度tab切换/刷新/分组/中英马来语/截图自审PASS，证据notification-center/navigation-{tests.log,browser.json,local-update.json,review.json}。上阶段全server628PASS/9ignore、真实HTTP/SMTP/MCP/worker/撤权/幂等PASS，notification_center_v1迁移及原证据同目录review.json保留。待用户验收，未提交推送/发布；Native构建通知限制、商业渠道/PG/MySQL未实连、发送记录未接自动清理边界仍有效；设计docs/统一通知设计.md。 |
 
-## Remaining Work / Next Action
-No source changes outstanding for this delivery. Wait for the other Agent/DSH process to finish its shared-service delivery, then integrate feature/monitoring-health-v1 with its changes and perform deployment separately. Recommended next environment gate: live Linux systemd/Docker/Compose/Swarm observation acceptance before production rollout; user acceptance follows deployment. Do not restart shared services or run live migrations from this worktree uncoordinated.
+| PLATFORM-SETTINGS-ORDER-44 | 待验证 | 已随45/46更新4291/PID1540；菜单末尾仓库关联→访问地址→站点设置，保留原路由/字段。实际4291导航顺序、两个section/基本信息tab、1440/390无溢出PASS（settings-order/browser.json）；待用户刷新验收，未提交推送/发版。 |
 
-## Last Checkpoint
-2026-11-11 final delivery build/API/browser/screenshots PASS; scoped local commit, integration/deployment pending.
+| CONVERSATION-WALLPAPER-45 | 待验证 | 用户否定几何纹理后已重做三组原创线描壁纸：生活涂鸦/星空漫游/自然手绘，兼容原pattern键；空会话改消息区居中插图/标题/提示语，主题底色保证自定义壁纸可读性。已备份更新4291/PID1540（pre-conversation-doodles-empty-20261110-133732），无新增迁移，原记录/密钥/实例/环境保全；604PASS/1既有skip、前后端构建、实际4291四宽度/亮暗审图/三组资产/回复/预览保存/上传移除/失败提示PASS。证据wallpaper/{doodles-local-browser,empty-local,doodles-local-update,doodles-review}.json及截图；临时5197/5198已停，双Runner在线，早期重复空验收群已归档，保留113508939366141952。直接执行及自审通过，待用户刷新验收；未提交推送/发版，移动实机键盘未测。 |
 
----
+| CONVERSATION-REPLY-46 | 待验证 | 已随44/45更新4291/PID1540；回复不再顶部引用/筛历史/强制滚动，改输入框内发送者/两行摘要/44px取消；失败保留正文与引用、成功清空，reply_to与重试幂等不变。相关16PASS，全量604PASS/1既有skip（首次缺ResizeObserver夹具已补齐，失败证据保留）；实际4291四宽度历史/滚动/焦点/取消PASS（wallpaper/local-browser.json）。验收会话113478763282436096原消息/外观未改，新增壁纸验收群113508939366141952；移动实机键盘未测。直接执行及需求自审通过，待用户刷新验收，未提交推送/发版。 |
 
-## 当前事项清单（2026-11-10）
+| CONVERSATION-MENTIONS-43 | 待验证 | 用户认可原光标补全/统一输入区；新增删除已备份更新4291/PID48912：原生Backspace/Delete/部分选区剪切完整提及，最后一处删除同步取消接收者，重复/撤销/重做一致；修复RAF快速输入光标竞争为同步定位。全前端602PASS/1既有skip、定向15PASS、前后端build PASS，最终实际4291四宽度双Agent删除/连续输入/剪贴板/撤销重做PASS（mentions-delete/{tests-caret,local-browser,local-update-caret,review}.json及截图）。原记录/密钥/实例/环境保全，双Runner在线，5197已停；首次更新含并行站点任务nullable platform_site_v1已审查迁移（备份pre-conversation-mention-deletion-20261110-124144），最终备份pre-conversation-mention-deletion-caret-20261110-124953无新增迁移。server原生608PASS/5缺sh或cygpath/9ignored，补测试PATH后受影响两模块16PASS；所有失败证据保留。直接执行/自审通过，未发消息/提交推送/发布；待用户刷新验收，移动实机键盘未验证。 |
+
+提示词模板阶段交付（AGENT-PROMPT-TEMPLATES-42，2026-11-10）：创建/编辑智能体新增通用、开发、审查、运维、工作流、报告六类模板，先预览后填入/追加/明确替换，可手动编辑、只读仅展示。六语齐全；AgentPrompt三项测试、生产构建、差异检查PASS。真实Chrome在4291/PID63576/index-BuGBLn9H.js验证六模板、创建POST与编辑刷新回读、只读、四宽度1440/900/390/320、六语窄屏PASS，已查看桌面/手机截图；证据data/maintenance/agent-prompt-templates-20261110/{browser-result,local-readiness,test-agent}.json及截图。模型空的demo空间不能创建，改用已有模型的Codex验收空间完成，未改模型；测试智能体113483510618001408已归档，原四智能体逐记录保全，密钥/实例不变。4291已提供此构建，无需重复重启，用户可刷新体验；未提交推送/公开发布。直接执行、自审及本阶段需求验收PASS。
+
+规则入口交付（RULES-SWAP-41，2026-11-10）：AGENTS.md承载原CLAUDE.md完整规则，CLAUDE.md承载原AGENTS.md入口及事项维护规则；同步标题、加载提示和入口引用，避免自引用。逆向字节比对及diff检查PASS，原规则完整保留；仅本地文档更新，未提交推送/部署。
+
+| CONVERSATION-THEME-39 | 待验证 | 已备份更新4291/PID63576，Markdown/Mermaid跟随主题/暗夜/自定义/系统，紧凑排版、长消息默认折叠/展开、气泡、每会话纹理/颜色/上传图片背景。实际4291主题14组、四宽度、复制/轮询、背景保存刷新/上传/删除保护/跨空间拒绝PASS；全前端580PASS/1既有skip、最终定向17PASS、后端会话22PASS及前后端build PASS。证据agent-platform-tools/theme/{result,appearance-result,delivery-update,readiness}.json；备份pre-conversation-delivery-20261110-113724，原数据/密钥/实例/环境保全，无迁移，双Runner在线，5197已停。待用户验收，未提交推送/发布。 |
+
+| AGENT-WORKFLOW-REPORT-40 | 待验证 | 原会话113478763282436096已新增v2报告卡片/文件113487626488516608：设计图用业务节点及“传递统计快照”等标签，正文详情为UI链接，原统计/审计证据不变，原报告保留。真实预览图无main 0、下载逐字节一致、工作流main/0端口与原succeeded执行未变PASS（workflow-report/revision-result.json及截图）。验收助手追加业务化表达说明；原生首轮恢复协议拒绝，后续重试113487678078455808 completed，未宣称修复恢复协议。本地仍70108，无需重启；此前链接/审计折叠21前端/6后端及真实点击PASS（link-fix），待用户验收，未提交推送/发布。 |
+
+| CONVERSATION-COPY-38 | 待验证 | 已备份更新4291/PID56888，用户/AI消息复制完整Markdown、Mermaid及代码源码，失败有提示；真实Chrome四宽度复制、拒绝反馈及实际demo报告复制PASS，证据agent-platform-tools/{copy-acceptance,demo-browser}.json。补齐表格内部滚动、图表标签与轮询不闪回骨架；相关8项PASS，最终构建PASS。未提交推送，待用户验收。 |
 
 | ACCOUNT-APPEARANCE-36 | 待验证 | 主题、明暗、自定义主题和六语偏好已按账号存云端；前端47/后端2、真实双账号与跨浏览器7组验证PASS，证据account-preferences-20261110及preview-domain-account-final.log。已随46284b3提交推送；4291现为alpha.15/PID26112，38类原记录/密钥/实例/环境保全PASS。用户验收及PG/MySQL CI待完成；未宣称已发布。 |
 
-| PREVIEW-DOMAIN-35 | 待验证 | 中立访问地址、可选预览域名、52字符Base32分流、原路径透传、旧链接308、空配置禁用、控制台合法IP/域名访问和token Host冲突拒绝已实现。前端571PASS/1既有skip、后端603PASS/9既有ignore、地址单测2、OAuth真实接口158、quickstart及构建PASS；手工预览/HMR/双层域名/禁用/跨空间/四屏PASS（preview-holes-20261109-174433）。最终Windows自动预览全生命周期PASS（preview-automation-20261109-181315）。Linux手工预览PASS；自动预览夹具已改detached Node+就绪检查，专项CI尚未执行成功，受GitHub Actions故障阻断。DNS在CI写实际hosts，Node/浏览器使用系统解析；不冒称公网DNS/TLS验收。 |
-| RELEASE-ALPHA13-37 | 受阻 | 全部业务代码已合并main（基线35af98a，含最终文档/测试隔离修订）并推送；alpha.15未打标签。alpha.13候选已取消；alpha.14候选精确取消重试因GitHub内部错误未确认完成，旧标签保留不移动。官方Actions事故investigating，专项CI42671630808/42672477937及控制CI42671416248/42672250997均零job启动失败。解除条件：Actions恢复、Linux专项及完整发布门禁通过，再推alpha.15并核验公开附件/签名/镜像。临时分支ci/preview-domain-acceptance-20261110（44a3e16）、ci/release-alpha13-supersede-20261110（6cd1a4c）待精确租约清理；不删除证据。 |
+| PREVIEW-DOMAIN-35 | 待验证 | 中立访问地址、可选预览域名、52字符Base32分流、原路径透传、旧链接308、空配置禁用、控制台合法IP/域名访问和token Host冲突拒绝已实现。前端571PASS/1既有skip、后端603PASS/9既有ignore、地址单测2、OAuth真实接口158、quickstart及构建PASS；手工预览/HMR/双层域名/禁用/跨空间/四屏PASS（preview-holes-20261109-174433）。最终Windows自动预览全生命周期PASS（preview-automation-20261109-181315）。Linux手工预览PASS；自动预览夹具已改detached Node+就绪检查，Build42673549569的preview-domains已SUCCESS（129350672963），三库backends亦SUCCESS；完整发布门禁仍在修复界面夹具。DNS在CI写实际hosts，Node/浏览器使用系统解析；不冒称公网DNS/TLS验收。 |
+| RELEASE-ALPHA13-37 | 待处理 | alpha.15标签d5e7bba已推；Build42721472362于2026-11-10T08:25:36失败，发布监测已退出且明确NOT PUBLISHED。watch.log位于030-alpha15-public-release。需诊断门禁并完成附件/镜像核验，不宣称已发布。4291运行候选alpha.15；公开已验证alpha.12记录保留。临时CI分支待按精确租约清理，保留未合并代码。 |
 
 发布交付（RELEASE-ALPHA9-34，2026-11-10）：v0.3.0-alpha.12已公开预发布，源码/tag为bb464698343ee11209984c6bc923bea094042978，地址https://github.com/7link-team/ferry/releases/tag/v0.3.0-alpha.12。Build42642463234全部28SUCCESS（全量测试、三库、四平台安装包、跨平台Runner升级回滚、部署与完整界面回归），源镜像42642449065/版本镜像42642463068均SUCCESS。21个公开附件共565142257字节全部实际下载，SHA256/GitHub摘要、6签名、Runner目录及amd64/arm64版本/source/revision核验PASS；证据data/maintenance/030-alpha12-public-release/{VERIFIED.txt,review.json,release-metadata.json,jobs.json,run-*.json}。alpha.11镜像站E500证据保留030-alpha11-public-release/diagnose-annotations.json；alpha.12将327下载URL转官方源，依赖版本/integrity不变，隔离npm ci与清单4项PASS。alpha.9/10/11失败候选标签和原始证据保留，不移动标签；所有操作临时分支已按精确租约删除。直接执行，源码自审与发布交付核验PASS；此记录覆盖下方旧“未发版”检查点，不代表用户验收。4291仍运行PID35224/index-DNAdtqaS.js，本轮未重启、未部署远程生产，临时Runner未改；原会话真实推理、商业Codeup与域名改造仍未验收/实现，保留对应待办。
 
@@ -105,7 +119,10 @@ No source changes outstanding for this delivery. Wait for the other Agent/DSH pr
 
 验证码配置交付检查点（2026-11-09 14:18）：直接执行，现有实现/真实邮件证据核对完成，无重复实现。前端534PASS/1既有skip、server570PASS/9既有ignored、相关Runner/协议/Sandbox通过；typecheck、前后端build及diff检查通过。隔离SMTP证据git-capabilities-20261109/registration-code-e2e.log及Temp/mail-template-workspace-fvXNWv；实际更新/备份/36类表、密钥、实例和环境保全见registration-code-local-update.json，无迁移。默认模板使用{{expires_minutes}}；历史自定义模板的字面10分钟不强制改写，需插入变量或恢复默认模板。自审/本期需求核对通过；实际4291超管UI未覆盖，不能把非超管会话烟测超时记为通过。其余分支拖动/Runner事项不在本次验证码交付中冒称验收。
 
-| PLATFORM-AI-27 | 待处理 | 用户2026-11-09提出：平台对外提供MCP；对内AI可调用平台功能（会话中创建主机/流水线等）；会话中发进度与预览验收卡片（带预览地址、跳转到流水线节点等审核位置）；会话右侧预览面板（iframe/webview，独立前进后退，多tab区分web/API/远程文件/目录等预览产物），参照主流会话+预览设计。顺序建议：先完成PREVIEW-AUTO-26（提供url输出/验收API/来源跳转）→预览面板+会话卡片→统一工具注册表（对内AI调用含权限与确认）→对外MCP。约束：预览为沙箱opaque origin，浏览器iframe跨源不可读history，独立前进后退需代理注入导航脚本或Tauri原生webview。每块需单独设计并经用户确认。 |
+| PLATFORM-AI-27 | 待验证 | Runner内置Ferry MCP、277项原业务路由目录、用户与Agent角色交集/事务重鉴权、当前空间绑定、加密写确认/防重及六CLI接线已实现。全工作区测试PASS（server611），前端574PASS/1既有skip；最终相关8项、构建、fmt与目录校验PASS。真实Codex查询/确认写入/主机命令/文件传输/撤权、六语四宽度PASS；demo真实会话7次MCP查询生成本月报告，3人/1仓库/19提交/新增3809/删除393，表格/图表/原文复制及重启持久化PASS。4291最终PID56888，两个临时Runner89776/20820在线，原数据/密钥/实例保全；未提交推送/发版，待用户验收。证据agent-platform-tools；设计docs/agent-platform-tools-design.md。 |
+
+MCP本地验收检查点（2026-11-10）：管理员正常登录后在demo创建专用只读角色、Agent及临时Runner，无新增管理员空间成员、未改现有SSH主机；普通测试账号对demo的404保留为正确权限拒绝。管理员私有会话入口http://127.0.0.1:4291/zh-CN/workspaces/109124836738990080/conversations/113467678051536896；普通验收账号的五模块计数会话113467803893239808位于原Codex验收空间。两次备份pre-agent-platform-20261110-103832、pre-agent-format-20261110-105339，无数据库迁移，最终local-format-update.json核对原记录/密钥/实例/环境保全，final-readiness.json验证双Runner重连与报告持久化。真实UI证据demo-browser.json覆盖1440/900/390/320、GFM双表/Mermaid节点标签、轮询稳定及完整原文复制；初次缺标签证据demo-svg-missing-labels.txt与demo-before-render-fix.png保留。目录已说明since/until及有效代码独立口径，测试脚本原from/to错误已修正；服务器会话数据未手工伪造。临时5197已停止，无后台构建/测试待等。源码仍在main工作区，未提交；本轮不处理独立alpha.15失败发布。边界：真实商业推理仅Codex，另五CLI接线为协议验证；API模型函数调用、物理多机、Figma/原生App未在本阶段认证。下一步由用户用administrator打开上述demo会话验收；不将277条目录等同每条业务写操作均已商业实测。
+
 | PREVIEW-HOLES-25 | 已完成 | 用户2026-11-09验收通过（独立实例4295，已停止并删除演示目录）。main：合并a45f97d（feat/preview-holes@403a5b6，分支与worktree已删除）+ style提交修复a2a1ad4遗留的16个rustfmt文件（逐文件去空白比对确认仅格式），推送origin/main。验证：cargo test --workspace PASS（server577、runner52）、tsc/vitest548/build PASS、fmt PASS；端到端12项PASS，证据data/maintenance/preview-holes-20261109-061002。当前语义：每条预览需人工创建（选Runner+端口），有效期1h/8h/24h/7d可续期、可撤销，过期后不可访问但记录保留；非自动发现/自动托管。已知小问题：不可达原因带英文前缀（探测错误用ApiError默认文本）；手机窄屏操作列挤压名称列（共享表格）。待决PREVIEW-AUTO-26：用户询问是否自动代理Runner上的服务并全托管生命周期，已给出方案建议，未确认未实现。 |
 | MODEL-CATALOG-SYNC-23 | 待处理 | 用户询问模型清单定时更新；建议可选自动同步、最近成功时间/结果/立即更新，区分手工模型与发现模型，保留默认及历史引用，CLI指定Runner/API指定连接。当前仅建议，周期、不可用模型语义和调度/离线规则待设计，不算已实现。 |
 | WORKFLOW-GIT-CAPABILITIES-24 | 待验证 | 本轮重开：Codeup子功能补克隆入口；连接模式不重复必填仓库地址，选仓库自动带入；明确Mac/Linux/Windows执行主机路径和Git Bash限制；分支节点右侧按输出端口添加，验证第二分支不接第一分支；整理布局保留上下/左右关系，节点出口/线/选择器统一显示条件分支名称。此前已补正：节点库新增代码与构建分类，克隆前置、主机命令结构化表单，复用SSH/Agent权限/容量/取消/日志及防重账本。真实Agent克隆HTTP Git→Go编译→运行产物、非零退出日志、三输入仅执行一次、无hosts.terminal拒绝与四宽度PASS；前端528PASS/1skip、工作流Rust91PASS/1ignore、最终UI23PASS。4291已备份更新/PID25108/index-C3OFHjy1.js，真实四宽度添加克隆/命令并编辑PASS。证据git-capabilities-20261109/node-build-{reviewed,local-update.json,local-smoke.json}。待用户体验；未提交推送发版。基础命令仅sh/Git Bash、同具体主机显式cd、每节点120秒；PowerShell/文件输入/全Git能力/商业写入未认证。 |
@@ -2358,6 +2375,101 @@ Python py_compile、actionlint v1.7.12（官方发布checksum验证；未装shel
 
 2026-11-10最新检查点：4291已备份更新alpha.15/PID26112/index-D8FlvvKb.js；38类原记录、密钥、实例及环境保全，原会话200、普通账号平台设置403。备份pre-preview-domains-20261110-021351，证据preview-domain-local-final-20261110。Linux旧失败原始附件alpha13-preview-ci-evidence.zip保留：夹具后台进程未监听；最终夹具采用独立Node进程和启动就绪检查，待Linux实际执行。官方故障证据preview-domain-linux-validation/github-{status,incidents-unresolved}.json及run-*.html，事故https://stspg.io/7yw63xl9ztrv。曾因磁盘满构建失败，使用cargo clean -p ferry-server清理31.5GiB生成缓存后构建PASS，业务/备份/证据未动；后续构建使用CARGO_INCREMENTAL=0。
 
+## Active task: Site identity and browser titles (2026-11-10)
+- Objective/confirmed: default AI Workspace (zh-CN AI \u5de5\u4f5c\u53f0); route title before site name; visible sun/hidden moon; configurable site name and prefix switch/strings; one Site Settings group, Basic / Browser Tabs / Footer / Scripts tabs.
+- Phase: ACCEPTANCE COMPLETE. Direct execution; no delegation. Design/review matrix: docs/site-settings-design.md. Existing unrelated dirty changes preserved. No commits/deployment/live database migration.
+- Implemented: accounts/site.rs config; new nullable platform_state.site_config with additive PlatformSite migration (destructive down refused); existing admin/settings transaction/version/audit/public footer API reused. PlatformFrame provides public config context to title, login and workspace brand. Grouped existing footer/scripts and preserved their storage; legacy section links remap. Six locale names/new labels/errors complete. New title and App regression tests; scripts/test-site-settings.mjs.
+- Verified: npm typecheck/build PASS; npm full 602PASS/1 existing skip before last header test; latest App/title regression 37PASS and new App test suite32PASS. cargo check --workspace PASS; cargo build -p ferry-server PASS. Fresh-binary API/Chrome acceptance PASS: C:/Users/FULLST~1/AppData/Local/Temp/site-settings-pGtSw8/evidence/result.json, 13 screenshots; saved identity/prefix, immediate title, login/workspace name, permissions/400/409, public payload isolation, existing footer/scripts retention, restart persistence, en/zh/ms at1440/900/390/320,44px tabs. Corrected long-name320 screenshot visually inspected (272px heading and controls fit).
+- Failures/resolution: migration unit test query_one API mismatch corrected to query_one_raw. Visual review found120-char login clipped; grid min-width/column fix, stronger element-bound check PASS. Stale embedded UI rejected by new asset-check in browser script; final binary rebuilt. Full Rust first run server610PASS/5FAIL/9ignored due missing sh; installed Git bin/usr-bin added ONLY to rerun process PATH.
+- Final verification: corrected process-only Git PATH cargo test --workspace PASS (exit0; server615PASS/9 existing ignored). Latest npm typecheck PASS; npm build and server build PASS; fresh embedded-binary browser/API report pGtSw8 PASS. Existing Rust warnings untouched.
+- Reviews: self-review PASS (scope/reuse/architecture/regression/complexity/durable state); original-request acceptance PASS. git diff --check PASS, LF confirmed for edited form files; no staging or generated evidence committed. Next: no implementation outstanding; deployment/live migration remains outside this task and requires user instruction.
+
+最新检查点（2026-11-11，62/61/63）：当前实现/测试/自审与需求核对完成；真实4291已更新。下一步仅显式暂存源码与设计文档、提交推送，排除本地状态/报告/数据。Agent自动安装与独立CLI配置仍是64记录的明确缺口，未擅自纳入。
+
+提交检查点：eb0bcaa（头像/成员）与058232f（角色详情）已推送GitHub main；本轮源码与设计文档均已提交。工作树仅保留原有ADR/AGENTS/CLAUDE、本地MEMORY及未跟踪datamaintenance，未暂存这些本地文件。当前功能无实现剩余，等待用户在4291验收。后续独立事项64（Agent新主机就绪与配置隔离）、59（讨论中的头部分隔线）、60（总体评审）、56（历史发版CI）仍按原状态保留。
+
+## AGENT-PROVISIONING-64 active checkpoint (2026-11-11)
+Phase: IMPLEMENTATION. User authorized automatic install, automatic upgrade, independent enable/disable and isolation. Design: docs/agent-runtime-provisioning.md. Direct execution; no delegation. Runner-local opt-in policy, official npm packages, staged verified versions, immutable executable binding, per-managed-conversation configuration isolation; no OS sandbox guarantee. No DB/schema or model credential/API-Agent changes. Existing code has not yet implemented these mechanisms. Next: implement provision.rs and wire session probe/run; test actual npm install and existing Runner tests. Verification: NOT_RUN. Preserve dirty local state and existing 4291/Runner processes.
+
+AGENT-PROVISIONING-64 verification checkpoint: Runner policy/immutable install/config isolation wired. cargo check --workspace PASS before final small path/time-limit adjustments. Runner relevant26 PASS; new pointer-binding/offline/traversal tests added, full workspace tests compiling. Real Gemini0.68.0 official npm install, isolated probe, disabled install/upgrade and failed upgrade retention PASS (agent-provision-live-gemini.log). Codex attempts exposed Windows verbatim npm path bug (fixed), then large package150s timeout (limit now300s); latest metadata15s timed out once. Claude first install failed with empty stderr; diagnosing with exit status/native current_dir normalization. Qwen/Pi live tests running. No4291/production update, commit or release yet. Next: finish six-runtime actual installation checks, review/fix failures, rerun final workspace checks and back up before local update.
+
+## 监控及预览分支交付记录（合并前历史，状态以顶部集成项及Git为准）
+# 当前事项清单
+- PREVIEW-INGRESS-01｜ACCEPTANCE｜三入口源码本地交付完成，提交以本分支HEAD为准；用户确认IP/Quick显式公开并确认风险，保留隔离。设计docs/preview-holes-design.md第20节。Direct，无子代理。
+- 验证｜cargo test --workspace PASS（Temp/preview-ingress-workspace-tests-delivery.log）：sandbox16/3ignored、protocol7、Runner54/7ignored及integration3+12、server668/9ignored、doc0。前端全量82文件630PASS/1skip（preview-ingress-all-ui-tests-direct.log）；workspace check PASS（preview-ingress-check-verified.log）。最终tsc/Vite生产构建PASS（preview-ingress-ui-build-accepted.log），主题生成校验PASS；最终server/Runner嵌入dist构建PASS（preview-ingress-build-accepted.log）。
+- 真实验收｜最终26项PASS，data/maintenance/preview-holes-20261111-082533/result.json（Temp/preview-ingress-live-accepted.log）。真实Runner/Vite/Chrome/已安装cloudflared：三入口、公开确认阻止未确认提交、Cookie剥离、API/资源/WS/HMR/沙箱、默认不搬迁、显式切换与旧入口回收、根域名修改/清空兼容、撤销断连接、Runner下线、Windows强杀服务回收其cloudflared。1440/900/390/320布局无整页横向溢出；英文/马来文390截图及中文320公开确认已视觉复核，说明可见且内部滚动/操作栏可达。
+- 两轮评审｜Self-review PASS（范围/复用/架构/回归/复杂度/持久状态）；Final acceptance review PASS（已授权三入口及风险确认/默认/切换/256位token/隔离/生命周期/六语/响应式，限上述实际环境）。不冒称生产或用户验收。
+- 过程记录｜新旧测试主机ID冲突改独立ID710001；Bash缺失以测试PATH补Git解决；串行测试占用exe导致LNK1104，停止本次串行后最终默认并行全量PASS。Quick首次导航DNS未解析，脚本加60秒公网就绪等待；后续一次连接器创建409原因未确认，保留08:18失败记录；最终完整重跑含两条Quick PASS。Platform section补description备用文案后已生产构建/真实可见断言通过。未弱化断言/删除测试/修改无关业务。
+- 决策｜domain保留32随机字节/256位/52字符Base32；IP及Quick无访问鉴权，手工每次确认，自动公开须管理员独立开关且默认关闭。普通PATCH同模式不重连，显式reconnect_ingress才重连。默认/启用只控制新建和切换；domain根域名变更/清空仍沿用原迁移/停用规则。Quick需本机CLI，200 in-flight/无SSE/无SLA/地址变化；无自动公网降级/重试/重启重放。
+- 限制｜真实验收为Windows单机隔离环境；未做Linux强杀/真实多节点故障/PG或MySQL连接验收，未提供Figma或原生App/物理键盘验收。沿用现有编译/大包警告。入口可用表示资源/租约有效，不保证公网DNS和三方服务即时可达。
+- 隔离｜design/preview-ingress-modes，C盘独立worktree与target。不改主目录、4291、共享Runner或外部Cloudflare。未做真实库迁移/合并/推送/部署。仅提交源码/文档，排除data/maintenance、dist、日志和二进制。
+- 下一步｜本期无源码待办；本地提交仅含25个源码/文档文件，worktree状态以git status为准。等待另一进程完成共享服务工作，再协调集成监控分支d56de5a及本预览提交；推荐部署前在目标Linux/三库/多节点环境补验收，不能直接替换共享服务。
+
+# 历史交付与依据
+# Task State - monitoring health v1
+
+## 当前事项清单（2026-11-11）
+| 编号 | 状态 | 事项与下一步/证据 |
+|---|---|---|
+| MONITORING-HEALTH-V1 | 待验证 | 一期代码、隔离API/通知/浏览器验收PASS；独立分支本地交付。待另一Agent/DSH进程完成后集成，再进行目标运行环境及用户验收；未合并/推送/部署。 |
+
+## Objective
+Three monitoring object levels: reuse host system monitoring; observe service instances; combine application entry availability and replica evidence. Reuse shared alerts/notifications.
+
+## Current Phase
+ACCEPTANCE
+
+## Current Step
+Scoped source delivery complete; verification and two review passes recorded. Local commit on isolated branch; inspect Git HEAD for its identity. User/live-environment acceptance remains separate.
+
+## Execution / isolation
+- Direct execution; coupled contracts did not benefit from delegation. No subagents.
+- Worktree C:/Users/FullStack/Projects/ferry-monitoring-health-v1; branch feature/monitoring-health-v1; base 058232f.
+- Private CARGO_TARGET_DIR=C:/Users/FullStack/AppData/Local/Temp/ferry-monitoring-health-target; temporary databases and dynamically allocated ports.
+- Preserve main D:/Projects/github/ferry and other Agent/DSH changes. No restart/replacement of 4291 (coordination PID15384) or Runner89776/20820. Shared services and data untouched.
+
+## Completed Work
+- Design/source audit and full review matrix with actual SQLite/PostgreSQL/MySQL generated DDL; additive migration with destructive-down protection.
+- HTTP/TCP checks, configurable evaluation/retention, runtime observations through existing HostChannel, CRUD/history/workspace permissions/audit/version fencing.
+- Native/systemd, Docker, Compose, Swarm parsers; running-revision evidence and explicit unknown/stale states.
+- Application entry/healthy/expected/unknown counts and per-service/instance evidence; shared alert events and notification delivery. Existing host and deployment-failure alerts preserved.
+- Swarm Cluster ID from bounded read-only Docker command; same-cluster managers merge demand, independent clusters stay separate; identity regression PASS.
+- Shared resource configurations/navigation, six-language catalogs; long-name column constraint and explicit action icons. Check list uses view/delete; edit/history/policy remain accessible in detail.
+
+## Confirmed Constraints / Decisions
+- Configurable defaults: interval30s, timeout5s, failures3, recoveries2, stale90s, raw history7d.
+- Entry-up + known replica failure=degraded; confirmed entry-down=unavailable; insufficient fresh evidence=unknown. Separate entry/healthy/unknown evidence. No automatic repair.
+- V1 HTTP/TCP and built-in runtime observations only. MQTT/log/scripts/heartbeat deferred. HTTP/TCP originate on server network; runtime evidence does not prove protocol quorum.
+- No historical automatic check creation, live migration, shared service update, merge, push or release in this delivery.
+
+## Verification
+- cargo test --workspace PASS (monitoring-workspace-complete.log): sandbox16/3ignored; protocol7; Runner54/7ignored plus integration3+12; server662/9ignored; doc suites0. This full run preceded the final cluster-identity change.
+- Final cluster-identity monitoring regressions12PASS (monitoring-cluster-final.log); cargo check --workspace PASS after that change (monitoring-check-final.log).
+- Frontend all82 files/627PASS/1existing skip (monitoring-ui-clean.log); final layout shared form/table/i18n54PASS (monitoring-layout-tests.log); final npm build including typecheck PASS (monitoring-delivery-ui.log).
+- Final server build after final dist PASS (monitoring-delivery-server.log).
+- Final actual isolated HTTP/TCP/API, unified local webhook trigger/recovery, workspace isolation/version conflict, unavailable runtime unknown, phone form saving a120-character name, four-width pages and English/Malay forms:7groupsPASS (monitoring-delivery-acceptance.log).
+- Final evidence C:/Users/FullStack/AppData/Local/Temp/monitoring-health-VcgIDN/report.json with22 screenshots. Desktop/Pad/Phone, Malay long text and final tablet/phone long-name tables visually inspected. No page overflow/browser exceptions.
+- git diff/cached diff checks PASS; LF verified; only scoped source/docs staged, no build/log/test artifacts.
+- Earlier failures retained: missing Bash/cygpath paths, incomplete catalogs, PowerShell Unicode/CLIXML handling; fixed without changing unrelated business code or weakening tests. Parallel UI run had2 timeouts; complete serial run passed.
+
+## Review / Acceptance
+- Self-review: scope/reuse/architecture/regression/complexity/durable state PASS.
+- Final acceptance review: authorized v1 implementation and isolated executable criteria PASS within environments listed above. No claim of user/production or live Linux-engine acceptance.
+
+## Known Issues / Risks
+- Windows test host has no live systemd/Docker/Compose/Swarm engines; parser/aggregation tests are not real-engine acceptance. PostgreSQL/MySQL SQL generation only, no live connections.
+- Figma/native App/physical mobile keyboard not available. MQTT/log/scripts/heartbeat remain excluded v2 scope.
+- Existing code warnings and frontend bundle-size warning retained; no unrelated cleanup.
+
+## Remaining Work / Next Action
+No source changes outstanding for this delivery. Wait for the other Agent/DSH process to finish its shared-service delivery, then integrate feature/monitoring-health-v1 with its changes and perform deployment separately. Recommended next environment gate: live Linux systemd/Docker/Compose/Swarm observation acceptance before production rollout; user acceptance follows deployment. Do not restart shared services or run live migrations from this worktree uncoordinated.
+
+## Last Checkpoint
+2026-11-11 final delivery build/API/browser/screenshots PASS; scoped local commit, integration/deployment pending.
+
+---
+
+
 Monitoring checkpoint: initial 6 focused Rust tests and 75 existing UI regressions PASS; initial typecheck fixed then PASS. Initial frontend build FAIL due D disk ENOSPC. Moved only this worktree to C via verified Move-Item and repaired Git metadata; rerun build. Cargo target remains private C:/Users/FullStack/AppData/Local/Temp/ferry-monitoring-health-target. New tests/changes since initial run require rerun. No Docker CLI or installed WSL available; live Linux engines not yet verified.
 
 ## Active continuation — preview ingress / security (2026-11-11)
@@ -2390,3 +2502,10 @@ Monitoring checkpoint: initial 6 focused Rust tests and 75 existing UI regressio
 - Screenshot self-review Phone320 settings and publicform: no horizontal overflow, fixed save/action bars; checkbox is reachable by internal scroll and successful real interaction verified. Additional en/ms-MY warning/settings screenshots and Windowsforced-exit JobObject cleanup added to script; rerun pending after fullworkspace suite releases executables.
 - Current running full Rust workspace: Temp/preview-ingress-workspace-tests.log, tool session52800. Avoid rebuilding/launching shared target executables concurrently with workspace integration builds on Windows. Latest tiny frontend effect fix reapplies defaults when navigating edit→new without unmount; rerun focused UI/build before final second live run.
 - Next: wait fullworkspace result; rebuild frontend+embeddedserver for latestUIeffect; rerun extended live script with en/ms and forcedexit; persist evidence, self-review + originalacceptance, precise localcommit. No merge/push/deploy.
+
+## INTEGRATE-MAIN-01 验证交付（2026-11-11）
+- Direct，无子代理；仅整合已授权两项功能与已有main，不新增业务规则或依赖。主目录初始工作区干净，main=8f4a884；两份状态文档冲突手工保留双方记录，业务源码无冲突。
+- 最终合并内容：cargo test --workspace 777 PASS/20既有ignored（server669、Runner67+integration5/12、protocol8、sandbox16）；前端83文件640 PASS/1既有skip。cargo check --workspace、主题生成校验、TypeScript/Vite生产构建及嵌入最终dist的server/Runner构建PASS。日志Temp/preview-merge-{workspace-tests,ui-tests,ui-build,check,build}.log。
+- 隔离真实监控7组PASS：Temp/monitoring-health-Xl5wDJ/report.json；真实预览26项PASS：data/maintenance/preview-holes-20261111-093505/result.json。包含HTTP/TCP阈值与通知/应用未知/权限、三入口与切换/确认/撤销/沙箱/API/WS/Windows强杀子进程回收、四宽度与英/马来文手机页面。最终Malay监控320及预览设置390截图已视觉复核。
+- Self-review PASS（范围、双方代码/状态保留、复用、架构、回归、复杂度、持久状态、无生成物）；原始合并要求验收PASS，源提交均为合并结果祖先，最终Git复核主工作区及独立worktree。无推送或部署；Linux/真实多节点/PG/MySQL验收边界沿用功能交付说明，既有忽略项与警告不改。
+- 下一步：本地main合并无源码待办；远端同步与部署未包含在本次合并指令中，需要用户后续明确指示。所有测试资源均隔离，未重启现有服务。

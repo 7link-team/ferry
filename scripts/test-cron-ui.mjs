@@ -1,7 +1,7 @@
 /** Real Chromium acceptance for scheduled tasks and real execution. */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, open } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, open, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
@@ -52,7 +52,7 @@ try {
   const root=`/workspaces/${workspace_tenant}`;
   const host=await post(owner,root+'/nodes',{name:'Cron UI runner',connection:'runner'});
   const {token}=await post(owner,root+'/runner-tokens',{host_id:host.id});
-  runner=spawn(resolve('target/debug/ferry-runner'),['--server',origin,'--token',token,'--state-dir',join(work,'runner')],{stdio:['ignore',log.fd,log.fd],windowsHide:true});
+  runner=spawn(resolve(process.env.RUNNER_BINARY || 'target/debug/ferry-runner'),['--server',origin,'--token',token,'--state-dir',join(work,'runner')],{stdio:['ignore',log.fd,log.fd],windowsHide:true});
   for(let i=0;;i++) {const r=await owner.request.get(`${origin}/api${root}/nodes/${host.id}`);if((await r.json()).state==='online')break;assert(i<200);await new Promise(r=>setTimeout(r,100));}
   await p.goto(`${uiOrigin}/zh-CN/workspaces/${workspace_tenant}/cron-jobs?scope=host`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
@@ -118,13 +118,79 @@ try {
   await p.waitForFunction(()=>!document.body.innerText.includes('UI edited'));
   for (const scope of ['build','deploy']) {
     await p.goto(`${uiOrigin}/zh-CN/workspaces/${workspace_tenant}/cron-jobs/new?scope=${scope}`);
-    const selected=await p.getByRole('combobox',{name:'所属模块',exact:true}).innerText();
-    assert(selected.includes(scope==='build'?'构建':'部署'));
+    assert.equal(await p.getByRole('combobox',{name:'所属模块',exact:true}).count(),0,'module is supplied by its navigation entry');
+    assert.equal(await p.getByRole('combobox',{name:'目标类型',exact:true}).count(),0,'action determines the target type');
     await p.getByRole('combobox',{name:'动作',exact:true}).click();
-    await p.getByRole('option',{name:scope==='build'?'触发流水线':'重新部署当前配置',exact:true}).waitFor();
-    await p.keyboard.press('Escape');
+    await p.getByRole('option',{name:scope==='build'?'触发流水线':'重新部署当前配置',exact:true}).click();
+    await p.getByRole('combobox',{name:scope==='build'?'目标流水线':'目标应用',exact:true}).waitFor();
+    if(scope==='deploy') {
+      await p.getByRole('combobox',{name:'动作',exact:true}).click();
+      await p.getByRole('option',{name:'同步市场目录',exact:true}).click();
+      await p.getByRole('combobox',{name:'市场来源',exact:true}).waitFor();
+      assert.equal(await p.getByRole('combobox',{name:'目标应用',exact:true}).count(),0);
+    }
   }
+  const graph={engine:'ferry-graph',schema:1,settings:{timezone:'UTC'},nodes:[
+    {id:'start',name:'定时入口',type:'core.trigger.manual',type_version:1,position:[0,0],params:{input_schema:{type:'object',properties:{message:{type:'string'}},required:['message']}}}
+  ],connections:[]};
+  const workflow=await post(owner,root+'/workflows',{name:'定时工作流验收',definition:JSON.stringify(graph)});
+  await post(owner,root+`/workflows/${workflow.id}/publications`,{version:workflow.version,revision_id:workflow.draft_revision_id,name:'v1'});
+  await p.goto(`${uiOrigin}/zh-CN${root}/cron-jobs/new?scope=build`);
+  await p.locator('a[href*="/workflows"]').filter({hasText:/^工作流$/}).first().waitFor();
+  await p.locator('a[href*="/pipelines"]').filter({hasText:/^流水线$/}).first().waitFor();
+  await p.getByRole('textbox',{name:/^名称/}).fill('节点工作流定时任务');
+  await p.getByRole('textbox',{name:'时区',exact:true}).fill('UTC');
+  await p.getByRole('combobox',{name:'动作',exact:true}).click();
+  await p.getByRole('option',{name:'触发工作流',exact:true}).click();
+  await p.getByRole('combobox',{name:'工作流',exact:true}).click();
+  await p.getByRole('option',{name:'定时工作流验收',exact:true}).click();
+  const input=p.getByRole('textbox',{name:/message/});
+  await input.waitFor();
+  assert.equal(await p.getByRole('button',{name:'创建',exact:true}).isDisabled(),true,'required workflow inputs block save');
+  await input.fill('浏览器真实定时输入');
+  await p.getByRole('combobox',{name:'动作',exact:true}).click();
+  await p.getByRole('option',{name:'触发流水线',exact:true}).click();
+  await p.getByRole('combobox',{name:'目标流水线',exact:true}).waitFor();
+  assert.equal(await input.count(),0,'changing actions clears the previous entry inputs');
+  await p.getByRole('combobox',{name:'动作',exact:true}).click();
+  await p.getByRole('option',{name:'触发工作流',exact:true}).click();
+  assert(!(await p.getByRole('combobox',{name:'工作流',exact:true}).innerText()).includes('定时工作流验收'),'old target is cleared');
+  await p.getByRole('combobox',{name:'工作流',exact:true}).click();
+  await p.getByRole('option',{name:'定时工作流验收',exact:true}).click();
+  await input.waitFor();assert.equal(await input.inputValue(),'');
+  await input.fill('浏览器真实定时输入');
+  await mkdir(resolve('data/maintenance/workflow-cron-browser'),{recursive:true});
+  for(const width of [1280,900,390,320]) {
+    await p.setViewportSize({width,height:850});
+    await input.scrollIntoViewIfNeeded();
+    assert(await p.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1),`no page overflow at ${width}`);
+    await p.screenshot({path:resolve(`data/maintenance/workflow-cron-browser/form-${width}.png`),fullPage:true});
+  }
+  await p.setViewportSize({width:1280,height:850});
+  await p.getByRole('button',{name:'创建',exact:true}).click();
+  const row=p.getByRole('row').filter({hasText:'节点工作流定时任务'});
+  await row.waitFor();
+  await row.getByRole('button',{name:'立即执行',exact:true}).click();
+  await p.waitForURL(`**${root}/cron-runs/*?scope=build`);
+  const workflowRunId=new URL(p.url()).pathname.split('/').pop();
+  let workflowRun;
+  for(let i=0;;i++) {
+    workflowRun=await(await owner.request.get(`${origin}/api${root}/cron-runs/${workflowRunId}`)).json();
+    if(!['queued','running'].includes(workflowRun.state))break;
+    assert(i<100,'workflow execution timeout');await new Promise(r=>setTimeout(r,200));
+  }
+  assert.equal(workflowRun.state,'succeeded');
+  assert.deepEqual(JSON.parse(workflowRun.config).inputs,{message:'浏览器真实定时输入'});
+  assert.equal(JSON.parse(workflowRun.config).scope,'build');
+  assert.equal(JSON.parse(workflowRun.config).target_kind,'workflow');
+  await p.getByRole('link',{name:'查看下游执行',exact:true}).click();
+  await p.waitForURL(`**${root}/workflows/${workflow.id}?execution=${workflowRun.downstream_id}`);
+  assert(!new URL(p.url()).pathname.startsWith('/api/'));
+  await p.getByRole('status').filter({hasText:/成功/}).first().waitFor();
+  await p.getByText('定时入口',{exact:true}).first().waitFor();
+  await p.screenshot({path:resolve('data/maintenance/workflow-cron-browser/execution.png'),fullPage:true});
   assert.deepEqual(errors,[]);
+  console.log('PASS: published workflow selection, required inputs, four responsive widths, real workflow execution and UI execution deep link');
   console.log('PASS: native custom cron selection/preserved expression/invalid save blocking/preset switching/API save and reopen; shared cron creation/edit/delete, real runner execution with live detail polling, history navigation, three scope defaults, no browser errors');
 } finally {
   if (runner && runner.exitCode===null) {runner.kill();await new Promise(r=>runner.once("exit",r));}

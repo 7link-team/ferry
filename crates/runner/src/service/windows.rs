@@ -34,7 +34,7 @@ impl Identity {
             | ServiceAccess::START;
         let info = ServiceInfo {
             name: self.name.clone().into(),
-            display_name: self.name.clone().into(),
+            display_name: format!("Ferry Runner ({})", self.name).into(),
             service_type: ServiceType::OWN_PROCESS,
             start_type: ServiceStartType::AutoStart,
             error_control: ServiceErrorControl::Normal,
@@ -78,7 +78,9 @@ impl Identity {
                     installed.executable_path.to_str() == Some(expected.as_str()),
                     "已有同名系统服务使用不同配置，拒绝覆盖"
                 );
-                if installed.start_type != ServiceStartType::AutoStart {
+                if installed.start_type != ServiceStartType::AutoStart
+                    || installed.display_name != info.display_name
+                {
                     service.change_config(&info)?;
                 }
                 service

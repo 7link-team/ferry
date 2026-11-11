@@ -229,6 +229,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
         ...d,
         ...Object.fromEntries((field.resetOnChange ?? []).map((key) => [key, Array.isArray(d[key]) || Array.isArray(config.blank[key]) ? [] : ""])),
         ...(["repository-source", "marketplace-repository", "actions-editor", "actions-template-editor", "custom"].includes(field.type) ? value as Record<string, unknown> : { [field.key]: value }),
+        ...field.patchOnChange?.(value, d),
       }) as Partial<T>)}
     />
   );
@@ -720,6 +721,9 @@ function Field<T>({
     {optionsError && <p role="alert" className="text-sm text-destructive">{optionsError}{commonText("form.refreshRetry")}</p>}
   </AutoField>;
 
+  if (field.type === "switch") return <AutoField name={field.key} label={field.label} required={field.required} help={field.help} className={field.span === 2 ? "sm:col-span-2" : undefined}>
+    <FieldControl name={field.key} field={{ name: field.label, type: "switch" }} value={value} disabled={readOnly} onChange={onChange} />
+  </AutoField>;
   return <AutoField name={field.key} label={field.label} required={field.required} help={field.help} className={field.span === 2 ? "sm:col-span-2" : undefined}>
     <div className="flex min-w-0 items-start gap-2">
       <div className="min-w-0 flex-1"><FieldControl name={field.key} field={{ name: field.label, type: field.type === "secret" ? "textarea" : field.type === "custom" ? "text" : field.type, config: { options, width: field.width ?? (Array.isArray(field.options) ? "auto" : "full"), ...(field.emptyValues ? { emptyValues: field.emptyValues } : {}), ...(field.emptyLabel || field.emptyLabelKey ? { emptyLabel: configText(field.emptyLabel, field.emptyLabelKey) } : {}), ...(field.min === undefined ? {} : { min: field.min }), ...(field.max === undefined ? {} : { max: field.max }), ...(field.placeholder ? { placeholder: field.placeholder } : {}) } }} value={value} required={field.required} disabled={readOnly} onChange={onChange} /></div>
@@ -763,7 +767,7 @@ export function ResourceActionDialog<T>({ action, row, workspace, permissions, o
     setBusy(true);setError("");try{await action.action?.(row,values);onDone();}catch(cause){setError(errorText(cause));}finally{setBusy(false);}
    }}>
     <div className="dialog-body space-y-4">
-    {fields.map(field=><Field key={field.key} field={field} workspace={workspace} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={permissions} reportOptions={report} onChange={value=>setValues(current=>({...current,...Object.fromEntries((field.resetOnChange??[]).map(key=>[key,undefined])),...(field.type === "custom" && field.render ? value as Record<string, unknown> : { [field.key]: value })}))} />)}
+    {fields.map(field=><Field key={field.key} field={field} workspace={workspace} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={permissions} reportOptions={report} onChange={value=>setValues(current=>({...current,...Object.fromEntries((field.resetOnChange??[]).map(key=>[key,undefined])),...(field.type === "custom" && field.render ? value as Record<string, unknown> : { [field.key]: value }),...field.patchOnChange?.(value,current)}))} />)}
     {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
     </div>
     <div className="dialog-footer mt-4"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>{commonText("common.cancel")}</Button><Button type="submit" disabled={busy||incomplete||Object.values(blocked).some(Boolean)}>{busy?commonText("common.processing"):commonText("form.confirmAction", { action: configText(action.label, action.labelKey) })}</Button></div>

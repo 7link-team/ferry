@@ -828,5 +828,6 @@
   "templates.examples.redisDataPort": "資料監聽與發布連接埠",
   "templates.examples.redisSentinelPort": "Sentinel 監聽與發布連接埠",
   "files.permissionInvalid": "請選擇有效檔案路徑及000至777的權限。",
-  "files.permissionUnsupported": "Windows 檔案與符號連結不支援此POSIX權限編輯。"
+  "files.permissionUnsupported": "Windows 檔案與符號連結不支援此POSIX權限編輯。",
+  "cron.workflowRun": "工作流執行 {id}"
 }

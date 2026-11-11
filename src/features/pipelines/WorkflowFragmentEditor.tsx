@@ -1,3 +1,4 @@
+import { Switch } from "../../shared/ui/switch";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import { Dialog } from "radix-ui";
@@ -58,7 +59,7 @@ export function WorkflowFragmentEditor({ source, job, index, original, readOnly,
     {field("timeout-minutes", executionText("editor.timeout"))}
     </ActionsPhase>
     <ActionsPhase phase="after">
-    {typeof step["continue-on-error"] === "string" ? field("continue-on-error", t("continueOnError")) : <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" disabled={readOnly} checked={step["continue-on-error"] === true} onChange={event => update({ "continue-on-error": event.target.checked })} /><FieldCaption label={t("continueOnError")} /></label>}
+    {typeof step["continue-on-error"] === "string" ? field("continue-on-error", t("continueOnError")) : <label className="flex min-h-10 items-center gap-2 text-sm"><Switch  disabled={readOnly} checked={step["continue-on-error"] === true} onCheckedChange={checked => update({ "continue-on-error": checked })} /><FieldCaption label={t("continueOnError")} /></label>}
     </ActionsPhase>
     <ActionFragmentYaml source={source} job={job} index={index} original={original} readOnly={readOnly} onChange={onChange} />
   </div>;

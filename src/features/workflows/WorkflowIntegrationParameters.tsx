@@ -1,3 +1,4 @@
+import { Switch } from "../../shared/ui/switch";
 import { FieldCaption } from "../../shared/forms/FieldHelp";
 import { Dialog } from "radix-ui";
 import { RefreshCw, X } from "lucide-react";
@@ -315,9 +316,9 @@ export function WorkflowIntegrationParameters({
         }}/>
         <p className="text-xs leading-5 text-muted-foreground">{t("integration.connectionHelp")}</p>
         {repositories.error && <p role="alert" className="text-sm text-destructive">{repositories.error}</p>}
-        {clone && !!value.connection_id && repositories.connection?.provider !== "git" && <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" className="size-4 accent-primary" disabled={readOnly} checked={batch} onChange={event => {
+        {clone && !!value.connection_id && repositories.connection?.provider !== "git" && <label className="flex min-h-11 items-center gap-2 text-sm"><Switch   disabled={readOnly} checked={batch} onCheckedChange={checked => {
           const next = {...value};
-          if (event.target.checked) next.repositories = repositories.repositories.filter(row => row.url === value.url).map(({url,name,full_name}) => ({url,name,full_name}));
+          if (checked) next.repositories = repositories.repositories.filter(row => row.url === value.url).map(({url,name,full_name}) => ({url,name,full_name}));
           else delete next.repositories;
           change(next);
         }}/>{t("actions.cloneMultiple")}</label>}

@@ -220,7 +220,7 @@ enum Action {
 }
 #[derive(Args)]
 struct Identity {
-    #[arg(long, default_value = "runner-agent")]
+    #[arg(long, default_value = "ferry-runner-agent")]
     name: String,
     /// Install for the current user instead of the machine (Windows logon task,
     /// systemd --user or LaunchAgent); no administrator rights are needed.
@@ -232,7 +232,20 @@ pub fn dispatch() -> anyhow::Result<bool> {
     if std::env::args_os().nth(1).as_deref() != Some(std::ffi::OsStr::new("service")) {
         return Ok(false);
     }
-    match Cli::parse_from(std::env::args_os().skip(1)).action {
+    let mut action = Cli::parse_from(std::env::args_os().skip(1)).action;
+    match &mut action {
+        Action::Install {
+            service,
+            state_dir: None,
+            ..
+        }
+        | Action::Start(service)
+        | Action::Stop(service)
+        | Action::Status(service)
+        | Action::Uninstall(service) => service.resolve_legacy()?,
+        _ => {}
+    }
+    match action {
         Action::Install {
             service,
             server,
@@ -400,6 +413,21 @@ fn write_registration(path: &Path, content: &str) -> anyhow::Result<()> {
 }
 
 impl Identity {
+    fn resolve_legacy(&mut self) -> anyhow::Result<()> {
+        if self.name == "ferry-runner-agent" {
+            let legacy = Self {
+                name: "runner-agent".into(),
+                user: self.user,
+            };
+            if !regular_file(&self.default_state_dir()?.join("service.json"))?
+                && regular_file(&legacy.default_state_dir()?.join("service.json"))?
+            {
+                self.name = legacy.name;
+            }
+        }
+        Ok(())
+    }
+
     fn default_state_dir(&self) -> anyhow::Result<PathBuf> {
         if self.user {
             #[cfg(windows)]
@@ -457,11 +485,20 @@ impl Identity {
             }
         }
         settings.store(&config)?;
-        let binary = root.join(if cfg!(windows) {
+        let legacy_binary = root.join(if cfg!(windows) {
             "runner-service.exe"
         } else {
             "runner-service"
         });
+        let binary = if regular_file(&legacy_binary)? {
+            legacy_binary
+        } else {
+            root.join(if cfg!(windows) {
+                "ferry-runner-service.exe"
+            } else {
+                "ferry-runner-service"
+            })
+        };
         if rebound || !regular_file(&binary)? {
             let mut temporary = tempfile::NamedTempFile::new_in(root)?;
             std::io::copy(
@@ -519,7 +556,7 @@ impl Identity {
             ))
         }
         let unit = format!(
-            "[Unit]\nDescription=Host execution agent\nAfter=network-online.target\nWants=network-online.target\nStartLimitIntervalSec=0\n[Service]\nType=simple\nExecStart={} service run --config {} --name {}\nRestart=on-failure\nRestartSec=5\nKillMode=mixed\nTimeoutStopSec=infinity\nUMask=0077\n[Install]\nWantedBy={}\n",
+            "[Unit]\nDescription=Ferry Runner host execution agent\nAfter=network-online.target\nWants=network-online.target\nStartLimitIntervalSec=0\n[Service]\nType=simple\nExecStart={} service run --config {} --name {}\nRestart=on-failure\nRestartSec=5\nKillMode=mixed\nTimeoutStopSec=infinity\nUMask=0077\n[Install]\nWantedBy={}\n",
             quote(binary)?,
             quote(config)?,
             self.name,
@@ -531,6 +568,17 @@ impl Identity {
         );
         let path = self.unit_path()?;
         std::fs::create_dir_all(path.parent().unwrap())?;
+        let unit = if binary
+            .file_stem()
+            .is_some_and(|name| name == "runner-service")
+        {
+            unit.replace(
+                "Description=Ferry Runner host execution agent",
+                "Description=Host execution agent",
+            )
+        } else {
+            unit
+        };
         write_registration(&path, &unit)?;
         command(self.systemctl().arg("daemon-reload"))?;
         command(

@@ -60,17 +60,21 @@ function InstallScopeChoice({ platform, scope, onChange, wide = false }: { platf
  * key and logs). The CLI `service uninstall` alone keeps that data.
  */
 export function runnerUninstallCommand(platform: Platform, scope: InstallScope = "system"): string {
-  const name = "runner-agent";
+  const names = ["ferry-runner-agent", "runner-agent"];
   const ps = (text: string) => `'${text.replaceAll("'", "''")}'`;
   const message = (key: string) => ps(commonText(`resource-domain:runner.command.${key}`));
   if (platform !== "windows") {
-    const root = scope === "system" ? `/var/lib/${name}` : platform === "macos" ? `$HOME/Library/Application Support/${name}` : `$HOME/.local/state/${name}`;
-    const body = `d="${root}"; if [ -x "$d/runner-service" ]; then "$d/runner-service" service uninstall --name ${name}${scope === "user" ? " --user" : ""} || exit 1; fi; rm -rf "$d" && [ ! -e "$d" ] && echo "${commonText("resource-domain:runner.command.uninstalled").replace(/[\\$`"]/g, "\\$&")}"`;
+    const body = names.map(name => {
+      const root = scope === "system" ? `/var/lib/${name}` : platform === "macos" ? `$HOME/Library/Application Support/${name}` : `$HOME/.local/state/${name}`;
+      return `(d="${root}"; b="$d/ferry-runner-service"; [ -x "$b" ] || b="$d/runner-service"; if [ -x "$b" ]; then "$b" service uninstall --name ${name}${scope === "user" ? " --user" : ""} || exit 1; fi; rm -rf "$d" && [ ! -e "$d" ] && echo "${commonText("resource-domain:runner.command.uninstalled").replace(/[\\$`"]/g, "\\$&")}")`;
+    }).join(" && ");
     return scope === "system" ? `sudo sh -c '${body.replaceAll("'", "'\"'\"'")}'` : `(${body})`;
   }
   // The directly pasted user command must not `exit` the user's own shell.
-  const steps = (root: string, user: boolean) => `$root = Join-Path ${root} '${name}'
-  $binary = Join-Path $root 'runner-service.exe'
+  const steps = (root: string, user: boolean) => names.map(name => `& {
+  $root = Join-Path ${root} '${name}'
+  $binary = Join-Path $root 'ferry-runner-service.exe'
+  if (-not (Test-Path -LiteralPath $binary)) { $binary = Join-Path $root 'runner-service.exe' }
   if (Test-Path -LiteralPath $binary) {
     Write-Host ${message("removingRegistration")}
     & $binary service uninstall --name ${name}${user ? " --user" : ""}
@@ -85,12 +89,13 @@ export function runnerUninstallCommand(platform: Platform, scope: InstallScope =
   for ($attempt = 0; Test-Path -LiteralPath $root; $attempt++) {
     try { Remove-Item -LiteralPath $root -Recurse -Force }
     catch { if ($attempt -ge 20) { throw }; Start-Sleep -Milliseconds 500 }
-  }`;
+  }
+}`).join("\n");
   // Report the observable result in the window the user pasted into, whichever
   // process did the work, so success is never silent.
-  const verify = (root: string, user: boolean) => `${user ? "" : `if (Get-Service -Name '${name}' -ErrorAction SilentlyContinue) { throw ${message("serviceRemains")} }
+  const verify = (root: string, user: boolean) => names.map(name => `${user ? "" : `if (Get-Service -Name '${name}' -ErrorAction SilentlyContinue) { throw ${message("serviceRemains")} }
   `}if (Test-Path -LiteralPath (Join-Path ${root} '${name}')) { throw ${message("directoryRemains")} }
-  Write-Host ${ps(commonText("resource-domain:runner.command.registrationRemoved", { registration: commonText(user ? "resource-domain:runner.scheduledTask" : "resource-domain:runner.systemService") }))} -ForegroundColor Green`;
+  Write-Host ${ps(commonText("resource-domain:runner.command.registrationRemoved", { registration: commonText(user ? "resource-domain:runner.scheduledTask" : "resource-domain:runner.systemService") }))} -ForegroundColor Green`).join("\n");
   if (scope === "user") return `& {
   $ErrorActionPreference = 'Stop'
   Write-Host ${message("uninstallingUser")}

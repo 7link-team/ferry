@@ -552,6 +552,7 @@ pub async fn remove(
     if row.lifecycle != "archived" {
         return Err(conflict("workflow.archiveFirst"));
     }
+    crate::cron_jobs::ensure_unreferenced(&tx, scope.workspace_id, "workflow", &[id]).await?;
     if workflow_executions::Entity::find()
         .filter(workflow_executions::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(workflow_executions::Column::WorkflowId.eq(id))

@@ -17,7 +17,7 @@ def interrupted(signum, frame):
     raise TimeoutError('native acceptance exceeded its deadline')
 if os.name != 'nt': signal.signal(signal.SIGTERM, interrupted)
 system = platform.system()
-name = 'runner-test-' + str(os.getpid())
+name = 'ferry-runner-test-' + str(os.getpid())
 windows_user = system == 'Windows' and os.environ.get('RUNNER_TEST_USER_SERVICE') == '1'
 user = ['--user'] if windows_user or system == 'Darwin' and not os.environ.get('RUNNER_TEST_SYSTEM_SERVICE') else []
 
@@ -162,6 +162,7 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
             assert rejected.returncode != 0, 'must reject user-writable service state'
             assert not (unsafe/'service.json').exists(), 'unsafe install must not persist credentials'
         service('install', '--server', origin, '--token', token, '--state-dir', state)
+        assert (state / ('ferry-runner-service.exe' if system == 'Windows' else 'ferry-runner-service')).is_file(), 'fresh supervisor must identify Ferry'
         host_path = f'/workspaces/{workspace_service}/nodes/'+host
         if windows_user:
             deadline = time.monotonic() + 8
@@ -434,7 +435,7 @@ jobs:
                 # Fault injection after stopping the actual service: a confirmed
                 # installation can be damaged between boots, not only while pending.
                 saved_journal = (state/'versions.json').read_bytes()
-                installed = state/'versions'/journal['current']['digest']/('runner.exe' if system=='Windows' else 'runner')
+                installed = state/'versions'/journal['current']['digest']/('ferry-runner.exe' if system=='Windows' else 'ferry-runner')
                 service('stop')
                 wait(lambda: pid()==0, 'stop before damaging confirmed version')
                 saved_binary = installed.read_bytes()

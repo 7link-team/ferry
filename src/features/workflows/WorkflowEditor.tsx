@@ -773,7 +773,7 @@ export function WorkflowEditor({
       { key: "number", label: "#", sortable:true },
       { key: "state", label: t("state"), render: row => <span className={row.state === "failed" ? "text-destructive" : ""}>{executionStateText(row.state)}</span> },
       { key: "revision_number", label: t("history.version"), render: row => row.revision_number ? `v${row.revision_number}` : "—" },
-      { key: "trigger_kind", label: t("history.trigger"), render: row => row.trigger_kind === "manual" ? t("manual") : String(row.trigger_kind || "—") },
+      { key: "trigger_kind", label: t("history.trigger"), render: row => row.trigger_kind === "manual" ? t("manual") : row.trigger_kind === "schedule" ? commonText("resource-domain:cron.scheduled") : String(row.trigger_kind || "—") },
       { key: "triggered_by_name", label: t("history.actor") },
       { key: "created_at", label: t("createdAt"), sortable:true, render: row => new Date(Number(row.created_at)).toLocaleString() },
       { key: "started_at", label: t("execution.startedAt"), sortable:true, render: row => Number(row.started_at)>0 ? new Date(Number(row.started_at)).toLocaleString() : "—" },

@@ -12,6 +12,7 @@ pub enum Runtime {
     Qwen,
     Opencode,
     Pi,
+    Dsh,
 }
 impl Runtime {
     pub fn parse(value: &str) -> Option<Self> {
@@ -22,6 +23,7 @@ impl Runtime {
             "qwen" => Some(Self::Qwen),
             "opencode" => Some(Self::Opencode),
             "pi" => Some(Self::Pi),
+            "dsh" => Some(Self::Dsh),
             _ => None,
         }
     }

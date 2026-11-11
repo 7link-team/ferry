@@ -56,7 +56,7 @@ it("shows physical adapters by default, reveals virtual adapters on request, and
   expect(host.textContent).toContain("以太网");
   expect(host.textContent).not.toContain("vEthernet (WSL)");
   expect(host.textContent).toContain("网卡 1 / 3");
-  const toggle = host.querySelector<HTMLButtonElement>('button[role="checkbox"]')!;
+  const toggle = host.querySelector<HTMLButtonElement>('button[role="switch"]')!;
   expect(document.getElementById(toggle.getAttribute("aria-labelledby")!)?.textContent).toContain("显示虚拟网卡（2）");
   await act(async () => toggle.click());
   expect(host.textContent).toContain("vEthernet (WSL)");

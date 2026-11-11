@@ -11,7 +11,7 @@ useState,
 type ComponentProps,
 type ReactNode,
 } from "react";
-import { Checkbox } from "../../ui/checkbox";
+import { Switch } from "../../ui/switch";
 import { Input } from "../../ui/input";
 import { FieldCaption } from "../FieldHelp";
 import {
@@ -33,7 +33,7 @@ const Errors = createContext<Record<string, string>>({});
 const controlClass =
   "w-full min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive";
 const fieldControls =
-  "input:not([type=hidden]):not([aria-hidden=true]),select:not([aria-hidden=true]),textarea:not([aria-hidden=true]),[role=combobox]:not([aria-hidden=true]),[role=checkbox]:not([aria-hidden=true])";
+  "input:not([type=hidden]):not([aria-hidden=true]),select:not([aria-hidden=true]),textarea:not([aria-hidden=true]),[role=combobox]:not([aria-hidden=true]),[role=checkbox]:not([aria-hidden=true]),[role=switch]:not([aria-hidden=true])";
 function focusField(form: HTMLFormElement | null, key: string) {
   const frame = [
     ...(form?.querySelectorAll<HTMLElement>("[data-auto-field]") ?? []),
@@ -332,11 +332,11 @@ export function FieldControl({
     );
   if (field.type === "switch")
     return (
-      <Checkbox
+      <Switch
         name={name}
         checked={!!value}
         disabled={disabled}
-        onCheckedChange={(checked) => onChange(!!checked)}
+        onCheckedChange={onChange}
       />
     );
   if (field.type === "select")

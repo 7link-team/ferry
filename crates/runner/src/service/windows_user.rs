@@ -114,7 +114,7 @@ fn task_xml(sid: &str, conhost: &Path, arguments: &str) -> anyhow::Result<String
     Ok(format!(
         "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\
 <Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\
-<RegistrationInfo><Description>Host execution agent (current user)</Description></RegistrationInfo>\
+<RegistrationInfo><Description>Ferry Runner host execution agent (current user)</Description></RegistrationInfo>\
 <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{user}</UserId></LogonTrigger></Triggers>\
 <Principals><Principal id=\"Author\"><UserId>{user}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>\
 <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\
