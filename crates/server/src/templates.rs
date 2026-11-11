@@ -848,6 +848,9 @@ fn validate_body(body: &Body, kind: Kind) -> Result<()> {
 pub(crate) fn validate_app(content: &str, parameters: &str) -> Result<()> {
     validate_template(content, parameters, Kind::App).map(|_| ())
 }
+pub(crate) fn validate_config(content: &str, parameters: &str) -> Result<()> {
+    validate_template(content, parameters, Kind::Config).map(|_| ())
+}
 const SPEC: Spec = Spec {
     search: &["name", "description"],
     filters: &[],

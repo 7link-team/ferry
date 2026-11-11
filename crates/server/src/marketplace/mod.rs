@@ -1,11 +1,12 @@
 //! Read external repository indexes; no Git hosting or local Git executable.
+pub(crate) mod index;
 use crate::error::{ApiError, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
-const MAX_INDEX_BYTES: usize = 2 * 1024 * 1024;
+use index::MAX_INDEX_BYTES;
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Source {
@@ -462,7 +463,7 @@ use crate::{
 use axum::{extract::State, http::StatusCode};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set, sea_query::Expr};
 use serde_json::json;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 const SOURCES: Spec = Spec {
     search: &["name"],
     filters: &["state", "repository_id"],
@@ -526,60 +527,7 @@ async fn bind_source_repository(
     Ok(())
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Index {
-    version: u32,
-    templates: Vec<IndexEntry>,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct IndexEntry {
-    key: String,
-    name: String,
-    #[serde(default)]
-    description: String,
-    content: Value,
-    #[serde(default = "empty_parameters")]
-    parameters: Value,
-}
-fn empty_parameters() -> Value {
-    json!([])
-}
-fn parse_index(text: &str) -> Result<Index> {
-    let index: Index = serde_json::from_str(text).map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("marketplace.indexObjectRequired"),
-        )
-    })?;
-    if index.version != 1 || index.templates.len() > 500 {
-        return Err(ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("marketplace.indexVersionInvalid"),
-        ));
-    }
-    let mut keys = HashSet::new();
-    for entry in &index.templates {
-        if entry.key.is_empty()
-            || entry.key.len() > 100
-            || !entry
-                .key
-                .bytes()
-                .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
-            || !keys.insert(&entry.key)
-            || entry.name.trim().is_empty()
-            || entry.name.chars().count() > 60
-        {
-            return Err(ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("marketplace.templateInvalid"),
-            ));
-        }
-        crate::templates::validate_app(&entry.content.to_string(), &entry.parameters.to_string())?;
-    }
-    Ok(index)
-}
+use index::parse_index;
 fn source_json(row: sources::Model) -> Result<Value> {
     let mut value: Value = serde_json::from_str(&row.config).map_err(|_| {
         ApiError::localized(
