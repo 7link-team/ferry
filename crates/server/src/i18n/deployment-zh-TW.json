@@ -256,6 +256,7 @@
   "blueprint.bindingRoleMissing": "角色 {role} 缺少綁定。",
   "blueprint.bindingCount": "角色 {role}：實例數必須在 {min} 到 {max} 之間。",
   "blueprint.bindingOdd": "角色 {role}：實例數必須為奇數。",
+  "blueprint.instancesTotal": "所有角色的實例總數最多為 {max}，目前為 {total}。",
   "blueprint.bindingHostUnknown": "實例 {instance}：該主機不在目前空間中。",
   "blueprint.hostOsUnsupported": "實例 {instance}：該主機系統為 {os}，僅支援 Linux 主機。",
   "blueprint.bindingAddressInvalid": "實例 {instance}：通告位址必須是非迴環的 IP 位址或主機名稱（最長 253 個字元），空值、0.0.0.0、::、127.0.0.0/8、::1 與 localhost 均不允許。",

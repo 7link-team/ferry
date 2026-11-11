@@ -256,6 +256,7 @@
   "blueprint.bindingRoleMissing": "Peranan {role} tiada pengikatan.",
   "blueprint.bindingCount": "Peranan {role}: bilangan instans mesti antara {min} dan {max}.",
   "blueprint.bindingOdd": "Peranan {role}: bilangan instans mesti ganjil.",
+  "blueprint.instancesTotal": "Jumlah instans semua peranan maksimum {max}; pengikatan ini mempunyai {total}.",
   "blueprint.bindingHostUnknown": "Instans {instance}: hos tidak wujud dalam ruang kerja ini.",
   "blueprint.hostOsUnsupported": "Instans {instance}: hos menjalankan {os}; hanya hos Linux disokong.",
   "blueprint.bindingAddressInvalid": "Instans {instance}: alamat iklan mesti alamat IP atau nama hos bukan loopback (maksimum 253 aksara); kosong, 0.0.0.0, ::, 127.0.0.0/8, ::1 dan localhost ditolak.",

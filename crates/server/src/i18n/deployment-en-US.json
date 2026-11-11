@@ -256,6 +256,7 @@
   "blueprint.bindingRoleMissing": "Role {role} has no binding.",
   "blueprint.bindingCount": "Role {role}: the instance count must be between {min} and {max}.",
   "blueprint.bindingOdd": "Role {role}: the instance count must be odd.",
+  "blueprint.instancesTotal": "All roles together may run at most {max} instances; the binding has {total}.",
   "blueprint.bindingHostUnknown": "Instance {instance}: the host does not exist in this workspace.",
   "blueprint.hostOsUnsupported": "Instance {instance}: the host runs {os}; only Linux hosts are supported.",
   "blueprint.bindingAddressInvalid": "Instance {instance}: the advertised address must be a non-loopback IP address or host name (at most 253 characters); empty, 0.0.0.0, ::, 127.0.0.0/8, ::1 and localhost are rejected.",

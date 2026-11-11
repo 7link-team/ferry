@@ -1,5 +1,5 @@
 //! Instance binding: which hosts/addresses run each blueprint role (pure validation, no DB).
-use super::model::Blueprint;
+use super::model::{Blueprint, MAX_INSTANCES};
 use crate::error::{ApiError, Result};
 use crate::i18n::Message;
 use crate::snowflake::Id;
@@ -92,6 +92,14 @@ pub fn validate(bp: &Blueprint, b: &Binding, hosts: &BTreeMap<Id, HostInfo>) -> 
     let known: BTreeSet<&str> = bp.roles.iter().map(|r| r.name.as_str()).collect();
     if let Some(extra) = b.roles.keys().find(|k| !known.contains(k.as_str())) {
         return fail(Message::new("blueprint.bindingRoleUnknown").with("role", extra));
+    }
+    let total: usize = b.roles.values().map(Vec::len).sum();
+    if total > MAX_INSTANCES as usize {
+        return fail(
+            Message::new("blueprint.instancesTotal")
+                .with("total", total.to_string())
+                .with("max", MAX_INSTANCES.to_string()),
+        );
     }
     for role in &bp.roles {
         let Some(list) = b.roles.get(&role.name) else {
@@ -306,6 +314,29 @@ mod tests {
         let mut r = three();
         r["ghost"] = json!([inst("1", "10.0.0.1")]);
         assert_eq!(key(check("native", r)), "blueprint.bindingRoleUnknown");
+    }
+
+    #[test]
+    fn total_instances_capped_at_one_hundred() {
+        let bp = blueprint(
+            vec![
+                role("a", 1, 1, 100, false, json!({})),
+                role("b", 1, 1, 100, false, json!({})),
+            ],
+            drivers(),
+            false,
+        );
+        let list = |n: usize| json!((0..n).map(|_| inst("1", "10.0.0.1")).collect::<Vec<_>>());
+        let b = binding("native", json!({"a": list(51), "b": list(50)}));
+        let m = validate(&bp, &b, &std_hosts())
+            .expect_err("101 instances")
+            .2
+            .expect("message");
+        assert_eq!(m.key, "blueprint.instancesTotal");
+        assert_eq!(m.params["total"], "101");
+        assert_eq!(m.params["max"], "100");
+        let b = binding("native", json!({"a": list(50), "b": list(50)}));
+        validate(&bp, &b, &std_hosts()).expect("100 instances ok");
     }
 
     #[test]

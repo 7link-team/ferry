@@ -256,6 +256,7 @@
   "blueprint.bindingRoleMissing": "ロール {role} にバインディングがありません。",
   "blueprint.bindingCount": "ロール {role}：インスタンス数は {min} から {max} の間にしてください。",
   "blueprint.bindingOdd": "ロール {role}：インスタンス数は奇数にしてください。",
+  "blueprint.instancesTotal": "全ロールの合計インスタンス数は最大 {max} です（現在 {total}）。",
   "blueprint.bindingHostUnknown": "インスタンス {instance}：このホストはワークスペースに存在しません。",
   "blueprint.hostOsUnsupported": "インスタンス {instance}：ホストの OS は {os} です。Linux ホストのみサポートされます。",
   "blueprint.bindingAddressInvalid": "インスタンス {instance}：公開アドレスにはループバックでない IP アドレスまたはホスト名（253 文字以内）を指定してください。空、0.0.0.0、::、127.0.0.0/8、::1、localhost は使用できません。",

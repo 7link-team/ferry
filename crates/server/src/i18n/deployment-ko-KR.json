@@ -256,6 +256,7 @@
   "blueprint.bindingRoleMissing": "역할 {role}에 바인딩이 없습니다.",
   "blueprint.bindingCount": "역할 {role}: 인스턴스 수는 {min}에서 {max} 사이여야 합니다.",
   "blueprint.bindingOdd": "역할 {role}: 인스턴스 수는 홀수여야 합니다.",
+  "blueprint.instancesTotal": "모든 역할의 인스턴스 합계는 최대 {max}개입니다(현재 {total}개).",
   "blueprint.bindingHostUnknown": "인스턴스 {instance}: 이 호스트는 현재 워크스페이스에 없습니다.",
   "blueprint.hostOsUnsupported": "인스턴스 {instance}: 호스트 OS가 {os}입니다. Linux 호스트만 지원됩니다.",
   "blueprint.bindingAddressInvalid": "인스턴스 {instance}: 광고 주소는 루프백이 아닌 IP 주소 또는 호스트 이름(최대 253자)이어야 합니다. 비어 있음, 0.0.0.0, ::, 127.0.0.0/8, ::1, localhost는 허용되지 않습니다.",

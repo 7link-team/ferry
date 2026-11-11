@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 const API_VERSION: &str = "ferry/blueprint-v1";
 const KIND: &str = "Blueprint";
 const MAX_ROLES: usize = 10;
-const MAX_INSTANCES: u32 = 100;
+pub(super) const MAX_INSTANCES: u32 = 100;
 const DRIVERS: [&str; 5] = ["native", "docker", "compose", "stack", "k8s"];
 const ENDPOINT_KINDS: [&str; 3] = ["discovery", "vip", "direct"];
 
