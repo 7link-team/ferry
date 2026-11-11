@@ -219,6 +219,7 @@
   "deployment.portable.sourceRequired": "各サービスにイメージまたはネイティブ成果物が必要です。ferry/v2 では両方を定義でき、実行方式で選択します。",
   "deployment.portable.placementMode": "配置制約には ferry/v2 と Docker Swarm / Stack が必要です。他の方式はホスト間で配置できません。",
   "deployment.portable.placementInvalid": "配置設定が無効です。ノード/エンジンラベル制約（== または !=）は32件まで、ノードあたりの最大レプリカ数は1～100です。",
+  "deployment.blueprintContextRequired": "この設定テンプレートはインスタンス単位のアクション（.Instance、range .Role など）を使用しているため、クラスターブループリントからのみデプロイできます。",
   "blueprint.invalidDocument": "ブループリントが有効な JSON ではないか、未知のフィールドまたは必須フィールドの欠落があります。",
   "blueprint.unsupportedVersion": "apiVersion が ferry/blueprint-v1 で kind が Blueprint のブループリントのみ対応しています。",
   "blueprint.nameInvalid": "ブループリント名は小文字で始め、a-z、0-9、- または _ のみを使用し、63 文字以内にしてください。",

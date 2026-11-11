@@ -219,6 +219,7 @@
   "deployment.portable.sourceRequired": "每個服務至少提供映像或原生成品；ferry/v2 可同時提供，由部署引擎選擇。",
   "deployment.portable.placementMode": "放置限制需要 ferry/v2 和 Docker Swarm / Stack；其他引擎無法跨主機排程。",
   "deployment.portable.placementInvalid": "放置設定無效：最多32條節點/引擎標籤限制（== 或 !=）；每節點副本上限為1–100。",
+  "deployment.blueprintContextRequired": "此設定範本使用了實例級動作（.Instance、range .Role 等），只能透過叢集藍圖部署。",
   "blueprint.invalidDocument": "藍圖不是有效的 JSON，或包含未知欄位、缺少必填欄位。",
   "blueprint.unsupportedVersion": "僅支援 apiVersion 為 ferry/blueprint-v1 且 kind 為 Blueprint 的藍圖。",
   "blueprint.nameInvalid": "藍圖名稱必須以小寫字母開頭，只能包含 a-z、0-9、- 或 _，且不超過 63 個字元。",

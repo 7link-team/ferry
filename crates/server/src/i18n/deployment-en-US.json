@@ -219,6 +219,7 @@
   "deployment.portable.sourceRequired": "Each service needs an image or a native artifact. ferry/v2 allows both; the deployment engine selects the source.",
   "deployment.portable.placementMode": "Placement requires ferry/v2 and Docker Swarm / Stack; other engines cannot schedule across hosts.",
   "deployment.portable.placementInvalid": "Invalid placement: use up to 32 node/engine label constraints (== or !=); max replicas per node must be 1–100.",
+  "deployment.blueprintContextRequired": "This configuration template uses instance actions (.Instance, range .Role, …) and can only be deployed from a cluster blueprint.",
   "blueprint.invalidDocument": "The blueprint is not valid JSON or contains unknown or missing fields.",
   "blueprint.unsupportedVersion": "Only apiVersion ferry/blueprint-v1 with kind Blueprint is supported.",
   "blueprint.nameInvalid": "The blueprint name must start with a lowercase letter, contain only a-z, 0-9, - or _, and be at most 63 characters.",

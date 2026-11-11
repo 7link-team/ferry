@@ -381,7 +381,7 @@ pub(crate) async fn create_in(
     if row.target_kind == "host-group" {
         groups::members(tx, scope.workspace_id, row.target_ref).await?;
     }
-    bindings(tx, &row, &row.manifest).await?;
+    bindings(tx, &row, &row.manifest, None).await?;
     apps::Entity::insert(row.into_active_model())
         .exec(tx)
         .await?;
@@ -419,7 +419,7 @@ pub async fn update(
     let current = scoped(&tx, &scope, &id).await?;
     let category = b.category.as_deref().unwrap_or(&current.category);
     check_category(&tx, &scope, category, Some(&current.category)).await?;
-    bindings(&tx, &r, &manifest).await?;
+    bindings(&tx, &r, &manifest, None).await?;
     let n = apps::Entity::update_many()
         .col_expr(apps::Column::Name, Expr::value(name.clone()))
         .col_expr(apps::Column::Category, Expr::value(category))
@@ -573,7 +573,7 @@ pub(crate) async fn references_variable(
     app: &apps::Model,
     id: i64,
 ) -> Result<bool> {
-    Ok(bindings(conn, app, &app.manifest)
+    Ok(bindings(conn, app, &app.manifest, None)
         .await?
         .1
         .values()
@@ -584,6 +584,7 @@ async fn bindings(
     conn: &impl sea_orm::ConnectionTrait,
     r: &apps::Model,
     manifest: &str,
+    contexts: Option<&BTreeMap<String, crate::blueprint::template::Context>>,
 ) -> Result<(
     Value,
     BTreeMap<String, crate::entities::variables::Model>,
@@ -623,8 +624,23 @@ async fn bindings(
                 ));
             }
             let row = &matches[0];
-            let text =
+            let mut text =
                 crate::templates::config_content(&row.content, &row.parameters, &file.values)?;
+            // Decided from the template source, never the rendered text, so a parameter
+            // value that looks like an instance action stays a literal.
+            if crate::blueprint::template::has_instance_tokens(&row.content) {
+                let ctx = contexts.and_then(|c| c.get(&service.name)).ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("deployment.blueprintContextRequired"),
+                    )
+                })?;
+                text = crate::blueprint::template::render_text(
+                    &text,
+                    ctx,
+                    crate::blueprint::template::Phase::Instance,
+                )?;
+            }
             size += text.len();
             if size > 4 * 1024 * 1024 {
                 return Err(ApiError::localized(
@@ -982,10 +998,10 @@ pub async fn preview(
         let old = old_revision(&s.db, &scope, r.id, &id).await?;
         (old.artifact, old.id)
     } else {
-        let (metadata, _, _) = bindings(&s.db, &r, &r.manifest).await?;
+        let (metadata, _, _) = bindings(&s.db, &r, &r.manifest, None).await?;
         let artifact = prepare_artifact(&s, &scope, ch.as_ref(), &r, &metadata).await?;
         let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
-        if bindings(&tx, &r, &r.manifest).await?.0 != metadata {
+        if bindings(&tx, &r, &r.manifest, None).await?.0 != metadata {
             return Err(ApiError::localized(
                 axum::http::StatusCode::CONFLICT,
                 crate::i18n::Message::new("deployment.error.029"),
@@ -1272,7 +1288,7 @@ async fn trigger(
         {
             scope.require("config-templates.read")?;
         }
-        let (metadata, rows, configs) = bindings(&tx, &r, &r.manifest).await?;
+        let (metadata, rows, configs) = bindings(&tx, &r, &r.manifest, None).await?;
         if r.preview_artifact.is_empty() || artifact_bindings(&r.preview_artifact)? != metadata {
             return Err(ApiError::localized(
                 axum::http::StatusCode::CONFLICT,
@@ -2110,6 +2126,241 @@ mod variable_snapshot_tests {
         assert_eq!(
             doc["x-variable-bindings"][0]["content"],
             "$${HOST} $$$$ $$plain\n"
+        );
+    }
+}
+
+#[cfg(test)]
+mod blueprint_binding_tests {
+    use super::*;
+    use crate::blueprint::template::{Context, Instance, Member};
+    use sea_orm::Set;
+
+    const CLUSTER: &str = "server_name={{ .Instance.Name }}\nroutes={{ range .Role \"nats\" }}{{ .Host }}:{{ .Port \"cluster\" }},{{ end }}\nport={{ .Values.port }}\n";
+    const PORT: &str = r#"[{"name":"port","type":"integer","default":4222}]"#;
+
+    async fn template(s: &AppState, id: i64, name: &str, content: &str, parameters: &str) {
+        crate::entities::config_templates::Entity::insert(
+            crate::entities::config_templates::ActiveModel {
+                id: Set(id),
+                workspace_id: Set(1),
+                name: Set(name.into()),
+                description: Set(String::new()),
+                content: Set(content.into()),
+                parameters: Set(parameters.into()),
+                version: Set(3),
+                created_at: Set(1),
+                updated_at: Set(1),
+                ..Default::default()
+            },
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+    }
+
+    fn app(services: Value) -> apps::Model {
+        let manifest = json!({"apiVersion":"ferry/v1","kind":"Application","metadata":{"name":"demo"},"services":services}).to_string();
+        apps::Model {
+            id: 900,
+            workspace_id: 1,
+            name: "demo".into(),
+            category: String::new(),
+            manifest,
+            preview_artifact: String::new(),
+            mode: "compose".into(),
+            target_kind: "host".into(),
+            target_ref: 1,
+            workdir: "/srv".into(),
+            description: String::new(),
+            state: "idle".into(),
+            revision_number: 0,
+            current_revision: 0,
+            created_at: 1,
+            updated_at: 1,
+            version: 1,
+        }
+    }
+
+    fn service(name: &str, files: Value) -> Value {
+        json!({"name":name,"image":"nats:2","files":files})
+    }
+
+    fn member(i: u32) -> Member {
+        Member {
+            name: format!("nats-{i}"),
+            index: i,
+            host: format!("10.0.0.{}", i + 1),
+            ports: BTreeMap::from([("cluster".into(), 6222)]),
+        }
+    }
+
+    fn contexts() -> BTreeMap<String, Context> {
+        (0..2)
+            .map(|i| {
+                let ctx = Context {
+                    values: BTreeMap::new(),
+                    instance: Some(Instance {
+                        role: "nats".into(),
+                        index: i,
+                        name: format!("nats-{i}"),
+                        host: format!("10.0.0.{}", i + 1),
+                        ports: BTreeMap::from([("cluster".into(), 6222)]),
+                    }),
+                    members: BTreeMap::from([("nats".into(), (0..2).map(member).collect())]),
+                    driver: "compose".into(),
+                };
+                (format!("nats-{i}"), ctx)
+            })
+            .collect()
+    }
+
+    fn key(e: ApiError) -> String {
+        e.2.map(|m| m.key).unwrap_or_default()
+    }
+
+    fn files(metadata: &Value) -> Vec<&Value> {
+        metadata
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["kind"] == "file")
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn config_rendered_per_instance_context() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        template(&s, 501, "nats-conf", CLUSTER, PORT).await;
+        let file = json!([{"path":"/etc/nats.conf","fromTemplate":"nats-conf"}]);
+        let r = app(json!([
+            service("nats-0", file.clone()),
+            service("nats-1", file)
+        ]));
+        let (metadata, _, configs) = bindings(&s.db, &r, &r.manifest, Some(&contexts()))
+            .await
+            .unwrap();
+        let routes = "routes=10.0.0.1:6222,10.0.0.2:6222,\nport=4222\n";
+        let expected = |i: u32| format!("server_name=nats-{i}\n{routes}");
+        for i in 0..2 {
+            assert_eq!(
+                configs[&(format!("nats-{i}"), "/etc/nats.conf".to_owned())],
+                expected(i)
+            );
+        }
+        let entries = files(&metadata);
+        assert_eq!(entries.len(), 2);
+        for (i, entry) in entries.iter().enumerate() {
+            assert_eq!(entry["service"], format!("nats-{i}"));
+            assert_eq!(entry["content"], expected(i as u32));
+            assert_eq!(entry["digest"], hash(&expected(i as u32)));
+            assert_eq!(entry["template_id"], json!(Id::from(501)));
+            assert_eq!(entry["template_version"], 3);
+        }
+        assert_ne!(entries[0]["digest"], entries[1]["digest"]);
+    }
+
+    #[tokio::test]
+    async fn instance_tokens_outside_blueprint_rejected() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        template(&s, 501, "nats-conf", CLUSTER, PORT).await;
+        let file = json!([{"path":"/etc/nats.conf","fromTemplate":"nats-conf"}]);
+        let r = app(json!([service("nats-0", file)]));
+        let err = bindings(&s.db, &r, &r.manifest, None).await.unwrap_err();
+        assert_eq!(key(err), "deployment.blueprintContextRequired");
+        // A context set lacking the file's own service is rejected the same way.
+        let mut others = contexts();
+        others.remove("nats-0");
+        let err = bindings(&s.db, &r, &r.manifest, Some(&others))
+            .await
+            .unwrap_err();
+        assert_eq!(key(err), "deployment.blueprintContextRequired");
+    }
+
+    #[tokio::test]
+    async fn plain_config_with_injected_value_not_evaluated() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        template(
+            &s,
+            502,
+            "plain",
+            "host={{ .Values.host }}\n",
+            r#"[{"name":"host","type":"string"}]"#,
+        )
+        .await;
+        let file = json!([{"path":"/etc/plain.conf","fromTemplate":"plain","values":{"host":"{{ .Instance.Host }}"}}]);
+        let r = app(json!([service("nats-0", file)]));
+        let literal = "host={{ .Instance.Host }}\n";
+        for contexts in [None, Some(contexts())] {
+            let (metadata, _, configs) = bindings(&s.db, &r, &r.manifest, contexts.as_ref())
+                .await
+                .unwrap();
+            assert_eq!(
+                configs[&("nats-0".to_owned(), "/etc/plain.conf".to_owned())],
+                literal
+            );
+            assert_eq!(files(&metadata)[0]["digest"], hash(literal));
+        }
+    }
+
+    #[tokio::test]
+    async fn secret_marker_survives_instance_rendering() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        template(
+            &s,
+            503,
+            "secret-conf",
+            "name={{ .Instance.Name }}\npassword={{ .Values.password }}\n",
+            r#"[{"name":"password","type":"string","secret":true}]"#,
+        )
+        .await;
+        crate::entities::variables::Entity::insert(crate::entities::variables::ActiveModel {
+            id: Set(601),
+            workspace_id: Set(1),
+            name: Set("db-password".into()),
+            scope: Set("global".into()),
+            scope_ref: Set(0),
+            kind: Set("secret".into()),
+            description: Set(String::new()),
+            value: Set(s
+                .vault
+                .seal("s3cret", &crate::vault::aad("1", "variables", "601"))
+                .unwrap()),
+            version: Set(1),
+            created_at: Set(1),
+            updated_at: Set(1),
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        let file = json!([{"path":"/etc/secret.conf","fromTemplate":"secret-conf","values":{"password":"db-password"}}]);
+        let r = app(json!([service("nats-1", file)]));
+        let (metadata, rows, configs) = bindings(&s.db, &r, &r.manifest, Some(&contexts()))
+            .await
+            .unwrap();
+        let text = "name=nats-1\npassword=\0variable/db-password\0\n";
+        assert_eq!(
+            configs[&("nats-1".to_owned(), "/etc/secret.conf".to_owned())],
+            text
+        );
+        assert_eq!(
+            files(&metadata)[0]["content"],
+            "name=nats-1\npassword=<variable/db-password>\n"
+        );
+        assert_eq!(files(&metadata)[0]["digest"], hash(text));
+        assert!(
+            metadata
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["kind"] == "file-variable"
+                    && m["name"] == "db-password"
+                    && m["service"] == "nats-1")
+        );
+        let out = config_files(&s, &metadata, &rows, &configs).unwrap();
+        assert_eq!(
+            out.values().next().unwrap(),
+            "name=nats-1\npassword=s3cret\n"
         );
     }
 }

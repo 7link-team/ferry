@@ -219,6 +219,7 @@
   "deployment.portable.sourceRequired": "Setiap perkhidmatan memerlukan imej atau artifak natif. ferry/v2 membenarkan kedua-duanya; enjin memilih sumber.",
   "deployment.portable.placementMode": "Penempatan memerlukan ferry/v2 dan Docker Swarm / Stack; enjin lain tidak menjadualkan merentas hos.",
   "deployment.portable.placementInvalid": "Penempatan tidak sah: maksimum 32 kekangan label nod/enjin (== atau !=); replika maksimum setiap nod ialah 1–100.",
+  "deployment.blueprintContextRequired": "Templat konfigurasi ini menggunakan tindakan peringkat instans (.Instance, range .Role, …) dan hanya boleh dikerahkan melalui blueprint kluster.",
   "blueprint.invalidDocument": "Pelan tindakan bukan JSON yang sah atau mengandungi medan tidak dikenali atau medan wajib yang tiada.",
   "blueprint.unsupportedVersion": "Hanya apiVersion ferry/blueprint-v1 dengan kind Blueprint disokong.",
   "blueprint.nameInvalid": "Nama pelan tindakan mesti bermula dengan huruf kecil, hanya mengandungi a-z, 0-9, - atau _, dan tidak melebihi 63 aksara.",

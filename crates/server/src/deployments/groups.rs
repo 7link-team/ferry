@@ -87,7 +87,7 @@ pub(super) async fn preview(
                 crate::i18n::Message::new("deployment.error.056"),
             ));
         }
-        let (metadata, _, _) = bindings(&s.db, app, &app.manifest).await?;
+        let (metadata, _, _) = bindings(&s.db, app, &app.manifest, None).await?;
         let mut rows = Vec::new();
         let mut encoded_metadata = json!([]);
         for id in &ids {
@@ -113,7 +113,7 @@ pub(super) async fn preview(
         })?;
         let tx = crate::variables::transaction(s, scope.workspace_id).await?;
         if members(&tx, scope.workspace_id, app.target_ref).await? != ids
-            || bindings(&tx, app, &app.manifest).await?.0 != metadata
+            || bindings(&tx, app, &app.manifest, None).await?.0 != metadata
         {
             return Err(ApiError::localized(
                 axum::http::StatusCode::CONFLICT,

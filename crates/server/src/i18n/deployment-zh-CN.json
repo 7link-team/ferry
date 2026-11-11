@@ -219,6 +219,7 @@
   "deployment.portable.sourceRequired": "每个服务至少提供镜像或原生产物；ferry/v2 可同时提供，由部署引擎选择。",
   "deployment.portable.placementMode": "放置约束需要 ferry/v2 和 Docker Swarm / Stack；其他引擎不能跨主机调度。",
   "deployment.portable.placementInvalid": "放置配置无效：最多32条节点/引擎标签约束（== 或 !=）；每节点副本上限为1–100。",
+  "deployment.blueprintContextRequired": "该配置模板使用了实例级动作（.Instance、range .Role 等），只能通过集群蓝图部署。",
   "blueprint.invalidDocument": "蓝图不是有效的 JSON，或包含未知字段、缺少必填字段。",
   "blueprint.unsupportedVersion": "仅支持 apiVersion 为 ferry/blueprint-v1 且 kind 为 Blueprint 的蓝图。",
   "blueprint.nameInvalid": "蓝图名称必须以小写字母开头，只能包含 a-z、0-9、- 或 _，且不超过 63 个字符。",
