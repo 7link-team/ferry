@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 2,
+  "packages": [
+    {
+      "key": "http-service",
+      "kind": "app",
+      "meta": {
+        "name": {
+          "zh-CN": "HTTP 示例服务",
+          "zh-TW": "HTTP 範例服務",
+          "en-US": "HTTP sample service",
+          "ms-MY": "Perkhidmatan HTTP contoh",
+          "ja-JP": "HTTP サンプルサービス",
+          "ko-KR": "HTTP 샘플 서비스"
+        },
+        "description": {
+          "zh-CN": "单个无状态 HTTP 服务，返回可配置的欢迎语，用于验证 Docker、Compose 与 Swarm 部署链路。",
+          "en-US": "A single stateless HTTP service returning a configurable welcome message, for checking Docker, Compose and Swarm deployments.",
+          "ms-MY": "Satu perkhidmatan HTTP tanpa keadaan yang memulangkan mesej alu-aluan boleh dikonfigurasi, untuk menyemak pelaksanaan Docker, Compose dan Swarm."
+        },
+        "category": "web",
+        "topology": "single",
+        "drivers": [
+          "docker",
+          "compose",
+          "stack"
+        ],
+        "tags": [
+          "http",
+          "sample"
+        ],
+        "maintainers": [
+          "Ferry"
+        ]
+      },
+      "icon": "",
+      "versions": [
+        {
+          "version": "1.0.0",
+          "blueprint": {
+            "apiVersion": "ferry/v1",
+            "kind": "Application",
+            "metadata": {
+              "name": "example-http"
+            },
+            "services": [
+              {
+                "name": "web",
+                "image": "busybox:1.36",
+                "command": [
+                  "sh",
+                  "-c",
+                  "mkdir -p /www; printf '%s' \"$WELCOME_MESSAGE\" > /www/index.html; exec httpd -f -p 8080 -h /www"
+                ],
+                "env": [
+                  {
+                    "name": "WELCOME_MESSAGE",
+                    "value": "{{ .Values.message }}"
+                  }
+                ],
+                "ports": [
+                  {
+                    "container": 8080,
+                    "published": "{{ .Values.port }}"
+                  }
+                ],
+                "health": {
+                  "readiness": {
+                    "httpGet": {
+                      "path": "/",
+                      "port": 8080
+                    },
+                    "periodSeconds": 1
+                  },
+                  "liveness": {
+                    "httpGet": {
+                      "path": "/",
+                      "port": 8080
+                    },
+                    "periodSeconds": 2
+                  }
+                },
+                "resources": {
+                  "limits": {
+                    "cpu": "500m",
+                    "memory": "64Mi"
+                  },
+                  "requests": {
+                    "memory": "16Mi"
+                  }
+                }
+              }
+            ]
+          },
+          "parameters": [
+            {
+              "name": "port",
+              "label": "Published port",
+              "type": "integer",
+              "min": 1,
+              "max": 65535,
+              "default": 8080
+            },
+            {
+              "name": "message",
+              "label": "Welcome message",
+              "type": "string",
+              "min_length": 1,
+              "max_length": 2000,
+              "default": "Hello from Ferry"
+            }
+          ],
+          "files": [],
+          "readme": "# HTTP sample service\n\nBusyBox `httpd` serving one page whose text comes from the `message` parameter.\n\n- Port: container `8080`, published on the `port` parameter.\n- Stateless: no volumes; safe to delete and recreate.\n- Verified by the Ferry CI driver suite for Docker, Compose and Swarm (single host).\n"
+        }
+      ]
+    }
+  ]
+}

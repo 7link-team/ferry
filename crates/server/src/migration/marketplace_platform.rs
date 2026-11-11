@@ -42,6 +42,35 @@ const INDEXES: &[(&str, &str, &[&str])] = &[
     ("marketplace_sources", "idx_marketplace_sources_due", &["workspace_id", "enabled", "next_sync_at"]),
 ];
 
+/// Built-in official source (user decision 2026-11-11): the public templates in this repository.
+/// Inserted once by this migration; a superadmin may disable or delete it and it is not re-created.
+const OFFICIAL_SOURCE_ID: i64 = 1;
+const OFFICIAL_SOURCE_CONFIG: &str = r#"{"provider":"github","api_base":"https://api.github.com","project":"7link-team/ferry","organization":"","branch":"main","index_path":"marketplace/index.json"}"#;
+
+async fn seed_official_source(m: &SchemaManager<'_>) -> Result<(), DbErr> {
+    use sea_orm::{ConnectionTrait, Statement};
+    let db = m.get_connection();
+    let backend = m.get_database_backend();
+    let exists = db
+        .query_one_raw(Statement::from_string(backend, format!("SELECT id FROM marketplace_sources WHERE id = {OFFICIAL_SOURCE_ID}")))
+        .await?
+        .is_some();
+    if exists {
+        return Ok(());
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+    let mut insert = Query::insert();
+    insert
+        .into_table(Alias::new("marketplace_sources"))
+        .columns(["id", "workspace_id", "name", "repository_id", "config", "state", "last_error", "synced_at", "run_as", "version", "created_at", "updated_at", "trust", "enabled", "sync_interval", "next_sync_at"].map(Alias::new))
+        .values_panic([
+            OFFICIAL_SOURCE_ID.into(), 0_i64.into(), "Ferry official templates".into(), 0_i64.into(), OFFICIAL_SOURCE_CONFIG.into(),
+            "idle".into(), "".into(), 0_i64.into(), 0_i64.into(), 1_i64.into(), now.into(), now.into(),
+            "official".into(), 1_i64.into(), (6 * 3600_i64).into(), 0_i64.into(),
+        ]);
+    m.exec_stmt(insert).await
+}
+
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
@@ -78,9 +107,12 @@ impl MigrationTrait for Migration {
             }
             m.create_index(index.to_owned()).await?;
         }
-        Ok(())
+        seed_official_source(m).await
     }
     async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let db = m.get_connection();
+        db.execute_unprepared(&format!("DELETE FROM marketplace_entries WHERE workspace_id = 0 AND source_id = {OFFICIAL_SOURCE_ID}")).await?;
+        db.execute_unprepared(&format!("DELETE FROM marketplace_sources WHERE id = {OFFICIAL_SOURCE_ID}")).await?;
         for (table, name, _) in INDEXES {
             if m.has_index(*table, *name).await? {
                 m.drop_index(Index::drop().name(*name).table(Alias::new(*table)).to_owned()).await?;
@@ -117,6 +149,13 @@ mod tests {
         assert_eq!(entry.try_get::<String>("", "package_version").unwrap(), "0.0.0");
         assert_eq!(entry.try_get::<String>("", "kind").unwrap(), "app");
         assert_eq!(entry.try_get::<i64>("", "compatible").unwrap(), 1);
+        let official = s.db.query_one_raw(Statement::from_string(backend, "SELECT workspace_id, trust, enabled, sync_interval, config FROM marketplace_sources WHERE id = 1")).await.unwrap().expect("default official source");
+        assert_eq!(official.try_get::<i64>("", "workspace_id").unwrap(), 0);
+        assert_eq!(official.try_get::<String>("", "trust").unwrap(), "official");
+        assert_eq!(official.try_get::<i64>("", "sync_interval").unwrap(), 6 * 3600);
+        let config: serde_json::Value = serde_json::from_str(&official.try_get::<String>("", "config").unwrap()).unwrap();
+        assert_eq!(config["project"], "7link-team/ferry");
+        assert_eq!(config["index_path"], "marketplace/index.json");
         for table in ["app_templates", "config_templates"] {
             let row = s.db.query_one_raw(Statement::from_string(backend, format!("SELECT COUNT(origin_source_id) AS n FROM {table}"))).await.unwrap().unwrap();
             assert!(row.try_get::<i64>("", "n").unwrap() >= 0);

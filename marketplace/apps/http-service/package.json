@@ -1,0 +1,20 @@
+{
+  "name": {
+    "zh-CN": "HTTP 示例服务",
+    "zh-TW": "HTTP 範例服務",
+    "en-US": "HTTP sample service",
+    "ms-MY": "Perkhidmatan HTTP contoh",
+    "ja-JP": "HTTP サンプルサービス",
+    "ko-KR": "HTTP 샘플 서비스"
+  },
+  "description": {
+    "zh-CN": "单个无状态 HTTP 服务，返回可配置的欢迎语，用于验证 Docker、Compose 与 Swarm 部署链路。",
+    "en-US": "A single stateless HTTP service returning a configurable welcome message, for checking Docker, Compose and Swarm deployments.",
+    "ms-MY": "Satu perkhidmatan HTTP tanpa keadaan yang memulangkan mesej alu-aluan boleh dikonfigurasi, untuk menyemak pelaksanaan Docker, Compose dan Swarm."
+  },
+  "category": "web",
+  "topology": "single",
+  "drivers": ["docker", "compose", "stack"],
+  "tags": ["http", "sample"],
+  "maintainers": ["Ferry"]
+}

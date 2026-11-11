@@ -399,6 +399,14 @@ mod tests {
     }
 
     #[test]
+    fn repository_bundle_parses() {
+        let rows = parse_bundle(include_str!("../../../../marketplace/index.json"), &semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap(), "en-US").unwrap();
+        assert!(!rows.is_empty());
+        assert!(rows.iter().all(|r| r.compatible), "official templates must be importable by this build");
+        assert!(rows.iter().any(|r| r.key == "http-service" && r.name == "HTTP sample service"));
+    }
+
+    #[test]
     fn digest_is_stable() {
         let text = bundle(json!([package(json!([version("1.0.0")]))]));
         let a = parse_bundle(&text, &ferry(), "en-US").unwrap();

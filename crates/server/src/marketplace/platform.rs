@@ -53,10 +53,19 @@ fn validate(b: &PlatformBody) -> Result<()> {
     if !(1..=168).contains(&b.sync_interval_hours) {
         return Err(bad("marketplace.syncIntervalInvalid"));
     }
-    if b.source.url()?.scheme() != "https" {
+    let url = b.source.url()?;
+    if url.scheme() != "https" && !test_loopback_http(&url) {
         return Err(bad("marketplace.platformHttpsRequired"));
     }
     Ok(())
+}
+
+/// Debug builds only: acceptance scripts serve fixtures over plain HTTP on loopback when
+/// FERRY_TEST_MARKETPLACE_HTTP=1. Release builds always require HTTPS.
+fn test_loopback_http(url: &reqwest::Url) -> bool {
+    cfg!(debug_assertions)
+        && std::env::var("FERRY_TEST_MARKETPLACE_HTTP").is_ok_and(|v| v == "1")
+        && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
 }
 
 pub(crate) async fn scoped(conn: &impl sea_orm::ConnectionTrait, id: Id) -> Result<sources::Model> {
@@ -496,7 +505,8 @@ pub(crate) mod tests {
         let (_dir, s) = crate::agents::tests::setup().await;
         let (_, Json(created)) = create(State(s.clone()), superadmin(&s).await, Json(body("Official"))).await.unwrap();
         let Json(list_all) = list(State(s.clone()), account(1, true), Query(HashMap::new())).await.unwrap();
-        assert_eq!(list_all["total"], 1);
+        assert!(list_all["items"].as_array().unwrap().iter().any(|i| i["id"] == created["id"]));
+        assert!(list_all["items"].as_array().unwrap().iter().any(|i| i["id"] == "1" && i["trust"] == "official"), "built-in official source is listed");
         let Json(workspace) = super::super::list_sources(State(s.clone()), crate::agents::tests::admin(1), Query(HashMap::new())).await.unwrap();
         assert!(workspace["items"].as_array().unwrap().iter().all(|i| i["id"] != created["id"]));
     }

@@ -680,3 +680,11 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Alternatives：旧有效路径308迁移，旧域名和未知token404。运维DNS/TLS/代理设置仍属于部署层，数据库配置不能替代。
 - Scope/Tradeoffs：新增access_config可空TEXT迁移，保留旧加密URL和历史strip_prefix字段。详细模型、up/down、全状态与验收见docs/preview-holes-design.md第17节。旧配置base路径的应用需调整为根路径。
 - Status：已实现，真实Runner/Actions/工作流、CI测试DNS与发布证据以MEMORY.md为准，不宣称公网DNS/TLS验收。
+
+## 平台级模板市场来源与索引 v2（2026-11-11，用户确认）
+
+- Decision：超级管理员在平台管理“模板来源”添加多个官方/社区公开仓库，所有工作空间应用市场开箱可见可导入；空间来源（公有/私有）保持不变。平台来源与空间来源同表（`workspace_id=0`），但 CRUD/同步为独立实现：不加工作空间锁、不绑定仓库与凭据、请求不带 token、只允许 HTTPS（debug 构建可用 `FERRY_TEST_MARKETPLACE_HTTP=1` 放行回环 http 供验收脚本）。索引新增 `schemaVersion 2`（每包多版本、附带配置文件、README、元数据、digest），v1 继续兼容。
+- Reason：用户要求类似 `helm repo add` 的平台级多源、模板以 Git 管理、平台级先只做公开仓库；参考 Helm/Nomad Pack/1Panel 的目录+版本结构，同步只读 CI 生成的单一 bundle 以避开匿名 API 限额。
+- Alternatives：平台来源独立新表（重复空间来源的查询与条目存储，否决）；同步时逐文件请求目录（匿名 60 次/小时不足，否决）；平台级私有仓库与平台凭据（用户确认本期不做）。
+- Scope/Tradeoffs：同步以 `sync_owner/sync_lease_until` 租约保证多实例只执行一次，后台每 60 秒调度到期来源，失败保留旧目录；`marketplace::recover` 不再处理平台来源。导入在一个事务里创建应用模板与附带配置模板，配置模板重名追加 `-2…-20`，应用模板 `fromTemplate` 改写为配置模板 ID，并记录 `origin_*`。未知 kind / `requires.ferry` 不满足 / 集群蓝图（P2 前）入库但不可导入。官方模板先放本仓库 `marketplace/`，协议稳定后再拆独立仓库。迁移内置一条默认官方来源（id=1，`7link-team/ferry` main `marketplace/index.json`，用户确认），可停用/删除且不再重建。迁移 `marketplace_platform` 仅新增列与索引，down 删除新增列。
+- Status：P1 已在分支 `feature/marketplace-p1` 实现并本地验收（证据 `data/maintenance/marketplace-p1/`）；集群蓝图、拓扑变更、六个 HA 模板按 `docs/应用市场与集群模板设计.md` 后续分期。未合并 main、未发布。

@@ -17,12 +17,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 requests=[]
 index={'version':1,'templates':[{'key':'web','name':'Imported app','description':'fixture','content':{'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'busybox:1.36'}]},'parameters':[]}]}
 fixture_status=200
+# Platform bundle: the repository's official index plus one package that ships a config file.
+platform_index=json.loads((Path(__file__).resolve().parent.parent/'marketplace'/'index.json').read_text(encoding='utf-8'))
+platform_index['packages'].append({'key':'with-config','kind':'app','meta':{'name':{'en-US':'With config','zh-CN':'带配置'},'category':'web','topology':'single','drivers':['docker']},
+    'versions':[{'version':'1.0.0','blueprint':{'apiVersion':'ferry/v2','kind':'Application','metadata':{'name':'cfg'},'services':[{'name':'web','image':'busybox:1.36','files':[{'path':'/etc/web.conf','fromTemplate':'web.conf'}]}]},
+    'files':[{'name':'web.conf','content':'listen 8080;'}]}]})
+platform_status=200
 class Receiver(BaseHTTPRequestHandler):
     def do_GET(self):
         import base64
         requests.append((self.path,{k.lower():v for k,v in self.headers.items()}))
-        payload=json.dumps({'content':base64.b64encode(json.dumps(index).encode()).decode(),'encoding':'base64'}).encode()
-        self.send_response(fixture_status);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
+        platform='platform-index.json' in self.path
+        payload=json.dumps({'content':base64.b64encode(json.dumps(platform_index if platform else index).encode()).decode(),'encoding':'base64'}).encode()
+        self.send_response(platform_status if platform else fixture_status);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
     def log_message(self,*args):pass
 receiver=ThreadingHTTPServer(('127.0.0.1',0),Receiver)
 threading.Thread(target=receiver.serve_forever,daemon=True).start()
@@ -42,7 +49,7 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
     base = f'http://127.0.0.1:{port}/api'
-    env = dict(os.environ, FERRY_DATA_DIR=directory, FERRY_BIND=f'127.0.0.1:{port}')
+    env = dict(os.environ, FERRY_DATA_DIR=directory, FERRY_BIND=f'127.0.0.1:{port}', FERRY_TEST_MARKETPLACE_HTTP='1')
     env.pop('FERRY_DATABASE_URL', None)
     if os.environ.get('FERRY_TEST_DATABASE_URL'): env['FERRY_DATABASE_URL'] = os.environ['FERRY_TEST_DATABASE_URL']
     binary = os.environ.get('FERRY_BINARY', 'target/debug/ferry-server')
@@ -156,6 +163,46 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         for source_id in sources:request(owner,root+'/marketplace-sources/'+source_id,method='DELETE',expected=204)
         check(request(owner,root+'/marketplace')['total']==0 and request(owner,root+'/app-templates/'+imported)==template,'source deletion removes catalog but preserves imported templates')
         request(owner,root+'/repositories/'+repo,method='DELETE',expected=204)
+        # Platform-level public sources: superadmin only, no credentials, visible in every workspace.
+        other_root=f'/workspaces/{workspace_other}'
+        pbody={'name':'Official','trust':'official','enabled':True,'sync_interval_hours':6,'provider':'github','api_base':api_base,'project':'ferry/templates','branch':'main','index_path':'platform-index.json'}
+        builtin=request(admin,'/platform/marketplace-sources/1')
+        check(builtin['trust']=='official' and builtin['project']=='7link-team/ferry' and builtin['index_path']=='marketplace/index.json','built-in official source points at this repository')
+        request(owner,'/platform/marketplace-sources',pbody,expected=403)
+        request(admin,'/platform/marketplace-sources',dict(pbody,trust='workspace'),expected=400)
+        request(admin,'/platform/marketplace-sources',dict(pbody,sync_interval_hours=169),expected=400)
+        check(True,'platform sources require superadmin and validate trust and interval')
+        pid=request(admin,'/platform/marketplace-sources',pbody,expected=201)['id']
+        check(all(i['id']!=pid for i in request(owner,root+'/marketplace-sources')['items']),'platform source is not a workspace source')
+        versions=sum(len(p['versions']) for p in platform_index['packages'])
+        result=request(admin,'/platform/marketplace-sources/'+pid+'/synchronizations',{})
+        path,headers=requests[-1]
+        check(result['templates']==versions and 'platform-index.json' in path and 'authorization' not in headers,'platform sync reads the public bundle without credentials')
+        def official(r):return [i for i in request(owner if r==root else outsider,r+'/marketplace?page_size=100')['items'] if i['source_id']==pid]
+        check(len(official(root))==versions and len(official(other_root))==versions,'every workspace sees platform templates')
+        item=next(i for i in official(root) if i['entry_key']=='with-config')
+        check(item['package_version']=='1.0.0' and item['files']==['web.conf'] and item['name']=='带配置','market item shows version, attached files and localized name')
+        request(guest,root+'/marketplace/'+item['id']+'/installations',{'version':item['version']},expected=403)
+        imported_cfg=request(owner,root+'/marketplace/'+item['id']+'/installations',{'version':item['version']},expected=201)['id']
+        app_template=request(owner,root+'/app-templates/'+imported_cfg)
+        config_ref=json.loads(app_template['content'])['services'][0]['files'][0]['fromTemplate']
+        config=request(owner,root+'/config-templates/'+config_ref)
+        check(config['content']=='listen 8080;' and config['name']=='web.conf','import creates the app template and its config template, linked by ID')
+        check(request(outsider,other_root+'/config-templates?q=web.conf')['total']==0,'import stays inside the importing workspace')
+        src=request(admin,'/platform/marketplace-sources/'+pid)
+        request(admin,'/platform/marketplace-sources/'+pid,dict(pbody,enabled=False,version=src['version']),method='PATCH')
+        request(owner,root+'/marketplace/'+item['id'],expected=404)
+        check(official(root)==[] and request(owner,root+'/app-templates/'+imported_cfg)['id']==imported_cfg,'disabling a platform source hides it everywhere and keeps imported templates')
+        src=request(admin,'/platform/marketplace-sources/'+pid)
+        request(admin,'/platform/marketplace-sources/'+pid,dict(pbody,version=src['version']),method='PATCH')
+        platform_status=500
+        request(admin,'/platform/marketplace-sources/'+pid+'/synchronizations',{},expected=400)
+        src=request(admin,'/platform/marketplace-sources/'+pid)
+        check(src['state']=='failed' and src['last_error'] and src['entry_count']==versions and len(official(root))==versions,'platform sync failure keeps the previous catalog')
+        platform_status=200
+        check(any(a.get('resource')=='marketplace-sources' for a in request(admin,'/platform/monitor/activity?page_size=100')['items']),'platform source changes are audited')
+        request(admin,'/platform/marketplace-sources/'+pid,method='DELETE',expected=204)
+        check(official(root)==[] and request(owner,root+'/config-templates/'+config_ref)['id']==config_ref,'deleting a platform source removes its catalog and keeps imports')
         print(f'{checks} checks passed (local provider fixtures; not live private-platform acceptance)',flush=True)
     except Exception:
         log.flush();print((data/'server.log').read_text()[-5000:],flush=True)
