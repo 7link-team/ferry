@@ -1,0 +1,12 @@
+{
+  "avatar": ["Avatar", "头像", "頭像", "アバター", "아바타", "Avatar"],
+  "portrait": ["Portrait", "人物插画", "人物插畫", "人物", "인물", "Potret"],
+  "pixel": ["Pixel robot", "像素机器人", "像素機器人", "ピクセルロボット", "픽셀 로봇", "Robot piksel"],
+  "initials": ["Initials", "姓名缩写", "姓名縮寫", "イニシャル", "이니셜", "Inisial"],
+  "emoji": ["Emoji", "表情", "表情", "絵文字", "이모지", "Emoji"],
+  "regenerate": ["Try another", "换一个", "換一個", "別の画像", "다른 이미지", "Cuba yang lain"],
+  "upload": ["Upload image", "上传图片", "上傳圖片", "画像をアップロード", "이미지 업로드", "Muat naik imej"],
+  "processing": ["Processing…", "处理中…", "處理中…", "処理中…", "처리 중…", "Memproses…"],
+  "imageHelp": ["PNG, JPEG or WebP, up to 5 MiB and 8192 px per side. Center cropped to a 128 × 128 avatar.", "支持 PNG、JPEG、WebP，最大 5 MiB，单边不超过 8192 像素；居中裁剪为 128 × 128 头像。", "支援 PNG、JPEG、WebP，最大 5 MiB，單邊不超過 8192 像素；置中裁剪為 128 × 128 頭像。", "PNG・JPEG・WebP、最大5 MiB・一辺8192 px。中央を128 × 128に切り抜きます。", "PNG, JPEG, WebP, 최대 5 MiB 및 한 변 8192 px. 중앙을 128 × 128로 자릅니다.", "PNG, JPEG atau WebP, sehingga 5 MiB dan 8192 px setiap sisi. Dipangkas di tengah kepada 128 × 128."],
+  "imageFailed": ["Unable to process this image. Choose another file.", "无法处理此图片，请选择其他文件。", "無法處理此圖片，請選擇其他檔案。", "画像を処理できません。別の画像を選択してください。", "이미지를 처리할 수 없습니다. 다른 파일을 선택하세요.", "Imej tidak dapat diproses. Pilih fail lain."]
+}

@@ -547,7 +547,7 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
                 "permissions": crate::accounts::workspace::PERMISSIONS.iter().map(|p| p.0).collect::<Vec<_>>() })).collect();
     }
     Ok(Json(json!({
-        "user": {"id": account.user.id, "email": account.user.email, "name": account.user.name, "is_superadmin": account.user.is_superadmin},
+        "user": {"avatar": super::preferences::avatars(&s.db, vec![i64::from(account.user.id)]).await?.remove(&i64::from(account.user.id)), "id": account.user.id, "email": account.user.email, "name": account.user.name, "is_superadmin": account.user.is_superadmin},
         "workspaces": workspaces,
     })))
 }
@@ -562,11 +562,14 @@ pub async fn profile(State(s): State<AppState>, account: Account) -> Result<Json
     Ok(Json(json!({
         "id": "1", "name": row.name, "email": row.email, "version": row.version,
         "new_password": "", "current_password": "",
+        "avatar": super::preferences::avatars(&s.db, vec![row.id]).await?.remove(&row.id),
     })))
 }
 
 #[derive(Deserialize)]
 pub struct ProfileUpdate {
+    #[serde(default)]
+    avatar: Option<crate::avatar::Avatar>,
     version: i64,
     name: String,
     email: String,
@@ -585,6 +588,7 @@ pub async fn update_profile(
     Json(body): Json<ProfileUpdate>,
 ) -> Result<Json<Value>> {
     use sea_orm::TransactionTrait;
+    if let Some(avatar) = &body.avatar { avatar.validate()?; }
     let name = body.name.trim().to_owned();
     if name.is_empty() {
         return Err(ApiError::localized(
@@ -652,6 +656,10 @@ pub async fn update_profile(
             .await?;
     }
     let mut changed = Vec::new();
+    if let Some(avatar) = &body.avatar {
+        super::preferences::save_avatar(&tx, row.id, avatar).await?;
+        changed.push("avatar");
+    }
     if name != row.name {
         changed.push("name");
     }

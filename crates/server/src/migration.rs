@@ -7,6 +7,7 @@ use sea_orm_migration::prelude::*;
 mod access_addresses;
 mod account_otp;
 mod account_preferences;
+mod identity_avatars;
 mod agent_models;
 mod ai_agents;
 mod ai_models;
@@ -167,6 +168,7 @@ impl MigratorTrait for Migrator {
             Box::new(PlatformSite),
             Box::new(notification_center::Migration),
             Box::new(account_otp::Migration),
+            Box::new(identity_avatars::Migration),
         ]
     }
 }

@@ -1,5 +1,6 @@
 mod accounts;
 mod agents;
+mod avatar;
 mod conversations;
 mod models;
 mod platform_tools;

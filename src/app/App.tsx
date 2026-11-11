@@ -1,3 +1,4 @@
+import { IdentityAvatar } from "../shared/ui/identity-avatar";
 import { installIntegrationCatalog, type IntegrationManifest } from "../features/workflows/integrations";
 import { TypedValueList } from "./pages/TypedValueList";
 import { ConversationsWorkspace } from "./pages/ConversationsWorkspace";
@@ -447,6 +448,7 @@ function WorkspaceHeaderActions({ identity, onWorkspaces, onSignedOut }: { ident
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm">
+              <IdentityAvatar id={identity.user.id} name={identity.user.name} kind="user" value={identity.user.avatar} className="size-7" />
               {identity.user.name}
             </Button>
           </DropdownMenuTrigger>

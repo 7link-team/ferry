@@ -2,6 +2,13 @@ import { i18n } from "../i18n/i18n";
 import { localeHeaders } from "../i18n/locale";
 import { beginActivity } from "./progress";
 
+export interface AvatarValue {
+  style: "portrait" | "pixel" | "initials" | "emoji" | "image";
+  seed?: string | undefined;
+  emoji?: string;
+  image?: string;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -64,7 +71,7 @@ export interface Workspace {
 }
 
 export interface Identity {
-  user: { id: string; email: string; name: string; is_superadmin: boolean };
+  user: { id: string; email: string; name: string; is_superadmin: boolean; avatar?: AvatarValue | null | undefined };
   workspaces: Workspace[];
 }
 

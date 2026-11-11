@@ -69,6 +69,8 @@ pub struct Body {
     metadata: HashMap<String, Value>,
     name: String,
     #[serde(default)]
+    avatar: Option<crate::avatar::Avatar>,
+    #[serde(default)]
     role: String,
     #[serde(default)]
     platform_role_id: String,
@@ -126,6 +128,10 @@ impl Body {
             return Err(invalid());
         }
         self.name = self.name.trim().into();
+        if self.avatar.is_none() {
+            self.avatar = old.and_then(|row| row.avatar.as_ref()).and_then(|value| serde_json::from_str(value).ok());
+        }
+        if let Some(avatar) = &self.avatar { avatar.validate()?; }
         if self.platform_role_id.is_empty() {
             if let Some(old) = old {
                 self.platform_role_id =
@@ -250,6 +256,7 @@ impl Body {
                 .into(),
             workspace_id: workspace.into(),
             name: self.name.clone(),
+            avatar: self.avatar.as_ref().map(|value| serde_json::to_string(value).expect("serializable avatar")),
             role: self.role.clone(),
             description: self.description.clone(),
             runtime: self.runtime.clone(),
@@ -269,7 +276,7 @@ impl Body {
     }
 }
 fn json(row: agents::Model) -> Value {
-    json!({"id":Id::from(row.id),"model_profile_id":Id::from(row.model_profile_id),"name":row.name,"role":row.role,"description":row.description,"runtime":row.runtime,"model":row.model,"host_id":Id::from(row.host_id),"owner_id":Id::from(row.owner_id),"cwd":row.cwd,"system_prompt":row.system_prompt,"permission":row.permission,"visibility":row.visibility,"state":row.state,"revision_id":Id::from(row.revision_id),"version":row.version,"created_at":row.created_at,"updated_at":row.updated_at})
+    json!({"avatar":row.avatar.as_ref().and_then(|v|serde_json::from_str::<Value>(v).ok()),"id":Id::from(row.id),"model_profile_id":Id::from(row.model_profile_id),"name":row.name,"role":row.role,"description":row.description,"runtime":row.runtime,"model":row.model,"host_id":Id::from(row.host_id),"owner_id":Id::from(row.owner_id),"cwd":row.cwd,"system_prompt":row.system_prompt,"permission":row.permission,"visibility":row.visibility,"state":row.state,"revision_id":Id::from(row.revision_id),"version":row.version,"created_at":row.created_at,"updated_at":row.updated_at})
 }
 async fn views(
     conn: &impl ConnectionTrait,

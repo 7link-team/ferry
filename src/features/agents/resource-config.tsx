@@ -1,4 +1,5 @@
 import { Eye, Pencil } from "lucide-react";
+import { AvatarEditor, IdentityAvatar, type AvatarValue } from "../../shared/ui/identity-avatar";
 import { AgentPrompt } from "./AgentPrompt";
 import { useEffect, useState } from "react";
 import { errorText } from "../../shared/api/api";
@@ -26,6 +27,7 @@ import type {
 } from "../../shared/resources/types";
 
 interface Agent {
+  avatar?: AvatarValue | undefined;
   id: string;
   name: string;
   role: string;
@@ -56,6 +58,7 @@ const choices = (values: string[]): Option[] =>
 const states = choices(["enabled", "disabled", "archived"]);
 const visibility = choices(["owner", "workspace"]);
 const editable = (row: Agent) => ({
+  avatar: row.avatar,
   name: row.name,
   role: row.role,
   platform_role_id: row.platform_role_id ?? "0",
@@ -236,7 +239,7 @@ export function agentsLists(
         },
       ],
       columns: [
-        { key: "name", label: "Name", labelKey: key("name"), sortable: true },
+        { key: "name", label: "Name", labelKey: key("name"), sortable: true, render: row => <span className="flex min-w-0 items-center gap-2"><IdentityAvatar id={row.id} name={row.name} kind="agent" value={row.avatar} className="size-8" /><span className="truncate">{row.name}</span></span> },
         { key: "role", label: "Role", labelKey: key("role") },
         {
           key: "model_profile_name",
@@ -347,6 +350,8 @@ export function agentsForms({
               type: "text",
               required: true,
             },
+            { key: "avatar", label: "Avatar", labelKey: "identity:avatar", type: "custom", span: 2,
+              render: ({ draft, readOnly, onPatch, onValidityChange }) => <AvatarEditor id={draft.id ?? "new"} name={draft.name ?? ""} kind="agent" value={draft.avatar} readOnly={readOnly} onBusyChange={onValidityChange} onChange={avatar => onPatch({ avatar })} /> },
             { key: "role", label: "Role", labelKey: key("role"), type: "text" },
             {
               key: "platform_role_id", label: "Platform role", labelKey: key("platformRole"), type: "select",

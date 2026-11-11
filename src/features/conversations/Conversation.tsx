@@ -1,3 +1,5 @@
+import { ConversationMembers, type ConversationMember } from "./ConversationMembers";
+import { IdentityAvatar, type AvatarValue } from "../../shared/ui/identity-avatar";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api, errorText } from "../../shared/api/api";
 import { base } from "../../shared/api/resource";
@@ -6,7 +8,6 @@ import { toast } from "sonner";
 import {
   Trash2,
   Bot,
-  User,
   Users,
   Info,
   Search,
@@ -73,8 +74,10 @@ interface ConversationData {
   kind: "private" | "group";
   viewer_id: string;
   can_manage: boolean;
-  members: { id: string; name: string }[];
-  agents: { id: string; name: string; state: string }[];
+  agent_id: string;
+  agent_avatar?: AvatarValue;
+  members: { id: string; name: string; avatar?: AvatarValue }[];
+  agents: { id: string; name: string; state: string; avatar?: AvatarValue; runtime?: string; model?: string; revision_id?: string }[];
   messages: ChatMessage[];
   id: string;
   title: string;
@@ -176,6 +179,7 @@ export function Conversation({
   initialDraft,
   onDraftChange,
   onDeleted,
+  onOpenConversation,
 }: {
   workspace: string;
   id: string;
@@ -184,6 +188,7 @@ export function Conversation({
   initialDraft?: ConversationDraft | undefined;
   onDraftChange?: (draft: ConversationDraft) => void;
   onDeleted?: () => void;
+  onOpenConversation?: (id: string) => void;
 }) {
   useCommonTranslation();
   const endpoint = `${base(workspace, "conversations")}/${encodeURIComponent(id)}`;
@@ -228,6 +233,7 @@ export function Conversation({
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [selectedMember, setSelectedMember] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [newBelow, setNewBelow] = useState(false);
@@ -544,7 +550,7 @@ export function Conversation({
           <button
             type="button"
             className="flex min-w-0 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => setInfoOpen(true)}
+            onClick={() => { setSelectedMember(""); setInfoOpen(true); }}
           >
             <span
               aria-hidden
@@ -587,7 +593,7 @@ export function Conversation({
                   ? "conversationMembers"
                   : "conversationInfo",
               )}
-              onClick={() => setInfoOpen(true)}
+              onClick={() => { setSelectedMember(""); setInfoOpen(true); }}
             >
               {data.kind === "group" ? <Users /> : <Info />}
             </Button>
@@ -664,55 +670,14 @@ export function Conversation({
           </Button>
         )}
       </div>
-      <Dialog.Root open={infoOpen} onOpenChange={setInfoOpen}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-          <Dialog.Content
-            aria-describedby={undefined}
-            className="fixed left-1/2 top-1/2 z-50 max-h-[85dvh] w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-lg border bg-background p-5 shadow-lg"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <Dialog.Title className="font-semibold">
-                {t("conversationInfo")}
-              </Dialog.Title>
-              <Dialog.Close asChild>
-                <Button variant="ghost" size="icon" aria-label={t("close")}>
-                  <X />
-                </Button>
-              </Dialog.Close>
-            </div>
-            <p className="mt-3 font-medium">{data.title}</p>
-            <h3 className="mt-5 mb-2 text-sm font-medium">
-              {t("conversationMembers")}
-            </h3>
-            <ul className="space-y-2 text-sm">
-              {data.members.map((member) => (
-                <li key={member.id} className="flex items-center gap-2">
-                  <User className="size-4 text-muted-foreground" />
-                  {member.name}
-                </li>
-              ))}
-              {(data.kind === "group"
-                ? data.agents
-                : [{ id: "agent", name: data.config.name, state: "active" }]
-              ).map((agent) => (
-                <li key={agent.id} className="flex items-center gap-2">
-                  <Bot className="size-4 text-muted-foreground" />
-                  {agent.name}
-                </li>
-              ))}
-            </ul>
-            {data.kind === "group" && data.can_manage && (
-              <Button
-                className="mt-4"
-                variant="outline"
-                disabled={busy || data.turns.some((turn) => active(turn.state))}
-                onClick={() => void openMembers()}
-              >
-                {t("manageMembers")}
-              </Button>
-            )}
-            <details className="mt-5 border-t pt-3 text-xs text-muted-foreground">
+      <ConversationMembers open={infoOpen} onOpenChange={setInfoOpen} selected={selectedMember} onSelect={setSelectedMember}
+        title={data.title} workspace={workspace} permissions={permissions} members={[
+          ...data.members.map(member => ({ ...member, kind: "user" as const })),
+          ...(data.kind === "group" ? data.agents : [{ id: data.agent_id, name: data.config.name, avatar: data.agent_avatar, runtime: data.config.runtime, model: data.config.model, revision_id: data.revision_id }]).map(agent => ({ ...agent, kind: "agent" as const })),
+        ] satisfies ConversationMember[]} turns={data.turns} connected={!connection} ownerId={data.owner_id} viewerId={data.viewer_id} primaryAgentId={data.agent_id}
+        onOpenConversation={onOpenConversation}
+        manage={data.kind === "group" && data.can_manage ? <Button variant="outline" disabled={busy || data.turns.some(turn => active(turn.state))} onClick={() => { setInfoOpen(false); void openMembers(); }}>{t("manageMembers")}</Button> : null}
+        executionDetails={<>            <details className="mt-5 border-t pt-3 text-xs text-muted-foreground">
               <summary className="cursor-pointer">
                 {t("executionDetails")}
               </summary>
@@ -734,9 +699,7 @@ export function Conversation({
                 </dd>
               </dl>
             </details>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+</>} />
       <div data-conversation-canvas className="relative flex min-h-0 flex-1 flex-col" style={conversationBackground(data.config.appearance, endpoint)}>
       {connection && (
         <p role="status" className="text-sm text-destructive">
@@ -876,16 +839,11 @@ export function Conversation({
                     data-turn-id={m?.role === "user" ? undefined : turn?.id}
                     className="group/message relative my-2 flex min-w-0 flex-wrap gap-x-2.5 gap-y-2 rounded-lg px-1 py-1.5 sm:px-3"
                   >
-                    <div
-                      aria-hidden
-                      className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md ${m?.role === "user" ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary"}`}
-                    >
-                      {m?.role === "user" ? (
-                        <User className="size-4" />
-                      ) : (
-                        <Bot className="size-4" />
-                      )}
-                    </div>
+                    <button type="button" className="mt-0.5 shrink-0 rounded-full focus-visible:outline-2 focus-visible:outline-ring" aria-label={`${t("memberDetails")} · ${name}`}
+                      onClick={() => { setSelectedMember(`${m?.role === "user" ? "user" : "agent"}:${m?.role === "user" ? m.owner_id : m?.agent_id || turn?.agent_id || data.agent_id}`); setInfoOpen(true); }}>
+                      <IdentityAvatar id={m?.role === "user" ? m.owner_id : m?.agent_id || turn?.agent_id || data.agent_id} name={name} kind={m?.role === "user" ? "user" : "agent"}
+                        value={m?.role === "user" ? data.members.find(member => member.id === m.owner_id)?.avatar : data.kind === "group" ? data.agents.find(agent => agent.id === (m?.agent_id || turn?.agent_id))?.avatar : data.agent_avatar} className="size-10" />
+                    </button>
                     <div className={`min-w-0 flex-1 rounded-xl border px-3 py-2.5 shadow-xs sm:px-4 ${m?.role === "user" ? "rounded-tl-sm border-primary/20 bg-muted text-foreground" : "rounded-tl-sm bg-card text-card-foreground"}`}>
                       <div className="mb-1 flex min-h-6 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                         <span className="font-semibold text-foreground">

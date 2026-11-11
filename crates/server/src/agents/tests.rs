@@ -125,6 +125,23 @@ fn parse(v: Value) -> Body {
 }
 
 #[tokio::test]
+async fn avatar_update_preserves_omitted_value_and_respects_workspace() {
+    let (_dir, s) = setup().await;
+    let mut input = body();
+    input["avatar"] = json!({"style":"pixel","seed":"chosen"});
+    let (_, Json(created)) = create(State(s.clone()), admin(1), Json(parse(input))).await.unwrap();
+    let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let Json(mut current) = detail(State(s.clone()), admin(1), Path(("1".into(), id))).await.unwrap();
+    assert_eq!(current["avatar"]["seed"], "chosen");
+    current.as_object_mut().unwrap().remove("avatar");
+    current["name"] = json!("New name");
+    update(State(s.clone()), admin(1), Path(("1".into(), id)), Json(parse(current))).await.unwrap();
+    let Json(current) = detail(State(s.clone()), admin(1), Path(("1".into(), id))).await.unwrap();
+    assert_eq!(current["avatar"]["seed"], "chosen");
+    assert_eq!(detail(State(s), admin(2), Path(("2".into(), id))).await.unwrap_err().0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn model_profile_agents_need_no_host_and_resolve_only_the_selected_catalog() {
     use crate::entities::ai_model_profiles as profiles;
     let (_dir, s) = setup().await;

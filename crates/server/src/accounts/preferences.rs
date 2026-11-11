@@ -19,6 +19,7 @@ mod entity {
         pub user_id: i64,
         pub theme: Option<String>,
         pub locale: Option<String>,
+        pub avatar: Option<String>,
         pub updated_at: i64,
         pub updated_by: i64,
     }
@@ -40,11 +41,13 @@ pub struct Theme {
 #[derive(Default, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
+    avatar: Option<crate::avatar::Avatar>,
     theme: Option<Theme>,
     locale: Option<String>,
 }
 impl Preferences {
     fn validate(&self) -> Result<()> {
+        if let Some(avatar) = &self.avatar { avatar.validate()?; }
         let valid = self.locale.as_ref().is_none_or(|v| {
             ["en-US", "zh-CN", "zh-TW", "ms-MY", "ja-JP", "ko-KR"].contains(&v.as_str())
         }) && self.theme.as_ref().is_none_or(|t| {
@@ -108,6 +111,8 @@ mod tests {
         )
         .await
         .unwrap();
+        let avatar: crate::avatar::Avatar = serde_json::from_value(serde_json::json!({"style":"emoji","emoji":"🤖"})).unwrap();
+        save_avatar(&s.db, 1, &avatar).await.unwrap();
         update(
             State(s.clone()),
             account(1),
@@ -117,6 +122,8 @@ mod tests {
         .unwrap();
         let stored = read(State(s.clone()), account(1)).await.unwrap().0;
         assert_eq!(stored.locale.as_deref(), Some("en-US"));
+        assert_eq!(stored.avatar.unwrap().emoji.as_deref(), Some("🤖"));
+        assert!(read(State(s.clone()), account(2)).await.unwrap().0.avatar.is_none());
         assert_eq!(stored.theme.unwrap().custom_dark["--primary"], "#123456");
         assert!(
             read(State(s.clone()), account(2))
@@ -151,12 +158,28 @@ mod tests {
         }
     }
 }
+pub(crate) async fn avatars(conn: &impl ConnectionTrait, ids: Vec<i64>) -> Result<std::collections::HashMap<i64, serde_json::Value>> {
+    let rows = entity::Entity::find().filter(entity::Column::UserId.is_in(ids)).all(conn).await?;
+    Ok(rows.into_iter().filter_map(|row| Some((row.user_id, serde_json::from_str(row.avatar.as_deref()?).ok()?))).collect())
+}
+pub(crate) async fn save_avatar(conn: &impl ConnectionTrait, id: i64, avatar: &crate::avatar::Avatar) -> Result<()> {
+    avatar.validate()?;
+    entity::Entity::insert(entity::ActiveModel {
+        user_id: Set(id), theme: Set(None), locale: Set(None),
+        avatar: Set(Some(serde_json::to_string(avatar).expect("serializable avatar"))),
+        updated_at: Set(db::now()), updated_by: Set(id),
+    }).on_conflict(OnConflict::column(entity::Column::UserId)
+        .update_columns([entity::Column::Avatar, entity::Column::UpdatedAt, entity::Column::UpdatedBy]).to_owned())
+        .exec(conn).await?;
+    Ok(())
+}
 pub async fn read(State(s): State<AppState>, account: Account) -> Result<Json<Preferences>> {
     let row = entity::Entity::find_by_id(i64::from(account.user.id))
         .one(&s.db)
         .await?;
     Ok(Json(match row {
         Some(row) => Preferences {
+            avatar: row.avatar.and_then(|v| serde_json::from_str(&v).ok()),
             theme: row.theme.and_then(|v| serde_json::from_str(&v).ok()),
             locale: row.locale,
         },
@@ -176,6 +199,7 @@ pub async fn update(
     if body.locale.is_some() {
         columns.push(entity::Column::Locale);
     }
+    if body.avatar.is_some() { columns.push(entity::Column::Avatar); }
     let id = i64::from(account.user.id);
     entity::Entity::insert(entity::ActiveModel {
         user_id: Set(id),
@@ -183,6 +207,7 @@ pub async fn update(
             .theme
             .map(|t| serde_json::to_string(&t).expect("serializable theme"))),
         locale: Set(body.locale),
+        avatar: Set(body.avatar.map(|avatar| serde_json::to_string(&avatar).expect("serializable avatar"))),
         updated_at: Set(db::now()),
         updated_by: Set(id),
     })

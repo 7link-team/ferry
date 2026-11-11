@@ -3,7 +3,7 @@ use crate::entities::{
     ai_agents as agents, ai_model_profiles as profiles, definition_revisions as revisions,
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Iterable, QueryFilter, QueryOrder,
     QuerySelect,
 };
 use serde_json::json;
@@ -35,6 +35,11 @@ impl MigrationTrait for Migration {
         let mut after = 0;
         loop {
             let rows = agents::Entity::find()
+                // This migration runs before identity_avatars on a fresh database.
+                // Keep the new optional presentation column out of its historical SELECT.
+                .select_only()
+                .columns(agents::Column::iter().filter(|column| !matches!(column, agents::Column::Avatar)))
+                .expr_as(sea_orm::sea_query::Expr::cust("NULL"), agents::Column::Avatar)
                 .filter(agents::Column::Id.gt(after))
                 .order_by_asc(agents::Column::Id)
                 .limit(100)

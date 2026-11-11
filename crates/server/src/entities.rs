@@ -283,6 +283,7 @@ pub mod ai_agents {
         pub model_profile_id: i64,
         pub workspace_id: i64,
         pub name: String,
+        pub avatar: Option<String>,
         pub role: String,
         pub description: String,
         pub runtime: String,

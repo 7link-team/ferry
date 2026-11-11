@@ -304,6 +304,7 @@ export function ConversationsWorkspace({
             permissions={permissions}
             initialDraft={drafts.current.get(selected)}
             onDraftChange={saveDraft}
+            onOpenConversation={id => { setRevision(value => value + 1); go(id, "view"); }}
             onDeleted={() => {
               drafts.current.delete(selected);
               setRows((old) => old.filter((row) => row.id !== selected));

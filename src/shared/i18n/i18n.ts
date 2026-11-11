@@ -16,6 +16,7 @@ import modelMessages from "./locales/models.json";
 import conversationMessages from "./locales/conversations.json";
 import holeMessages from "./locales/holes.json";
 import otpMessages from "./locales/otp.json";
+import identityMessages from "./locales/identity.json";
 
 // Column order is explicit so adding/reordering supported locales cannot change translations.
 const typedLocales = ["en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "ms-MY"];
@@ -38,6 +39,8 @@ for (const locale of typedLocales) i18n.addResourceBundle(locale, "conversations
 for (const locale of typedLocales) i18n.addResourceBundle(locale, "notifications", Object.fromEntries(Object.entries(notificationMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])));
 for (const locale of typedLocales) i18n.addResourceBundle(locale, "holes", Object.fromEntries(Object.entries(holeMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])));
 for (const locale of typedLocales) i18n.addResourceBundle(locale, "otp", Object.fromEntries(Object.entries(otpMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])));
+
+for (const locale of typedLocales) i18n.addResourceBundle(locale, "identity", Object.fromEntries(Object.entries(identityMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])));
 
 export function workflowText(key: keyof typeof workflowMessages): string {
   return i18n.t(key, { ns: "workflow-domain", keySeparator: false });

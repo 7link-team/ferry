@@ -1,4 +1,4 @@
-import { useState,type ReactNode } from "react";
+import { useMemo,useState,type ReactNode } from "react";
 import { toast } from "sonner";
 import type { Identity } from "../shared/api/api";
 import { commonText,useCommonTranslation } from "../shared/i18n/i18n";
@@ -7,13 +7,16 @@ import { Button } from "../shared/ui/button";
 import { ResourceForm } from "./resources/ResourceForm";
 import { navigate } from "./router";
 import { AccountOtp } from "./AccountOtp";
+import { AvatarEditor, type AvatarValue } from "../shared/ui/identity-avatar";
 
 type Row = Record<string, unknown> & { id: string };
 
 /** The signed-in user's own account: one record at /api/profile/1. */
-const profile: FormConfig<Row> = {
+const profile = (userId: string): FormConfig<Row> => ({
   resource: "profile", endpoint: "/profile", heading: () => commonText("account.title"), blank: {}, sections: [
     { title: "基本信息", titleKey: "common.basic", fields: [
+      { key: "avatar", label: "Avatar", labelKey: "identity:avatar", type: "custom", span: 2,
+        render: ({ draft, readOnly, onPatch, onValidityChange }) => <AvatarEditor id={userId} name={String(draft.name ?? "")} kind="user" value={draft.avatar as AvatarValue | undefined} readOnly={readOnly} onBusyChange={onValidityChange} onChange={avatar => onPatch({ avatar })} /> },
       { key: "name", label: "姓名", labelKey: "auth.name", type: "text", required: true },
       { key: "email", label: "登录邮箱", labelKey: "account.loginEmail", type: "text", required: true, help: "修改后用新邮箱登录，其他设备上的登录会失效。", helpKey: "account.emailHelp" },
     ] },
@@ -27,12 +30,13 @@ const profile: FormConfig<Row> = {
       { key: "current_password", label: "当前密码", labelKey: "account.currentPassword", type: "password", help: "修改登录邮箱或密码时必须填写；只改姓名可留空。", helpKey: "account.verifyHelp" },
     ] },
   ],
-};
+});
 const permissions = new Set(["profile.update"]);
 export const accountRoute = { workspace: "_account", group: "account", item: "profile", id: "1", mode: "edit" } as const;
 
 export function Account({ identity, reload, headerActions }: { identity: Identity; reload: () => void; headerActions?: ReactNode }) {
   useCommonTranslation();
+  const config = useMemo(() => profile(identity.user.id), [identity.user.id]);
   // /account always parses to the edit view; remount after saving or cancelling
   // so the form reloads the stored record and clears the password inputs.
   const [saves, setSaves] = useState(0);
@@ -47,7 +51,7 @@ export function Account({ identity, reload, headerActions }: { identity: Identit
       {headerActions}
     </header>
     <main className="min-h-0 flex-1 overflow-auto p-5">
-      <ResourceForm key={saves} config={profile} workspace="_account" permissions={permissions}
+      <ResourceForm key={saves} config={config} workspace="_account" permissions={permissions}
         onCancel={() => setSaves(count => count + 1)}
         onSaved={() => { toast.success(commonText("account.saved")); setSaves(count => count + 1); reload(); }} />
     </main>

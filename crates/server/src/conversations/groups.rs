@@ -192,17 +192,28 @@ pub(super) async fn detail(
         )
         .all(conn)
         .await?;
+    let avatars = crate::accounts::preferences::avatars(conn, users.iter().map(|u| u.id).collect()).await?;
     value["members"] = json!(
         users
             .iter()
-            .map(|u| json!({"id":Id::from(u.id),"name":u.name}))
+            .map(|u| json!({"id":Id::from(u.id),"name":u.name,"avatar":avatars.get(&u.id)}))
             .collect::<Vec<_>>()
     );
     let snapshots = agents::Entity::find()
         .filter(agents::Column::ConversationId.eq(c.id))
         .all(conn)
         .await?;
-    value["agents"]=json!(snapshots.iter().filter(|a|a.state!="removed").map(|a|json!({"id":Id::from(a.agent_id),"name":serde_json::from_str::<Value>(&a.config).ok().and_then(|v|v["name"].as_str().map(str::to_owned)),"state":a.state})).collect::<Vec<_>>());
+    let identities = ai_agents::Entity::find()
+        .filter(ai_agents::Column::WorkspaceId.eq(c.workspace_id))
+        .filter(ai_agents::Column::Id.is_in(snapshots.iter().map(|a| a.agent_id).chain(std::iter::once(c.agent_id))))
+        .all(conn).await?;
+    let avatar = |id| identities.iter().find(|a| a.id == id).and_then(|a| a.avatar.as_deref()).and_then(|v| serde_json::from_str::<Value>(v).ok());
+    value["agent_avatar"] = json!(avatar(c.agent_id));
+    value["agents"] = json!(snapshots.iter().filter(|a| a.state != "removed").map(|a| {
+        let config: Value = serde_json::from_str(&a.config).unwrap_or(Value::Null);
+        json!({"id":Id::from(a.agent_id),"name":config["name"],"state":a.state,
+            "runtime":config["runtime"],"model":config["model"],"revision_id":Id::from(a.revision_id),"avatar":avatar(a.agent_id)})
+    }).collect::<Vec<_>>());
     let chat = messages::Entity::find()
         .filter(messages::Column::ConversationId.eq(c.id))
         .order_by_asc(messages::Column::Id)

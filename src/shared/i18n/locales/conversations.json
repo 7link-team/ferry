@@ -1109,5 +1109,133 @@
     "再試行",
     "미리보기 다시 시도",
     "Cuba semula pratonton"
+  ],
+  "memberDetails": [
+    "Member details",
+    "成员详情",
+    "成員詳情",
+    "メンバー詳細",
+    "멤버 상세",
+    "Butiran ahli"
+  ],
+  "memberWorkStatus": [
+    "Current activity",
+    "当前工作状态",
+    "目前工作狀態",
+    "現在の状態",
+    "현재 작업 상태",
+    "Aktiviti semasa"
+  ],
+  "statusUnknown": [
+    "Connection unavailable",
+    "连接不可用",
+    "連線不可用",
+    "接続できません",
+    "연결할 수 없음",
+    "Sambungan tidak tersedia"
+  ],
+  "statusIdle": [
+    "Idle",
+    "空闲",
+    "閒置",
+    "待機中",
+    "대기",
+    "Tidak aktif"
+  ],
+  "statusApproval": [
+    "Awaiting approval",
+    "等待审批",
+    "等待審批",
+    "承認待ち",
+    "승인 대기",
+    "Menunggu kelulusan"
+  ],
+  "lastResult": [
+    "Last execution result",
+    "最近执行结果",
+    "最近執行結果",
+    "前回の実行結果",
+    "최근 실행 결과",
+    "Hasil pelaksanaan terakhir"
+  ],
+  "noExecution": [
+    "No executions yet",
+    "尚无执行",
+    "尚無執行",
+    "実行履歴なし",
+    "실행 기록 없음",
+    "Belum ada pelaksanaan"
+  ],
+  "memberRole": [
+    "Conversation role",
+    "会话身份",
+    "會話身分",
+    "会話での役割",
+    "대화 역할",
+    "Peranan perbualan"
+  ],
+  "conversationOwner": [
+    "Owner",
+    "会话所有者",
+    "會話擁有者",
+    "所有者",
+    "소유자",
+    "Pemilik"
+  ],
+  "memberStatusScope": [
+    "Activity in this conversation only; refreshed with the conversation.",
+    "仅显示本会话内的活动，随会话实时刷新。",
+    "僅顯示本會話內的活動，隨會話即時更新。",
+    "この会話内の状態のみ表示し、会話とともに更新します。",
+    "이 대화의 활동만 표시하며 대화와 함께 갱신합니다.",
+    "Aktiviti dalam perbualan ini sahaja; dikemas kini bersama perbualan."
+  ],
+  "humanPresenceUnavailable": [
+    "Online presence is not collected for human members.",
+    "未采集人类成员的在线状态。",
+    "未蒐集人類成員的線上狀態。",
+    "人間のメンバーのオンライン状態は収集しません。",
+    "사용자 온라인 상태는 수집하지 않습니다.",
+    "Status dalam talian ahli manusia tidak dikumpulkan."
+  ],
+  "searchMembers": [
+    "Search members",
+    "搜索成员",
+    "搜尋成員",
+    "メンバーを検索",
+    "멤버 검색",
+    "Cari ahli"
+  ],
+  "noMatchingMembers": [
+    "No matching members",
+    "没有匹配的成员",
+    "沒有符合的成員",
+    "該当するメンバーなし",
+    "일치하는 멤버 없음",
+    "Tiada ahli sepadan"
+  ],
+  "startDirectChat": [
+    "Start direct chat",
+    "发起单聊",
+    "發起單聊",
+    "個別チャットを開始",
+    "개인 대화 시작",
+    "Mulakan sembang langsung"
+  ],
+  "creatingConversation": [
+    "Creating…",
+    "创建中…",
+    "建立中…",
+    "作成中…",
+    "생성 중…",
+    "Mencipta…"
+  ],
+  "model": [
+    "Model",
+    "模型",
+    "模型",
+    "モデル",
+    "모델",
+    "Model"
   ]
 }
