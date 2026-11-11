@@ -264,5 +264,7 @@
   "blueprint.bindingColocateHost": "인스턴스 {instance}은(는) {target}과(와) 같은 호스트에서 실행되어야 합니다.",
   "blueprint.bindingComposeSingleHost": "compose 드라이버는 모든 인스턴스가 단일 호스트에 있어야 합니다.",
   "blueprint.bindingComposeNeedsSingleHost": "이 블루프린트는 일부 역할에 서로 다른 호스트를 요구하고 단일 호스트 배포를 허용하지 않으므로 compose 드라이버를 사용할 수 없습니다.",
-  "blueprint.portConflict": "인스턴스 {instance}과(와) {other}이(가) 같은 호스트에서 동일한 포트 {port}를 게시합니다."
+  "blueprint.portConflict": "인스턴스 {instance}과(와) {other}이(가) 같은 호스트에서 동일한 포트 {port}를 게시합니다.",
+  "blueprint.topologyChangeRequiresPlan": "첫 배포 이후에는 블루프린트 바인딩을 변경할 수 없습니다. 인스턴스를 이동하거나 수를 바꾸려면 새 배포 계획을 만드세요.",
+  "blueprint.deploymentInvalid": "블루프린트 배포에는 블루프린트 매니페스트, 배포 모드와 드라이버가 일치하는 바인딩, target_ref 0이 필요합니다. 다른 대상 유형은 바인딩을 가질 수 없습니다."
 }

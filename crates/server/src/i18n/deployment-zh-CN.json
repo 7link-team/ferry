@@ -264,5 +264,7 @@
   "blueprint.bindingColocateHost": "实例 {instance} 必须与 {target} 位于同一主机。",
   "blueprint.bindingComposeSingleHost": "compose 驱动要求所有实例位于同一台主机。",
   "blueprint.bindingComposeNeedsSingleHost": "此蓝图要求部分角色分布在不同主机且不允许单机部署，因此不能使用 compose 驱动。",
-  "blueprint.portConflict": "实例 {instance} 与 {other} 在同一主机上发布了相同端口 {port}。"
+  "blueprint.portConflict": "实例 {instance} 与 {other} 在同一主机上发布了相同端口 {port}。",
+  "blueprint.topologyChangeRequiresPlan": "首次部署后不能再修改蓝图绑定；如需迁移或增减实例，请创建新的部署计划。",
+  "blueprint.deploymentInvalid": "蓝图部署需要蓝图清单、驱动与部署模式一致的绑定，且 target_ref 为 0；其他目标类型不能携带绑定。"
 }

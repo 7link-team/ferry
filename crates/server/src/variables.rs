@@ -1249,6 +1249,7 @@ mod tests {
             created_at: Set(1),
             updated_at: Set(1),
             version: Set(1),
+            blueprint_binding: Set(None),
         })
         .exec(&s.db)
         .await

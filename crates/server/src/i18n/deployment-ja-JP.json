@@ -264,5 +264,7 @@
   "blueprint.bindingColocateHost": "インスタンス {instance} は {target} と同じホストで実行する必要があります。",
   "blueprint.bindingComposeSingleHost": "compose ドライバーでは、すべてのインスタンスを 1 台のホストに配置する必要があります。",
   "blueprint.bindingComposeNeedsSingleHost": "このブループリントは一部のロールを別々のホストに配置する必要があり、単一ホストでの配置を許可していないため、compose ドライバーは使用できません。",
-  "blueprint.portConflict": "インスタンス {instance} と {other} が同じホストで同じポート {port} を公開しています。"
+  "blueprint.portConflict": "インスタンス {instance} と {other} が同じホストで同じポート {port} を公開しています。",
+  "blueprint.topologyChangeRequiresPlan": "初回デプロイ後はブループリントのバインディングを変更できません。インスタンスの移動や増減には新しいデプロイ計画を作成してください。",
+  "blueprint.deploymentInvalid": "ブループリントのデプロイには、ブループリントのマニフェスト、デプロイモードと一致するドライバーのバインディング、および target_ref 0 が必要です。他のターゲット種別はバインディングを持てません。"
 }

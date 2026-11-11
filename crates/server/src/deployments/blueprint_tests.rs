@@ -1,0 +1,546 @@
+//! Blueprint deployments reuse the host-group per-host target machinery end to end.
+use super::*;
+use crate::agents::tests::admin;
+use crate::entities::deployment_revision_targets as targets;
+use crate::platform_tools::tests::setup;
+use sea_orm::Set;
+
+const CONF: &str = "server_name={{ .Instance.Name }}\nroutes={{ range .Role \"nats\" }}{{ .Host }}:{{ .Port \"cluster\" }},{{ end }}\n";
+
+fn blueprint(image: &str) -> String {
+    json!({
+        "apiVersion": "ferry/blueprint-v1",
+        "kind": "Blueprint",
+        "metadata": {"name": "nats"},
+        "roles": [{
+            "name": "nats",
+            "instances": {"min": 1, "max": 5, "default": 2},
+            "placement": {"distinctHosts": true},
+            "identity": "stable",
+            "ports": [{"name": "client", "container": 4222, "published": 4222},
+                      {"name": "cluster", "container": 6222, "published": 6222}],
+            "service": {"image": image,
+                        "files": [{"path": "/etc/nats.conf", "fromTemplate": "nats-conf"}]}
+        }],
+        "drivers": {"docker": {"supported": true}}
+    })
+    .to_string()
+}
+
+fn binding(hosts: &[i64]) -> Value {
+    let list: Vec<Value> = hosts
+        .iter()
+        .enumerate()
+        .map(|(i, h)| json!({"hostId": h.to_string(), "address": format!("10.0.0.{}", i + 1)}))
+        .collect();
+    json!({"driver": "docker", "roles": {"nats": list}})
+}
+
+fn body(hosts: &[i64]) -> Value {
+    json!({"name": "mq", "manifest": blueprint("nats:2"), "mode": "docker",
+           "target_kind": "blueprint", "target_ref": "0", "workdir": "/srv",
+           "blueprint_binding": binding(hosts)})
+}
+
+fn key(e: ApiError) -> String {
+    e.2.map(|m| m.key).unwrap_or_else(|| e.1)
+}
+
+async fn host(s: &AppState, id: i64, group: i64) {
+    crate::hosts::fake::register(id);
+    hosts::Entity::insert(hosts::ActiveModel {
+        id: Set(id),
+        workspace_id: Set(1),
+        name: Set(format!("Host {id}")),
+        address: Set("192.0.2.1".into()),
+        port: Set(22),
+        username: Set("test".into()),
+        connection: Set("fake".into()),
+        state: Set("online".into()),
+        group_id: Set(group),
+        description: Set(String::new()),
+        host_key: Set(String::new()),
+        runner_key_hash: Set(String::new()),
+        enroll_token: Set(String::new()),
+        enroll_token_hash: Set(String::new()),
+        seen_at: Set(0),
+        created_at: Set(0),
+        updated_at: Set(0),
+        version: Set(1),
+        os: Set("linux".into()),
+        arch: Set(String::new()),
+        agent_version: Set(String::new()),
+        metrics: Set(String::new()),
+        credential_id: Set(0),
+        ..Default::default()
+    })
+    .exec(&s.db)
+    .await
+    .unwrap();
+}
+
+async fn template(s: &AppState, content: &str, version: i64) {
+    use crate::entities::config_templates as t;
+    t::Entity::delete_by_id(601).exec(&s.db).await.unwrap();
+    t::Entity::insert(t::ActiveModel {
+        id: Set(601),
+        workspace_id: Set(1),
+        name: Set("nats-conf".into()),
+        description: Set(String::new()),
+        content: Set(content.into()),
+        parameters: Set("[]".into()),
+        version: Set(version),
+        created_at: Set(1),
+        updated_at: Set(1),
+        ..Default::default()
+    })
+    .exec(&s.db)
+    .await
+    .unwrap();
+}
+
+/// Workspace 1 with fake hosts and the instance-aware config template.
+async fn fixture(hosts: &[i64]) -> (tempfile::TempDir, AppState) {
+    let (dir, s) = setup().await;
+    for id in hosts {
+        host(&s, *id, 0).await;
+    }
+    template(&s, CONF, 1).await;
+    (dir, s)
+}
+
+async fn create_app(s: &AppState, b: Value) -> Result<String> {
+    let (_, Json(out)) = create(
+        State(s.clone()),
+        admin(1),
+        Json(serde_json::from_value(b).unwrap()),
+    )
+    .await?;
+    Ok(out["id"].as_str().unwrap().to_owned())
+}
+
+async fn row(s: &AppState, id: &str) -> apps::Model {
+    scoped(&s.db, &admin(1), id).await.unwrap()
+}
+
+async fn preview_of(s: &AppState, id: &str, revision: Option<String>) -> Result<Value> {
+    let Json(out) = preview(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id.into())),
+        Json(PreviewBody {
+            revision_id: revision,
+        }),
+    )
+    .await?;
+    Ok(out)
+}
+
+fn run_body(preview: &Value, revision: &str) -> RunBody {
+    RunBody {
+        version: preview["version"].as_i64().unwrap(),
+        expected_hash: preview["expected_hash"].as_str().unwrap().into(),
+        preview_token: preview["preview_token"].as_str().unwrap().into(),
+        target_hashes: serde_json::from_value(preview["target_hashes"].clone()).unwrap(),
+        revision_id: revision.into(),
+    }
+}
+
+async fn apply_preview(s: &AppState, id: &str, preview: &Value) -> Result<String> {
+    let (_, Json(out)) = apply(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id.into())),
+        Json(run_body(preview, "")),
+    )
+    .await?;
+    Ok(out["id"].as_str().unwrap().to_owned())
+}
+
+async fn revision(s: &AppState, id: &str) -> revisions::Model {
+    revisions::Entity::find_by_id(i64::from(id.parse::<Id>().unwrap()))
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+async fn target_rows(s: &AppState, revision: &str) -> Vec<targets::Model> {
+    targets::Entity::find()
+        .filter(targets::Column::RevisionId.eq(i64::from(revision.parse::<Id>().unwrap())))
+        .order_by_asc(targets::Column::Position)
+        .all(&s.db)
+        .await
+        .unwrap()
+}
+
+/// Marks a queued revision as having succeeded so it can be rolled back to.
+async fn succeed(s: &AppState, app: &str, revision: &str) {
+    let rev = i64::from(revision.parse::<Id>().unwrap());
+    revisions::Entity::update_many()
+        .col_expr(revisions::Column::State, Expr::value("succeeded"))
+        .filter(revisions::Column::Id.eq(rev))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    apps::Entity::update_many()
+        .col_expr(apps::Column::State, Expr::value("succeeded"))
+        .col_expr(apps::Column::CurrentRevision, Expr::value(rev))
+        .filter(apps::Column::Id.eq(i64::from(app.parse::<Id>().unwrap())))
+        .exec(&s.db)
+        .await
+        .unwrap();
+}
+
+fn services(artifact: &str) -> Vec<String> {
+    let doc: Value = serde_json::from_str(artifact).unwrap();
+    doc["services"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect()
+}
+
+#[tokio::test]
+async fn create_blueprint_deployment_validates_binding() {
+    let (_dir, s) = fixture(&[711, 712]).await;
+    let id = create_app(&s, body(&[711, 712])).await.unwrap();
+    let r = row(&s, &id).await;
+    assert_eq!((r.target_kind.as_str(), r.target_ref), ("blueprint", 0));
+    let stored: Value = serde_json::from_str(r.blueprint_binding.as_deref().unwrap()).unwrap();
+    assert_eq!(stored["roles"]["nats"][1]["hostId"], "712");
+    assert_eq!(app_json(&r)["blueprint_binding"]["driver"], "docker");
+
+    let cases: Vec<(Value, &str)> = vec![
+        (body(&[711, 999]), "blueprint.bindingHostUnknown"),
+        (body(&[711, 711]), "blueprint.bindingDistinctHosts"),
+        (
+            {
+                let mut b = body(&[711, 712]);
+                b["mode"] = json!("compose");
+                b
+            },
+            "blueprint.deploymentInvalid",
+        ),
+        (
+            {
+                let mut b = body(&[711, 712]);
+                b["target_ref"] = json!("711");
+                b
+            },
+            "blueprint.deploymentInvalid",
+        ),
+        (
+            {
+                let mut b = body(&[711, 712]);
+                b.as_object_mut().unwrap().remove("blueprint_binding");
+                b
+            },
+            "blueprint.deploymentInvalid",
+        ),
+        (
+            {
+                let mut b = body(&[711, 712]);
+                b["blueprint_binding"] = json!({"driver": "docker"});
+                b
+            },
+            "blueprint.bindingInvalid",
+        ),
+        (
+            {
+                let mut b = body(&[711, 712]);
+                b["manifest"] = json!(json!({"apiVersion":"ferry/v2","kind":"Application","metadata":{"name":"x"},"services":[{"name":"web","image":"nginx:1"}]}).to_string());
+                b
+            },
+            "blueprint.deploymentInvalid",
+        ),
+        (
+            {
+                let mut b = body(&[711, 712]);
+                b["target_kind"] = json!("host");
+                b["target_ref"] = json!("711");
+                b["manifest"] = json!(json!({"apiVersion":"ferry/v2","kind":"Application","metadata":{"name":"x"},"services":[{"name":"web","image":"nginx:1"}]}).to_string());
+                b
+            },
+            "blueprint.deploymentInvalid",
+        ),
+    ];
+    for (b, expected) in cases {
+        let error = create_app(&s, b.clone()).await.expect_err(expected);
+        assert_eq!(key(error), expected, "{b}");
+    }
+}
+
+#[tokio::test]
+async fn blueprint_preview_produces_one_target_per_host() {
+    let (_dir, s) = fixture(&[721, 722]).await;
+    let id = create_app(&s, body(&[721, 722])).await.unwrap();
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let desired: Value = serde_json::from_str(preview["desired"].as_str().unwrap()).unwrap();
+    let rows = desired["targets"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["host_id"], "721");
+    assert_eq!(rows[1]["host_id"], "722");
+    assert_eq!(services(rows[0]["artifact"].as_str().unwrap()), ["nats-0"]);
+    assert_eq!(services(rows[1]["artifact"].as_str().unwrap()), ["nats-1"]);
+    assert!(
+        rows[0]["artifact"]
+            .as_str()
+            .unwrap()
+            .contains(crate::hosts::fake::DIGEST)
+    );
+    // The union of every host's bindings: one rendered config per instance.
+    let files: Vec<&Value> = preview["variables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["kind"] == "file")
+        .collect();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0]["service"], "nats-0");
+    assert!(
+        files[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("server_name=nats-0")
+    );
+    assert!(
+        files[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("server_name=nats-1")
+    );
+    assert!(
+        files[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("routes=10.0.0.1:6222,10.0.0.2:6222,")
+    );
+    assert_eq!(preview["target_hashes"].as_object().unwrap().len(), 2);
+
+    let rev = apply_preview(&s, &id, &preview).await.unwrap();
+    let stored = target_rows(&s, &rev).await;
+    assert_eq!(stored.len(), 2);
+    assert_eq!(stored[0].host_id, 721);
+    assert_eq!(stored[0].artifact, rows[0]["artifact"].as_str().unwrap());
+    assert_eq!(stored[1].artifact, rows[1]["artifact"].as_str().unwrap());
+    // Each host's compiled application travels with the revision for execution and replay.
+    let rendered: Value = serde_json::from_str(&revision(&s, &rev).await.rendered).unwrap();
+    let manifest: Value =
+        serde_json::from_str(rendered["targets"][1]["manifest"].as_str().unwrap()).unwrap();
+    assert_eq!(rendered["targets"][1]["host_id"], "722");
+    assert_eq!(manifest["services"][0]["name"], "nats-1");
+}
+
+#[tokio::test]
+async fn blueprint_apply_rejects_stale_preview() {
+    let (_dir, s) = fixture(&[731, 732]).await;
+    let id = create_app(&s, body(&[731, 732])).await.unwrap();
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    // A config template edit after preview changes one host's bindings.
+    template(&s, &format!("{CONF}# edited\n"), 2).await;
+    let error = apply_preview(&s, &id, &preview).await.unwrap_err();
+    assert_eq!(key(error), "deployment.error.040");
+    // A fresh preview is accepted.
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    apply_preview(&s, &id, &preview).await.unwrap();
+}
+
+#[tokio::test]
+async fn blueprint_preview_rejects_missing_host() {
+    let (_dir, s) = fixture(&[741, 742]).await;
+    let id = create_app(&s, body(&[741, 742])).await.unwrap();
+    hosts::Entity::delete_by_id(742).exec(&s.db).await.unwrap();
+    let error = preview_of(&s, &id, None).await.unwrap_err();
+    assert_eq!(key(error), "blueprint.bindingHostUnknown");
+}
+
+#[tokio::test]
+async fn binding_frozen_after_first_revision() {
+    let (_dir, s) = fixture(&[751, 752, 753]).await;
+    let id = create_app(&s, body(&[751, 752])).await.unwrap();
+    let update_with = |b: Value| {
+        let s = s.clone();
+        let id = id.clone();
+        async move {
+            update(
+                State(s.clone()),
+                admin(1),
+                Path(("1".into(), id.clone())),
+                Json(serde_json::from_value(b).unwrap()),
+            )
+            .await
+        }
+    };
+    // Before the first revision the topology may still change.
+    let mut b = body(&[751, 753]);
+    b["version"] = json!(row(&s, &id).await.version);
+    update_with(b).await.unwrap();
+    assert!(
+        row(&s, &id)
+            .await
+            .blueprint_binding
+            .unwrap()
+            .contains("753")
+    );
+
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let rev = apply_preview(&s, &id, &preview).await.unwrap();
+    succeed(&s, &id, &rev).await;
+    let mut b = body(&[751, 752]);
+    b["version"] = json!(row(&s, &id).await.version);
+    assert_eq!(
+        key(update_with(b).await.unwrap_err()),
+        "blueprint.topologyChangeRequiresPlan"
+    );
+    let mut b = body(&[751, 753]);
+    b["version"] = json!(row(&s, &id).await.version);
+    b["target_kind"] = json!("host-group");
+    assert!(update_with(b).await.is_err());
+    // Same topology, other fields: accepted.
+    let mut b = body(&[751, 753]);
+    b["version"] = json!(row(&s, &id).await.version);
+    b["description"] = json!("same topology");
+    update_with(b).await.unwrap();
+    assert_eq!(row(&s, &id).await.description, "same topology");
+}
+
+#[tokio::test]
+async fn blueprint_rollback_replays_stored_targets() {
+    let (_dir, s) = fixture(&[761, 762]).await;
+    let id = create_app(&s, body(&[761, 762])).await.unwrap();
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let first = apply_preview(&s, &id, &preview).await.unwrap();
+    succeed(&s, &id, &first).await;
+    let old = revision(&s, &first).await;
+    let old_targets = target_rows(&s, &first).await;
+
+    // The blueprint changes afterwards; rollback must not recompile it.
+    let mut b = body(&[761, 762]);
+    b["manifest"] = json!(blueprint("nats:3"));
+    b["version"] = json!(row(&s, &id).await.version);
+    update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id.clone())),
+        Json(serde_json::from_value(b).unwrap()),
+    )
+    .await
+    .unwrap();
+
+    let preview = preview_of(&s, &id, Some(first.clone())).await.unwrap();
+    assert_eq!(preview["desired"].as_str().unwrap(), old.artifact);
+    let (_, Json(out)) = rollback(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id.clone())),
+        Json(run_body(&preview, &first)),
+    )
+    .await
+    .unwrap();
+    let back = out["id"].as_str().unwrap().to_owned();
+    let replay = revision(&s, &back).await;
+    assert_eq!(replay.artifact, old.artifact);
+    assert_eq!(replay.rendered, old.rendered);
+    assert_eq!(replay.manifest, old.manifest);
+    let replayed = target_rows(&s, &back).await;
+    assert_eq!(
+        replayed
+            .iter()
+            .map(|t| (t.host_id, t.artifact.clone()))
+            .collect::<Vec<_>>(),
+        old_targets
+            .iter()
+            .map(|t| (t.host_id, t.artifact.clone()))
+            .collect::<Vec<_>>()
+    );
+    assert!(replayed[0].artifact.contains("nats@sha256"));
+
+    // Execution runs each host with its own stored application.
+    let (ok, output) = execute(&s, &replay).await.unwrap();
+    assert!(ok, "{output}");
+    for (host, artifact) in [
+        (761, &old_targets[0].artifact),
+        (762, &old_targets[1].artifact),
+    ] {
+        let fake = crate::hosts::fake::get(host);
+        let files = fake.files.lock().unwrap();
+        let stage = files
+            .iter()
+            .find(|(path, _)| path.ends_with(&format!("revision-{}.json", replay.id)))
+            .map(|(_, text)| text.clone())
+            .expect("stage upload");
+        assert_eq!(&stage, artifact);
+    }
+}
+
+#[tokio::test]
+async fn host_group_behaviour_unchanged() {
+    let (_dir, s) = setup().await;
+    crate::entities::host_groups::Entity::insert(crate::entities::host_groups::ActiveModel {
+        id: Set(77),
+        workspace_id: Set(1),
+        name: Set("edge".into()),
+        description: Set(String::new()),
+        parent_id: Set(0),
+        position: Set(0),
+        created_at: Set(0),
+        updated_at: Set(0),
+        version: Set(1),
+    })
+    .exec(&s.db)
+    .await
+    .unwrap();
+    host(&s, 771, 77).await;
+    host(&s, 772, 77).await;
+    let manifest = json!({"apiVersion":"ferry/v2","kind":"Application","metadata":{"name":"web"},
+                          "services":[{"name":"web","image":"nginx:1"}]})
+    .to_string();
+    let id = create_app(
+        &s,
+        json!({"name":"web","manifest":manifest,"mode":"docker","target_kind":"host-group",
+               "target_ref":"77","workdir":"/srv"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(row(&s, &id).await.blueprint_binding, None);
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let desired: Value = serde_json::from_str(preview["desired"].as_str().unwrap()).unwrap();
+    let rows = desired["targets"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["artifact"], rows[1]["artifact"]);
+    assert_eq!(desired["x-variable-bindings"], json!([]));
+    let rev = apply_preview(&s, &id, &preview).await.unwrap();
+    assert_eq!(target_rows(&s, &rev).await.len(), 2);
+    let r = revision(&s, &rev).await;
+    assert_eq!(r.manifest, row(&s, &id).await.manifest);
+    let (ok, output) = execute(&s, &r).await.unwrap();
+    assert!(ok, "{output}");
+}
+
+#[tokio::test]
+async fn blueprint_role_files_keep_config_templates_referenced() {
+    let (_dir, s) = fixture(&[781, 782]).await;
+    create_app(&s, body(&[781, 782])).await.unwrap();
+    let error = crate::templates::configs::delete(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), Id::from(601))),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(key(error), "templates.applicationReferenced");
+}
+
+#[tokio::test]
+async fn blueprint_variables_are_found_in_compiled_applications() {
+    let (_dir, s) = fixture(&[791, 792]).await;
+    let id = create_app(&s, body(&[791, 792])).await.unwrap();
+    let r = row(&s, &id).await;
+    let unrelated = references_variable(&s.db, &r, 424242).await.unwrap();
+    assert!(!unrelated);
+    // Readers that only need compiled services do not depend on hosts still existing.
+    hosts::Entity::delete_by_id(792).exec(&s.db).await.unwrap();
+    assert_eq!(applications(&r).unwrap().len(), 2);
+}

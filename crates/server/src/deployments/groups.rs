@@ -1,5 +1,7 @@
-//! Ordered host-group snapshots and per-host outcomes; mode execution is shared.
+//! Ordered multi-host snapshots (host groups and cluster blueprints) and per-host outcomes;
+//! mode execution is shared.
 use super::*;
+use crate::blueprint::{binding, compile::HostPlan, template::Context};
 use crate::entities::{
     deployment_revision_targets as targets, deployment_target_states as current, host_groups,
 };
@@ -30,6 +32,110 @@ pub(super) async fn members(
         .into_iter()
         .map(|h| h.id.into())
         .collect())
+}
+/// Deployments whose revisions are pinned per host in `deployment_revision_targets`.
+pub(super) fn is_multi(kind: &str) -> bool {
+    matches!(kind, "host-group" | "blueprint")
+}
+/// One host's share of a multi-host deployment.
+pub(super) struct HostTarget {
+    pub host_id: Id,
+    /// The deployment as this host runs it: its own manifest, `target_kind` "host" and
+    /// `target_ref` the host; directory, project and variable scope stay the deployment's.
+    pub app: apps::Model,
+    /// Instance contexts for config templates; blueprints only.
+    pub contexts: Option<BTreeMap<String, Context>>,
+}
+fn host_app(app: &apps::Model, host: Id, manifest: String) -> apps::Model {
+    let mut out = app.clone();
+    out.manifest = manifest;
+    out.target_kind = "host".into();
+    out.target_ref = host.into();
+    out
+}
+/// Compiles a blueprint deployment without consulting hosts: the binding was validated when
+/// it was stored, so readers that only need the compiled services never fail on a host change.
+pub(crate) fn compiled(app: &apps::Model) -> Result<Vec<HostPlan>> {
+    let binding = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
+    crate::blueprint::compile::compile(&app.manifest, &binding, &app.name)
+}
+/// Validates a binding against this workspace's current hosts, then compiles every host's plan.
+pub(super) async fn compile(
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+    manifest: &str,
+    b: &binding::Binding,
+    name: &str,
+) -> Result<Vec<HostPlan>> {
+    let bp = crate::blueprint::model::parse(manifest)?;
+    let known = hosts::Entity::find()
+        .filter(hosts::Column::WorkspaceId.eq(workspace))
+        .all(conn)
+        .await?
+        .into_iter()
+        .map(|h| {
+            let id = Id::from(h.id);
+            (id, binding::HostInfo { id, os: h.os })
+        })
+        .collect();
+    binding::validate(&bp, b, &known)?;
+    crate::blueprint::compile::compile(manifest, b, name)
+}
+/// Every host a new revision of `app` deploys to, in target order: host-group members share
+/// the deployment manifest; a blueprint compiles one application per bound host.
+pub(super) async fn targets(
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+    app: &apps::Model,
+) -> Result<Vec<HostTarget>> {
+    if app.target_kind == "blueprint" {
+        let b = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
+        return Ok(compile(conn, workspace, &app.manifest, &b, &app.name)
+            .await?
+            .into_iter()
+            .map(|plan| HostTarget {
+                host_id: plan.host_id,
+                app: host_app(app, plan.host_id, plan.manifest),
+                contexts: Some(plan.contexts),
+            })
+            .collect());
+    }
+    Ok(members(conn, workspace, app.target_ref)
+        .await?
+        .into_iter()
+        .map(|id| HostTarget {
+            host_id: id,
+            app: host_app(app, id, app.manifest.clone()),
+            contexts: None,
+        })
+        .collect())
+}
+/// Every host's public bindings in host order; an entry an earlier host already lists is
+/// not repeated, so identical host-group members collapse to one host's list.
+pub(super) fn merge<'a>(lists: impl IntoIterator<Item = &'a Value>) -> Value {
+    let mut out: Vec<Value> = Vec::new();
+    for list in lists {
+        let before = out.len();
+        for item in list.as_array().into_iter().flatten() {
+            if !out[..before].contains(item) {
+                out.push(item.clone());
+            }
+        }
+    }
+    json!(out)
+}
+/// Each blueprint host's compiled application, as stored in a revision's `rendered`.
+pub(super) fn rendered(targets: &[HostTarget]) -> Result<String> {
+    serde_json::to_string_pretty(&json!({"targets": targets
+        .iter()
+        .map(|t| json!({"host_id": t.host_id, "manifest": t.app.manifest}))
+        .collect::<Vec<_>>()}))
+    .map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.006"),
+        )
+    })
 }
 fn plans(artifact: &str) -> Result<Vec<(Id, String)>> {
     let doc: Value = serde_json::from_str(artifact).map_err(|_| {
@@ -80,30 +186,39 @@ pub(super) async fn preview(
         let old = old_revision(&s.db, scope, app.id, &id).await?;
         (old.artifact, old.id)
     } else {
-        let ids = members(&s.db, scope.workspace_id, app.target_ref).await?;
-        if ids.is_empty() {
+        let hosts = targets(&s.db, scope.workspace_id, app).await?;
+        if hosts.is_empty() {
             return Err(ApiError::localized(
                 axum::http::StatusCode::BAD_REQUEST,
                 crate::i18n::Message::new("deployment.error.056"),
             ));
         }
-        let (metadata, _, _) = bindings(&s.db, app, &app.manifest, None).await?;
         let mut rows = Vec::new();
-        let mut encoded_metadata = json!([]);
-        for id in &ids {
-            let channel = remote::open(s, &scope.workspace_id, id).await?;
-            let artifact = prepare_artifact(s, scope, channel.as_ref(), app, &metadata).await?;
+        let mut encoded = Vec::new();
+        let mut metadata = Vec::new();
+        for target in &hosts {
+            let (bound, _, _) = bindings(
+                &s.db,
+                &target.app,
+                &target.app.manifest,
+                target.contexts.as_ref(),
+            )
+            .await?;
+            let channel = remote::open(s, &scope.workspace_id, &target.host_id).await?;
+            let artifact =
+                prepare_artifact(s, scope, channel.as_ref(), &target.app, &bound).await?;
             let doc: Value = serde_json::from_str(&artifact).map_err(|_| {
                 ApiError::localized(
                     axum::http::StatusCode::BAD_REQUEST,
                     crate::i18n::Message::new("deployment.error.057"),
                 )
             })?;
-            encoded_metadata = doc.get("x-variable-bindings").cloned().unwrap_or(json!([]));
-            rows.push(json!({"host_id":id,"artifact":artifact}));
+            encoded.push(doc.get("x-variable-bindings").cloned().unwrap_or(json!([])));
+            rows.push(json!({"host_id":target.host_id,"artifact":artifact}));
+            metadata.push(bound);
         }
         let desired = serde_json::to_string_pretty(
-            &json!({"targets":rows,"x-variable-bindings":encoded_metadata}),
+            &json!({"targets":rows,"x-variable-bindings":merge(&encoded)}),
         )
         .map_err(|_| {
             ApiError::localized(
@@ -112,9 +227,21 @@ pub(super) async fn preview(
             )
         })?;
         let tx = crate::variables::transaction(s, scope.workspace_id).await?;
-        if members(&tx, scope.workspace_id, app.target_ref).await? != ids
-            || bindings(&tx, app, &app.manifest, None).await?.0 != metadata
-        {
+        let again = targets(&tx, scope.workspace_id, app).await?;
+        let mut changed = again.len() != hosts.len();
+        for (target, (before, bound)) in again.iter().zip(hosts.iter().zip(&metadata)) {
+            changed |= target.host_id != before.host_id
+                || target.app.manifest != before.app.manifest
+                || &bindings(
+                    &tx,
+                    &target.app,
+                    &target.app.manifest,
+                    target.contexts.as_ref(),
+                )
+                .await?
+                .0 != bound;
+        }
+        if changed {
             return Err(ApiError::localized(
                 axum::http::StatusCode::CONFLICT,
                 crate::i18n::Message::new("deployment.error.058"),
@@ -164,7 +291,11 @@ pub(super) async fn enqueue(
 ) -> Result<()> {
     let plans = plans(artifact)?;
     if source == 0
-        && members(conn, app.workspace_id.into(), app.target_ref).await?
+        && targets(conn, app.workspace_id.into(), app)
+            .await?
+            .iter()
+            .map(|t| t.host_id)
+            .collect::<Vec<_>>()
             != plans.iter().map(|(id, _)| *id).collect::<Vec<_>>()
     {
         return Err(ApiError::localized(
@@ -297,6 +428,18 @@ pub(super) async fn execute(
             crate::i18n::Message::new("deployment.error.063"),
         ));
     }
+    // A blueprint host runs its own compiled application, stored with the revision.
+    let mut manifests = BTreeMap::new();
+    if app.target_kind == "blueprint" {
+        let doc: Value = serde_json::from_str(&rev.rendered).unwrap_or_default();
+        for target in doc["targets"].as_array().into_iter().flatten() {
+            if let (Some(host), Some(manifest)) =
+                (target["host_id"].as_str(), target["manifest"].as_str())
+            {
+                manifests.insert(host.to_owned(), manifest.to_owned());
+            }
+        }
+    }
     let mut output = StoredText::new();
     for row in rows {
         let scope =
@@ -325,10 +468,21 @@ pub(super) async fn execute(
             .filter(targets::Column::Id.eq(row.id))
             .exec(&s.db)
             .await?;
-        let mut host_app = app.clone();
-        host_app.target_ref = row.host_id;
-        host_app.target_kind = "host".into();
+        let mut host_app = host_app(app, row.host_id.into(), app.manifest.clone());
         let mut host_revision = rev.clone();
+        if app.target_kind == "blueprint" {
+            let manifest = manifests
+                .get(&row.host_id.to_string())
+                .cloned()
+                .ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("deployment.error.063"),
+                    )
+                })?;
+            host_app.manifest = manifest.clone();
+            host_revision.manifest = manifest;
+        }
         host_revision.artifact = row.artifact;
         host_revision.expected_hash = row.expected_hash;
         let result = execute_host(s, &host_revision, protected, &host_app).await;

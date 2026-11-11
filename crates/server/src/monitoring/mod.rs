@@ -843,9 +843,11 @@ pub async fn applications(
             .cloned()
             .collect();
         let mut required_hosts = Vec::new();
+        // Blueprint revisions store per-host applications, not one manifest: no derived
+        // topology for them yet.
         if app.target_kind == "host" {
             required_hosts.push(app.target_ref);
-        } else if scope.permissions.contains("hosts.read") {
+        } else if app.target_kind == "host-group" && scope.permissions.contains("hosts.read") {
             use crate::entities::hosts;
             required_hosts = hosts::Entity::find()
                 .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))

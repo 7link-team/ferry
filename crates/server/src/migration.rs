@@ -10,6 +10,7 @@ mod account_otp;
 mod account_preferences;
 mod identity_avatars;
 mod marketplace_platform;
+mod blueprint_deployments;
 mod agent_models;
 mod ai_agents;
 mod ai_models;
@@ -175,6 +176,7 @@ impl MigratorTrait for Migrator {
             Box::new(monitoring::Migration),
             Box::new(preview_ingress::Migration),
             Box::new(marketplace_platform::Migration),
+            Box::new(blueprint_deployments::Migration),
         ]
     }
 }

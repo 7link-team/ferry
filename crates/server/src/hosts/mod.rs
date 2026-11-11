@@ -3,6 +3,8 @@
 //! mutation lands in `activity`.
 pub(crate) mod channel;
 pub(crate) mod execution;
+#[cfg(test)]
+pub(crate) mod fake;
 pub(crate) mod monitor;
 pub(crate) mod remote;
 pub(crate) mod runner;

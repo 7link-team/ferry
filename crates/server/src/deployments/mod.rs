@@ -63,6 +63,7 @@ fn app_json(r: &apps::Model) -> Value {
     json!({"id":Id::from(r.id),"name":r.name,"category":r.category,"manifest":r.manifest,"mode":r.mode,"target_kind":r.target_kind,
         "target_ref":Id::from(r.target_ref),"workdir":r.workdir,"description":r.description,"state":r.state,
         "revision_number":r.revision_number,"current_revision":Id::from(r.current_revision),
+        "blueprint_binding":r.blueprint_binding.as_deref().and_then(|b| serde_json::from_str::<Value>(b).ok()),
         "created_at":r.created_at,"updated_at":r.updated_at,"version":r.version})
 }
 fn revision_json(r: &revisions::Model) -> Value {
@@ -97,6 +98,9 @@ pub struct Body {
     description: String,
     #[serde(default)]
     version: i64,
+    /// Instance binding; required when `target_kind` is `blueprint`, rejected otherwise.
+    #[serde(default)]
+    blueprint_binding: Option<Value>,
 }
 async fn check_category(
     conn: &impl sea_orm::ConnectionTrait,
@@ -117,11 +121,9 @@ async fn check_category(
     }
     Ok(())
 }
-async fn check(
-    conn: &impl sea_orm::ConnectionTrait,
-    scope: &Scope,
-    b: &Body,
-) -> Result<(String, String, Id)> {
+/// Normalized name, manifest, target reference and (blueprints only) binding JSON.
+type Checked = (String, String, Id, Option<String>);
+async fn check(conn: &impl sea_orm::ConnectionTrait, scope: &Scope, b: &Body) -> Result<Checked> {
     if b.name.trim().is_empty() || b.name.chars().count() > 60 {
         return Err(ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
@@ -129,12 +131,15 @@ async fn check(
         ));
     }
     if !["compose", "docker", "native", "stack"].contains(&b.mode.as_str())
-        || !["host", "host-group"].contains(&b.target_kind.as_str())
+        || !["host", "host-group", "blueprint"].contains(&b.target_kind.as_str())
     {
         return Err(ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("deployment.error.002"),
         ));
+    }
+    if (b.target_kind == "blueprint") != b.blueprint_binding.is_some() {
+        return Err(blueprint_invalid());
     }
     let workdir = crate::hosts::channel::check_path(&b.workdir)?;
     if b.mode == "native"
@@ -150,6 +155,9 @@ async fn check(
             axum::http::StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("deployment.error.004"),
         ));
+    }
+    if b.target_kind == "blueprint" {
+        return check_blueprint(conn, scope, b).await;
     }
     let host_id = Id::reference(&b.target_ref)?;
     if b.target_kind == "host-group" {
@@ -192,7 +200,89 @@ async fn check(
             )
         })?,
         host_id,
+        None,
     ))
+}
+fn blueprint_invalid() -> ApiError {
+    ApiError::localized(
+        StatusCode::BAD_REQUEST,
+        Message::new("blueprint.deploymentInvalid"),
+    )
+}
+/// A blueprint deployment targets the hosts its binding names: `target_ref` stays 0, `mode`
+/// is the binding's driver, and the binding must compile against this workspace's hosts.
+async fn check_blueprint(
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    b: &Body,
+) -> Result<Checked> {
+    if b.target_ref.trim() != "0" || !crate::blueprint::model::is_blueprint(&b.manifest) {
+        return Err(blueprint_invalid());
+    }
+    let binding = crate::blueprint::binding::parse(
+        &b.blueprint_binding
+            .as_ref()
+            .map(Value::to_string)
+            .unwrap_or_default(),
+    )?;
+    if binding.driver != b.mode {
+        return Err(blueprint_invalid());
+    }
+    let mut doc: Value = serde_json::from_str(&b.manifest).map_err(|_| blueprint_invalid())?;
+    // Pipeline references are stored by id, as for single-manifest deployments.
+    for role in doc["roles"].as_array_mut().into_iter().flatten() {
+        let pointer = "/service/artifact/pipeline";
+        if let Some(pipeline) = role.pointer(pointer).and_then(Value::as_str) {
+            scope.require("pipelines.read")?;
+            let id =
+                crate::pipelines::artifacts::pipeline_id(conn, scope.workspace_id, pipeline).await?;
+            *role.pointer_mut(pointer).unwrap() = json!(id.to_string());
+        }
+    }
+    let manifest = serde_json::to_string_pretty(&doc).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.006"),
+        )
+    })?;
+    let name = b.name.trim().to_owned();
+    for plan in groups::compile(conn, scope.workspace_id, &manifest, &binding, &name).await? {
+        if manifest::parse_for(&plan.manifest, &b.mode)?
+            .services
+            .iter()
+            .any(|s| !s.files.is_empty())
+        {
+            scope.require("config-templates.read")?;
+        }
+    }
+    let binding = serde_json::to_string(&binding).map_err(|_| blueprint_invalid())?;
+    Ok((name, manifest, Id::from(0), Some(binding)))
+}
+/// Every config template, variable and artifact each target host would deploy must resolve.
+async fn validate_bindings(conn: &impl sea_orm::ConnectionTrait, app: &apps::Model) -> Result<()> {
+    if app.target_kind == "blueprint" {
+        for target in groups::targets(conn, app.workspace_id.into(), app).await? {
+            bindings(
+                conn,
+                &target.app,
+                &target.app.manifest,
+                target.contexts.as_ref(),
+            )
+            .await?;
+        }
+        return Ok(());
+    }
+    bindings(conn, app, &app.manifest, None).await.map(|_| ())
+}
+/// The applications a deployment runs: its manifest, or each host's compiled blueprint.
+pub(crate) fn applications(app: &apps::Model) -> Result<Vec<manifest::Manifest>> {
+    if app.target_kind == "blueprint" {
+        return groups::compiled(app)?
+            .iter()
+            .map(|plan| manifest::parse_for(&plan.manifest, &app.mode))
+            .collect();
+    }
+    Ok(vec![manifest::parse_for(&app.manifest, &app.mode)?])
 }
 pub async fn list(
     State(s): State<AppState>,
@@ -356,7 +446,7 @@ pub(crate) async fn create_in(
     b: Body,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("deployments.create")?;
-    let (name, manifest, target_ref) = check(tx, &scope, &b).await?;
+    let (name, manifest, target_ref, blueprint_binding) = check(tx, &scope, &b).await?;
     check_category(tx, scope, b.category.as_deref().unwrap_or_default(), None).await?;
     let (id, now) = (s.next_id()?, db::now());
     let row = apps::Model {
@@ -377,11 +467,12 @@ pub(crate) async fn create_in(
         created_at: now,
         updated_at: now,
         version: 1,
+        blueprint_binding,
     };
     if row.target_kind == "host-group" {
         groups::members(tx, scope.workspace_id, row.target_ref).await?;
     }
-    bindings(tx, &row, &row.manifest, None).await?;
+    validate_bindings(tx, &row).await?;
     apps::Entity::insert(row.into_active_model())
         .exec(tx)
         .await?;
@@ -405,8 +496,9 @@ pub async fn update(
 ) -> Result<Json<Value>> {
     scope.require("deployments.update")?;
     let r = scoped(&s.db, &scope, &id).await?;
-    let (name, manifest, host) = check(&s.db, &scope, &b).await?;
+    let (name, manifest, host, binding) = check(&s.db, &scope, &b).await?;
     if i64::from(host) != r.target_ref
+        || b.target_kind != r.target_kind
         || b.workdir.trim_end_matches('/') != r.workdir
         || b.mode != r.mode
     {
@@ -415,15 +507,27 @@ pub async fn update(
             crate::i18n::Message::new("deployment.error.007"),
         ));
     }
+    // Revisions pin per-host targets; moving instances needs a new deployment plan.
+    if r.revision_number > 0 && binding != r.blueprint_binding {
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("blueprint.topologyChangeRequiresPlan"),
+        ));
+    }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let current = scoped(&tx, &scope, &id).await?;
     let category = b.category.as_deref().unwrap_or(&current.category);
     check_category(&tx, &scope, category, Some(&current.category)).await?;
-    bindings(&tx, &r, &manifest, None).await?;
+    let mut candidate = r.clone();
+    candidate.name = name.clone();
+    candidate.manifest = manifest.clone();
+    candidate.blueprint_binding = binding.clone();
+    validate_bindings(&tx, &candidate).await?;
     let n = apps::Entity::update_many()
         .col_expr(apps::Column::Name, Expr::value(name.clone()))
         .col_expr(apps::Column::Category, Expr::value(category))
         .col_expr(apps::Column::Manifest, Expr::value(manifest))
+        .col_expr(apps::Column::BlueprintBinding, Expr::value(binding))
         .col_expr(apps::Column::PreviewArtifact, Expr::value(""))
         .col_expr(apps::Column::Description, Expr::value(b.description))
         .col_expr(
@@ -573,6 +677,19 @@ pub(crate) async fn references_variable(
     app: &apps::Model,
     id: i64,
 ) -> Result<bool> {
+    if app.target_kind == "blueprint" {
+        for plan in groups::compiled(app)? {
+            if bindings(conn, app, &plan.manifest, Some(&plan.contexts))
+                .await?
+                .1
+                .values()
+                .any(|row| row.id == id)
+            {
+                return Ok(true);
+            }
+        }
+        return Ok(false);
+    }
     Ok(bindings(conn, app, &app.manifest, None)
         .await?
         .1
@@ -990,7 +1107,7 @@ pub async fn preview(
 ) -> Result<Json<Value>> {
     scope.require("deployments.read")?;
     let r = scoped(&s.db, &scope, &id).await?;
-    if r.target_kind == "host-group" {
+    if groups::is_multi(&r.target_kind) {
         return groups::preview(&s, &scope, &r, b).await;
     }
     let ch = remote::open(&s, &scope.workspace_id, &Id::from(r.target_ref)).await?;
@@ -1281,26 +1398,61 @@ async fn trigger(
             files,
         )
     } else {
-        if manifest::parse_for(&r.manifest, &r.mode)?
-            .services
-            .iter()
-            .any(|s| !s.files.is_empty())
-        {
-            scope.require("config-templates.read")?;
+        // Host-group members share one manifest, so one computation stands for all of them;
+        // a blueprint binds each host's own compiled application.
+        let hosts = if r.target_kind == "blueprint" {
+            groups::targets(&tx, scope.workspace_id, &r).await?
+        } else {
+            vec![groups::HostTarget {
+                host_id: r.target_ref.into(),
+                app: r.clone(),
+                contexts: None,
+            }]
+        };
+        for target in &hosts {
+            if manifest::parse_for(&target.app.manifest, &r.mode)?
+                .services
+                .iter()
+                .any(|s| !s.files.is_empty())
+            {
+                scope.require("config-templates.read")?;
+            }
         }
-        let (metadata, rows, configs) = bindings(&tx, &r, &r.manifest, None).await?;
-        if r.preview_artifact.is_empty() || artifact_bindings(&r.preview_artifact)? != metadata {
+        let mut bound = Vec::new();
+        for target in &hosts {
+            bound.push(
+                bindings(
+                    &tx,
+                    &target.app,
+                    &target.app.manifest,
+                    target.contexts.as_ref(),
+                )
+                .await?,
+            );
+        }
+        if r.preview_artifact.is_empty()
+            || artifact_bindings(&r.preview_artifact)?
+                != groups::merge(bound.iter().map(|(metadata, _, _)| metadata))
+        {
             return Err(ApiError::localized(
                 axum::http::StatusCode::CONFLICT,
                 crate::i18n::Message::new("deployment.error.040"),
             ));
         }
-        let mut files = environment_files(s, &metadata, &rows, &r.mode)?;
-        files.extend(config_files(s, &metadata, &rows, &configs)?);
+        let mut files = BTreeMap::new();
+        for (metadata, rows, configs) in &bound {
+            files.extend(environment_files(s, metadata, rows, &r.mode)?);
+            files.extend(config_files(s, metadata, rows, configs)?);
+        }
+        let rendered = if r.target_kind == "blueprint" {
+            groups::rendered(&hosts)?
+        } else {
+            manifest::render_for(&manifest::parse_for(&r.manifest, &r.mode)?, &r.mode)?
+        };
         (
             0,
             r.manifest.clone(),
-            manifest::render_for(&manifest::parse_for(&r.manifest, &r.mode)?, &r.mode)?,
+            rendered,
             r.preview_artifact.clone(),
             files,
         )
@@ -1324,7 +1476,7 @@ async fn trigger(
         ));
     }
     let (id, now) = (s.next_id()?, db::now());
-    if r.target_kind == "host-group" {
+    if groups::is_multi(&r.target_kind) {
         groups::enqueue(s, &tx, &r, id, &artifact, &b, source).await?;
     } else {
         hosts::Entity::find_by_id(r.target_ref)
@@ -1625,7 +1777,7 @@ async fn execute_inner(
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
-    if r.target_kind == "host-group" {
+    if groups::is_multi(&r.target_kind) {
         return groups::execute(s, &r, rev, protected).await;
     }
     execute_host(s, rev, protected, &r).await
@@ -1930,6 +2082,7 @@ mod variable_snapshot_tests {
                     workdir: "/srv".into(),
                     description: String::new(),
                     version: 1,
+                    blueprint_binding: None,
                 },
             )
             .await?;
@@ -2131,6 +2284,8 @@ mod variable_snapshot_tests {
 }
 
 #[cfg(test)]
+mod blueprint_tests;
+#[cfg(test)]
 mod blueprint_binding_tests {
     use super::*;
     use crate::blueprint::template::{Context, Instance, Member};
@@ -2179,6 +2334,7 @@ mod blueprint_binding_tests {
             created_at: 1,
             updated_at: 1,
             version: 1,
+            blueprint_binding: None,
         }
     }
 

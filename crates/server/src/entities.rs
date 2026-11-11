@@ -1097,6 +1097,9 @@ pub mod deployments {
         pub created_at: i64,
         pub updated_at: i64,
         pub version: i64,
+        /// Instance binding JSON; set only when `target_kind` is `blueprint`.
+        #[sea_orm(column_type = "Text", nullable)]
+        pub blueprint_binding: Option<String>,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

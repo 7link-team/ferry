@@ -264,5 +264,7 @@
   "blueprint.bindingColocateHost": "實例 {instance} 必須與 {target} 位於同一主機。",
   "blueprint.bindingComposeSingleHost": "compose 驅動要求所有實例位於同一台主機。",
   "blueprint.bindingComposeNeedsSingleHost": "此藍圖要求部分角色分布在不同主機且不允許單機部署，因此不能使用 compose 驅動。",
-  "blueprint.portConflict": "實例 {instance} 與 {other} 在同一主機上發佈了相同連接埠 {port}。"
+  "blueprint.portConflict": "實例 {instance} 與 {other} 在同一主機上發佈了相同連接埠 {port}。",
+  "blueprint.topologyChangeRequiresPlan": "首次部署後不能再修改藍圖綁定；如需遷移或增減實例，請建立新的部署計畫。",
+  "blueprint.deploymentInvalid": "藍圖部署需要藍圖清單、驅動與部署模式一致的綁定，且 target_ref 為 0；其他目標類型不能攜帶綁定。"
 }

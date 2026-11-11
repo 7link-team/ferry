@@ -1010,13 +1010,24 @@ async fn config_unreferenced(
         .all(conn)
         .await?
     {
-        let manifest = crate::deployments::manifest::parse(&row.manifest)?;
-        if manifest
-            .services
-            .iter()
-            .flat_map(|s| &s.files)
-            .any(|f| f.from_template == id.to_string() || f.from_template == name)
-        {
+        let wanted = |reference: &str| reference == id.to_string() || reference == name;
+        let referenced = if row.target_kind == "blueprint" {
+            // Blueprint roles carry their files on each role's service template.
+            crate::blueprint::model::parse(&row.manifest)?
+                .roles
+                .iter()
+                .filter_map(|role| role.service["files"].as_array())
+                .flatten()
+                .filter_map(|file| file["fromTemplate"].as_str())
+                .any(wanted)
+        } else {
+            crate::deployments::manifest::parse(&row.manifest)?
+                .services
+                .iter()
+                .flat_map(|s| &s.files)
+                .any(|f| wanted(&f.from_template))
+        };
+        if referenced {
             return Err(ApiError::localized(
                 axum::http::StatusCode::CONFLICT,
                 crate::i18n::Message::new("templates.applicationReferenced"),

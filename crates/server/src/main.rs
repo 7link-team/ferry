@@ -632,6 +632,8 @@ pub async fn channel_open(
     match host.connection.as_str() {
         "ssh" => hosts::ssh::open(s, host).await,
         "runner" => hosts::runner::open(s, host).await,
+        #[cfg(test)]
+        "fake" => hosts::fake::open(host),
         _ => Err(error::ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
             i18n::Message::new("host.connectionUnknown"),
