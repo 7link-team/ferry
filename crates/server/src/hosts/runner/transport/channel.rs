@@ -284,6 +284,7 @@ impl HostChannel for RunnerChannel {
         &self,
         runtime: wire::agent::Runtime,
         cwd: &str,
+        binding: Option<&wire::agent::Binding>,
     ) -> Result<wire::agent::Probe> {
         let (answer, _socket) = self
             .ask(
@@ -292,6 +293,7 @@ impl HostChannel for RunnerChannel {
                     runtime,
                     cwd: cwd.into(),
                     workspace: None,
+                    binding: binding.cloned(),
                 },
                 Duration::from_secs(35),
             )
@@ -327,8 +329,9 @@ impl HostChannel for RunnerChannel {
                     runtime,
                     cwd: String::new(),
                     workspace: Some(key.into()),
+                    binding: None,
                 },
-                Duration::from_secs(35),
+                Duration::from_secs(360),
             )
             .await?;
         match answer {

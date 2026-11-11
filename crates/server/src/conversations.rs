@@ -133,6 +133,7 @@ impl Configuration {
                         | ferry_protocol::agent::Runtime::Qwen
                         | ferry_protocol::agent::Runtime::Opencode
                         | ferry_protocol::agent::Runtime::Pi
+                        | ferry_protocol::agent::Runtime::Dsh
                 ))
     }
     fn for_conversation(a: &ai_agents::Model, body: &Create) -> Result<Self> {
@@ -389,7 +390,7 @@ async fn prepare_execution(
         }
         Err(last)
     };
-    tokio::time::timeout(std::time::Duration::from_secs(20), allocate)
+    tokio::time::timeout(std::time::Duration::from_secs(390), allocate)
         .await
         .map_err(|_| error(StatusCode::CONFLICT, "conversations.noRunner"))?
 }
@@ -413,7 +414,9 @@ async fn bind_execution(
             .agent_workspace(config.runtime, &format!("{id}-{agent}"))
             .await?
     } else {
-        channel.agent_probe(config.runtime, &config.cwd).await?
+        channel
+            .agent_probe(config.runtime, &config.cwd, None)
+            .await?
     };
     let canonical = probe
         .canonical_directory

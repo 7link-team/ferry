@@ -671,8 +671,8 @@
     "platform.workspaceCount.hosts": "Hosts",
     "platform.workspaceCount.repository_connections": "Repository connections",
     "platform.workspaceCount.credentials": "Credentials",
-    "platform.workspaceCount.pipelines": "Build pipelines",
-    "platform.workspaceCount.workflows": "Node workflows",
+    "platform.workspaceCount.pipelines": "Pipelines",
+    "platform.workspaceCount.workflows": "Workflows",
     "platform.workspaceCount.assets": "Content files",
     "platform.mailConnection": "Connection and verification",
     "platform.mailTemplates": "Mail templates",
@@ -828,7 +828,13 @@
     "platform.accessAddresses": "Access addresses",
     "platform.previewDomain": "Preview root domain",
     "platform.publicAddressHelp": "Optional primary URL for callbacks and shared links. Other reachable IPs and domains remain accessible.",
-    "platform.previewDomainHelp": "Optional; leave empty to disable preview tunnels. Enter a domain without protocol, *. or path, e.g. preview.example.com. Configure wildcard DNS, TLS and proxy forwarding separately. Preview URLs use the primary URL scheme/port, or HTTPS by default."
+    "platform.previewDomainHelp": "Optional; leave empty to disable preview tunnels. Enter a domain without protocol, *. or path, e.g. preview.example.com. Configure wildcard DNS, TLS and proxy forwarding separately. Preview URLs use the primary URL scheme/port, or HTTPS by default.",
+    "cron.workflowAction": "Trigger workflow",
+    "cron.workflowParameters": "Workflow entry and inputs",
+    "cron.workflowHelp": "Each occurrence starts the current published version using this entry and these inputs. Draft changes and pinned test data are excluded.",
+    "cron.workflowPublishedRequired": "Select an active, published workflow.",
+    "cron.workflowEntryRequired": "This published workflow has no manual entry node.",
+    "cron.workflowEntryChoose": "Select a valid entry from the published version."
   },
   "zh-CN": {
     "platform.storagePrefix": "S3 路径前缀",
@@ -1502,8 +1508,8 @@
     "platform.workspaceCount.hosts": "主机",
     "platform.workspaceCount.repository_connections": "仓库连接",
     "platform.workspaceCount.credentials": "凭据",
-    "platform.workspaceCount.pipelines": "构建流水线",
-    "platform.workspaceCount.workflows": "节点工作流",
+    "platform.workspaceCount.pipelines": "流水线",
+    "platform.workspaceCount.workflows": "工作流",
     "platform.workspaceCount.assets": "内容文件",
     "platform.mailConnection": "连接与验证",
     "platform.mailTemplates": "邮件模板",
@@ -1659,7 +1665,13 @@
     "platform.accessAddresses": "访问地址",
     "platform.previewDomain": "预览根域名",
     "platform.publicAddressHelp": "可选，用于回调和分享链接的主要地址，不限制其他可达 IP 或域名访问。",
-    "platform.previewDomainHelp": "可选，留空禁用预览穿透。填写纯域名，不带协议、*. 或路径；另行配置通配 DNS、TLS 和代理转发。预览使用主要地址的协议和端口，无主要地址时使用 HTTPS。"
+    "platform.previewDomainHelp": "可选，留空禁用预览穿透。填写纯域名，不带协议、*. 或路径；另行配置通配 DNS、TLS 和代理转发。预览使用主要地址的协议和端口，无主要地址时使用 HTTPS。",
+    "cron.workflowAction": "触发工作流",
+    "cron.workflowParameters": "工作流入口与参数",
+    "cron.workflowHelp": "每次启动当前已发布版本，使用此入口和参数；不执行草稿改动，不使用固定测试数据。",
+    "cron.workflowPublishedRequired": "请选择已发布且未归档的工作流。",
+    "cron.workflowEntryRequired": "此发布版本没有手动触发入口节点。",
+    "cron.workflowEntryChoose": "请选择当前发布版本中的有效入口节点。"
   },
   "zh-TW": {
     "platform.storagePrefix": "S3 路徑前綴",
@@ -2333,8 +2345,8 @@
     "platform.workspaceCount.hosts": "主機",
     "platform.workspaceCount.repository_connections": "儲存庫連線",
     "platform.workspaceCount.credentials": "憑證",
-    "platform.workspaceCount.pipelines": "建置流水線",
-    "platform.workspaceCount.workflows": "節點工作流",
+    "platform.workspaceCount.pipelines": "流水線",
+    "platform.workspaceCount.workflows": "工作流",
     "platform.workspaceCount.assets": "內容檔案",
     "platform.mailConnection": "連線與驗證",
     "platform.mailTemplates": "郵件範本",
@@ -2490,7 +2502,13 @@
     "platform.accessAddresses": "存取位址",
     "platform.previewDomain": "預覽根網域",
     "platform.publicAddressHelp": "選填，用於回呼和分享連結的主要位址，不限制其他可達 IP 或網域存取。",
-    "platform.previewDomainHelp": "選填，留空停用預覽穿透。填寫純網域，不帶協定、*. 或路徑；另行設定萬用 DNS、TLS 和代理轉送。預覽使用主要位址的協定和連接埠，無主要位址時使用 HTTPS。"
+    "platform.previewDomainHelp": "選填，留空停用預覽穿透。填寫純網域，不帶協定、*. 或路徑；另行設定萬用 DNS、TLS 和代理轉送。預覽使用主要位址的協定和連接埠，無主要位址時使用 HTTPS。",
+    "cron.workflowAction": "觸發工作流",
+    "cron.workflowParameters": "工作流入口與參數",
+    "cron.workflowHelp": "每次啟動目前已發佈版本，使用此入口和參數；不執行草稿變更，不使用固定測試資料。",
+    "cron.workflowPublishedRequired": "請選擇已發佈且未封存的工作流。",
+    "cron.workflowEntryRequired": "此發佈版本沒有手動觸發入口節點。",
+    "cron.workflowEntryChoose": "請選擇目前發佈版本中的有效入口節點。"
   },
   "ja-JP": {
     "platform.storagePrefix": "S3 パスプレフィックス",
@@ -3164,8 +3182,8 @@
     "platform.workspaceCount.hosts": "ホスト",
     "platform.workspaceCount.repository_connections": "リポジトリ接続",
     "platform.workspaceCount.credentials": "認証情報",
-    "platform.workspaceCount.pipelines": "ビルドパイプライン",
-    "platform.workspaceCount.workflows": "ノードワークフロー",
+    "platform.workspaceCount.pipelines": "パイプライン",
+    "platform.workspaceCount.workflows": "ワークフロー",
     "platform.workspaceCount.assets": "コンテンツファイル",
     "platform.mailConnection": "接続と検証",
     "platform.mailTemplates": "メールテンプレート",
@@ -3321,7 +3339,13 @@
     "platform.accessAddresses": "アクセスアドレス",
     "platform.previewDomain": "プレビューのルートドメイン",
     "platform.publicAddressHelp": "コールバックと共有リンクに使用する任意の主要URL。他の到達可能なIPやドメインからもアクセスできます。",
-    "platform.previewDomainHelp": "任意。空欄でプレビュー無効。プロトコル、*.、パスを含まないドメインを指定し、DNS、TLS、プロキシを別途設定します。主要URLの方式とポート、未設定ならHTTPSを使用します。"
+    "platform.previewDomainHelp": "任意。空欄でプレビュー無効。プロトコル、*.、パスを含まないドメインを指定し、DNS、TLS、プロキシを別途設定します。主要URLの方式とポート、未設定ならHTTPSを使用します。",
+    "cron.workflowAction": "ワークフローを実行",
+    "cron.workflowParameters": "ワークフローの開始点と入力",
+    "cron.workflowHelp": "実行時点の公開済みバージョンを、この開始点と入力で実行します。下書きと固定テストデータは使用しません。",
+    "cron.workflowPublishedRequired": "公開済みでアーカイブされていないワークフローを選択してください。",
+    "cron.workflowEntryRequired": "公開済みバージョンに手動トリガーがありません。",
+    "cron.workflowEntryChoose": "公開済みバージョンの有効な開始ノードを選択してください。"
   },
   "ko-KR": {
     "platform.storagePrefix": "S3 경로 접두사",
@@ -3995,8 +4019,8 @@
     "platform.workspaceCount.hosts": "호스트",
     "platform.workspaceCount.repository_connections": "저장소 연결",
     "platform.workspaceCount.credentials": "자격 증명",
-    "platform.workspaceCount.pipelines": "빌드 파이프라인",
-    "platform.workspaceCount.workflows": "노드 워크플로",
+    "platform.workspaceCount.pipelines": "파이프라인",
+    "platform.workspaceCount.workflows": "워크플로",
     "platform.workspaceCount.assets": "콘텐츠 파일",
     "platform.mailConnection": "연결 및 검증",
     "platform.mailTemplates": "메일 템플릿",
@@ -4152,7 +4176,13 @@
     "platform.accessAddresses": "접속 주소",
     "platform.previewDomain": "미리보기 루트 도메인",
     "platform.publicAddressHelp": "콜백 및 공유 링크의 기본 URL입니다. 다른 접근 가능한 IP와 도메인도 허용됩니다.",
-    "platform.previewDomainHelp": "선택 사항입니다. 비워 두면 미리보기가 비활성화됩니다. 프로토콜, *., 경로 없이 도메인을 입력하고 DNS, TLS, 프록시를 별도 설정하세요. 기본 URL의 프로토콜/포트 또는 HTTPS를 사용합니다."
+    "platform.previewDomainHelp": "선택 사항입니다. 비워 두면 미리보기가 비활성화됩니다. 프로토콜, *., 경로 없이 도메인을 입력하고 DNS, TLS, 프록시를 별도 설정하세요. 기본 URL의 프로토콜/포트 또는 HTTPS를 사용합니다.",
+    "cron.workflowAction": "워크플로 실행",
+    "cron.workflowParameters": "워크플로 시작 노드 및 입력",
+    "cron.workflowHelp": "매번 현재 게시된 버전을 이 시작 노드와 입력으로 실행합니다. 초안과 고정 테스트 데이터는 사용하지 않습니다.",
+    "cron.workflowPublishedRequired": "게시되었으며 보관되지 않은 워크플로를 선택하세요.",
+    "cron.workflowEntryRequired": "게시된 버전에 수동 시작 노드가 없습니다.",
+    "cron.workflowEntryChoose": "게시된 버전의 유효한 시작 노드를 선택하세요."
   },
   "ms-MY": {
     "platform.storagePrefix": "Awalan laluan S3",
@@ -4826,8 +4856,8 @@
     "platform.workspaceCount.hosts": "Hos",
     "platform.workspaceCount.repository_connections": "Sambungan repositori",
     "platform.workspaceCount.credentials": "Bukti kelayakan",
-    "platform.workspaceCount.pipelines": "Saluran binaan",
-    "platform.workspaceCount.workflows": "Aliran kerja nod",
+    "platform.workspaceCount.pipelines": "Saluran paip",
+    "platform.workspaceCount.workflows": "Aliran kerja",
     "platform.workspaceCount.assets": "Fail kandungan",
     "platform.mailConnection": "Sambungan dan pengesahan",
     "platform.mailTemplates": "Templat e-mel",
@@ -4983,6 +5013,12 @@
     "platform.accessAddresses": "Alamat akses",
     "platform.previewDomain": "Domain akar pratonton",
     "platform.publicAddressHelp": "URL utama pilihan untuk panggil balik dan pautan perkongsian. IP dan domain lain yang boleh dicapai kekal dibenarkan.",
-    "platform.previewDomainHelp": "Pilihan; kosongkan untuk melumpuhkan terowong pratonton. Masukkan domain tanpa protokol, *. atau laluan. Konfigurasikan DNS kad bebas, TLS dan proksi secara berasingan. Menggunakan protokol/port URL utama atau HTTPS secara lalai."
+    "platform.previewDomainHelp": "Pilihan; kosongkan untuk melumpuhkan terowong pratonton. Masukkan domain tanpa protokol, *. atau laluan. Konfigurasikan DNS kad bebas, TLS dan proksi secara berasingan. Menggunakan protokol/port URL utama atau HTTPS secara lalai.",
+    "cron.workflowAction": "Cetuskan aliran kerja",
+    "cron.workflowParameters": "Nod permulaan dan input aliran kerja",
+    "cron.workflowHelp": "Setiap kejadian menjalankan versi terbitan semasa menggunakan nod dan input ini. Perubahan draf dan data ujian yang dipinkan tidak digunakan.",
+    "cron.workflowPublishedRequired": "Pilih aliran kerja yang telah diterbitkan dan belum diarkibkan.",
+    "cron.workflowEntryRequired": "Versi terbitan ini tiada nod pencetus manual.",
+    "cron.workflowEntryChoose": "Pilih nod permulaan yang sah daripada versi terbitan semasa."
   }
 }

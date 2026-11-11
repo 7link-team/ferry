@@ -49,7 +49,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
     anonymous = client()
     log = open(data / 'server.log', 'wb')
     def launch():
-        proc = subprocess.Popen([binary,"--desktop-control"], env=env, stdout=log, stderr=log, stdin=subprocess.PIPE)
+        proc = subprocess.Popen([binary,"--desktop-control"], env=env, stdout=log, stderr=log, stdin=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         for _ in range(150):
             if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text(encoding='utf8',errors='replace'))
             try:
@@ -73,7 +73,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         group=request(owner,root+'/node-groups',{'name':'Cron group'},expected=201)['id']
         host=request(owner,root+'/nodes',{'name':'Cron runner','connection':'runner','group_id':group},expected=201)['id']
         token=request(owner,root+'/runner-tokens',{'host_id':host},expected=201)['token']
-        runner=subprocess.Popen([os.environ.get('RUNNER_BINARY','target/debug/ferry-runner'),'--server',base[:-4],'--token',token,'--state-dir',str(data/'runner')],stdout=log,stderr=log)
+        runner=subprocess.Popen([os.environ.get('RUNNER_BINARY','target/debug/ferry-runner'),'--server',base[:-4],'--token',token,'--state-dir',str(data/'runner')],stdout=log,stderr=log,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         def eventually(fn,timeout=30):
             until=time.monotonic()+timeout
             while time.monotonic()<until:
@@ -141,6 +141,30 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(request(owner,root+'/pipeline-runs/'+result['downstream_id'])['state']=='succeeded','child run really succeeds')
         request(owner,root+'/pipelines/'+pipe,method='DELETE',expected=409)
         check(request(owner,root+'/cron-jobs?scope=build')['total']==1 and request(owner,root+'/cron-jobs?scope=deploy')['total']==0,'shared resource filters three scopes')
+        graph={'engine':'ferry-graph','schema':1,'settings':{'timezone':'UTC'},'nodes':[
+            {'id':'start','name':'Scheduled entry','type':'core.trigger.manual','type_version':1,'position':[0,0],
+             'params':{'input_schema':{'type':'object','properties':{'message':{'type':'string'}},'required':['message']}}}
+        ],'connections':[],'pin_data':{'start':[{'json':{'message':'NOT_PRODUCTION_INPUT'}}]}}
+        workflow=request(owner,root+'/workflows',{'name':'Cron workflow','definition':json.dumps(graph)},expected=201)
+        workflow_body=dict(body,name='Scheduled workflow',scope='build',action='workflow',target_kind='workflow',target_ref=workflow['id'],command='',entry_node_id='start',inputs={'message':'Real scheduled input'})
+        request(owner,root+'/cron-jobs',workflow_body,expected=400)
+        request(owner,root+'/workflows/'+workflow['id']+'/publications',{'version':workflow['version'],'revision_id':workflow['draft_revision_id'],'name':'v1'},expected=201)
+        request(owner,root+'/cron-jobs',dict(workflow_body,inputs={}),expected=400)
+        request(owner,root+'/cron-jobs',dict(workflow_body,entry_node_id='missing'),expected=400)
+        request(outsider,f'/workspaces/{workspace_other}/cron-jobs',workflow_body,expected=404)
+        workflow_cron=create(workflow_body)
+        result=done(execute(workflow_cron))
+        child=request(owner,root+'/workflow-executions/'+result['downstream_id'])
+        check(result['state']=='succeeded' and result['downstream_kind']=='workflow-executions' and result['workflow_id']==workflow['id'],'workflow cron links to its real child execution')
+        check(child['state']=='succeeded' and child['mode']=='production' and child['trigger_kind']=='schedule' and child['revision_id']==workflow['draft_revision_id'],'published workflow runs in production with schedule identity')
+        node=request(owner,root+'/workflow-executions/'+child['id']+'/node-runs')['items'][0]
+        output=request(owner,root+'/workflow-executions/'+child['id']+'/node-runs/'+node['id']+'/output')
+        check('Real scheduled input' in json.dumps(output) and 'NOT_PRODUCTION_INPUT' not in json.dumps(output),'scheduled workflow outputs real inputs instead of pinned test data')
+        check(request(owner,root+'/cron-jobs?scope=build')['total']==2,'build schedules contain both pipelines and node workflows')
+        update(workflow_cron,enabled=True,schedule='* * * * * *')
+        automatic=eventually(lambda:next((r for r in runs(workflow_cron) if r['trigger_kind']=='scheduled' and r['state']=='succeeded'),None))
+        update(workflow_cron,enabled=False)
+        check(automatic['downstream_kind']=='workflow-executions','real timer automatically starts a published workflow')
         # A scheduled identity must not retain permissions after its role is revoked.
         from datetime import datetime,timezone,timedelta
         role=request(owner,root+'/roles',{'name':'Scheduler','permissions':['cron-jobs.create','cron-jobs.update','cron-jobs.run','hosts.terminal']})['id']
@@ -173,7 +197,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(run(active)['state']=='succeeded' and 'DRAIN_DONE' in run(active)['output'],'graceful shutdown preserves command completion before exit')
         events=request(owner,root+'/activity?resource=cron-jobs&page_size=200')['items']
         check(any(e['action']=='scheduled' for e in events) and all('command' not in e['details'] and 'CRON_OK' not in json.dumps(e['details']) for e in events),'scheduled and manual actions audited without script content')
-        for id in [cid,grouped,retry,overlap,build,revoked,missed,draining]:
+        for id in [cid,grouped,retry,overlap,build,workflow_cron,revoked,missed,draining]:
             eventually(lambda:all(r['state'] not in ('queued','running') for r in runs(id)))
             request(owner,root+'/cron-jobs/'+id,method='DELETE',expected=204)
         check(request(owner,root+'/cron-jobs')['total']==0,'inactive jobs and histories can be deleted')

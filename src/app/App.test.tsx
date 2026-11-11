@@ -346,7 +346,8 @@ it("edits Git monitoring through a named Runner selector and polling-only events
   expect(dialog.textContent).not.toContain("合并完成");
   expect(dialog.textContent).not.toContain("新增仓库");
   expect(dialog.textContent).toContain("更新标签");
-  expect(dialog.querySelectorAll('[role="checkbox"]')).toHaveLength(7); // Six events and the enable switch.
+  expect(dialog.querySelectorAll('[role="checkbox"]')).toHaveLength(6);
+  expect(dialog.querySelectorAll('[role="switch"]')).toHaveLength(1);
   expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/nodes?")).map(([url]) => new URL(String(url), location.origin).searchParams.get("page"))).toEqual(["1", "2"]);
   await act(async () => dialog.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   const request = vi.mocked(fetch).mock.calls.find(([url, init]) => url === "/api/workspaces/2/code-connection-monitors/42" && init?.method === "PATCH");

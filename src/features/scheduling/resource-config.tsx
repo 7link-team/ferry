@@ -10,6 +10,7 @@ import {
 } from "../../shared/resources/config";
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import { TARGETS } from "../hosts/resource-config";
+import { WorkflowScheduleInputs } from "./WorkflowScheduleInputs";
 
 export interface CronJob {
   id: string;
@@ -23,6 +24,8 @@ export interface CronJob {
   target_kind: string;
   target_ref: string;
   environment_id: string;
+  entry_node_id: string;
+  inputs: Record<string, unknown>;
   command: string;
   timeout_seconds: number;
   max_retries: number;
@@ -46,6 +49,7 @@ export interface CronRun {
   config: string;
   downstream_id: string;
   downstream_kind: string;
+  workflow_id?: string;
   version: number;
   trigger_kind: string;
 }
@@ -85,11 +89,12 @@ export const cronLinks = (workspace: string) => [
     labelKey: "resource-domain:cron.downstream",
     when: (r: CronRun) => r.downstream_id !== "0",
     to: (r: CronRun) => ({
-      group: r.downstream_kind === "pipeline-runs" ? "build" : "deploy",
-      item: r.downstream_kind === "pipeline-runs" ? "runs" : "revisions",
-      id: r.downstream_id,
+      group: r.downstream_kind === "workflow-executions" ? "workflow" : r.downstream_kind === "pipeline-runs" ? "build" : "deploy",
+      item: r.downstream_kind === "workflow-executions" ? "workflows" : r.downstream_kind === "pipeline-runs" ? "runs" : "revisions",
+      id: r.downstream_kind === "workflow-executions" ? (r.workflow_id ?? "") : r.downstream_id,
       mode: "view" as const,
     }),
+    query: (r: CronRun): Record<string, string> => r.downstream_kind === "workflow-executions" ? { execution: r.downstream_id } : {},
   },
   {
     label: "核实并解除阻塞",
@@ -301,6 +306,9 @@ export function schedulingForms({
         action: "",
         target_kind: "",
         target_ref: "",
+        environment_id: "",
+        entry_node_id: "",
+        inputs: {},
         command: "",
         timeout_seconds: 1800,
         max_retries: 0,
@@ -323,31 +331,6 @@ export function schedulingForms({
               labelKey: "common-domain:common.name",
               type: "text",
               required: true,
-            },
-            {
-              key: "scope",
-              label: "所属模块",
-              labelKey: "resource-domain:cron.module",
-              type: "select",
-              resetOnChange: ["action", "target_kind", "target_ref", "command"],
-              options: [
-                {
-                  value: "host",
-                  label: "主机",
-                  labelKey: "common-domain:nav.hosts",
-                },
-                {
-                  value: "build",
-                  label: "构建",
-                  labelKey: "common-domain:nav.build",
-                },
-                {
-                  value: "deploy",
-                  label: "部署",
-                  labelKey: "resource-domain:variable.deploy",
-                },
-              ],
-              immutable: true,
             },
             {
               key: "enabled",
@@ -397,12 +380,15 @@ export function schedulingForms({
               type: "select",
               required: true,
               when: (d) => d.scope === "build",
+              resetOnChange: ["target_kind", "target_ref", "environment_id", "entry_node_id", "inputs"],
+              patchOnChange: value => ({ target_kind: value === "pipeline" || value === "workflow" ? value : "", inputs: {} }),
               options: [
                 {
                   value: "pipeline",
                   label: "触发流水线",
                   labelKey: "resource-domain:cron.pipelineAction",
                 },
+                { value: "workflow", label: "Trigger workflow", labelKey: "resource-domain:cron.workflowAction" },
               ],
             },
             {
@@ -412,6 +398,8 @@ export function schedulingForms({
               type: "select",
               required: true,
               when: (d) => d.scope === "deploy",
+              resetOnChange: ["target_kind", "target_ref", "environment_id", "entry_node_id", "inputs"],
+              patchOnChange: value => ({ target_kind: value === "sync-marketplace" ? "marketplace-source" : value === "redeploy" || value === "restart" ? "deployment" : "", inputs: {} }),
               options: [
                 {
                   value: "redeploy",
@@ -441,52 +429,6 @@ export function schedulingForms({
               options: TARGETS,
             },
             {
-              key: "target_kind",
-              label: "目标类型",
-              labelKey: "resource-domain:resource.targetType",
-              type: "select",
-              required: true,
-              when: (d) => d.scope === "build",
-              options: [
-                {
-                  value: "pipeline",
-                  label: "流水线",
-                  labelKey: "common-domain:shell.pipeline",
-                },
-              ],
-            },
-            {
-              key: "target_kind",
-              label: "目标类型",
-              labelKey: "resource-domain:resource.targetType",
-              type: "select",
-              required: true,
-              when: (d) =>
-                d.scope === "deploy" && d.action !== "sync-marketplace",
-              options: [
-                {
-                  value: "deployment",
-                  label: "应用",
-                  labelKey: "common-domain:nav.applications",
-                },
-              ],
-            },
-            {
-              key: "target_kind",
-              label: "目标类型",
-              labelKey: "resource-domain:resource.targetType",
-              type: "select",
-              required: true,
-              when: (d) => d.action === "sync-marketplace",
-              options: [
-                {
-                  value: "marketplace-source",
-                  label: "市场来源",
-                  labelKey: "common-domain:nav.marketplaceSources",
-                },
-              ],
-            },
-            {
               key: "target_ref",
               label: "市场来源",
               labelKey: "common-domain:nav.marketplaceSources",
@@ -512,6 +454,19 @@ export function schedulingForms({
               options: namedOptions(workspace, resource),
             })),
             {
+              key: "target_ref", label: "Workflow", labelKey: "workflow-domain:kind.nodes",
+              type: "select", required: true, width: "full",
+              when: d => d.target_kind === "workflow",
+              options: namedOptions(workspace, "workflows", undefined, { lifecycle: "active" }),
+              resetOnChange: ["entry_node_id", "inputs"],
+            },
+            {
+              key: "inputs", label: "Workflow parameters", labelKey: "resource-domain:cron.workflowParameters",
+              type: "custom", span: 2,
+              when: d => d.target_kind === "workflow" && !!d.target_ref,
+              render: props => <WorkflowScheduleInputs {...props} />,
+            },
+            {
               key: "environment_id",
               label: "执行环境",
               labelKey: "resource-domain:pipeline.environment",
@@ -519,7 +474,7 @@ export function schedulingForms({
               emptyValues: ["0", 0],
               emptyLabelKey: "resource-domain:reference.noEnvironment",
               options: namedOptions(workspace, "pipeline-environments"),
-              when: (d) => d.scope === "build",
+              when: (d) => d.scope === "build" && d.target_kind === "pipeline",
               help: "流水线绑定环境时必须选择其中一个；不绑定环境时留空。",
               helpKey: "resource-domain:cron.environmentHelp",
             },

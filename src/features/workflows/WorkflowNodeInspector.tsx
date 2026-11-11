@@ -1,3 +1,4 @@
+import { Switch } from "../../shared/ui/switch";
 import { FieldCaption } from "../../shared/forms/FieldHelp";
 import { Dialog, DropdownMenu } from "radix-ui";
 import {
@@ -747,24 +748,22 @@ export function WorkflowNodeInspector({
                       )}
                     </p>
                     <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
+                      <Switch
                         checked={node.settings?.execute_once === true}
                         disabled={readOnly}
-                        onChange={(event) =>
-                          settings({ execute_once: event.target.checked })
+                        onCheckedChange={(checked) =>
+                          settings({ execute_once: checked })
                         }
                       />
                       <FieldCaption label={t("inspector.executeOnce")} />
                     </label>
                     {canPinNode(node) && (
                       <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
+                        <Switch
                           checked={node.settings?.always_output === true}
                           disabled={readOnly}
-                          onChange={(event) =>
-                            settings({ always_output: event.target.checked })
+                          onCheckedChange={(checked) =>
+                            settings({ always_output: checked })
                           }
                         />
                         <FieldCaption label={t("inspector.alwaysOutput")} />

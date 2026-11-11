@@ -828,5 +828,6 @@
   "templates.examples.redisDataPort": "데이터 수신 및 공개 포트",
   "templates.examples.redisSentinelPort": "Sentinel 수신 및 공개 포트",
   "files.permissionInvalid": "유효한 경로와 000~777 권한을 선택하세요.",
-  "files.permissionUnsupported": "Windows 파일과 심볼릭 링크의 POSIX 권한은 편집할 수 없습니다."
+  "files.permissionUnsupported": "Windows 파일과 심볼릭 링크의 POSIX 권한은 편집할 수 없습니다.",
+  "cron.workflowRun": "워크플로 실행 {id}"
 }

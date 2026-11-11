@@ -1,4 +1,37 @@
+## Cron form context and derived targets (2026-11-11)
+- Decision: user requested hiding module selection and avoiding redundant action/target-kind selectors. Existing navigation entry supplies create scope, edit retains saved scope, no module switch in the form. Build/deploy actions derive their unique target kind; host keeps host/group choice. Extend the shared field configuration with optional patchOnChange so dependent resets and derived values occur in one state update in both CRUD forms and action dialogs.
+- Reason: reuse route context and shared form controls without a bespoke scheduling form. Alternatives: auto-updating via effects or leaving a redundant disabled selector; rejected to avoid stale intermediate state and visual repetition. Tradeoffs: type remains an explicit backend field for compatibility, although it is derived in the UI. Scope: presentation/linkage only, no API, permission, schema or runtime changes. Status: implemented; relevant53 tests, production builds and embedded Chromium four-width/real-execution acceptance PASS; backed-up4291 update and data/asset preservation PASS.
+
+## Workflow display terminology (2026-11-11)
+- Decision: user requested consistent short names. Use Pipeline / Workflow (流水线 / 工作流), and Trigger pipeline / Trigger workflow (触发流水线 / 触发工作流) for actions. Apply to shared kind labels, navigation, target selectors, workspace counts and notification sources in all six locales. Technical engine distinctions remain in descriptive help; identifiers, routes and execution semantics stay unchanged.
+- Reason: shorter parallel labels communicate the same product concepts consistently. Alternative: retain the longer Build pipeline / Node workflow pair; rejected in favour of the user's proposed short labels. Tradeoffs: the workflow navigation group and resource share a name. Scope: display wording only. Status: implemented; frontend22 tests, production builds and embedded Chromium four-width acceptance PASS; backed-up4291 update and asset/data preservation PASS.
+
+## Node workflow cron integration (2026-11-11)
+- Decision: extend existing build cron jobs with action/target workflow, explicit manual entry and schema-based inputs in existing JSON config. Resolve the active published revision on each occurrence, freeze it when admitting the execution, reauthorize the saved actor in the target workspace and run in production mode without pinned test data.
+- Reason: user requested node workflow scheduling in the existing build scheduler; existing publication/run admission and cron scheduling provide the authoritative permission, audit and lifecycle mechanisms.
+- Alternatives considered: independent workflow scheduler or invoking draft/manual testing. Rejected because they duplicate scheduling behavior or execute unapproved/test configuration.
+- Tradeoffs: changes to published entry/schema can require updating a saved schedule; old servers cannot execute the new action. Scope: shared cron UI/API/runtime and existing execution links; no new schema, migration or scheduling policy.
+- Status: implemented; cron3, workflow run20, UI6, HTTP25 checks and embedded Chromium acceptance PASS; backed-up local4291 update PASS. No commit/push/release for this task.
+
+## Ferry installed runtime identity (2026-11-11)
+- Decision: user explicitly requires ferry-prefixed product executable/service/MCP identity. New default registration is ferry-runner-agent, supervisor ferry-runner-service, signed worker ferry-runner, canonical MCP subcommand ferry-mcp. MCP server ferry and tools ferry_discover/ferry_request remain unchanged.
+- Reason/scope: distinguish product processes/services from unrelated runners. This explicit user decision overrides neutral deployment naming for these software identifiers; third-party runtime names and business enums remain untouched.
+- Compatibility/tradeoff: retain platform-mcp alias and signature-verified legacy staged filenames. Reinstallation detects existing runner-agent default state and reuses its registration/path; automatic worker updates do not rewrite service-manager registration or host identity. Existing legacy supervisors retain their executable path. New Windows service display names and native descriptions identify Ferry.
+- Alternatives: automatically rename live service registrations was rejected for this bounded change because it requires separate stop/re-register/recovery handling and is not equivalent to a worker update.
+- Status: scoped naming acceptance PASS (Runner/CLI/MCP/native Windows services/Actions/UI/build). Legacy live-service renaming explicitly excluded and disclosed. No schema/data migration.
+
 # Architecture Decision Records
+
+## 会话内容与背景（2026-11-10）
+
+- 决策/依据：用户要求紧凑Markdown、长消息折叠、气泡和每会话纹理/颜色/图片背景；直接执行，复用主题令牌、会话配置JSON、会话文件上传和原有权限，不新增表/迁移/依赖。外部聊天产品只作为交互参考。
+- 范围：内容实际高度超过480px时默认收至416px；按钮展开全文/收起，流式执行期间不折叠；展开状态在同页轮询中保留。复制不受折叠影响，始终完整源码。无灰度，无自动摘要，不改变消息和执行记录。
+- 配置：config.appearance={pattern,color,image}，pattern固定plain/dots/grid/diagonal；color为空跟随主题或#RRGGBB；image为当前空间/会话文件ID或null。图片仅PNG/JPEG/WebP/AVIF，最大5MiB，复用存储配额与加密；不接收远端URL/SVG/脚本。图片背景跟随明暗加遮罩，气泡独立底色。默认plain/空色/无图；恢复默认需保存。
+- 权限/流程：PUT /api/workspaces/:workspace/conversations/:id/appearance，需conversations.read/update且当前用户为会话所有者；沿用成员可读规则，背景成员可见。上传另需conversations.run和active会话。校验→空间事务→查会话归属→查文件同会话且类型/大小正确→保存配置、版本+1、更新时间及现有操作记录；无状态流转、不改Agent参数/历史快照，重新绑定Agent时保留外观。未知字段/颜色/模式拒绝，跨空间或无归属404；失败弹层保留草稿并显示错误。当前背景图片禁止独立删除，删除整个会话沿用文件引用清理。无新增xx_at字段、索引、DDL或up/down；历史无配置按默认显示，旧版本忽略额外配置。
+- 布局：Desktop≥1200/Pad768–1199/Phone320–767均同一消息顺序，内容最大4xl且气泡可缩；表格/图表自身滚动，整页无横溢；弹层固定标题/按钮、中间滚动，手机避开安全区，按钮44px，键盘Focus可见；所有新文案覆盖六语。无新菜单/模型/计算/第三方。暂缺Figma，使用三类尺寸浏览器截图，不冒称原生App或虚拟键盘覆盖。
+- 验收：折叠/展开/流式/轮询/复制、主题矩阵、背景保存刷新/恢复、图片类型/大小、空间/账号拒绝、背景文件删除保护及截图；证据见MEMORY.md对应事项。状态：实现与验证中，用户验收未完成。
+- 报告交付（用户追加）：AI复用MCP multipart上传会话文件，最终回答的同空间同会话Markdown文件链接转为独立报告卡片，置于长内容折叠区之外；复制仍保留原始链接。预览仅在点击时按原文件权限读取，最多1MiB，超限提示下载，不执行HTML；Markdown/Mermaid沿用主题与消毒，长代码块自身滚动。下载复用原文件响应，不另存生成副本。预览标题/底部下载固定、正文滚动；失败可重试，关闭中止读取。无新后端端点/模型/迁移或Agent特殊文件权限，不支持任意外链伪装为报告卡片。
+- 链接与审计纠正（用户反馈）：同源同空间工作流详情API链接显示为当前语言的/workspaces/:workspace/workflows/:id页面；执行详情先用原权限GET查询workflow_id，再进入该工作流?execution=:id，拒绝时显示错误并允许重试，不暴露JSON入口，不猜测父对象。现存聊天和报告无需改原始文本即可兼容；文件下载与外链不重写。MCP发现结果提供这两个UI路由格式，后续AI使用UI链接。已结束/拒绝/过期的工具申请、调用结果与用量统一在单个默认折叠的执行详情内；仅running且decision=null的申请保持显式，原所有权和conversations.run校验/确认按钮不变。无新数据模型、状态、权限、迁移或依赖。
 
 ## Chat collaboration and personal activity state (2026-11-08)
 - Decision: extend the existing SQL chat store with optimistic message versions, edit/retraction timestamps, explicit reply links and Human mentions. Per-user saves and monotonic read cursors are separate from shared messages. Conversation membership is checked on every interaction and attachment request; only the author can edit/retract Human messages, while active executions block these mutations. Executed prompts and native CLI history are not rewritten.
@@ -680,3 +713,58 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Alternatives：旧有效路径308迁移，旧域名和未知token404。运维DNS/TLS/代理设置仍属于部署层，数据库配置不能替代。
 - Scope/Tradeoffs：新增access_config可空TEXT迁移，保留旧加密URL和历史strip_prefix字段。详细模型、up/down、全状态与验收见docs/preview-holes-design.md第17节。旧配置base路径的应用需调整为根路径。
 - Status：已实现，真实Runner/Actions/工作流、CI测试DNS与发布证据以MEMORY.md为准，不宣称公网DNS/TLS验收。
+
+## 群聊光标提及与统一输入区（2026-11-10）
+
+- 依据/范围：用户要求Slack式@补全和附件工具栏整体化。直接执行，复用Composer、当前群聊members/agents、上传/发送、主题与六语；无新增API、权限、远程成员搜索、依赖、数据库字段/索引/DDL/up/down、审计或删除策略变化，不改私聊/发送快捷键。
+- 交互：折叠选区的光标前出现独立@关键词时打开，姓名不区分大小写过滤；邮箱不触发。弹层锚定光标，视口不足翻转、夹紧；最多312px，内部滚动，ArrowUp/Down、Enter选择、Esc/失焦/外点关闭，IME确认不触发选择/发送。无候选有六语空态；只使用现有成员，停用Agent不可选择，重复提及去重不取消已选项，成员芯片仍可删除。替换当前词保留后文；本地过滤无加载或网络错误态。
+- 外观：输入、附件和成员在同一圆角边框/背景内，工具栏为容器底部，独立滚动仅限附件和候选。长姓名截断，完整名称通过原文保留；无匹配不发送，禁用/上传/录音沿用原状态。候选与工具栏触控44px；主题使用语义token，亮/暗一致。
+- 响应式矩阵：Desktop≥1200→编辑器限宽/光标弹层→键鼠触控→名单单列→候选内滚动→保留原安全区；Pad768–1199→随内容宽缩放/弹层夹紧→同键鼠触控→单列→候选内滚动→visualViewport响应键盘；Phone320–767→满可用宽/弹层留8px边距→44px选择→姓名截断→内部纵滚→可视视口避键盘。无整页横向滚动；不新增页面导航。Figma/原生App实机暂缺，不冒称覆盖。
+- 验收：Composer测试光标中段/过滤/去重/禁用/键盘/IME/空与74项，真实Chrome四宽度/亮暗/换行滚动与实际群聊验证，证据与本地更新状态记录MEMORY.md；不向真实成员发送消息。
+- 删除补充（用户反馈）：选中的@完整姓名视作删除单元，Backspace/Delete或部分选区删除扩展到完整提及；仅吞掉提及后一个普通空格，不删除相邻正文。通过原生textarea删除保留浏览器撤销；剪切/选区替换同步接收者，重复提及到最后一处删除才移除接收者，原生撤销/重做恢复相应已选状态。只跟踪本会话曾移除且仍在当前名单的身份，不凭任意输入新增接收者；手动取消芯片清除该身份的恢复记录。无持久化删除、无新权限/接口/文案/布局；空/禁用/IME保留原行为，三尺寸沿用上述矩阵，移动实机键盘不冒称验收。单测及真实浏览器覆盖反向/正向/选区/重复/撤销/重做，保留旧版证据。
+- 快速输入回归：提及选择、工具栏插入@和快捷键换行的光标恢复在useLayoutEffect中同步完成；不使用下一动画帧恢复，防止下一次输入发生后旧位置覆盖新位置。实际4291连续输入后正文顺序、删除及原生撤销联合验证。
+
+## 会话壁纸范围与选择面板（2026-11-10）
+
+- 用户确认：壁纸铺满聊天内容区，含输入栏后方；顶部会话标题、筛选与左侧会话列表保留主题底色。消息滚动区与输入栏共用一个连续背景容器，图片不随消息滚动重新定位，输入框仍用不透明主题底色保证可读。
+- 范围/事实：仅重排原会话外观面板，参考WhatsApp的壁纸选择/预览结构；复用四种原pattern枚举、六语、可选十六进制颜色、原上传和PUT appearance。增加八个静态色板选项仅为颜色输入建议，不新增业务枚举/配置字段。无新权限、接口、数据模型/索引/DDL/up/down、依赖、审计或删除策略；仍为会话所有者设置且当前会话成员可见。
+- 状态/流程：打开读取保存值→本地选择即时预览→保存成功应用整个聊天区；关闭不保存，重新打开恢复保存值。纯色/纹理选择清图片引用；上传成功选择图片，移除仅清引用不删除原文件，复用文件权限/5MiB及原四种MIME限制。保存/上传中禁用操作与关闭，错误在固定底栏显示；空值跟随主题，非法图片有现有六语提示，长文案换行。
+- 模式/响应式矩阵：Desktop≥1200→左控制右预览→44px键鼠触控→色板/纹理缩略图→中间滚动→固定头尾；Pad768–1199→同两列且限宽→同入口→预览可缩→中间滚动→安全区底部；Phone320–767→单列预览在上→44px触控/可见关闭保存→控制换行→中间纵滚→90dvh和安全区。实际聊天区始终flex min-h-0，消息自己纵滚，背景覆盖输入框外边距；禁止整页横溢。不改变消息排序、气泡对齐、发送或执行流程。Figma和移动实机键盘未提供，明确未验收。
+- 验收：真实会话四宽度/亮暗、色板与纹理即时预览、图片上传/移除、错误/关闭不保存、保存回读、消息区和输入栏共用背景、标题/导航不受影响；菜单44同时验证仓库关联→访问地址→站点设置顺序和原URL。证据与本地交付状态见MEMORY.md。
+
+## 2026-11-10 Site identity configuration
+Decision: unified Site Settings group with four tabs, confirmed by user; separate nullable site_config JSON in platform_state. Keep footer_html/page_scripts intact. Reuse settings transaction/version/admin/audit and public footer read/context rather than parallel settings fetches.
+Reason: one deployment identity source, compatible additive API and unchanged existing content.
+Alternatives considered: independent footer/scripts groups (user chose grouping); adding identity into script JSON (mixes responsibilities).
+Tradeoffs: one additive column migration; down refuses destructive removal like existing footer/scripts migrations; app rollback retains column.
+Scope: site name/title prefixes and menu organization only. Status: implemented and verified (2026-11-10); workspace checks/tests, frontend/server builds and isolated API/Chrome acceptance PASS. No live database migration or deployment performed.
+# 消息回复引用位置（2026-11-10）
+
+- 事实来源：Conversation 的 reply_to 草稿和发送接口已存在；用户要求点击回复后引用不跑到顶部。范围为回复交互修复，不增加独立线程页、模型或接口。
+- 回复入口只设置 reply_to，在输入框内部上方显示发送者、两行摘要和取消按钮；不筛选原消息历史、不修改当前活动筛选、不强制跟随底部，输入框聚焦使用 preventScroll。
+- 成功发送清空引用；失败保留引用和正文，重试复用 client_id；取消仅清空草稿引用，不删除原消息。附件消息使用附件名摘要，缺失或撤回消息显示既有撤回文案。
+- 复用会话运行权限、空间隔离、草稿保存、原消息审计与发送校验；无权限变更、数据库迁移、删除或额外操作记录；无计算、索引或DDL变更，无灰度与新三方依赖，兼容既有 reply_to 数据。
+- 六语文案齐全。Desktop/Pad/Phone 均使用输入框上方单列引用卡，发送者截断、摘要两行、取消触控44px；引用随编辑区常驻，消息在自己的容器中滚动，复用输入区键盘与安全区契约。Figma 暂缺，不宣称设计稿验收。
+- 验收：完整历史及滚动保留、聚焦、取消、失败保留/成功清空、reply_to 与幂等键、1440/900/390/320布局；证据位于 data/maintenance/agent-platform-tools/wallpaper。只读/已归档保持原有禁止发送规则。
+
+## 壁纸视觉修订与空会话（2026-11-10）
+
+用户否定圆点、网格、斜纹的视觉效果，要求参考 WhatsApp 的手绘壁纸；替换为本地原创 SVG 生活涂鸦、星空漫游、自然手绘，以低对比线描错落平铺，纯色和用户上传图片继续保留。沿用 dots/grid/diagonal 三个已保存键，仅更换对应资产及六语名称，不增加类型、不改接口或迁移历史数据。SVG 使用固定低透明度中性色线条，叠加现有主题或自定义背景色，消息和编辑区继续使用主题表面色。
+
+空会话在消息滚动区居中展示本地矢量提示图、标题与原有发送提示，不增加按钮或业务流程；中央提示使用主题表面底色保证任意壁纸颜色/图片上的可读性，筛选空态继续使用原文案，避免重复提示。Desktop/Pad/Phone 均为单列居中，提示语限制宽度并换行；短屏允许消息容器内滚动，不挤压输入栏、无整页横向滚动。沿用原有无障碍标题，装饰图 aria-hidden；无新增模型、权限、审计、删除、计算或三方依赖。验证三组实际资产、四宽度、亮暗、预览与保存回读；Figma及移动实机键盘暂缺。
+
+## 统一通知归属（2026-11-10，已实现并更新本地，待用户验收）
+
+- 入口为工作空间“维护 → 通知”，集中渠道、模板和发送记录。各工作空间独立管理；不把工作空间机器人或SMTP连接放到平台注册邮箱配置。
+- 仓库监控保留启停、仓库范围、事件订阅和业务内容；代码洞察、告警、流水线与工作流保留各自触发条件，只引用通知渠道/模板。业务规则不迁入通知菜单，平台注册验证码及其模板仍归账户注册设置。
+- 现有源码的业务渠道配置位于仓库连接监控，非独立代码洞察发送模块。复用 notifications/channel.rs 和 webhook.rs，统一传输、签名、接收方错误判断；不是把仓库专用的推送字段强加给其他业务消息。
+- 存量渠道转换为本空间共享渠道并保存绑定，保留地址、密钥、语言、启停及订阅行为；不重置监控轮询、已有事件和已投递记录，不因转换自动补发。模型、字段/索引/DDL与备份降级契约见 docs/统一通知设计.md；4291 已执行 notification_center_v1，转换及整库保全证据见 data/maintenance/notification-center/local-update.json。本轮实际迁移验证为 SQLite，PG/MySQL 未实连验证。
+- 统一发送接口供工作流节点、构建步骤及 ferry_request 复用。渠道查看、配置、发送分权，按当前空间和可用渠道验证；AI沿用调用人权限与Agent角色交集，密钥服务端解密，不出现在MCP响应或执行日志。副作用调用记录来源、操作人及关联运行/会话，幂等控制避免重试重复发送；不得把“具有查看权限”视为发送授权。
+- 实现及验收边界：统一 notification.send 节点支持 SMTP 与现有机器人/Webhook渠道，ferry_request 使用统一发送接口；构建增加 ferry/notify@v1，复用消息参数表单与私有 worker 桥，仅支持 Native 任务。容器构建须通过 needs 串联独立 Native 通知任务。Agent 来源在工作流/流水线加密上下文持久化，后台重新检查账号、Agent、渠道权限及撤权。实际本地 HTTP/SMTP、幂等、失败不重发、空间/角色/Agent隔离、存量转换与响应式页面证据见 data/maintenance/notification-center 及 notification-*.log；未向商业通知渠道实发。平台注册邮件仍归账户注册，不迁入业务通知。
+
+AGENT-PROVISIONING-64: Accepted user scope install/update/isolation. Use Runner-local opt-in policy and immutable npm installations; preserve native mode and permissions. Configuration isolation is not an OS sandbox. Do not copy execution-user credentials or claim API profiles work. No migration. See docs/agent-runtime-provisioning.md.
+
+## 2026-11-11 Confirmed login renewal policy and DSH identity
+Decision: retain Cookie-based authentication. New sessions use 30-minute access and 14-day absolute refresh lifetime; automatic refresh enabled by default and triggered only by user activity. Rotate refresh tokens; never extend the original absolute deadline. Logout revokes both tokens. Platform duration changes affect new logins, disabling automatic refresh stops future automatic renewal immediately.
+Reason: user explicitly accepted these recommended semantics. Alternatives considered: JWT replacement and indefinite sliding refresh. Tradeoffs: additive persistence and race/replay tests are needed; existing sliding sessions need explicit compatible migration treatment. Scope: login/session policy; implementation pending.
+Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-ai/deepseek-harness, npm @deepseek-ai/dsh, verified from upstream README and CLI help. Node >=24.9.0. Reuse ACP transport with DSH's session/resume and session/set_config_option, managed installation and per-Agent DSH_HOME. A temporary plugin invokes the native permission service for readonly admission and forwards native turn/end reason, since upstream ACP maps errors to end_turn. Require the root session's receipt; descendant endings cannot complete the root turn. Alternatives considered: copying generic ACP load/modes (unsupported) and treating end_turn as success (loses failures). Tradeoffs: depends on DSH's public plugin lifecycle APIs; no OS sandbox or automatic vendor login. Scope: adapter/provisioning, no schema change. Status: implemented and real process acceptance PASS8/8; installed on local4291 with both Runners updated, no database migration. See docs/agent-runtime-provisioning.md for verification boundaries.

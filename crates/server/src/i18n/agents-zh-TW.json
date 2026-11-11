@@ -3,5 +3,6 @@
   "agents.changed": "智慧體 已變更，請重新整理後儲存。",
   "agents.probeUnsupported": "環境偵測需要使用支援此能力的新版 Runner 連線。",
   "permission.group.ai-agents": "智慧體",
-  "permission.action.probe": "偵測環境"
+  "permission.action.probe": "偵測環境",
+  "agents.runtimeSetupFailed": "無法準備智慧體執行環境。請檢查 Runner 安裝策略、Node/npm、網路與版本設定；啟用設定隔離時請使用預設託管工作目錄。"
 }

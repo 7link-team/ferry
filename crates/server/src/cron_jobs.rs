@@ -5,7 +5,7 @@ use crate::{
     db,
     entities::{
         cron_jobs as jobs, cron_runs as runs, deployment_revisions, deployments, host_groups,
-        hosts, pipeline_runs, pipelines,
+        hosts, pipeline_runs, pipelines, workflow_executions,
     },
     error::{ApiError, Result},
     i18n::{self, Message, StoredText},
@@ -51,6 +51,10 @@ pub struct Body {
     pub target_ref: String,
     #[serde(default)]
     pub environment_id: String,
+    #[serde(default)]
+    pub entry_node_id: String,
+    #[serde(default)]
+    pub inputs: serde_json::Map<String, Value>,
     #[serde(default)]
     pub command: String,
     pub timeout_seconds: u64,
@@ -175,6 +179,11 @@ async fn validate(
                 .await?
                 .is_some()
         }
+        ("build", "workflow", "workflow") => {
+            crate::workflows::run::schedule_request(conn, scope, id, &b.entry_node_id, &b.inputs)
+                .await?;
+            true
+        }
         ("deploy", "sync-marketplace", "marketplace-source") => {
             scope.require("marketplace-sources.sync")?;
             crate::entities::marketplace_sources::Entity::find_by_id(i64::from(id))
@@ -203,6 +212,12 @@ async fn validate(
     };
     if !present {
         return Err(ApiError::missing());
+    }
+    if b.target_kind == "workflow" && !b.environment_id.is_empty() {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("cron.targetMismatch"),
+        ));
     }
     if b.scope == "host"
         && (b.command.trim().is_empty() || b.command.len() > 65536 || b.command.contains('\0'))
@@ -239,6 +254,9 @@ fn job_json(row: jobs::Model) -> Result<Value> {
 }
 fn run_json(row: runs::Model, detail: bool) -> Value {
     let mut value = json!({"id":Id::from(row.id),"job_id":Id::from(row.job_id),"job_name":row.job_name,"scope":row.scope,"state":row.state,"trigger_kind":row.trigger_kind,"triggered_by":Id::from(row.triggered_by),"scheduled_at":row.scheduled_at,"started_at":row.started_at,"finished_at":row.finished_at,"attempt":row.attempt,"downstream_id":Id::from(row.downstream_id),"downstream_kind":row.downstream_kind,"created_at":row.created_at,"version":row.version});
+    if row.downstream_kind == "workflow-executions" {
+        value["workflow_id"] = json!(Id::from(row.target_ref));
+    }
     if detail {
         value["output"] = json!(i18n::display_text_stored(&row.output));
         value["config"] = json!(row.config);
@@ -769,6 +787,16 @@ async fn downstream(
                 r.state,
                 Message::new("cron.pipelineRun").with("id", id.to_string()),
             )
+        } else if kind == "workflow-executions" {
+            let r = workflow_executions::Entity::find_by_id(id)
+                .filter(workflow_executions::Column::WorkspaceId.eq(run.workspace_id))
+                .one(&s.db)
+                .await?
+                .ok_or_else(ApiError::missing)?;
+            (
+                r.state,
+                Message::new("cron.workflowRun").with("id", id.to_string()),
+            )
         } else {
             let r = deployment_revisions::Entity::find_by_id(id)
                 .filter(deployment_revisions::Column::WorkspaceId.eq(run.workspace_id))
@@ -947,7 +975,20 @@ async fn once(
             )),
         };
     }
-    let (id, kind) = if b.scope == "build" {
+    let (id, kind) = if b.scope == "build" && b.target_kind == "workflow" {
+        let (_, Json(value)) = crate::workflows::run::scheduled(
+            s.clone(),
+            scope,
+            Id::reference(&b.target_ref)?,
+            &b.entry_node_id,
+            &b.inputs,
+        )
+        .await?;
+        (
+            Id::reference(value["id"].as_str().ok_or_else(ApiError::missing)?)?,
+            "workflow-executions",
+        )
+    } else if b.scope == "build" {
         let (_, Json(value)) = crate::pipelines::runs::trigger_as(
             s.clone(),
             scope,
@@ -1061,6 +1102,12 @@ pub async fn scheduler(
                 None
             } else if row.downstream_kind == "pipeline-runs" {
                 pipeline_runs::Entity::find_by_id(row.downstream_id)
+                    .one(&s.db)
+                    .await?
+                    .map(|r| r.state)
+            } else if row.downstream_kind == "workflow-executions" {
+                workflow_executions::Entity::find_by_id(row.downstream_id)
+                    .filter(workflow_executions::Column::WorkspaceId.eq(row.workspace_id))
                     .one(&s.db)
                     .await?
                     .map(|r| r.state)
@@ -1303,6 +1350,193 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn workflow_schedules_validate_authority_and_run_published_revisions() {
+        use crate::{agents::tests::admin, entities::workflows};
+        let (_dir, s) = crate::platform_tools::tests::setup().await;
+        let graph = json!({"engine":"ferry-graph","schema":1,"settings":{"timezone":"UTC"},"nodes":[
+            {"id":"start","name":"Start","type":"core.trigger.manual","type_version":1,"params":{"input_schema":{"type":"object","properties":{"message":{"type":"string"}},"required":["message"]}},"position":[0,0]}
+        ],"connections":[],"pin_data":{"start":[{"json":{"message":"DO_NOT_USE_PINNED_TEST_DATA"}}]}});
+        let (_, Json(workflow)) = crate::workflows::create(
+            State(s.clone()),
+            admin(1),
+            Json(
+                serde_json::from_value(
+                    json!({"name":"Scheduled fixture","definition":graph.to_string()}),
+                )
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let id: Id = serde_json::from_value(workflow["id"].clone()).unwrap();
+        let mut b = body("* * * * *", "UTC");
+        b.scope = "build".into();
+        b.action = "workflow".into();
+        b.target_kind = "workflow".into();
+        b.target_ref = id.to_string();
+        b.command.clear();
+        b.entry_node_id = "start".into();
+        b.inputs.insert("message".into(), json!("Scheduled input"));
+        assert!(
+            validate(&s.db, &admin(1), &b, true).await.is_err(),
+            "draft is not a production target"
+        );
+        workflows::Entity::update_many()
+            .col_expr(
+                workflows::Column::PublishedRevisionId,
+                Expr::value(
+                    Id::reference(workflow["draft_revision_id"].as_str().unwrap()).unwrap(),
+                ),
+            )
+            .filter(workflows::Column::Id.eq(id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        validate(&s.db, &admin(1), &b, true).await.unwrap();
+        assert_eq!(
+            validate(&s.db, &admin(2), &b, true).await.unwrap_err().0,
+            StatusCode::NOT_FOUND
+        );
+        let mut denied = admin(1);
+        denied
+            .permissions
+            .retain(|permission| permission != "workflows.run");
+        assert_eq!(
+            validate(&s.db, &denied, &b, true).await.unwrap_err().0,
+            StatusCode::FORBIDDEN
+        );
+        let mut invalid = b.clone();
+        invalid.entry_node_id = "missing".into();
+        assert!(validate(&s.db, &admin(1), &invalid, true).await.is_err());
+        invalid = b.clone();
+        invalid.inputs.clear();
+        assert!(validate(&s.db, &admin(1), &invalid, true).await.is_err());
+        invalid = b.clone();
+        invalid.inputs.insert("message".into(), json!(3));
+        assert!(validate(&s.db, &admin(1), &invalid, true).await.is_err());
+        invalid = b.clone();
+        invalid.environment_id = "1".into();
+        assert!(validate(&s.db, &admin(1), &invalid, true).await.is_err());
+        let (_, Json(saved)) = create(State(s.clone()), admin(1), Json(b.clone()))
+            .await
+            .unwrap();
+        let job_id: Id = serde_json::from_value(saved["id"].clone()).unwrap();
+        jobs::Entity::update_many()
+            .col_expr(jobs::Column::NextRunAt, Expr::value(db::now() - 1))
+            .filter(jobs::Column::Id.eq(job_id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        due(&s, false).await.unwrap();
+        let queued = runs::Entity::find()
+            .filter(runs::Column::JobId.eq(job_id))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(queued.trigger_kind, "scheduled");
+        assert_eq!(queued.state, "queued");
+        let (stop_tx, stop) = watch::channel(false);
+        let (_drain_tx, drain) = watch::channel(false);
+        let worker = tokio::spawn(crate::workflows::run::scheduler(
+            s.clone(),
+            stop.clone(),
+            drain.clone(),
+        ));
+        let result = tokio::time::timeout(
+            Duration::from_secs(20),
+            execute(s.clone(), queued.clone(), stop.clone(), drain),
+        )
+        .await;
+        stop_tx.send(true).unwrap();
+        worker.await.unwrap();
+        result.unwrap().unwrap();
+        let completed = runs::Entity::find_by_id(queued.id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(completed.state, "succeeded");
+        assert_eq!(completed.downstream_kind, "workflow-executions");
+        let execution = workflow_executions::Entity::find_by_id(completed.downstream_id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            execution.revision_id.to_string(),
+            workflow["draft_revision_id"].as_str().unwrap()
+        );
+        assert_eq!(execution.trigger_kind, "schedule");
+        assert_eq!(execution.mode, "production");
+        assert_eq!(execution.triggered_by, 1);
+        assert_eq!(execution.state, "succeeded");
+        assert_eq!(run_json(completed.clone(), false)["workflow_id"], json!(id));
+        runs::Entity::update_many()
+            .col_expr(runs::Column::State, Expr::value("running"))
+            .filter(runs::Column::Id.eq(completed.id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let (_stopped, stopped) = watch::channel(true);
+        let (_draining, draining) = watch::channel(false);
+        scheduler(s.clone(), stopped, draining).await;
+        assert_eq!(
+            runs::Entity::find_by_id(completed.id)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            "succeeded",
+            "restart recovery follows the workflow execution"
+        );
+        let (_, Json(retry)) = run_now(State(s.clone()), admin(1), Path(("1".into(), job_id)))
+            .await
+            .unwrap();
+        let retry_id: Id = serde_json::from_value(retry["id"].clone()).unwrap();
+        let retry = runs::Entity::find_by_id(i64::from(retry_id))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        crate::entities::workspace_roles::Entity::update_many()
+            .col_expr(
+                crate::entities::workspace_roles::Column::Permissions,
+                Expr::value(json!(denied.permissions).to_string()),
+            )
+            .filter(crate::entities::workspace_roles::Column::Id.eq(1))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let (_stop, stop) = watch::channel(false);
+        let (_drain, drain) = watch::channel(false);
+        execute(s.clone(), retry, stop, drain).await.unwrap();
+        let rejected = runs::Entity::find_by_id(i64::from(retry_id))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(rejected.state, "failed");
+        assert_eq!(
+            rejected.downstream_id, 0,
+            "revocation must block creation of a downstream workflow execution"
+        );
+        assert!(
+            ensure_unreferenced(&s.db, 1.into(), "workflow", &[id])
+                .await
+                .is_err()
+        );
+        workflows::Entity::update_many()
+            .col_expr(workflows::Column::Lifecycle, Expr::value("archived"))
+            .filter(workflows::Column::Id.eq(id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        assert!(validate(&s.db, &admin(1), &b, true).await.is_err());
+    }
+
+    #[tokio::test]
     async fn stored_run_output_keeps_large_logs_and_localizes_skips_and_manual_review_per_reader() {
         use crate::entities::workspaces;
         use crate::i18n::{Locale, with_locale};
@@ -1474,6 +1708,8 @@ mod tests {
             target_kind: "host".into(),
             target_ref: "1".into(),
             environment_id: String::new(),
+            entry_node_id: String::new(),
+            inputs: Default::default(),
             command: "true".into(),
             timeout_seconds: 10,
             max_retries: 0,

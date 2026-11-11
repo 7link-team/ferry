@@ -35,7 +35,7 @@ export function FieldCaption({ label, help, required = false }: { label: ReactNo
   const [hint, setHint] = useState("");
   useEffect(() => {
     const container = frame.current?.closest("[data-auto-field]") ?? frame.current?.closest("label");
-    const control = container?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input,select,textarea");
+    const control = container?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input:not([aria-hidden=true]),select:not([aria-hidden=true]),textarea,[role=switch],[role=checkbox]");
     if (!control) { setHint(""); return; }
     // The help trigger has its own accessible name; exclude it from the input's name.
     if (!control.hasAttribute("aria-label") && (!control.hasAttribute("aria-labelledby") || control.dataset.fieldCaption === "true")) {
@@ -46,7 +46,7 @@ export function FieldCaption({ label, help, required = false }: { label: ReactNo
       setHint("");
       return;
     }
-    const type = control.tagName === "SELECT" || control.getAttribute("role") === "combobox" ? "select" : control.tagName === "TEXTAREA" ? "multiline" : control.type === "checkbox" ? "toggle" : control.type === "number" ? "number" : "text";
+    const type = control.tagName === "SELECT" || control.getAttribute("role") === "combobox" ? "select" : control.tagName === "TEXTAREA" ? "multiline" : control.type === "checkbox" || ["switch", "checkbox"].includes(control.getAttribute("role") ?? "") ? "toggle" : control.type === "number" ? "number" : "text";
     const example = control.getAttribute("placeholder");
     const limits = [control.getAttribute("min"), control.getAttribute("max")].filter(value => value !== null).join(" … ");
     const next = commonText(`field.${type}`) + (limits ? ` (${limits})` : "") + (example ? "\n" + commonText("field.example") + example : "") + (control.required ? "\n" + commonText("field.required") : "");

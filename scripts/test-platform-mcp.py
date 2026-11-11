@@ -36,7 +36,7 @@ requests=[
 ]
 flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
 try:
-    result=subprocess.run([str(binary),'platform-mcp'],env=env,input=''.join(json.dumps(dict(jsonrpc='2.0',**row))+'\n' for row in requests).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=25,**flags)
+    result=subprocess.run([str(binary),os.environ.get('FERRY_MCP_COMMAND','ferry-mcp')],env=env,input=''.join(json.dumps(dict(jsonrpc='2.0',**row))+'\n' for row in requests).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=25,**flags)
     assert result.returncode==0,result.stderr.decode(errors='replace')
     rows=[json.loads(line) for line in result.stdout.splitlines()]
     assert [row['id'] for row in rows]==list(range(1,8)),rows

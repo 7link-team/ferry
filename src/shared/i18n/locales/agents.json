@@ -574,5 +574,13 @@
     "提供されたデータと検証可能な情報源から明確なレポートを作成してください。読者、対象期間、指標の定義を確認し、欠損値、単位、計算方法を点検してください。証拠、解釈、提案を区別し、データや出典を捏造しないでください。結論、根拠、限界、次の行動を示してください。ファイルを実際に作成するまでダウンロード可能と伝えないでください。",
     "제공된 데이터와 검증 가능한 출처로 명확한 보고서를 작성하세요. 독자, 기간과 지표 정의를 확인하고 누락값, 단위와 계산 방법을 점검하세요. 증거, 해석과 제안을 구분하고 데이터나 출처를 지어내지 마세요. 핵심 결론, 근거, 한계와 다음 행동을 제시하세요. 실제 파일을 만든 뒤에만 다운로드할 수 있다고 알리세요.",
     "Hasilkan laporan jelas daripada data diberikan dan sumber boleh disahkan. Sahkan pembaca, tempoh dan definisi metrik. Semak nilai hilang, unit dan kaedah pengiraan. Bezakan bukti, tafsiran dan cadangan; jangan reka data atau sumber. Mulakan dengan dapatan utama, bukti, batasan dan tindakan seterusnya. Dakwa fail boleh dimuat turun hanya selepas menciptanya."
+  ],
+  "runtimeSetupFailed": [
+    "Unable to prepare the Agent runtime. Check the Runner installation policy, Node/npm, network and version settings. Configuration isolation requires the default managed working directory.",
+    "无法准备智能体运行环境。请检查 Runner 安装策略、Node/npm、网络和版本配置；启用配置隔离时请使用默认托管工作目录。",
+    "無法準備智慧體執行環境。請檢查 Runner 安裝策略、Node/npm、網路與版本設定；啟用設定隔離時請使用預設託管工作目錄。",
+    "エージェントの実行環境を準備できません。Runner のインストール方針、Node/npm、ネットワーク、バージョン設定を確認してください。設定の分離には既定の管理対象作業ディレクトリが必要です。",
+    "에이전트 실행 환경을 준비할 수 없습니다. Runner 설치 정책, Node/npm, 네트워크 및 버전 설정을 확인하세요. 설정 격리에는 기본 관리 작업 디렉터리가 필요합니다.",
+    "Persekitaran ejen tidak dapat disediakan. Semak dasar pemasangan Runner, Node/npm, rangkaian dan tetapan versi. Pengasingan konfigurasi memerlukan direktori kerja terurus lalai."
   ]
 }

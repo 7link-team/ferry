@@ -34,7 +34,7 @@ it("adds unique names and edits typed defaults without JSON", async () => {
   expect(JSON.parse(latest).map((row: { name: string }) => row.name)).toEqual(["parameter_2", "parameter_3"]);
   const row = host.querySelectorAll("fieldset")[1]!;
   await fill(row.querySelector("select")!, "integer");
-  await act(async () => row.querySelector<HTMLButtonElement>('[role="checkbox"]')!.click());
+  await act(async () => row.querySelector<HTMLButtonElement>('[role="switch"]')!.click());
   await fill(row.querySelector<HTMLInputElement>('input[type="number"]')!, "42");
   expect(JSON.parse(latest)[1].default).toBe(42);
 });
@@ -64,7 +64,7 @@ it("keeps the complete definition when switching between form and source", async
 
 it("shows typed values in read-only mode without mutation controls", async () => {
   await act(async () => root.render(<Harness source='[{"name":"enabled","type":"boolean","default":false}]' readOnly />));
-  expect(host.querySelector("input, select, textarea, [role=checkbox]")).toBeNull();
+  expect(host.querySelector("input, select, textarea, [role=checkbox], [role=switch]")).toBeNull();
   expect(host.querySelector("dl")?.textContent).toContain("否");
   expect(button("添加参数")).toBeUndefined();
   expect(latest).toContain('"default":false');

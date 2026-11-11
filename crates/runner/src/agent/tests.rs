@@ -215,6 +215,239 @@ fn acp_readonly_cancels_tools_and_rejects_foreign_sessions_or_missing_safe_modes
     );
 }
 
+fn dsh_initialize() -> Value {
+    json!({"id":0,"result":{"protocolVersion":1,
+        "agentInfo":{"name":"deepseek-harness-acp"},
+        "agentCapabilities":{"sessionCapabilities":{"resume":{}}}}})
+}
+
+fn dsh_options(values: &[(&str, &str)]) -> Value {
+    json!([{"id":"model","type":"select","currentValue":"[\"provider\",\"model\"]",
+        "options":[{"group":"provider","options":values.iter().map(|(provider, model)|
+            json!({"value":serde_json::to_string(&[provider, model]).unwrap(),"name":model}))
+            .collect::<Vec<_>>()}]}])
+}
+
+fn dsh_policy(p: &mut protocol::Protocol) {
+    p.receive(json!({"method":"agent_runtime/permissions","params":{"sessionId":"dsh-session","preset":"read-only"}})).unwrap();
+}
+
+fn dsh_ready(permission: Permission, platform_tools: bool) -> protocol::Protocol {
+    let mut r = request(Runtime::Dsh);
+    r.permission = permission;
+    r.platform_tools = platform_tools;
+    let mut p = protocol::Protocol::new(r, "dsh-test".into());
+    assert_eq!(
+        p.receive(dsh_initialize()).unwrap().writes[0]["method"],
+        "session/new"
+    );
+    dsh_policy(&mut p);
+    let next = p
+        .receive(json!({"id":1,"result":{"sessionId":"dsh-session","configOptions":[]}}))
+        .unwrap();
+    assert_eq!(next.writes[0]["method"], "session/prompt");
+    assert!(
+        matches!(&next.events[0], Event::Session { native_session_id } if native_session_id == "dsh-session")
+    );
+    p
+}
+
+#[test]
+fn dsh_new_resume_stream_and_completion_use_its_advertised_contract() {
+    assert_eq!(Runtime::parse("dsh"), Some(Runtime::Dsh));
+    let cmd = command(&request(Runtime::Dsh));
+    assert_eq!(cmd.as_std().get_args().last().unwrap(), "acp");
+    let mut p = dsh_ready(Permission::ReadOnly, false);
+    let step = p.receive(json!({"method":"session/update","params":{"sessionId":"dsh-session",
+        "update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"answer"}}}})).unwrap();
+    assert!(matches!(&step.events[0], Event::Text {text,..} if text == "answer"));
+    p.receive(json!({"method":"agent_runtime/turn_end","params":{
+        "sessionId":"dsh-session","reason":"completed"}}))
+        .unwrap();
+    assert_eq!(
+        p.receive(json!({"id":4,"result":{"stopReason":"end_turn"}}))
+            .unwrap()
+            .done,
+        Some(Outcome::Completed)
+    );
+    let mut r = request(Runtime::Dsh);
+    r.native_session_id = Some("dsh-session".into());
+    let mut p = protocol::Protocol::new(r, "resume".into());
+    assert_eq!(
+        p.receive(dsh_initialize()).unwrap().writes[0]["method"],
+        "session/resume"
+    );
+    dsh_policy(&mut p);
+    assert_eq!(
+        p.receive(json!({"id":1,"result":{"configOptions":[]}}))
+            .unwrap()
+            .writes[0]["method"],
+        "session/prompt"
+    );
+    assert!(
+        p.receive(json!({"method":"session/update","params":{"sessionId":"another","update":{}}}))
+            .is_err()
+    );
+    let mut p = protocol::Protocol::new(request(Runtime::Dsh), "wrong-agent".into());
+    assert!(
+        p.receive(json!({"id":0,"result":{"protocolVersion":1,"agentInfo":{"name":"other"}}}))
+            .is_err()
+    );
+}
+
+#[test]
+fn dsh_model_selection_rejects_missing_ambiguous_and_unacknowledged_routes() {
+    for (requested, values, accepted) in [
+        (
+            "provider/model",
+            vec![("provider", "model"), ("other", "model")],
+            true,
+        ),
+        (
+            "model",
+            vec![("provider", "model"), ("other", "model")],
+            false,
+        ),
+        ("missing", vec![("provider", "model")], false),
+        ("model", vec![("provider", "model")], true),
+    ] {
+        let mut r = request(Runtime::Dsh);
+        r.model = Some(requested.into());
+        let mut p = protocol::Protocol::new(r, "model".into());
+        p.receive(dsh_initialize()).unwrap();
+        dsh_policy(&mut p);
+        let step = p.receive(json!({"id":1,"result":{"sessionId":"dsh-session","configOptions":dsh_options(&values)}}));
+        if accepted {
+            let step = step.unwrap();
+            assert_eq!(step.writes[0]["method"], "session/set_config_option");
+            assert_eq!(
+                step.writes[0]["params"]["value"],
+                "[\"provider\",\"model\"]"
+            );
+            assert!(
+                p.receive(json!({"id":3,"result":{"configOptions":[]}}))
+                    .is_err()
+            );
+        } else {
+            assert!(step.is_err());
+        }
+    }
+    let mut r = request(Runtime::Dsh);
+    r.model = Some("provider/model".into());
+    let mut p = protocol::Protocol::new(r, "model-success".into());
+    p.receive(dsh_initialize()).unwrap();
+    dsh_policy(&mut p);
+    let options = dsh_options(&[("provider", "model")]);
+    p.receive(json!({"id":1,"result":{"sessionId":"dsh-session","configOptions":options}}))
+        .unwrap();
+    assert_eq!(
+        p.receive(json!({"id":3,"result":{"configOptions":options}}))
+            .unwrap()
+            .writes[0]["method"],
+        "session/prompt"
+    );
+}
+
+#[test]
+fn dsh_id_only_permissions_cannot_unlock_unrelated_tools_or_other_sessions() {
+    let permission = |id: &str| {
+        json!({"id":90,"method":"session/request_permission","params":{
+        "sessionId":"dsh-session","toolCall":{"toolCallId":id},
+        "options":[{"kind":"allow_once","optionId":"once"},{"kind":"reject_once","optionId":"reject"}]}})
+    };
+    let mut p = dsh_ready(Permission::ReadOnly, true);
+    p.receive(json!({"method":"session/update","params":{"sessionId":"dsh-session","update":{
+        "sessionUpdate":"tool_call","toolCallId":"platform","title":"mcp__ferry__ferry_request","status":"pending"}}})).unwrap();
+    assert_eq!(
+        p.receive(permission("platform")).unwrap().writes[0]["result"]["outcome"]["optionId"],
+        "once"
+    );
+    assert_eq!(
+        p.receive(permission("unknown")).unwrap().writes[0]["result"]["outcome"]["outcome"],
+        "cancelled"
+    );
+    p.receive(
+        json!({"method":"session/update","params":{"sessionId":"dsh-session","update":{
+        "sessionUpdate":"tool_call_update","toolCallId":"platform","status":"completed"}}}),
+    )
+    .unwrap();
+    assert_eq!(
+        p.receive(permission("platform")).unwrap().writes[0]["result"]["outcome"]["outcome"],
+        "cancelled"
+    );
+    let mut p = dsh_ready(Permission::OnRequest, false);
+    let step = p.receive(permission("local")).unwrap();
+    let Event::Approval { request_id, .. } = &step.events[0] else {
+        panic!("missing approval")
+    };
+    let request_id = request_id.clone();
+    assert_eq!(
+        p.input(Input::Decision {
+            request_id: request_id.clone(),
+            allow: true
+        })
+        .unwrap()
+        .writes[0]["result"]["outcome"]["optionId"],
+        "once"
+    );
+    assert!(
+        p.input(Input::Decision {
+            request_id,
+            allow: true
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn dsh_native_end_reason_overrides_acp_success_and_requires_a_matching_receipt() {
+    for reason in ["error", "blocked", "aborted", "max-tokens", "unknown"] {
+        let mut p = dsh_ready(Permission::ReadOnly, false);
+        p.receive(json!({"method":"agent_runtime/turn_end","params":{
+            "sessionId":"dsh-session","reason":reason}}))
+            .unwrap();
+        assert_eq!(
+            p.receive(json!({"id":4,"result":{"stopReason":"end_turn"}}))
+                .unwrap()
+                .done,
+            Some(Outcome::Failed)
+        );
+    }
+    let mut p = dsh_ready(Permission::ReadOnly, false);
+    assert!(
+        p.receive(json!({"id":4,"result":{"stopReason":"end_turn"}}))
+            .is_err()
+    );
+    p.receive(json!({"method":"agent_runtime/turn_end","params":{
+        "sessionId":"foreign","reason":"completed"}}))
+        .unwrap();
+    assert!(
+        p.receive(json!({"id":4,"result":{"stopReason":"end_turn"}}))
+            .is_err()
+    );
+}
+
+#[test]
+fn dsh_fails_closed_without_policy_receipt_or_resume_capability() {
+    let mut p = protocol::Protocol::new(request(Runtime::Dsh), "missing-policy".into());
+    p.receive(dsh_initialize()).unwrap();
+    assert!(
+        p.receive(json!({"id":1,"result":{"sessionId":"dsh-session","configOptions":[]}}))
+            .is_err()
+    );
+    let mut p = protocol::Protocol::new(request(Runtime::Dsh), "foreign-policy".into());
+    p.receive(dsh_initialize()).unwrap();
+    p.receive(json!({"method":"agent_runtime/permissions","params":{"sessionId":"foreign","preset":"read-only"}})).unwrap();
+    assert!(
+        p.receive(json!({"id":1,"result":{"sessionId":"dsh-session"}}))
+            .is_err()
+    );
+    let mut r = request(Runtime::Dsh);
+    r.native_session_id = Some("dsh-session".into());
+    let mut p = protocol::Protocol::new(r, "missing-resume".into());
+    assert!(p.receive(json!({"id":0,"result":{"protocolVersion":1,"agentInfo":{"name":"deepseek-harness-acp"}}})).is_err());
+}
+
 #[test]
 fn pi_agent_end_preserves_final_text_and_failed_outcomes() {
     for failed in [false, true] {

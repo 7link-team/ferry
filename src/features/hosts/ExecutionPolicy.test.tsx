@@ -19,11 +19,11 @@ it("keeps shared execution opt-in and blocks invalid capacity before saving", as
     return <ExecutionPolicyFields value={value} readOnly={false} onChange={setValue} onValidityChange={validity} />;
   }
   await act(async () => root.render(<Form />));
-  const checkboxes = host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
-  expect(checkboxes[0]!.checked).toBe(true);
-  expect(checkboxes[1]!.checked).toBe(false);
+  const checkboxes = host.querySelectorAll<HTMLButtonElement>('[role="switch"]');
+  expect(checkboxes[0]!.getAttribute("aria-checked")).toBe("true");
+  expect(checkboxes[1]!.getAttribute("aria-checked")).toBe("false");
   await act(async () => checkboxes[1]!.click());
-  expect(checkboxes[1]!.checked).toBe(true);
+  expect(checkboxes[1]!.getAttribute("aria-checked")).toBe("true");
   const input = host.querySelector<HTMLInputElement>('input[type="number"]')!;
   expect(input.getAttribute("aria-label")).toBe(executionText("hostExecution.capacity"));
   for (const [value, blocked] of [["0", true], ["65", true], ["2.5", true], ["4", false]] as const) {

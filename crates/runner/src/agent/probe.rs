@@ -10,6 +10,7 @@ pub(super) fn executable(runtime: Runtime) -> Option<std::path::PathBuf> {
         Runtime::Qwen => "qwen",
         Runtime::Opencode => "opencode",
         Runtime::Pi => "pi",
+        Runtime::Dsh => "dsh",
     };
     let path = std::env::var_os("PATH")?;
     for directory in std::env::split_paths(&path) {
@@ -32,6 +33,7 @@ pub(super) fn executable(runtime: Runtime) -> Option<std::path::PathBuf> {
             let packages: &[&str] = match runtime {
                 Runtime::Gemini => &["@google/gemini-cli"],
                 Runtime::Qwen => &["@qwen-code/qwen-code"],
+                Runtime::Dsh => &["@deepseek-ai/dsh"],
                 Runtime::Pi => &[
                     "@earendil-works/pi-coding-agent",
                     "@mariozechner/pi-coding-agent",
@@ -91,12 +93,13 @@ pub(super) fn executable(runtime: Runtime) -> Option<std::path::PathBuf> {
     None
 }
 
-async fn capture(
-    _runtime: Runtime,
+pub(super) async fn capture_with(
     executable: &std::path::Path,
     args: &[&str],
+    environment: &provision::Environment,
 ) -> Result<(bool, String)> {
     let mut command = native_command(executable);
+    environment.apply(&mut command);
     // Use the exact executable inspected above, not a current-directory shim.
     command
         .args(args)
@@ -141,7 +144,24 @@ async fn capture(
     result.context("CLI inspection timed out")?
 }
 
+#[cfg(test)]
 pub(crate) async fn probe(runtime: Runtime, cwd: &str) -> Result<Probe> {
+    probe_with(
+        runtime,
+        cwd,
+        &provision::Environment {
+            executable: executable(runtime),
+            home: None,
+        },
+    )
+    .await
+}
+
+pub(crate) async fn probe_with(
+    runtime: Runtime,
+    cwd: &str,
+    environment: &provision::Environment,
+) -> Result<Probe> {
     use sha2::{Digest, Sha256};
     let mut identity = Sha256::new();
     for key in [
@@ -152,7 +172,10 @@ pub(crate) async fn probe(runtime: Runtime, cwd: &str) -> Result<Probe> {
         "HOME",
         "APPDATA",
         "LOCALAPPDATA",
-    ] {
+    ]
+    .into_iter()
+    .chain((runtime == Runtime::Dsh).then_some("DSH_HOME"))
+    {
         identity.update(key.as_bytes());
         identity.update([0]);
         if let Some(value) = std::env::var_os(key) {
@@ -162,6 +185,9 @@ pub(crate) async fn probe(runtime: Runtime, cwd: &str) -> Result<Probe> {
     }
     #[cfg(unix)]
     identity.update(unsafe { libc::geteuid() }.to_le_bytes());
+    if let Some(home) = &environment.home {
+        identity.update(home.to_string_lossy().as_bytes());
+    }
     ensure!(
         (cwd.is_empty() || std::path::Path::new(cwd).is_absolute())
             && cwd.len() <= 4096
@@ -188,16 +214,16 @@ pub(crate) async fn probe(runtime: Runtime, cwd: &str) -> Result<Probe> {
             .filter(|p| p.is_dir())
             .map(|p| p.to_string_lossy().into_owned()),
     };
-    let Some(path) = executable(runtime) else {
+    let Some(path) = environment.executable.as_ref() else {
         status.error = Some("missing".into());
         return Ok(status);
     };
     status.executable = Some(path.to_string_lossy().into_owned());
     // An empty cwd is an explicit catalog inspection, never a turn preflight.
-    if cwd.is_empty() {
+    if cwd.is_empty() && environment.home.is_none() {
         status.models = native_models(runtime, &path).await;
     }
-    match capture(runtime, &path, &["--version"]).await {
+    match capture_with(path, &["--version"], environment).await {
         Ok((true, text)) => {
             status.version = text
                 .lines()
@@ -217,7 +243,7 @@ pub(crate) async fn probe(runtime: Runtime, cwd: &str) -> Result<Probe> {
         // Preserve unknown; actual session admission reports authentication errors.
         _ => return Ok(status),
     };
-    if let Ok((success, text)) = capture(runtime, &path, args).await {
+    if let Ok((success, text)) = capture_with(path, args, environment).await {
         status.authentication = match runtime {
             Runtime::Codex if codex_authentication(success, &text) => "logged_in",
             Runtime::Codex if !success && text.contains("Not logged in") => "logged_out",
@@ -394,6 +420,43 @@ mod tests {
             true,
             "Authentication is checked when you send a request."
         ));
+    }
+    #[tokio::test]
+    async fn existing_runtime_bindings_keep_their_original_identity_hash() {
+        use sha2::{Digest, Sha256};
+        let mut legacy = Sha256::new();
+        for key in [
+            "USERNAME",
+            "USER",
+            "USERDOMAIN",
+            "USERPROFILE",
+            "HOME",
+            "APPDATA",
+            "LOCALAPPDATA",
+        ] {
+            legacy.update(key.as_bytes());
+            legacy.update([0]);
+            if let Some(value) = std::env::var_os(key) {
+                legacy.update(value.to_string_lossy().as_bytes());
+            }
+            legacy.update([0]);
+        }
+        #[cfg(unix)]
+        legacy.update(unsafe { libc::geteuid() }.to_le_bytes());
+        let expected = format!("{:x}", legacy.finalize());
+        for runtime in [
+            Runtime::Codex,
+            Runtime::Claude,
+            Runtime::Gemini,
+            Runtime::Qwen,
+            Runtime::Opencode,
+            Runtime::Pi,
+        ] {
+            let result = probe_with(runtime, "", &provision::Environment::default())
+                .await
+                .unwrap();
+            assert_eq!(result.execution_identity, expected, "{runtime:?}");
+        }
     }
     #[tokio::test]
     #[ignore = "requires native CLI installations and the current user's login"]

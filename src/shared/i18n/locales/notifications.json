@@ -448,19 +448,19 @@
   ],
   "source.workflow": [
     "Workflow",
-    "节点工作流",
-    "節點工作流程",
+    "工作流",
+    "工作流",
     "ワークフロー",
     "워크플로",
     "Aliran kerja"
   ],
   "source.pipeline": [
     "Pipeline",
-    "构建流水线",
-    "建置管線",
+    "流水线",
+    "流水線",
     "パイプライン",
     "파이프라인",
-    "Saluran binaan"
+    "Saluran paip"
   ],
   "source.alert": [
     "Alert",

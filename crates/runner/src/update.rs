@@ -78,10 +78,18 @@ pub(crate) fn staged_binary(
         "版本目录与签名哈希不一致"
     );
     let binary = dir.join(if cfg!(windows) {
-        "runner.exe"
+        "ferry-runner.exe"
     } else {
-        "runner"
+        "ferry-runner"
     });
+    let binary = match std::fs::symlink_metadata(&binary) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => dir.join(if cfg!(windows) {
+            "runner.exe"
+        } else {
+            "runner"
+        }),
+        _ => binary,
+    };
     ensure!(
         std::fs::symlink_metadata(&binary)?.file_type().is_file(),
         "代理程序必须是普通文件"
@@ -122,9 +130,9 @@ pub(crate) fn stage(
         .prefix("staging-")
         .tempdir_in(&base)?;
     let binary = directory.path().join(if cfg!(windows) {
-        "runner.exe"
+        "ferry-runner.exe"
     } else {
-        "runner"
+        "ferry-runner"
     });
     let mut input = std::fs::File::open(source)?.take(artifact.size + 1);
     let mut output = std::fs::File::create(&binary)?;
