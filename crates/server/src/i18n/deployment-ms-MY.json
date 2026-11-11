@@ -236,5 +236,14 @@
   "blueprint.endpointInvalid": "Titik akhir {endpoint} tidak sah: perlukan nama unik, peranan dan port sedia ada, serta kind discovery, vip atau direct.",
   "blueprint.driverUnknown": "Kunci pemacu tidak dikenali; kunci dibenarkan ialah native, docker, compose, stack dan k8s.",
   "blueprint.updateInvalid": "update.maxParallel dan update.healthTimeout mestilah sekurang-kurangnya 1.",
-  "blueprint.stableMaxParallel": "Pelan tindakan dengan peranan stable memerlukan update.maxParallel bernilai 1."
+  "blueprint.stableMaxParallel": "Pelan tindakan dengan peranan stable memerlukan update.maxParallel bernilai 1.",
+  "blueprint.templateSyntax": "Ralat sintaks templat: setiap tindakan mesti ditutup, setiap range dan if memerlukan end yang sepadan, penanda trim tidak disokong, dan hanya ungkapan yang disokong boleh digunakan.",
+  "blueprint.templateDepth": "Blok range/if dan kurungan templat boleh bersarang paling banyak 8 tahap.",
+  "blueprint.templateFunctionUnknown": "Fungsi templat {name} tidak disokong; hanya add tersedia.",
+  "blueprint.templateFieldUnknown": "Medan templat {field} tidak disokong.",
+  "blueprint.templateValueMissing": "Parameter templat {name} tidak mempunyai nilai.",
+  "blueprint.templateRoleUnknown": "Templat merujuk peranan {role} yang tidak diketahui.",
+  "blueprint.templatePortUnknown": "Templat merujuk port {port} yang tidak diketahui.",
+  "blueprint.templateIntegerRequired": "add memerlukan operand integer dan hasil integer dalam julat.",
+  "blueprint.templateUnresolved": "Templat yang dirender masih mengandungi ungkapan yang belum diselesaikan: data instans tiada atau nilai mengandungi sintaks templat."
 }

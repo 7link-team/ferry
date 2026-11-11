@@ -236,5 +236,14 @@
   "blueprint.endpointInvalid": "엔드포인트 {endpoint}이(가) 올바르지 않습니다. 고유한 이름, 존재하는 역할과 포트, discovery/vip/direct 중 하나의 kind가 필요합니다.",
   "blueprint.driverUnknown": "알 수 없는 드라이버 키입니다. native, docker, compose, stack, k8s만 허용됩니다.",
   "blueprint.updateInvalid": "update.maxParallel과 update.healthTimeout은 1 이상이어야 합니다.",
-  "blueprint.stableMaxParallel": "stable 역할이 있는 블루프린트는 update.maxParallel이 1이어야 합니다."
+  "blueprint.stableMaxParallel": "stable 역할이 있는 블루프린트는 update.maxParallel이 1이어야 합니다.",
+  "blueprint.templateSyntax": "템플릿 구문 오류: 모든 액션은 닫혀야 하고, range와 if에는 대응하는 end가 있어야 하며, 공백 트림 표시는 지원되지 않고, 지원되는 표현식만 사용할 수 있습니다.",
+  "blueprint.templateDepth": "템플릿의 range/if 블록과 괄호는 최대 8단계까지 중첩할 수 있습니다.",
+  "blueprint.templateFunctionUnknown": "지원되지 않는 템플릿 함수 {name}입니다. add만 사용할 수 있습니다.",
+  "blueprint.templateFieldUnknown": "지원되지 않는 템플릿 필드 {field}입니다.",
+  "blueprint.templateValueMissing": "템플릿 매개변수 {name}에 값이 없습니다.",
+  "blueprint.templateRoleUnknown": "템플릿이 알 수 없는 역할 {role}을(를) 참조합니다.",
+  "blueprint.templatePortUnknown": "템플릿이 알 수 없는 포트 {port}을(를) 참조합니다.",
+  "blueprint.templateIntegerRequired": "add의 피연산자는 정수여야 하며 결과도 정수 범위를 벗어날 수 없습니다.",
+  "blueprint.templateUnresolved": "렌더링된 템플릿에 해석되지 않은 표현식이 남아 있습니다. 인스턴스 정보가 없거나 값에 템플릿 구문이 포함되어 있습니다."
 }

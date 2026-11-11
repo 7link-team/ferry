@@ -236,5 +236,14 @@
   "blueprint.endpointInvalid": "Endpoint {endpoint} is invalid: it needs a unique name, an existing role and port, and kind discovery, vip, or direct.",
   "blueprint.driverUnknown": "Unknown driver key; allowed keys are native, docker, compose, stack, and k8s.",
   "blueprint.updateInvalid": "update.maxParallel and update.healthTimeout must be at least 1.",
-  "blueprint.stableMaxParallel": "A blueprint with stable roles requires update.maxParallel to be 1."
+  "blueprint.stableMaxParallel": "A blueprint with stable roles requires update.maxParallel to be 1.",
+  "blueprint.templateSyntax": "Template syntax error: every action must be closed, every range and if needs a matching end, trim markers are not supported, and only supported expressions may be used.",
+  "blueprint.templateDepth": "Template range/if blocks and parentheses can be nested at most 8 levels deep.",
+  "blueprint.templateFunctionUnknown": "Unsupported template function {name}; only add is available.",
+  "blueprint.templateFieldUnknown": "Unsupported template field {field}.",
+  "blueprint.templateValueMissing": "Template parameter {name} has no value.",
+  "blueprint.templateRoleUnknown": "The template references unknown role {role}.",
+  "blueprint.templatePortUnknown": "The template references unknown port {port}.",
+  "blueprint.templateIntegerRequired": "add requires integer operands and an integer result within range.",
+  "blueprint.templateUnresolved": "The rendered template still contains unresolved expressions: instance data is missing or a value contains template syntax."
 }
