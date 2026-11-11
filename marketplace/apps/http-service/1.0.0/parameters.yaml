@@ -1,0 +1,12 @@
+- name: port
+  label: Published port
+  type: integer
+  min: 1
+  max: 65535
+  default: 8080
+- name: message
+  label: Welcome message
+  type: string
+  min_length: 1
+  max_length: 2000
+  default: Hello from Ferry
