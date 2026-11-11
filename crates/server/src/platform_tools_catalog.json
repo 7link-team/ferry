@@ -31,7 +31,7 @@
     "source": "crates/server/src/agents.rs",
     "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(mut body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct Body {\n    #[serde(flatten, default, skip_serializing)]\n    metadata: HashMap<String, Value>,\n    name: String,\n    #[serde(default)]\n    role: String,\n    #[serde(default)]\n    platform_role_id: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    model_profile_id: String,\n    #[serde(default)]\n    model: String,\n    #[serde(default)]\n    host_id: Id,\n    owner_id: Id,\n    #[serde(default)]\n    cwd: String,\n    #[serde(default)]\n    system_prompt: String,\n    #[serde(default = \"default_permission\")]\n    permission: String,\n    visibility: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n}"
+      "struct Body {\n    #[serde(flatten, default, skip_serializing)]\n    metadata: HashMap<String, Value>,\n    name: String,\n    #[serde(default)]\n    avatar: Option<crate::avatar::Avatar>,\n    #[serde(default)]\n    role: String,\n    #[serde(default)]\n    platform_role_id: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    model_profile_id: String,\n    #[serde(default)]\n    model: String,\n    #[serde(default)]\n    host_id: Id,\n    owner_id: Id,\n    #[serde(default)]\n    cwd: String,\n    #[serde(default)]\n    system_prompt: String,\n    #[serde(default = \"default_permission\")]\n    permission: String,\n    visibility: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n}"
     ],
     "permission_checks": [
       "ai-agents.create",
@@ -59,7 +59,7 @@
     "source": "crates/server/src/agents.rs",
     "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(mut body): Json<Body>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct Body {\n    #[serde(flatten, default, skip_serializing)]\n    metadata: HashMap<String, Value>,\n    name: String,\n    #[serde(default)]\n    role: String,\n    #[serde(default)]\n    platform_role_id: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    model_profile_id: String,\n    #[serde(default)]\n    model: String,\n    #[serde(default)]\n    host_id: Id,\n    owner_id: Id,\n    #[serde(default)]\n    cwd: String,\n    #[serde(default)]\n    system_prompt: String,\n    #[serde(default = \"default_permission\")]\n    permission: String,\n    visibility: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n}"
+      "struct Body {\n    #[serde(flatten, default, skip_serializing)]\n    metadata: HashMap<String, Value>,\n    name: String,\n    #[serde(default)]\n    avatar: Option<crate::avatar::Avatar>,\n    #[serde(default)]\n    role: String,\n    #[serde(default)]\n    platform_role_id: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    model_profile_id: String,\n    #[serde(default)]\n    model: String,\n    #[serde(default)]\n    host_id: Id,\n    owner_id: Id,\n    #[serde(default)]\n    cwd: String,\n    #[serde(default)]\n    system_prompt: String,\n    #[serde(default = \"default_permission\")]\n    permission: String,\n    visibility: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n}"
     ],
     "permission_checks": [
       "ai-agents.read",
@@ -400,6 +400,33 @@
       "app-templates.read"
     ],
     "permission": "app-templates.read"
+  },
+  {
+    "path": "/application-health",
+    "method": "GET",
+    "handler": "applications",
+    "source": "crates/server/src/monitoring/mod.rs",
+    "signature": "async fn applications(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "alerts.read",
+      "deployments.read",
+      "hosts.read"
+    ],
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/application-health/{id}",
+    "method": "GET",
+    "handler": "application",
+    "source": "crates/server/src/monitoring/mod.rs",
+    "signature": "async fn application(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "alerts.read",
+      "deployments.read",
+      "hosts.read"
+    ]
   },
   {
     "path": "/code-connection-analyses/{id}",
@@ -1156,7 +1183,7 @@
     "source": "crates/server/src/main.rs",
     "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(b): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct Body {\n    pub name: String,\n    #[serde(default)]\n    pub description: String,\n    pub scope: String,\n    pub schedule: String,\n    pub timezone: String,\n    #[serde(default)]\n    pub enabled: bool,\n    pub action: String,\n    pub target_kind: String,\n    pub target_ref: String,\n    #[serde(default)]\n    pub environment_id: String,\n    #[serde(default)]\n    pub command: String,\n    pub timeout_seconds: u64,\n    #[serde(default)]\n    pub max_retries: u32,\n    #[serde(default = \"retry_delay\")]\n    pub retry_delay_seconds: u64,\n    #[serde(default)]\n    pub version: i64,\n}"
+      "struct Body {\n    pub name: String,\n    #[serde(default)]\n    pub description: String,\n    pub scope: String,\n    pub schedule: String,\n    pub timezone: String,\n    #[serde(default)]\n    pub enabled: bool,\n    pub action: String,\n    pub target_kind: String,\n    pub target_ref: String,\n    #[serde(default)]\n    pub environment_id: String,\n    #[serde(default)]\n    pub entry_node_id: String,\n    #[serde(default)]\n    pub inputs: serde_json::Map<String, Value>,\n    #[serde(default)]\n    pub command: String,\n    pub timeout_seconds: u64,\n    #[serde(default)]\n    pub max_retries: u32,\n    #[serde(default = \"retry_delay\")]\n    pub retry_delay_seconds: u64,\n    #[serde(default)]\n    pub version: i64,\n}"
     ],
     "permission_checks": [
       "cron-jobs.create"
@@ -1193,7 +1220,7 @@
     "source": "crates/server/src/main.rs",
     "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(b): Json<Body>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct Body {\n    pub name: String,\n    #[serde(default)]\n    pub description: String,\n    pub scope: String,\n    pub schedule: String,\n    pub timezone: String,\n    #[serde(default)]\n    pub enabled: bool,\n    pub action: String,\n    pub target_kind: String,\n    pub target_ref: String,\n    #[serde(default)]\n    pub environment_id: String,\n    #[serde(default)]\n    pub command: String,\n    pub timeout_seconds: u64,\n    #[serde(default)]\n    pub max_retries: u32,\n    #[serde(default = \"retry_delay\")]\n    pub retry_delay_seconds: u64,\n    #[serde(default)]\n    pub version: i64,\n}"
+      "struct Body {\n    pub name: String,\n    #[serde(default)]\n    pub description: String,\n    pub scope: String,\n    pub schedule: String,\n    pub timezone: String,\n    #[serde(default)]\n    pub enabled: bool,\n    pub action: String,\n    pub target_kind: String,\n    pub target_ref: String,\n    #[serde(default)]\n    pub environment_id: String,\n    #[serde(default)]\n    pub entry_node_id: String,\n    #[serde(default)]\n    pub inputs: serde_json::Map<String, Value>,\n    #[serde(default)]\n    pub command: String,\n    pub timeout_seconds: u64,\n    #[serde(default)]\n    pub max_retries: u32,\n    #[serde(default = \"retry_delay\")]\n    pub retry_delay_seconds: u64,\n    #[serde(default)]\n    pub version: i64,\n}"
     ],
     "permission_checks": [
       "cron-jobs.run",
@@ -1357,7 +1384,7 @@
     "source": "crates/server/src/main.rs",
     "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(b): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct Body {\n    name: String,\n    #[serde(default)]\n    category: Option<String>,\n    manifest: String,\n    mode: String,\n    target_kind: String,\n    target_ref: String,\n    workdir: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n}"
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    category: Option<String>,\n    manifest: String,\n    mode: String,\n    target_kind: String,\n    target_ref: String,\n    workdir: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n    /// Instance binding; required when `target_kind` is `blueprint`, rejected otherwise.\n    #[serde(default)]\n    blueprint_binding: Option<Value>,\n}"
     ],
     "permission_checks": [
       "deployments.create"
@@ -1395,7 +1422,7 @@
     "source": "crates/server/src/main.rs",
     "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(b): Json<Body>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct Body {\n    name: String,\n    #[serde(default)]\n    category: Option<String>,\n    manifest: String,\n    mode: String,\n    target_kind: String,\n    target_ref: String,\n    workdir: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n}"
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    category: Option<String>,\n    manifest: String,\n    mode: String,\n    target_kind: String,\n    target_ref: String,\n    workdir: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n    /// Instance binding; required when `target_kind` is `blueprint`, rejected otherwise.\n    #[serde(default)]\n    blueprint_binding: Option<Value>,\n}"
     ],
     "permission_checks": [
       "config-templates.read",
@@ -1564,6 +1591,87 @@
     "permission": "dictionaries.update"
   },
   {
+    "path": "/health-checks",
+    "method": "GET",
+    "handler": "list",
+    "source": "crates/server/src/monitoring/mod.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "alerts.read",
+      "deployments.read",
+      "hosts.read"
+    ],
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/health-checks",
+    "method": "POST",
+    "handler": "create",
+    "source": "crates/server/src/monitoring/mod.rs",
+    "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(mut body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    kind: String,\n    role: String,\n    #[serde(default)]\n    deployment_id: String,\n    #[serde(default)]\n    host_id: String,\n    #[serde(default)]\n    service_name: String,\n    #[serde(default)]\n    enabled: bool,\n    #[serde(default)]\n    version: i64,\n    #[serde(flatten)]\n    settings: Settings,\n}",
+      "struct Settings {\n    pub address: String,\n    pub expected_status: u16,\n    pub body_contains: String,\n    pub interval_seconds: u32,\n    pub timeout_seconds: u32,\n    pub failure_threshold: u32,\n    pub recovery_threshold: u32,\n    pub stale_seconds: u32,\n    pub retention_days: u32,\n}"
+    ],
+    "permission_checks": [
+      "alerts.create"
+    ],
+    "permission": "alerts.create"
+  },
+  {
+    "path": "/health-checks/{id}",
+    "method": "DELETE",
+    "handler": "delete",
+    "source": "crates/server/src/monitoring/mod.rs",
+    "signature": "async fn delete(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "alerts.delete"
+    ],
+    "permission": "alerts.delete"
+  },
+  {
+    "path": "/health-checks/{id}",
+    "method": "GET",
+    "handler": "detail",
+    "source": "crates/server/src/monitoring/mod.rs",
+    "signature": "async fn detail(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "alerts.read",
+      "deployments.read",
+      "hosts.read"
+    ],
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/health-checks/{id}",
+    "method": "PATCH",
+    "handler": "update",
+    "source": "crates/server/src/monitoring/mod.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(mut body): Json<Body>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    description: String,\n    kind: String,\n    role: String,\n    #[serde(default)]\n    deployment_id: String,\n    #[serde(default)]\n    host_id: String,\n    #[serde(default)]\n    service_name: String,\n    #[serde(default)]\n    enabled: bool,\n    #[serde(default)]\n    version: i64,\n    #[serde(flatten)]\n    settings: Settings,\n}",
+      "struct Settings {\n    pub address: String,\n    pub expected_status: u16,\n    pub body_contains: String,\n    pub interval_seconds: u32,\n    pub timeout_seconds: u32,\n    pub failure_threshold: u32,\n    pub recovery_threshold: u32,\n    pub stale_seconds: u32,\n    pub retention_days: u32,\n}"
+    ],
+    "permission_checks": [
+      "alerts.update"
+    ]
+  },
+  {
+    "path": "/health-observations",
+    "method": "GET",
+    "handler": "history",
+    "source": "crates/server/src/monitoring/mod.rs",
+    "signature": "async fn history(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "alerts.read"
+    ],
+    "permission": "alerts.read"
+  },
+  {
     "path": "/holes",
     "method": "GET",
     "handler": "list",
@@ -1583,7 +1691,7 @@
     "source": "crates/server/src/holes.rs",
     "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<CreateBody>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct CreateBody {\n    name: String,\n    host_id: Id,\n    target_port: i64,\n    #[serde(default = \"default_strip\")]\n    strip_prefix: bool,\n    ttl_hours: i64,\n}"
+      "struct CreateBody {\n    name: String,\n    host_id: Id,\n    target_port: i64,\n    #[serde(default = \"default_strip\")]\n    strip_prefix: bool,\n    ttl_hours: i64,\n    ingress_mode: Option<String>,\n    #[serde(default)]\n    public_access_acknowledged: bool,\n}"
     ],
     "permission_checks": [
       "holes.create"
@@ -1619,7 +1727,7 @@
     "source": "crates/server/src/holes.rs",
     "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<UpdateBody>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct UpdateBody {\n    version: i64,\n    name: Option<String>,\n    strip_prefix: Option<bool>,\n    /// Present means \"extend\": the new expiry counts from now.\n    ttl_hours: Option<i64>,\n}"
+      "struct UpdateBody {\n    version: i64,\n    name: Option<String>,\n    strip_prefix: Option<bool>,\n    /// Present means \"extend\": the new expiry counts from now.\n    ttl_hours: Option<i64>,\n    ingress_mode: Option<String>,\n    #[serde(default)]\n    public_access_acknowledged: bool,\n    #[serde(default)]\n    reconnect_ingress: bool,\n}"
     ],
     "permission_checks": [
       "holes.read",
@@ -1673,7 +1781,7 @@
     "method": "GET",
     "handler": "marketplace::list",
     "source": "crates/server/src/main.rs",
-    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(mut raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
     "definitions": [],
     "permission_checks": [
       "marketplace.read"
@@ -1779,9 +1887,10 @@
     "source": "crates/server/src/main.rs",
     "signature": "async fn install(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(b): Json<Install>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct Install {\n    version: i64,\n}"
+      "struct Install {\n    pub(super) version: i64,\n}"
     ],
     "permission_checks": [
+      "config-templates.create",
       "marketplace.install"
     ],
     "permission": "marketplace.install"
@@ -2875,6 +2984,18 @@
     "documentation": "Safe presentation preferences are available to every workspace member."
   },
   {
+    "path": "/preview-ingresses",
+    "method": "GET",
+    "handler": "ingress_options",
+    "source": "crates/server/src/holes.rs",
+    "signature": "async fn ingress_options(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "holes.read"
+    ],
+    "permission": "holes.read"
+  },
+  {
     "path": "/repositories",
     "method": "GET",
     "handler": "repositories::list",
@@ -3662,8 +3783,7 @@
     ],
     "permission_checks": [
       "workflows.run"
-    ],
-    "permission": "workflows.run"
+    ]
   },
   {
     "path": "/workflows/{id}/expression-previews",
