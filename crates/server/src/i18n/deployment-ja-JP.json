@@ -246,5 +246,21 @@
   "blueprint.templatePortUnknown": "テンプレートが不明なポート {port} を参照しています。",
   "blueprint.templateIntegerRequired": "{action} の add のオペランドは整数で、結果も整数の範囲内である必要があります。",
   "blueprint.templateUnresolved": "テンプレート式 {action} の結果に未解決のテンプレート構文が残っています。値にテンプレートアクションを含めたり、組み合わせて作ったりすることはできません。",
-  "blueprint.templateInstanceMissing": "内部エラー：インスタンス情報なしでインスタンスフェーズのテンプレートがレンダリングされました。"
+  "blueprint.templateInstanceMissing": "内部エラー：インスタンス情報なしでインスタンスフェーズのテンプレートがレンダリングされました。",
+  "blueprint.bindingInvalid": "バインディングが有効な JSON ではないか、未知または不足のフィールドがあります。",
+  "blueprint.driverNotYetSupported": "ブループリントでは stack ドライバーはまだサポートされていません。",
+  "blueprint.driverNotImplemented": "ブループリントでは k8s ドライバーは未実装です。",
+  "blueprint.driverUnsupported": "このブループリントはドライバー {driver} をサポートしていません。",
+  "blueprint.bindingRoleUnknown": "バインディングがブループリントに定義されていないロール {role} を参照しています。",
+  "blueprint.bindingRoleMissing": "ロール {role} にバインディングがありません。",
+  "blueprint.bindingCount": "ロール {role}：インスタンス数は {min} から {max} の間にしてください。",
+  "blueprint.bindingOdd": "ロール {role}：インスタンス数は奇数にしてください。",
+  "blueprint.bindingHostUnknown": "インスタンス {instance}：このホストはワークスペースに存在しません。",
+  "blueprint.hostOsUnsupported": "インスタンス {instance}：ホストの OS は {os} です。Linux ホストのみサポートされます。",
+  "blueprint.bindingAddressInvalid": "インスタンス {instance}：公開アドレスにはループバックでない IP アドレスまたはホスト名（253 文字以内）を指定してください。空、0.0.0.0、::、127.0.0.0/8、::1、localhost は使用できません。",
+  "blueprint.bindingDistinctHosts": "ロール {role}：各インスタンスは異なるホストで実行する必要があります。",
+  "blueprint.bindingColocateCount": "ロール {role} は {target} と同じホストに配置されるため、インスタンス数が同じである必要があります。",
+  "blueprint.bindingColocateHost": "インスタンス {instance} は {target} と同じホストで実行する必要があります。",
+  "blueprint.bindingComposeSingleHost": "compose ドライバーでは、すべてのインスタンスを 1 台のホストに配置する必要があります。",
+  "blueprint.bindingComposeNeedsSingleHost": "このブループリントは一部のロールを別々のホストに配置する必要があり、単一ホストでの配置を許可していないため、compose ドライバーは使用できません。"
 }

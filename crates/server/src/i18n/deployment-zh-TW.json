@@ -246,5 +246,21 @@
   "blueprint.templatePortUnknown": "範本參照了未知連接埠 {port}。",
   "blueprint.templateIntegerRequired": "{action} 中 add 的運算元必須是整數，且結果不能超出整數範圍。",
   "blueprint.templateUnresolved": "範本運算式 {action} 轉譯後仍殘留範本語法：參數值不能包含或拼接出範本運算式。",
-  "blueprint.templateInstanceMissing": "內部錯誤：轉譯執行個體階段範本時缺少執行個體資料。"
+  "blueprint.templateInstanceMissing": "內部錯誤：轉譯執行個體階段範本時缺少執行個體資料。",
+  "blueprint.bindingInvalid": "綁定不是有效的 JSON，或包含未知欄位或缺少欄位。",
+  "blueprint.driverNotYetSupported": "藍圖暫不支援 stack 驅動。",
+  "blueprint.driverNotImplemented": "藍圖尚未實作 k8s 驅動。",
+  "blueprint.driverUnsupported": "此藍圖不支援驅動 {driver}。",
+  "blueprint.bindingRoleUnknown": "綁定引用了藍圖中未定義的角色 {role}。",
+  "blueprint.bindingRoleMissing": "角色 {role} 缺少綁定。",
+  "blueprint.bindingCount": "角色 {role}：實例數必須在 {min} 到 {max} 之間。",
+  "blueprint.bindingOdd": "角色 {role}：實例數必須為奇數。",
+  "blueprint.bindingHostUnknown": "實例 {instance}：該主機不在目前空間中。",
+  "blueprint.hostOsUnsupported": "實例 {instance}：該主機系統為 {os}，僅支援 Linux 主機。",
+  "blueprint.bindingAddressInvalid": "實例 {instance}：通告位址必須是非迴環的 IP 位址或主機名稱（最長 253 個字元），空值、0.0.0.0、::、127.0.0.0/8、::1 與 localhost 均不允許。",
+  "blueprint.bindingDistinctHosts": "角色 {role}：各實例必須位於不同主機。",
+  "blueprint.bindingColocateCount": "角色 {role} 與 {target} 同機部署，兩者的實例數必須相同。",
+  "blueprint.bindingColocateHost": "實例 {instance} 必須與 {target} 位於同一主機。",
+  "blueprint.bindingComposeSingleHost": "compose 驅動要求所有實例位於同一台主機。",
+  "blueprint.bindingComposeNeedsSingleHost": "此藍圖要求部分角色分布在不同主機且不允許單機部署，因此不能使用 compose 驅動。"
 }

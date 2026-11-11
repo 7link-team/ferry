@@ -246,5 +246,21 @@
   "blueprint.templatePortUnknown": "Templat merujuk port {port} yang tidak diketahui.",
   "blueprint.templateIntegerRequired": "add dalam {action} memerlukan operand integer dan hasil integer dalam julat.",
   "blueprint.templateUnresolved": "Ungkapan templat {action} meninggalkan sintaks templat yang belum diselesaikan: nilai tidak boleh mengandungi atau membentuk tindakan templat.",
-  "blueprint.templateInstanceMissing": "Ralat dalaman: templat fasa instans dirender tanpa data instans."
+  "blueprint.templateInstanceMissing": "Ralat dalaman: templat fasa instans dirender tanpa data instans.",
+  "blueprint.bindingInvalid": "Pengikatan bukan JSON yang sah atau mengandungi medan yang tidak dikenali atau tiada.",
+  "blueprint.driverNotYetSupported": "Pemacu stack belum disokong untuk pelan tindakan.",
+  "blueprint.driverNotImplemented": "Pemacu k8s belum dilaksanakan untuk pelan tindakan.",
+  "blueprint.driverUnsupported": "Pemacu {driver} tidak disokong oleh pelan tindakan ini.",
+  "blueprint.bindingRoleUnknown": "Pengikatan merujuk peranan {role} yang tidak ditakrifkan dalam pelan tindakan.",
+  "blueprint.bindingRoleMissing": "Peranan {role} tiada pengikatan.",
+  "blueprint.bindingCount": "Peranan {role}: bilangan instans mesti antara {min} dan {max}.",
+  "blueprint.bindingOdd": "Peranan {role}: bilangan instans mesti ganjil.",
+  "blueprint.bindingHostUnknown": "Instans {instance}: hos tidak wujud dalam ruang kerja ini.",
+  "blueprint.hostOsUnsupported": "Instans {instance}: hos menjalankan {os}; hanya hos Linux disokong.",
+  "blueprint.bindingAddressInvalid": "Instans {instance}: alamat iklan mesti alamat IP atau nama hos bukan loopback (maksimum 253 aksara); kosong, 0.0.0.0, ::, 127.0.0.0/8, ::1 dan localhost ditolak.",
+  "blueprint.bindingDistinctHosts": "Peranan {role}: instans mesti berjalan pada hos yang berbeza.",
+  "blueprint.bindingColocateCount": "Peranan {role} diletakkan bersama {target}, jadi kedua-duanya mesti mempunyai bilangan instans yang sama.",
+  "blueprint.bindingColocateHost": "Instans {instance} mesti berjalan pada hos yang sama dengan {target}.",
+  "blueprint.bindingComposeSingleHost": "Pemacu compose memerlukan semua instans berada pada satu hos.",
+  "blueprint.bindingComposeNeedsSingleHost": "Pelan tindakan ini memerlukan hos berbeza untuk sesetengah peranan dan tidak membenarkan penggunaan satu hos, jadi pemacu compose tidak boleh digunakan."
 }

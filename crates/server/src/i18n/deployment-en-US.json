@@ -246,5 +246,21 @@
   "blueprint.templatePortUnknown": "The template references unknown port {port}.",
   "blueprint.templateIntegerRequired": "add in {action} requires integer operands and an integer result within range.",
   "blueprint.templateUnresolved": "Template expression {action} leaves unresolved template syntax: values must not contain or form a template action.",
-  "blueprint.templateInstanceMissing": "Internal error: an instance-phase template was rendered without instance data."
+  "blueprint.templateInstanceMissing": "Internal error: an instance-phase template was rendered without instance data.",
+  "blueprint.bindingInvalid": "The binding is not valid JSON or contains unknown or missing fields.",
+  "blueprint.driverNotYetSupported": "The stack driver is not supported for blueprints yet.",
+  "blueprint.driverNotImplemented": "The k8s driver is not implemented for blueprints.",
+  "blueprint.driverUnsupported": "Driver {driver} is not supported by this blueprint.",
+  "blueprint.bindingRoleUnknown": "The binding references role {role}, which the blueprint does not define.",
+  "blueprint.bindingRoleMissing": "Role {role} has no binding.",
+  "blueprint.bindingCount": "Role {role}: the instance count must be between {min} and {max}.",
+  "blueprint.bindingOdd": "Role {role}: the instance count must be odd.",
+  "blueprint.bindingHostUnknown": "Instance {instance}: the host does not exist in this workspace.",
+  "blueprint.hostOsUnsupported": "Instance {instance}: the host runs {os}; only Linux hosts are supported.",
+  "blueprint.bindingAddressInvalid": "Instance {instance}: the advertised address must be a non-loopback IP address or host name (at most 253 characters); empty, 0.0.0.0, ::, 127.0.0.0/8, ::1 and localhost are rejected.",
+  "blueprint.bindingDistinctHosts": "Role {role}: instances must run on different hosts.",
+  "blueprint.bindingColocateCount": "Role {role} is colocated with {target}, so both must have the same number of instances.",
+  "blueprint.bindingColocateHost": "Instance {instance} must run on the same host as {target}.",
+  "blueprint.bindingComposeSingleHost": "The compose driver requires all instances to be on a single host.",
+  "blueprint.bindingComposeNeedsSingleHost": "This blueprint requires distinct hosts for some roles and does not allow single-host deployment, so the compose driver cannot be used."
 }
