@@ -1,0 +1,5 @@
+[
+  { "name": "message", "label": "Page text served by every web instance", "type": "string", "min_length": 1, "max_length": 200, "default": "Hello from Ferry" },
+  { "name": "web_port", "label": "Web port of instance 0 (instance N publishes this + N)", "type": "integer", "min": 1024, "max": 65000, "default": 18080 },
+  { "name": "lb_port", "label": "Load balancer port of instance 0 (instance N publishes this + N)", "type": "integer", "min": 1024, "max": 65000, "default": 18000 }
+]

@@ -806,3 +806,10 @@ Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-a
 - Alternatives：平台来源独立新表（重复空间来源的查询与条目存储，否决）；同步时逐文件请求目录（匿名 60 次/小时不足，否决）；平台级私有仓库与平台凭据（用户确认本期不做）。
 - Scope/Tradeoffs：同步以 `sync_owner/sync_lease_until` 租约保证多实例只执行一次，后台每 60 秒调度到期来源，失败保留旧目录；`marketplace::recover` 不再处理平台来源。导入在一个事务里创建应用模板与附带配置模板，配置模板重名追加 `-2…-20`，应用模板 `fromTemplate` 改写为配置模板 ID，并记录 `origin_*`。未知 kind / `requires.ferry` 不满足 / 集群蓝图（P2 前）入库但不可导入。官方模板先放本仓库 `marketplace/`，协议稳定后再拆独立仓库。迁移内置一条默认官方来源（id=1，`7link-team/ferry` main `marketplace/index.json`，用户确认），可停用/删除且不再重建。迁移 `marketplace_platform` 仅新增列与索引，down 删除新增列。
 - Status：P1 已在分支 `feature/marketplace-p1` 实现并本地验收（证据 `data/maintenance/marketplace-p1/`）；集群蓝图、拓扑变更、六个 HA 模板按 `docs/应用市场与集群模板设计.md` 后续分期。未合并 main、未发布。
+
+## 集群蓝图 P2a（2026-11-11，分支 feature/marketplace-p2）
+
+- Decision：新增 `ferry/blueprint-v1` 蓝图层（`crates/server/src/blueprint/{model,template,binding,compile}.rs`），作为 `kind: Blueprint` 的应用模板保存。渲染分两阶段：模板阶段只把 `.Values` 内联进蓝图文本（实例动作 `.Instance/.Role/.Deployment/range/if/add` 原样保留），保存的部署产物不再依赖参数值；部署阶段按实例绑定逐主机编译为普通 `ferry/v2` Application，复用主机组的逐目标预览/执行/回滚与每主机当前版本指针（`target_kind = "blueprint"`，`target_ref = 0`，`blueprint_binding` 保存绑定）。配置模板可含实例动作，按服务所属实例的上下文渲染；每台主机只拿到自己实例的产物和配置文件快照。
+- Scope：仅 Linux 主机；驱动 docker/native（每实例绑定主机，成员按绑定地址+发布端口互访）与 compose（单机，服务名+容器端口，需模板声明 `allowSingleHost`，非 HA）；stack 待 P2b，k8s 预留。绑定在首个修订后冻结（改变实例位置需拓扑变更计划，P2.5），参数与镜像可升级。官方包 `marketplace/apps/nats-cluster`（3 成员 JetStream，`identity: stable`、`distinctHosts`、`odd`，路由用 `range .Role "nats"`）与 `nginx-ha`（无状态 web×2 + lb×1，upstream 用 `range .Role "web"`）只声明 docker/compose；native 需流水线制品，暂不提供。端口按 `add <base> .Instance.Index` 偏移，避免共享网络命名空间时冲突。
+- Alternatives：一次性完整渲染（参数值进入修订快照后无法逐主机重算，否决）；新表/新执行器承载蓝图（重复主机组机制，否决）；把所有实例下发到每台主机（泄露其他实例配置且相互清理，否决）。
+- Tradeoffs：编译后的 Application 名取部署名，部署名须是小写标识符；市场导入时蓝图角色内的 `fromTemplate` 同样改写为配置模板 ID。验证：Rust 单元/编译测试（含 `official_blueprints_compile_for_supported_drivers`）；真实驱动验收为 `deployment-ha.yml` 的 `blueprint` 矩阵项（`FERRY_TEST_BLUEPRINT=1`），CI 未运行前不写 `verified.json`。

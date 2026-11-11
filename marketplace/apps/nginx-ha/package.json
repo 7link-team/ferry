@@ -1,0 +1,20 @@
+{
+  "name": {
+    "zh-CN": "Nginx 高可用 Web",
+    "zh-TW": "Nginx 高可用 Web",
+    "en-US": "Nginx HA web",
+    "ms-MY": "Web HA Nginx",
+    "ja-JP": "Nginx 高可用性 Web",
+    "ko-KR": "Nginx 고가용성 웹"
+  },
+  "description": {
+    "zh-CN": "两个或更多无状态 Nginx Web 实例分布在不同主机，前置 Nginx 负载均衡器，其 upstream 由 Ferry 按实例绑定生成。",
+    "en-US": "Two or more stateless Nginx web instances on distinct hosts behind an Nginx load balancer whose upstream Ferry generates from the instance binding.",
+    "ms-MY": "Dua atau lebih instans web Nginx tanpa keadaan pada hos berbeza di belakang pengimbang beban Nginx yang upstreamnya dijana oleh Ferry daripada pengikatan instans."
+  },
+  "category": "web",
+  "topology": "cluster",
+  "drivers": ["docker", "compose"],
+  "tags": ["nginx", "http", "load-balancer"],
+  "maintainers": ["Ferry"]
+}

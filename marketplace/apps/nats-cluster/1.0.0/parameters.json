@@ -1,0 +1,5 @@
+[
+  { "name": "client_port", "label": "Client port of instance 0 (instance N publishes this + N)", "type": "integer", "min": 1024, "max": 65000, "default": 14222 },
+  { "name": "cluster_port", "label": "Route port of instance 0 (instance N publishes this + N)", "type": "integer", "min": 1024, "max": 65000, "default": 16222 },
+  { "name": "monitor_port", "label": "Monitoring port of instance 0 (instance N publishes this + N)", "type": "integer", "min": 1024, "max": 65000, "default": 18222 }
+]

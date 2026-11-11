@@ -79,6 +79,8 @@ def main():
     assert mode in ("compose", "docker", "native", "stack")
     swarm_ha = os.environ.get('FERRY_TEST_SWARM_HA') == '1'
     test_nats = os.environ.get('FERRY_TEST_NATS_TEMPLATES') == '1' and mode in ('compose', 'stack')
+    test_blueprint = os.environ.get('FERRY_TEST_BLUEPRINT') == '1'
+    assert not test_blueprint or mode == 'docker', 'Blueprint acceptance runs in docker mode'
     assert not swarm_ha or mode == 'stack', 'Swarm HA acceptance requires stack mode'
     swarm_nodes = ('manager', 'worker', 'worker2') if swarm_ha else ('manager', 'worker')
     report = {'mode': mode, 'swarm_nodes': list(swarm_nodes) if mode == 'stack' else [],
@@ -152,6 +154,10 @@ def main():
         listed = next(r for r in api(f'/workspaces/{workspace_ops}/deployment-revisions?deployment_id={id}&page_size=200')['items'] if r['id']==result)
         check('revision list names the application and the trigger user next to their IDs', listed['deployment_name']==current['name'] and listed['triggered_by_name']=='deploy')
         deployed = next(r for r in api(f'/workspaces/{workspace_ops}/deployments?page_size=200')['items'] if r['id']==id)
+        if current['target_kind']=='blueprint':
+            # A blueprint targets the hosts named by its binding; there is no single target record.
+            check('blueprint revision records every bound host as a target', deployed['target_ref']==current['target_ref'] and len(saved['targets'])==len({i['hostId'] for rows in current['blueprint_binding']['roles'].values() for i in rows}))
+            return result
         target = api(f'/workspaces/{workspace_ops}/'+('nodes' if current['target_kind']=='host' else 'node-groups')+'/'+current['target_ref'])
         check('deployment list names its target host or host group', deployed['target_ref']==current['target_ref'] and deployed['target_name']==target['name'])
         return result
@@ -221,10 +227,11 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             compose_version = '2.40.3'
         report['compose'] = {'version':compose_version,'source':'provided' if compose_binary else 'release',
                              'sha256':hashlib.sha256((build_dir/'docker-compose').read_bytes()).hexdigest()}
-        if mode=='stack':
+        if mode=='stack' or test_blueprint:
             (build_dir/'nested-daemon').write_text('#!/bin/sh\nset -eu\nif [ -f /sys/fs/cgroup/cgroup.controllers ]; then\n mkdir -p /sys/fs/cgroup/init\n for pid in $(cat /sys/fs/cgroup/cgroup.procs); do echo "$pid" > /sys/fs/cgroup/init/cgroup.procs 2>/dev/null || :; done\n sed -e "s/ / +/g" -e "s/^/+/" /sys/fs/cgroup/cgroup.controllers > /sys/fs/cgroup/cgroup.subtree_control\nfi\nexec dockerd "$@"\n')
             with (build_dir/'Dockerfile').open('ab') as docker_file:
                 docker_file.write(b'\nCOPY nested-daemon /usr/local/bin/nested-daemon\nRUN chmod +x /usr/local/bin/nested-daemon\n')
+        if mode=='stack':
             (build_dir/'docker-wrapper').write_text('#!/bin/sh\nerr=$(mktemp); /usr/bin/docker --host unix:///docker-socket/docker.sock "$@" 2>"$err"; result=$?; cat "$err" >&2; cat "$err" >> /tmp/stack-cli-errors; rm -f "$err"; exit $result\n')
         print('== preparing Linux Docker/SSH fixture', flush=True)
         with (work / 'docker-build.log').open('wb') as log:
@@ -316,6 +323,171 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         ssh_id=create('hosts',{'name':'ssh','connection':'ssh','address':'127.0.0.1','port':ssh_port,'username':'root','credential_id':credential})
         action_path=f'/workspaces/{workspace_ops}/nodes/'+ssh_id+'/connection-tests'
         eventually(lambda:api(action_path,{},status=200)['ok'])
+        if test_blueprint:
+            # Official marketplace blueprints on three Linux fixture hosts. Each fixture runs
+            # its own Docker daemon, so a host only ever sees its own instances and files;
+            # members address each other by fixture IP on one private network.
+            network=name+'-blueprint'
+            command(['docker','network','create',network])
+            fixtures=[]
+            plain=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            def fetch(url):
+                try:
+                    with plain.open(url,timeout=3) as r: return r.read().decode()
+                except OSError: return None
+            def fixture_docker(child,*args):
+                return subprocess.run(['docker','exec',child,'/usr/bin/docker',*args],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+            def diagnostics(label):
+                output=[]
+                for _,child,_ in fixtures:
+                    output.append('### '+child+'\n'+fixture_docker(child,'ps','-a').stdout.decode(errors='replace'))
+                    for container in fixture_docker(child,'ps','-aq').stdout.decode(errors='replace').split():
+                        output.append(fixture_docker(child,'logs','--tail','80',container).stdout.decode(errors='replace'))
+                (work/('blueprint-'+label+'-diagnostics.log')).write_text('\n'.join(output),encoding='utf8')
+                print('\n'.join(output)[-6000:],flush=True)
+            for index in range(3):
+                child=f'{name}-bp-{index}'
+                extra_containers.append(child)
+                ssh=port()
+                command(['docker','run','-d','--name',child,'--privileged','--cgroupns=private','--network',network,'--add-host','host.docker.internal:host-gateway','-p',f'127.0.0.1:{ssh}:22','deployment-live-test-'+mode])
+                command(['docker','exec','-d',child,'nested-daemon','--host=unix:///var/run/docker.sock','--storage-driver=vfs'])
+                eventually(lambda child=child:fixture_docker(child,'info').returncode==0,120)
+                ip=json.loads(command(['docker','inspect',child]))[0]['NetworkSettings']['Networks'][network]['IPAddress']
+                if index==0:
+                    host=create('hosts',{'name':'blueprint-runner','connection':'runner'})
+                    host_token=api(f'/workspaces/{workspace_ops}/runner-tokens',{'host_id':host},status=201)['token']
+                    command(['docker','cp',str(runner),child+':/usr/local/bin/fixture-runner'])
+                    command(['docker','exec',child,'chmod','+x','/usr/local/bin/fixture-runner'])
+                    command(['docker','exec','-d',child,'/usr/local/bin/fixture-runner','--server',f'http://host.docker.internal:{server_port}','--token',host_token,'--state-dir','/tmp/runner-state'])
+                    eventually(lambda host=host:api(f'/workspaces/{workspace_ops}/nodes/'+host)['state']=='online')
+                else:
+                    host=create('hosts',{'name':f'blueprint-ssh-{index}','connection':'ssh','address':'127.0.0.1','port':ssh,'username':'root','credential_id':credential})
+                    eventually(lambda host=host:api(f'/workspaces/{workspace_ops}/nodes/'+host+'/connection-tests',{},status=200)['ok'])
+                fixtures.append((host,child,ip))
+            check('three blueprint hosts with independent Docker daemons and distinct addresses',len({ip for _,_,ip in fixtures})==3)
+            report['blueprint']={'hosts':[{'host_id':h,'container':c,'address':ip} for h,c,ip in fixtures],'deployments':{}}
+            # Import the official packages exactly as bundled: package files become config
+            # templates under their own names, the blueprint becomes an application template.
+            bundle=json.loads(Path('marketplace/index.json').read_text(encoding='utf8'))
+            def install(key):
+                version=next(p for p in bundle['packages'] if p['key']==key)['versions'][-1]
+                for item in version['files']:
+                    create('config-templates',{'name':item['name'],'content':item['content'],'parameters':json.dumps(item['parameters'])})
+                template=create('app-templates',{'name':key,'content':json.dumps(version['blueprint']),'parameters':json.dumps(version['parameters'])})
+                return api(f'/workspaces/{workspace_ops}/app-templates/'+template)
+            def render(template,values):
+                return api(f'/workspaces/{workspace_ops}/app-templates/'+template['id']+'/renderings',{'version':template['version'],'values':values})['manifest']
+            def binding(driver,roles,hosts):
+                # Instances are assigned to hosts round-robin in role order.
+                result,n={},0
+                for role,count in roles:
+                    result[role]=[]
+                    for _ in range(count):
+                        host,_,ip=hosts[n%len(hosts)];n+=1
+                        result[role].append({'hostId':host,'address':ip})
+                return {'driver':driver,'roles':result}
+            def deploy(label,template,values,bound):
+                # The deployment name becomes the compiled application name, so it is an identifier.
+                id=create('deployments',{'name':label,'mode':bound['driver'],'target_kind':'blueprint','target_ref':'0','workdir':'/tmp/blueprint-deployments','manifest':render(template,values),'blueprint_binding':bound})
+                revision=start(id);row=done(id)
+                if row['state']!='succeeded': diagnostics(label)
+                check(label+' blueprint deployment succeeds: '+row['latest_revision']['output'],row['state']=='succeeded')
+                report['blueprint']['deployments'][label]={'deployment':id,'revisions':[revision],'binding':bound}
+                return id,revision
+            def owned(child,id):
+                prefix=f"deployment-{workspace['id']}-{id}"
+                return sorted(n[len(prefix)+1:] for n in fixture_docker(child,'ps','--filter','label=workspace.deployment='+prefix,'--format','{{.Names}}').stdout.decode().split())
+            def monitor(ip,port_number,path):
+                text=fetch(f'http://{ip}:{port_number}{path}')
+                try: return json.loads(text) if text else None
+                except ValueError: return None
+            def two_routes(ip,port_number):
+                routes=(monitor(ip,port_number,'/routez') or {}).get('routes') or []
+                return len({r.get('remote_name') or r.get('remote_id') for r in routes})==2
+            def meta_cluster(ip,port_number):
+                meta=(monitor(ip,port_number,'/jsz') or {}).get('meta_cluster') or {}
+                return meta if meta.get('cluster_size')==3 and meta.get('leader') else None
+            def nats_request(ip,port_number,subject,payload):
+                # Minimal NATS client: one request/reply over the text protocol.
+                with socket.create_connection((ip,port_number),timeout=10) as conn:
+                    reader=conn.makefile('rb')
+                    assert reader.readline().startswith(b'INFO '),'NATS INFO expected'
+                    body=json.dumps(payload).encode()
+                    conn.sendall(b'CONNECT {"verbose":false,"pedantic":false}\r\nSUB _INBOX.ferry 1\r\nPUB '+subject.encode()+b' _INBOX.ferry '+str(len(body)).encode()+b'\r\n'+body+b'\r\n')
+                    while True:
+                        line=reader.readline()
+                        if not line or line.startswith(b'-ERR'): raise OSError(line.decode(errors='replace'))
+                        if line.startswith(b'PING'): conn.sendall(b'PONG\r\n')
+                        elif line.startswith(b'MSG '):
+                            size=int(line.split()[-1])
+                            return json.loads(reader.read(size+2)[:size])
+            def replicated_stream(ip,port_number,stream):
+                try:
+                    reply=nats_request(ip,port_number,'$JS.API.STREAM.CREATE.'+stream,{'name':stream,'subjects':[stream.lower()+'.>'],'num_replicas':3,'storage':'file'})
+                except OSError: return None
+                if reply.get('error') and reply['error'].get('err_code')==10058:
+                    # Stream already exists from an earlier attempt; read it back.
+                    try: reply=nats_request(ip,port_number,'$JS.API.STREAM.INFO.'+stream,{})
+                    except OSError: return None
+                ok=not reply.get('error') and reply['config']['num_replicas']==3 and len(reply.get('cluster',{}).get('replicas') or [])==2
+                return reply if ok else None
+            def balanced(url,message):
+                bodies=[fetch(url) for _ in range(12)]
+                if any(b is None or not b.startswith(message+' from ') for b in bodies): return None
+                served={b.strip().split(' from ',1)[1] for b in bodies}
+                return served if served=={'web-0','web-1'} else None
+            try:
+                nats_template=install('nats-cluster')
+                nginx_template=install('nginx-ha')
+                print('== blueprint docker driver on three hosts',flush=True)
+                nats_id,_=deploy('nats-docker',nats_template,{'client_port':14222,'cluster_port':16222,'monitor_port':18222},binding('docker',[('nats',3)],fixtures))
+                for i,(_,child,ip) in enumerate(fixtures):
+                    check(f'docker host {i} runs only its own NATS member',owned(child,nats_id)==[f'nats-{i}'])
+                    check(f'docker nats-{i} has routes to the two other members',eventually(lambda ip=ip,i=i:two_routes(ip,18222+i),120))
+                    meta=eventually(lambda ip=ip,i=i:meta_cluster(ip,18222+i),120)
+                    check(f'docker nats-{i} sees a JetStream meta cluster of 3 with a leader',meta['cluster_size']==3)
+                stream=eventually(lambda:replicated_stream(fixtures[0][2],14222,'FERRY_DOCKER'),120)
+                check('docker NATS creates a JetStream stream with 3 replicas',stream['config']['num_replicas']==3)
+                report['blueprint']['nats_docker_stream']=stream.get('cluster')
+                nginx_values={'message':'blueprint-v1','web_port':18080,'lb_port':18000}
+                nginx_binding=binding('docker',[('web',2),('lb',1)],fixtures)
+                nginx_id,first=deploy('nginx-docker',nginx_template,nginx_values,nginx_binding)
+                check('docker nginx instances land on their bound hosts',[owned(c,nginx_id) for _,c,_ in fixtures]==[['web-0'],['web-1'],['lb-0']])
+                lb_url=f'http://{fixtures[2][2]}:18000/'
+                check('docker nginx load balancer serves both web instances',eventually(lambda:balanced(lb_url,'blueprint-v1'),120))
+                row=app(nginx_id)
+                moved=json.loads(json.dumps(row['blueprint_binding']))
+                moved['roles']['lb'][0]={'hostId':fixtures[0][0],'address':fixtures[0][2]}
+                api(f'/workspaces/{workspace_ops}/deployments/'+nginx_id,dict(row,blueprint_binding=moved),method='PATCH',status=400)
+                check('binding is frozen after the first revision',app(nginx_id)['blueprint_binding']==row['blueprint_binding'])
+                row=app(nginx_id)
+                api(f'/workspaces/{workspace_ops}/deployments/'+nginx_id,dict(row,manifest=render(nginx_template,dict(nginx_values,message='blueprint-v2'))),method='PATCH')
+                second=start(nginx_id);row=done(nginx_id)
+                if row['state']!='succeeded': diagnostics('nginx-docker-upgrade')
+                check('docker nginx parameter upgrade applies a new revision: '+row['latest_revision']['output'],row['state']=='succeeded' and second!=first)
+                check('docker nginx serves the upgraded parameter through the load balancer',eventually(lambda:balanced(lb_url,'blueprint-v2'),120))
+                start(nginx_id,first);row=done(nginx_id)
+                if row['state']!='succeeded': diagnostics('nginx-docker-rollback')
+                check('docker nginx rollback to revision 1 succeeds: '+row['latest_revision']['output'],row['state']=='succeeded')
+                check('docker nginx serves the revision 1 parameter after rollback',eventually(lambda:balanced(lb_url,'blueprint-v1'),120))
+                check('rollback revision is current on every bound host',len(row['current_targets'])==3 and all(t['current_revision']==row['latest_revision']['id'] for t in row['current_targets']))
+                report['blueprint']['deployments']['nginx-docker']['revisions']+=[second,row['latest_revision']['id']]
+                print('== blueprint compose driver on one host',flush=True)
+                single=[fixtures[0]];ip=fixtures[0][2]
+                deploy('nats-compose',nats_template,{'client_port':24222,'cluster_port':26222,'monitor_port':28222},binding('compose',[('nats',3)],single))
+                for i in range(3):
+                    check(f'compose nats-{i} has routes to the two other members',eventually(lambda i=i:two_routes(ip,28222+i),120))
+                    check(f'compose nats-{i} sees a JetStream meta cluster of 3 with a leader',eventually(lambda i=i:meta_cluster(ip,28222+i),120)['cluster_size']==3)
+                check('compose NATS creates a JetStream stream with 3 replicas',eventually(lambda:replicated_stream(ip,24222,'FERRY_COMPOSE'),120)['config']['num_replicas']==3)
+                deploy('nginx-compose',nginx_template,{'message':'compose-v1','web_port':28080,'lb_port':28000},binding('compose',[('web',2),('lb',1)],single))
+                check('compose nginx load balancer serves both web instances',eventually(lambda:balanced(f'http://{ip}:28000/','compose-v1'),120))
+            except Exception:
+                diagnostics('failure')
+                raise
+            check('blueprint check floor',checks>=30)
+            report['result']='PASS'
+            print(f'{checks} passed, 0 failed, 0 skipped',flush=True)
+            return
         if mode=='native' and os.environ.get('FERRY_TEST_GROUPS')=='1':
             import shlex
             import sqlite3
@@ -1052,6 +1224,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         for p in reversed(processes):
             if p.poll() is None: p.kill();p.wait()
         for child in extra_containers: subprocess.run(['docker','rm','-f',child],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        if test_blueprint: subprocess.run(['docker','network','rm',name+'-blueprint'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         subprocess.run(['docker','rm','-f',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         subprocess.run(['docker','volume','rm',name+'-files'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         if mode=='stack':

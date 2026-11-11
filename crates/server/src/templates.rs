@@ -1151,6 +1151,8 @@ template_api!(
 );
 
 #[cfg(test)]
+mod official_blueprints_tests;
+#[cfg(test)]
 mod tests {
     use super::*;
 
