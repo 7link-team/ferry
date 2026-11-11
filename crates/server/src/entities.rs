@@ -1119,6 +1119,10 @@ pub mod app_templates {
         pub version: i64,
         pub created_at: i64,
         pub updated_at: i64,
+        pub origin_source_id: i64,
+        pub origin_key: String,
+        pub origin_version: String,
+        pub origin_digest: String,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}
@@ -1350,6 +1354,15 @@ pub mod marketplace_sources {
         pub version: i64,
         pub created_at: i64,
         pub updated_at: i64,
+        pub trust: String,
+        pub enabled: i64,
+        pub sync_interval: i64,
+        pub next_sync_at: i64,
+        pub sync_owner: String,
+        pub sync_lease_until: i64,
+        pub created_by: i64,
+        pub updated_by: i64,
+        pub synced_by: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}
@@ -1373,6 +1386,15 @@ pub mod marketplace_entries {
         pub version: i64,
         pub created_at: i64,
         pub updated_at: i64,
+        pub package_version: String,
+        pub kind: String,
+        pub meta: Option<String>,
+        pub files: Option<String>,
+        pub readme: Option<String>,
+        pub compatible: i64,
+        pub digest: String,
+        pub created_by: i64,
+        pub updated_by: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}
@@ -1530,6 +1552,10 @@ pub mod config_templates {
         pub version: i64,
         pub created_at: i64,
         pub updated_at: i64,
+        pub origin_source_id: i64,
+        pub origin_key: String,
+        pub origin_version: String,
+        pub origin_digest: String,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

@@ -38,7 +38,7 @@ pub(crate) async fn seed_examples(
         parameters: Set("[]".into()),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now),
+        updated_at: Set(now), ..Default::default()
     }).exec(conn).await?;
     let content =
         convert_legacy_content(include_str!("templates/examples/repository-report.json"))?;
@@ -48,7 +48,7 @@ pub(crate) async fn seed_examples(
         name: Set("示例：公开仓库信息与 JSON 报告".into()),
         description: Set("真实执行验证：查询 GitHub 公开仓库 golang/text，生成可下载的 JSON 报告。无需凭据或主机；可在节点表单修改仓库。仅手动运行，需要服务器可访问 GitHub API。".into()),
         content: Set(content), parameters: Set("[]".into()), version: Set(1),
-        created_at: Set(now), updated_at: Set(now),
+        created_at: Set(now), updated_at: Set(now), ..Default::default()
     }).exec(conn).await?;
     let content = include_str!("templates/examples/http-service.json");
     let parameters = json!([
@@ -69,7 +69,7 @@ pub(crate) async fn seed_examples(
         parameters: Set(parameters),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now),
+        updated_at: Set(now), ..Default::default()
     })
     .exec(conn)
     .await?;
@@ -86,7 +86,7 @@ pub(crate) async fn seed_examples(
         parameters: Set("[]".into()),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now),
+        updated_at: Set(now), ..Default::default()
     })
     .exec(conn)
     .await?;
@@ -111,7 +111,7 @@ pub(crate) async fn seed_examples(
         parameters: Set(parameters),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now),
+        updated_at: Set(now), ..Default::default()
     })
     .exec(conn)
     .await?;
@@ -129,7 +129,7 @@ pub(crate) async fn seed_examples(
             parameters: Set("[]".into()),
             version: Set(1),
             created_at: Set(now),
-            updated_at: Set(now),
+            updated_at: Set(now), ..Default::default()
         },
     )
     .exec(conn)
@@ -154,7 +154,7 @@ pub(crate) async fn seed_examples(
         parameters: Set(parameters),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now),
+        updated_at: Set(now), ..Default::default()
     })
     .exec(conn)
     .await?;
@@ -172,7 +172,7 @@ pub(crate) async fn seed_examples(
             parameters: Set("[]".into()),
             version: Set(1),
             created_at: Set(now),
-            updated_at: Set(now),
+            updated_at: Set(now), ..Default::default()
         },
     )
     .exec(conn)
@@ -202,7 +202,7 @@ pub(crate) async fn seed_examples(
         parameters: Set(parameters),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now),
+        updated_at: Set(now), ..Default::default()
     })
     .exec(conn)
     .await?;
@@ -923,7 +923,7 @@ macro_rules! template_api {
                 if $kind==Kind::Pipeline {body.content=convert_legacy_content(&body.content)?;}
                 validate_body(&body,$kind)?;
                 let id=s.next_id()?; let now=db::now();
-                rows::Entity::insert(rows::ActiveModel {id:Set(id.into()),workspace_id:Set(scope.workspace_id.into()),name:Set(body.name.trim().to_owned()),description:Set(body.description),content:Set(body.content),parameters:Set(body.parameters),version:Set(1),created_at:Set(now),updated_at:Set(now)}).exec(tx).await?;
+                rows::Entity::insert(rows::ActiveModel {id:Set(id.into()),workspace_id:Set(scope.workspace_id.into()),name:Set(body.name.trim().to_owned()),description:Set(body.description),content:Set(body.content),parameters:Set(body.parameters),version:Set(1),created_at:Set(now),updated_at:Set(now), ..Default::default()}).exec(tx).await?;
                 crate::hosts::activity_in(&s,tx,&scope,"create",$resource,&id,json!({"name":body.name})).await?;
                 Ok((StatusCode::CREATED,Json(json!({"id":id,"version":1}))))
             }
@@ -1470,7 +1470,7 @@ mod tests {
             parameters: Set("[]".into()),
             version: Set(1),
             created_at: Set(0),
-            updated_at: Set(0),
+            updated_at: Set(0), ..Default::default()
         })
         .exec(&s.db)
         .await

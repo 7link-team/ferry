@@ -301,6 +301,15 @@ mod tests {
             version: 4,
             created_at: 0,
             updated_at: 0,
+            trust: "workspace".into(),
+            enabled: 1,
+            sync_interval: 0,
+            next_sync_at: 0,
+            sync_owner: String::new(),
+            sync_lease_until: 0,
+            created_by: 0,
+            updated_by: 0,
+            synced_by: 0,
         };
         for locale in Locale::ALL {
             let view = with_locale(locale, async { source_json(row.clone()) })
@@ -679,7 +688,7 @@ pub(crate) async fn create_source_in(
         run_as: Set(scope.user.id.into()),
         version: Set(1),
         created_at: Set(now),
-        updated_at: Set(now),
+        updated_at: Set(now), ..Default::default()
     })
     .exec(tx)
     .await?;
@@ -941,7 +950,7 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
                 parameters: Set(serde_json::to_string(&entry.parameters).unwrap()),
                 version: Set(1),
                 created_at: Set(now),
-                updated_at: Set(now),
+                updated_at: Set(now), ..Default::default()
             })
             .exec(&tx)
             .await?;

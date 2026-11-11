@@ -8,6 +8,7 @@ mod access_addresses;
 mod account_otp;
 mod account_preferences;
 mod identity_avatars;
+mod marketplace_platform;
 mod agent_models;
 mod ai_agents;
 mod ai_models;
@@ -169,6 +170,7 @@ impl MigratorTrait for Migrator {
             Box::new(notification_center::Migration),
             Box::new(account_otp::Migration),
             Box::new(identity_avatars::Migration),
+            Box::new(marketplace_platform::Migration),
         ]
     }
 }
