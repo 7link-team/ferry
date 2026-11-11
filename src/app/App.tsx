@@ -23,6 +23,7 @@ DropdownMenuContent,
 DropdownMenuItem,
 DropdownMenuRadioGroup,
 DropdownMenuRadioItem,
+DropdownMenuSeparator,
 DropdownMenuTrigger,
 } from "../shared/ui/dropdown-menu";
 import { Account,accountRoute } from "./Account";
@@ -473,8 +474,9 @@ function WorkspaceSwitcher({ identity, current, onWorkspaces }: { identity: Iden
               <ChevronDown className="size-4 shrink-0" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" collisionPadding={8} className="max-h-[min(60dvh,var(--radix-dropdown-menu-content-available-height),28rem)] w-[min(22rem,var(--radix-dropdown-menu-content-available-width))] overflow-y-auto">
+          <DropdownMenuContent align="end" collisionPadding={8} className="flex max-h-[min(60dvh,var(--radix-dropdown-menu-content-available-height),28rem)] w-[min(22rem,var(--radix-dropdown-menu-content-available-width))] flex-col overflow-hidden">
             <DropdownMenuRadioGroup
+              className="min-h-0 overflow-y-auto overscroll-contain"
               value={current?.id}
               onValueChange={(workspace) => {
                 if (workspace !== current?.id)
@@ -488,7 +490,8 @@ function WorkspaceSwitcher({ identity, current, onWorkspaces }: { identity: Iden
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
-            <DropdownMenuItem onClick={() => onWorkspaces()}>{t("app.workspaces")}</DropdownMenuItem>
+            <DropdownMenuSeparator className="shrink-0" />
+            <DropdownMenuItem className="min-h-11 shrink-0 justify-center whitespace-normal text-center" onClick={() => onWorkspaces()}>{t("app.workspaces")}</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
   );
