@@ -263,5 +263,5 @@
   "blueprint.bindingColocateHost": "Instance {instance} must run on the same host as {target}.",
   "blueprint.bindingComposeSingleHost": "The compose driver requires all instances to be on a single host.",
   "blueprint.bindingComposeNeedsSingleHost": "This blueprint requires distinct hosts for some roles and does not allow single-host deployment, so the compose driver cannot be used.",
-  "blueprint.portConflict": "Instance {instance} and {other} publish the same port {port} on one host."
+  "blueprint.portConflict": "Instances {instance} and {other} publish the same port {port} on one host."
 }
