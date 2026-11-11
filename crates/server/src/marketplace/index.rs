@@ -195,7 +195,7 @@ fn digest(content: &Value, parameters: &Value, files: &[PackageFile]) -> String 
 }
 
 /// Compatibility is judged against the release triple so pre-release builds satisfy `>=x.y.z`.
-fn compatibility(kind: &str, requires: &str, content: &Value, ferry: &semver::Version) -> Result<Option<String>> {
+fn compatibility(kind: &str, requires: &str, ferry: &semver::Version) -> Result<Option<String>> {
     if kind != "app" {
         return Ok(Some("marketplace.kindUnsupported".into()));
     }
@@ -204,9 +204,6 @@ fn compatibility(kind: &str, requires: &str, content: &Value, ferry: &semver::Ve
         if !requirement.matches(&semver::Version::new(ferry.major, ferry.minor, ferry.patch)) {
             return Ok(Some("marketplace.ferryVersionUnsupported".into()));
         }
-    }
-    if content.get("kind").and_then(Value::as_str) == Some("Blueprint") {
-        return Ok(Some("marketplace.blueprintRequiresUpgrade".into()));
     }
     Ok(None)
 }
@@ -267,7 +264,7 @@ pub fn parse_bundle(text: &str, ferry_version: &semver::Version, locale: &str) -
                 }
                 files.push(PackageFile { name: f.name, content: f.content, parameters: f.parameters });
             }
-            let reason = compatibility(&package.kind, &v.requires.ferry, &v.blueprint, ferry_version)?;
+            let reason = compatibility(&package.kind, &v.requires.ferry, ferry_version)?;
             if reason.is_none() {
                 crate::templates::validate_app(&v.blueprint.to_string(), &v.parameters.to_string())?;
                 for f in &files {
@@ -362,12 +359,28 @@ mod tests {
         pipeline["key"] = json!("build");
         let mut newer = version("2.0.0");
         newer["requires"] = json!({"ferry":">=99.0.0"});
-        let mut blueprint = version("3.0.0");
-        blueprint["blueprint"] = json!({"apiVersion":"ferry/blueprint-v1","kind":"Blueprint","metadata":{"name":"web"},"roles":[]});
-        let text = bundle(json!([pipeline, package(json!([newer, blueprint]))]));
+        let text = bundle(json!([pipeline, package(json!([newer]))]));
         let rows = parse_bundle(&text, &ferry(), "en-US").unwrap();
-        assert_eq!(rows.len(), 3);
+        assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|r| !r.compatible && r.incompatible_reason.is_some()));
+    }
+
+    #[test]
+    fn marketplace_blueprint_version_is_compatible() {
+        let mut v = version("3.0.0");
+        v["blueprint"] = json!({"apiVersion":"ferry/blueprint-v1","kind":"Blueprint","metadata":{"name":"web"},
+            "roles":[{"name":"web","instances":{"min":1,"max":3,"default":2},"identity":"stateless",
+                "ports":[{"name":"http","container":80,"published":"{{ add .Values.port .Instance.Index }}"}],
+                "service":{"image":"nginx","env":[{"name":"NODE","value":"{{ .Instance.Name }}"}]}}]});
+        v["parameters"] = json!([{"name":"port","type":"integer","default":8080}]);
+        v["files"] = json!([{"name":"nginx.conf","content":"server_name {{ .Instance.Name }};","parameters":[]}]);
+        let rows = parse_bundle(&bundle(json!([package(json!([v.clone()]))])), &ferry(), "en-US").unwrap();
+        assert!(rows[0].compatible);
+        assert_eq!(rows[0].incompatible_reason, None);
+        assert_eq!(rows[0].content["kind"], "Blueprint");
+        // Blueprint versions are validated like any other app version.
+        v["blueprint"]["roles"] = json!([]);
+        assert!(parse_bundle(&bundle(json!([package(json!([v]))])), &ferry(), "en-US").is_err());
     }
 
     #[test]

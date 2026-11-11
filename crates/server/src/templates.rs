@@ -212,9 +212,55 @@ pub(crate) async fn seed_examples(
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     App,
+    /// An app template whose document is a cluster blueprint (derived, never stored).
+    Blueprint,
     Pipeline,
     Actions,
     Config,
+}
+/// App templates holding a blueprint keep instance-level actions for per-instance rendering.
+fn document_kind(kind: Kind, doc: &Value) -> Kind {
+    if kind == Kind::App && crate::blueprint::model::is_blueprint(&doc.to_string()) {
+        Kind::Blueprint
+    } else {
+        kind
+    }
+}
+/// Leading words of actions evaluated per instance by `blueprint::template`
+/// (`.Name`/`.Index`/`.Host`/`.Port` are `range` member fields).
+const INSTANCE_WORDS: [&str; 7] = [
+    ".Instance",
+    ".Role",
+    ".Deployment",
+    ".Name",
+    ".Index",
+    ".Host",
+    ".Port",
+];
+/// Blueprint and config templates copy instance actions verbatim; every other kind
+/// rejects them. The engine checks their grammar afterwards.
+fn instance_action(token: &str) -> bool {
+    let word = token
+        .split(|c: char| c.is_whitespace() || c == '(')
+        .next()
+        .unwrap_or_default();
+    matches!(word, "range" | "if" | "else" | "end" | "add")
+        || INSTANCE_WORDS.iter().any(|p| {
+            word.strip_prefix(p)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+        })
+}
+/// A substituted value contains, or joins its neighbours into, a template action.
+fn unresolved(action: &str) -> ApiError {
+    let mut chars = action.chars();
+    let mut excerpt: String = chars.by_ref().take(80).collect();
+    if chars.next().is_some() {
+        excerpt.push('\u{2026}');
+    }
+    ApiError::localized(
+        StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new("blueprint.templateUnresolved").with("action", excerpt),
+    )
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -515,8 +561,13 @@ fn expand(
             .collect::<Result<Vec<_>>>()
             .map(Value::Array),
         Value::String(text) => {
+            let instance_aware = matches!(kind, Kind::Blueprint | Kind::Config);
             let mut output = String::new();
             let mut offset = 0;
+            // Output offsets of verbatim instance actions and of substituted values,
+            // so substituted text can be proven not to form an action of its own.
+            let mut kept = Vec::new();
+            let mut substituted = Vec::new();
             while let Some(relative) = text[offset..].find("{{") {
                 let start = offset + relative;
                 if matches!(kind, Kind::Pipeline | Kind::Actions)
@@ -573,6 +624,7 @@ fn expand(
                     let actions_env = kind == Kind::Actions && actions_env_field(field);
                     let secret_field = match kind {
                         Kind::App => field == "/services/*/env/*/valueFrom",
+                        Kind::Blueprint => field == "/roles/*/service/env/*/valueFrom",
                         Kind::Pipeline => field == "/env/*/valueFrom",
                         Kind::Actions => actions_env,
                         Kind::Config => true,
@@ -618,9 +670,17 @@ fn expand(
                             )));
                         }
                         if whole {
+                            if instance_aware
+                                && replacement.as_str().is_some_and(|s| s.contains("{{"))
+                            {
+                                return Err(unresolved(&text[start..end + 2]));
+                            }
                             // Manifest environment values are strings even when a
                             // shared parameter also fills a numeric port field.
-                            if kind == Kind::App && field == "/services/*/env/*/value" {
+                            if (kind == Kind::App && field == "/services/*/env/*/value")
+                                || (kind == Kind::Blueprint
+                                    && field == "/roles/*/service/env/*/value")
+                            {
                                 return Ok(json!(
                                     replacement
                                         .as_str()
@@ -630,12 +690,14 @@ fn expand(
                             }
                             return Ok(replacement.clone());
                         }
+                        let from = output.len();
                         output.push_str(
                             &replacement
                                 .as_str()
                                 .map(str::to_owned)
                                 .unwrap_or_else(|| replacement.to_string()),
                         );
+                        substituted.push((from, output.len(), &text[start..end + 2]));
                     } else {
                         output.push_str(&text[start..end + 2]);
                     }
@@ -643,6 +705,9 @@ fn expand(
                     && ["run", "branch", "repo_url", "commit"].contains(&token)
                     && token == &text[start + 2..end]
                 {
+                    output.push_str(&text[start..end + 2]);
+                } else if instance_aware && instance_action(token) {
+                    kept.push((output.len(), end + 2 - start));
                     output.push_str(&text[start..end + 2]);
                 } else {
                     return Err(ApiError::localized(
@@ -653,10 +718,64 @@ fn expand(
                 offset = end + 2;
             }
             output.push_str(&text[offset..]);
+            if !kept.is_empty() {
+                instance_references(text, definitions, kind, used)?;
+            }
+            if instance_aware && values.is_some() {
+                // Every `{{` left in the output must be exactly a kept action.
+                let mut kept = kept.into_iter();
+                let mut offset = 0;
+                while let Some(relative) = output[offset..].find("{{") {
+                    let start = offset + relative;
+                    match kept.next() {
+                        Some((at, len)) if at == start => offset = start + len,
+                        _ => {
+                            let blame = substituted
+                                .iter()
+                                .find(|(from, to, _)| *from <= start + 1 && start < *to)
+                                .map_or(&output[start..], |(_, _, raw)| raw);
+                            return Err(unresolved(blame));
+                        }
+                    }
+                }
+            }
             Ok(json!(output))
         }
         _ => Ok(value.clone()),
     }
+}
+/// Grammar-checks a string holding instance actions with the blueprint engine and
+/// applies parameter rules to the `.Values` names those actions reference.
+fn instance_references(
+    text: &str,
+    definitions: &BTreeMap<String, Parameter>,
+    kind: Kind,
+    used: &mut BTreeSet<String>,
+) -> Result<()> {
+    for reference in crate::blueprint::template::value_references(text)? {
+        let p = definitions.get(&reference.name).ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("templates.parameterUndeclared")
+                    .with("name", reference.name.as_str()),
+            )
+        })?;
+        used.insert(reference.name);
+        // A secret renders only as a reference marker: it cannot be branched on,
+        // computed with, or repeated per member.
+        if p.secret && !reference.plain {
+            let key = if kind == Kind::Config {
+                "templates.secretInBlock"
+            } else {
+                "templates.secretPlacementInvalid"
+            };
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new(key),
+            ));
+        }
+    }
+    Ok(())
 }
 fn actions_env_field(field: &str) -> bool {
     let parts: Vec<_> = field.split('/').collect();
@@ -693,7 +812,15 @@ fn validate_template(
         return Ok((doc, definitions));
     }
     let mut used = BTreeSet::new();
-    expand(&doc, &definitions, None, kind, "", &mut used, 0)?;
+    expand(
+        &doc,
+        &definitions,
+        None,
+        document_kind(kind, &doc),
+        "",
+        &mut used,
+        0,
+    )?;
     if definitions.keys().any(|name| !used.contains(name)) {
         return Err(ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
@@ -751,6 +878,7 @@ fn render_content(
         };
         values.insert(name.clone(), value);
     }
+    let kind = document_kind(kind, &doc);
     let out = expand(
         &doc,
         &definitions,
@@ -775,6 +903,9 @@ fn render_content(
     match kind {
         Kind::App => {
             crate::deployments::manifest::parse(&text)?;
+        }
+        Kind::Blueprint => {
+            crate::blueprint::model::parse(&text)?;
         }
         Kind::Pipeline => {
             crate::pipelines::validate_definition(&text)?;
@@ -1952,5 +2083,199 @@ jobs:
         .unwrap();
         assert_eq!(out["flag"], false);
         assert_eq!(out["text"], "{{ .Values.flag }}");
+    }
+    fn error_key(error: ApiError) -> String {
+        error.2.as_ref().unwrap().key.to_string()
+    }
+    fn blueprint_template() -> Value {
+        json!({
+          "apiVersion": "ferry/blueprint-v1",
+          "kind": "Blueprint",
+          "metadata": { "name": "nats-cluster" },
+          "roles": [{
+            "name": "nats",
+            "instances": { "min": 3, "max": 9, "default": 3, "odd": true },
+            "placement": { "distinctHosts": true },
+            "identity": "stable",
+            "ports": [
+              { "name": "client", "container": 4222, "published": "{{ .Values.client_port }}" },
+              { "name": "cluster", "container": 6222, "published": "{{ add .Values.cluster_base .Instance.Index }}" }
+            ],
+            "service": {
+              "image": "nats:{{ .Values.tag }}",
+              "command": ["--name", "{{ .Instance.Name }}",
+                "--routes", "{{ range .Role \"nats\" }}nats://{{ .Host }}:{{ .Port \"cluster\" }},{{ end }}",
+                "{{ if .Values.tls }}--tls{{ else }}--no-tls{{ end }}"],
+              "env": [
+                { "name": "DRIVER", "value": "{{ .Deployment.Driver }}" },
+                { "name": "PORT", "value": "{{ .Values.client_port }}" },
+                { "name": "TOKEN", "valueFrom": "{{ .Values.token }}" }
+              ]
+            }
+          }]
+        })
+    }
+    const BLUEPRINT_PARAMETERS: &str = r#"[{"name":"client_port","type":"integer","default":4222},{"name":"cluster_base","type":"integer","default":6222},{"name":"tag","type":"string","default":"2.10"},{"name":"tls","type":"boolean","default":true},{"name":"token","type":"string","secret":true}]"#;
+    #[test]
+    fn app_template_accepts_blueprint_with_instance_tokens() {
+        let content = blueprint_template().to_string();
+        validate_app(&content, BLUEPRINT_PARAMETERS).unwrap();
+        let token = BTreeMap::from([("token".into(), json!("nats-token"))]);
+        let rendered = render_content(&content, BLUEPRINT_PARAMETERS, &token, Kind::App).unwrap();
+        crate::blueprint::model::parse(&rendered).unwrap();
+        let out: Value = serde_json::from_str(&rendered).unwrap();
+        let role = &out["roles"][0];
+        assert_eq!(role["ports"][0]["published"], 4222);
+        assert_eq!(
+            role["ports"][1]["published"],
+            "{{ add .Values.cluster_base .Instance.Index }}"
+        );
+        let service = &role["service"];
+        assert_eq!(service["image"], "nats:2.10");
+        assert_eq!(service["command"][1], "{{ .Instance.Name }}");
+        assert_eq!(
+            service["command"][3],
+            "{{ range .Role \"nats\" }}nats://{{ .Host }}:{{ .Port \"cluster\" }},{{ end }}"
+        );
+        assert_eq!(
+            service["command"][4],
+            "{{ if .Values.tls }}--tls{{ else }}--no-tls{{ end }}"
+        );
+        assert_eq!(service["env"][0]["value"], "{{ .Deployment.Driver }}");
+        assert_eq!(service["env"][1]["value"], "4222");
+        assert_eq!(service["env"][2]["valueFrom"], "variable/nats-token");
+        // A parameter referenced only inside a kept action must still be declared.
+        let undeclared = content.replace("if .Values.tls", "if .Values.missing");
+        assert_eq!(
+            error_key(validate_app(&undeclared, BLUEPRINT_PARAMETERS).unwrap_err()),
+            "templates.parameterUndeclared"
+        );
+        // Kept actions still follow the engine grammar.
+        let unbalanced = content.replace("{{ else }}--no-tls{{ end }}", "{{ else }}--no-tls");
+        assert!(validate_app(&unbalanced, BLUEPRINT_PARAMETERS).is_err());
+        // Secrets cannot be hidden inside an instance-level action.
+        let hidden = content.replace("if .Values.tls", "if .Values.token");
+        assert_eq!(
+            error_key(validate_app(&hidden, BLUEPRINT_PARAMETERS).unwrap_err()),
+            "templates.secretPlacementInvalid"
+        );
+        // Rendering validates the blueprint model, not the application manifest.
+        let mut invalid = blueprint_template();
+        invalid["roles"][0]["instances"]["default"] = json!(4);
+        assert_eq!(
+            error_key(
+                render_content(
+                    &invalid.to_string(),
+                    BLUEPRINT_PARAMETERS,
+                    &token,
+                    Kind::App
+                )
+                .unwrap_err()
+            ),
+            "blueprint.instancesOdd"
+        );
+        // Values must not smuggle template actions into the instance phase.
+        let mut smuggled = token.clone();
+        smuggled.insert("tag".into(), json!("{{ .Instance.Host }}"));
+        assert_eq!(
+            error_key(
+                render_content(&content, BLUEPRINT_PARAMETERS, &smuggled, Kind::App).unwrap_err()
+            ),
+            "blueprint.templateUnresolved"
+        );
+    }
+    #[test]
+    fn config_template_keeps_instance_tokens() {
+        let content = "server_name={{ .Instance.Name }}\nroutes=[{{ range .Role \"nats\" }}nats://{{ .Host }}:{{ .Port \"cluster\" }} {{ end }}]\n{{ if .Values.tls }}tls {}{{ end }}\nport={{ .Values.port }}\nnext={{ add .Values.port 1 }}\n";
+        let params = r#"[{"name":"tls","type":"boolean","default":true},{"name":"port","type":"integer","default":4222}]"#;
+        validate_config(content, params).unwrap();
+        let output = config_content(content, params, &BTreeMap::new()).unwrap();
+        assert_eq!(
+            output,
+            content.replace("port={{ .Values.port }}", "port=4222")
+        );
+        assert_eq!(
+            error_key(
+                validate_config(content, r#"[{"name":"port","type":"integer"}]"#).unwrap_err()
+            ),
+            "templates.parameterUndeclared"
+        );
+        assert_eq!(
+            error_key(
+                validate_config(
+                    "{{ .Instance.Name }}",
+                    r#"[{"name":"port","type":"integer"}]"#
+                )
+                .unwrap_err()
+            ),
+            "templates.parametersUnused"
+        );
+        assert!(validate_config("{{ range .Role \"nats\" }}x", "[]").is_err());
+        assert!(validate_config("{{ .Host }}", "[]").is_err());
+        let params = r#"[{"name":"name","type":"string"}]"#;
+        let template = "a{{ .Values.name }}{ .Instance.Name }} {{ .Instance.Index }}";
+        for value in ["{{ .Instance.Host }}", "{", "x{{"] {
+            let values = BTreeMap::from([("name".into(), json!(value))]);
+            assert_eq!(
+                error_key(config_content(template, params, &values).unwrap_err()),
+                "blueprint.templateUnresolved",
+                "{value}"
+            );
+        }
+        let values = BTreeMap::from([("name".into(), json!("}}"))]);
+        assert_eq!(
+            config_content(template, params, &values).unwrap(),
+            "a}}{ .Instance.Name }} {{ .Instance.Index }}"
+        );
+    }
+    #[test]
+    fn secret_inside_config_block_rejected() {
+        let params = r#"[{"name":"tls","type":"boolean","default":true},{"name":"password","type":"string","secret":true}]"#;
+        for content in [
+            "{{ if .Values.tls }}password={{ .Values.password }}{{ end }}",
+            "{{ range .Role \"nats\" }}{{ .Values.password }}{{ end }}{{ .Values.tls }}",
+            "{{ if .Values.password }}on{{ end }}{{ .Values.tls }}",
+            "{{ add .Values.password 1 }}{{ .Values.tls }}",
+        ] {
+            assert_eq!(
+                error_key(validate_config(content, params).unwrap_err()),
+                "templates.secretInBlock",
+                "{content}"
+            );
+        }
+        validate_config(
+            "{{ if .Values.tls }}tls{{ end }}\npassword={{ .Values.password }}",
+            params,
+        )
+        .unwrap();
+    }
+    #[test]
+    fn pipeline_template_still_rejects_instance_tokens() {
+        let workflow = "jobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: echo {{ .Instance.Name }}\n";
+        for token in [
+            "{{ .Instance.Name }}",
+            "{{ if .Values.x }}",
+            "{{ range .Role \"a\" }}",
+            "{{ end }}",
+        ] {
+            let content = json!({"engine":crate::pipelines::actions::ENGINE,
+                "workflow":workflow.replace("{{ .Instance.Name }}", token)})
+            .to_string();
+            assert_eq!(
+                error_key(
+                    validate_template(&content, "[]", Kind::Pipeline)
+                        .err()
+                        .unwrap()
+                ),
+                "templates.expressionUnsupported",
+                "{token}"
+            );
+        }
+        let legacy = json!({"apiVersion":"ferry/v1","kind":"Application","metadata":{"name":"web"},
+            "services":[{"name":"web","image":"nginx","command":["{{ .Instance.Name }}"]}]});
+        assert_eq!(
+            error_key(validate_app(&legacy.to_string(), "[]").unwrap_err()),
+            "templates.expressionUnsupported"
+        );
     }
 }

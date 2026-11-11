@@ -92,6 +92,63 @@ pub fn has_instance_tokens(text: &str) -> bool {
     }
 }
 
+/// A `.Values` name referenced by a template action.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValueReference {
+    pub name: String,
+    /// A bare `{{ .Values.x }}` outside every `range`/`if` block: the only form whose
+    /// substitution does not depend on per-instance evaluation.
+    pub plain: bool,
+}
+
+/// Syntax-checks `text` like [`check`] and lists every `.Values` reference in order.
+pub fn value_references(text: &str) -> Result<Vec<ValueReference>> {
+    fn expr_refs(expr: &Expr, out: &mut Vec<ValueReference>) {
+        match expr {
+            Expr::Values(name) => out.push(ValueReference {
+                name: name.clone(),
+                plain: false,
+            }),
+            Expr::Add(a, b) => {
+                expr_refs(a, out);
+                expr_refs(b, out);
+            }
+            _ => {}
+        }
+    }
+    fn walk(nodes: &[Node], in_block: bool, out: &mut Vec<ValueReference>) {
+        for node in nodes {
+            match node {
+                Node::Text(_) => {}
+                Node::Output {
+                    expr: Expr::Values(name),
+                    ..
+                } => out.push(ValueReference {
+                    name: name.clone(),
+                    plain: !in_block,
+                }),
+                Node::Output { expr, .. } => expr_refs(expr, out),
+                Node::Range { body, .. } => walk(body, true, out),
+                Node::If {
+                    cond,
+                    then,
+                    otherwise,
+                    ..
+                } => {
+                    expr_refs(cond, out);
+                    walk(then, true, out);
+                    if let Some((_, other)) = otherwise {
+                        walk(other, true, out);
+                    }
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&parse(text)?, false, &mut out);
+    Ok(out)
+}
+
 fn fail<T>(message: Message) -> Result<T> {
     Err(ApiError::localized(StatusCode::BAD_REQUEST, message))
 }
@@ -1192,5 +1249,25 @@ bad: {{ .Values.name 1 }} tail";
         // Known names inside kept actions pass and stay verbatim.
         let text = "{{ if .Values.name }}{{ add .Values.client_port .Instance.Index }}{{ end }}";
         assert_eq!(render_text(text, &ctx(), Phase::Values).unwrap(), text);
+    }
+
+    #[test]
+    fn value_references_mark_plain_outputs() {
+        let refs = value_references(
+            "{{ .Values.a }}{{ if .Values.b }}{{ .Values.c }}{{ else }}{{ add .Values.d 1 }}{{ end }}{{ range .Role \"r\" }}{{ .Values.e }}{{ end }}",
+        )
+        .unwrap();
+        let names: Vec<_> = refs.iter().map(|r| (r.name.as_str(), r.plain)).collect();
+        assert_eq!(
+            names,
+            [
+                ("a", true),
+                ("b", false),
+                ("c", false),
+                ("d", false),
+                ("e", false)
+            ]
+        );
+        assert!(value_references("{{ if .Values.a }}").is_err());
     }
 }
