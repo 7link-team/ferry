@@ -347,6 +347,10 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             # members address each other by fixture IP on one private network.
             network=name+'-blueprint'
             command(['docker','network','create',network])
+            # The host as seen from this network. Reaching host.docker.internal (docker0) from a
+            # user-defined bridge crosses bridges and can be filtered; the gateway of the fixtures'
+            # own network is the host itself, and the server listens on 0.0.0.0.
+            gateway=json.loads(command(['docker','network','inspect',network]))[0]['IPAM']['Config'][0]['Gateway']
             fixtures=[]
             plain=urllib.request.build_opener(urllib.request.ProxyHandler({}))
             def fetch(url):
@@ -376,8 +380,20 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     host_token=api(f'/workspaces/{workspace_ops}/runner-tokens',{'host_id':host},status=201)['token']
                     command(['docker','cp',str(runner),child+':/usr/local/bin/fixture-runner'])
                     command(['docker','exec',child,'chmod','+x','/usr/local/bin/fixture-runner'])
-                    command(['docker','exec','-d',child,'/usr/local/bin/fixture-runner','--server',f'http://host.docker.internal:{server_port}','--token',host_token,'--state-dir','/tmp/runner-state'])
-                    eventually(lambda host=host:api(f'/workspaces/{workspace_ops}/nodes/'+host)['state']=='online')
+                    server_url=f'http://{gateway}:{server_port}'
+                    command(['docker','exec','-d',child,'sh','-c',f'exec /usr/local/bin/fixture-runner --server {server_url} --token {host_token} --state-dir /tmp/runner-state >/tmp/fixture-runner.log 2>&1'])
+                    try:
+                        eventually(lambda host=host:api(f'/workspaces/{workspace_ops}/nodes/'+host)['state']=='online')
+                    except AssertionError:
+                        probe=subprocess.run(['docker','exec',child,'sh','-c',
+                            f'echo "## runner log"; cat /tmp/fixture-runner.log 2>&1 | tail -60; '
+                            f'echo "## processes"; ps -eo pid,stat,args | grep -v "ps -eo" | tail -30; '
+                            f'echo "## server status from fixture ({server_url})"; curl -sS -m 5 {server_url}/api/status 2>&1; echo; '
+                            f'echo "## host.docker.internal"; getent hosts host.docker.internal 2>&1; '
+                            f'echo "## routes"; ip route 2>&1'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+                        (work/'blueprint-runner-diagnostics.log').write_bytes(probe.stdout)
+                        report_log_tail(work/'blueprint-runner-diagnostics.log','blueprint fixture runner never came online',120)
+                        raise
                 else:
                     host=create('hosts',{'name':f'blueprint-ssh-{index}','connection':'ssh','address':'127.0.0.1','port':ssh,'username':'root','credential_id':credential})
                     eventually(lambda host=host:api(f'/workspaces/{workspace_ops}/nodes/'+host+'/connection-tests',{},status=200)['ok'])
