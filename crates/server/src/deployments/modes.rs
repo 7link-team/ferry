@@ -869,7 +869,9 @@ pub(crate) fn stack_finalize(app: &deployments::Model, artifact: &str) -> Result
     let mut sources = serde_json::Map::new();
     for service in doc["services"].as_object_mut().unwrap().values_mut() {
         let mut mounts = Vec::new();
-        if let Some(volumes) = service["volumes"].as_array_mut() {
+        // `get_mut`, not `service["volumes"]`: IndexMut would insert `volumes: null`, which
+        // `docker stack deploy` rejects for services that mount nothing.
+        if let Some(volumes) = service.get_mut("volumes").and_then(Value::as_array_mut) {
             volumes.retain(|volume| {
                 if volume["type"]!="bind" {return true;}
                 let source=volume["source"].as_str().unwrap().trim_start_matches("./");
@@ -956,7 +958,8 @@ pub(crate) async fn stack_execute(
                 }
             }
         }
-        if let Some(ports) = service["ports"].as_array_mut() {
+        // `get_mut` so services without ports don't gain `ports: null` (rejected by stack deploy).
+        if let Some(ports) = service.get_mut("ports").and_then(Value::as_array_mut) {
             for port in ports {
                 if let Some(value) = port["published"].as_str() {
                     port["published"] =
@@ -1068,4 +1071,55 @@ fi; "#));
         ));
     }
     result
+}
+
+#[cfg(test)]
+mod stack_finalize_tests {
+    use super::*;
+
+    fn app() -> deployments::Model {
+        deployments::Model {
+            id: 2,
+            workspace_id: 1,
+            name: "web".into(),
+            category: String::new(),
+            manifest: String::new(),
+            preview_artifact: String::new(),
+            mode: "stack".into(),
+            target_kind: "host".into(),
+            target_ref: 3,
+            workdir: "/opt/deployments".into(),
+            description: String::new(),
+            state: "idle".into(),
+            revision_number: 0,
+            current_revision: 0,
+            created_at: 0,
+            updated_at: 0,
+            version: 1,
+            blueprint_binding: None,
+        }
+    }
+
+    #[test]
+    fn services_without_volumes_get_no_volumes_key() {
+        // `docker stack deploy` rejects `volumes: null` ("services.web.volumes must be a list").
+        let artifact = json!({"services":{
+            "web":{"image":"nginx:1.27-alpine"},
+            "db":{"image":"redis:7","volumes":[
+                {"type":"bind","source":"./.config-a.txt","target":"/etc/a.conf"},
+                {"type":"volume","source":"data","target":"/data"}
+            ]}
+        }})
+        .to_string();
+        let doc: Value = serde_json::from_str(&stack_finalize(&app(), &artifact).unwrap()).unwrap();
+        assert!(doc["services"]["web"].get("volumes").is_none(), "{doc}");
+        assert_eq!(
+            doc["services"]["db"]["volumes"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(
+            doc["services"]["db"]["secrets"].as_array().unwrap().len(),
+            1
+        );
+    }
 }
