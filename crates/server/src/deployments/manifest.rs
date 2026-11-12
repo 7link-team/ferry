@@ -692,7 +692,16 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
                 } else {
                     probe_command(s, probe)?
                 };
-                v["healthcheck"] = json!({"test":["CMD-SHELL",command],"interval":format!("{}s",probe.period_seconds),"timeout":format!("{}s",probe.timeout_seconds),"retries":probe.failure_threshold});
+                // Probe failures during start-up must not let Swarm/Docker kill a task that
+                // Ferry is still willing to wait for (e.g. a balancer whose upstream restarts
+                // at the same time): the start period matches Ferry's readiness deadline. A
+                // passing probe still marks the container healthy immediately.
+                let start = m
+                    .strategy
+                    .as_ref()
+                    .map(|s| s.health_timeout)
+                    .unwrap_or_else(health_timeout);
+                v["healthcheck"] = json!({"test":["CMD-SHELL",command],"interval":format!("{}s",probe.period_seconds),"timeout":format!("{}s",probe.timeout_seconds),"retries":probe.failure_threshold,"start_period":format!("{start}s")});
             }
         }
         if let Some(resources) = &s.resources {
@@ -1374,6 +1383,31 @@ fn validate_compose(doc: &Value, mode: &str, portable: bool) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn healthcheck_start_period_follows_health_timeout() {
+        // Swarm and Docker must not kill a task for failing probes while Ferry is still
+        // willing to wait for it to become ready (a dependency may start later).
+        for (strategy, expected) in [
+            (json!(null), "120s"),
+            (json!({"type":"recreate","healthTimeout":45}), "45s"),
+        ] {
+            let mut doc = json!({"apiVersion":"ferry/v2","kind":"Application","metadata":{"name":"x"},
+                "services":[{"name":"lb","image":"nginx:1","ports":[{"name":"http","container":80,"published":18000}],
+                    "health":{"readiness":{"httpGet":{"path":"/healthz","port":"http"},"periodSeconds":5}}}]});
+            if !strategy.is_null() {
+                doc["strategy"] = strategy;
+            }
+            for mode in ["stack", "compose"] {
+                let m = parse_for(&doc.to_string(), mode).unwrap();
+                let out: Value = serde_yaml_ng::from_str(&render_for(&m, mode).unwrap()).unwrap();
+                assert_eq!(
+                    out["services"]["lb"]["healthcheck"]["start_period"],
+                    json!(expected),
+                    "{mode}"
+                );
+            }
+        }
+    }
     use super::*;
     fn sample() -> Value {
         json!({"apiVersion":"ferry/v1","kind":"Application","metadata":{"name":"demo"},"services":[{"name":"web","image":"nginx:alpine","ports":[{"container":80,"published":8080}]}]})

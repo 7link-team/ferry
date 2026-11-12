@@ -364,8 +364,12 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 except OSError: return None
             def fixture_docker(child,*args):
                 return subprocess.run(['docker','exec',child,'/usr/bin/docker',*args],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
-            def diagnostics(label):
+            def diagnostics(label,row=None):
                 output=[]
+                # The executor's own stderr and exit code per target (the revision summary alone
+                # only says which host failed).
+                for target in (row or {}).get('current_targets') or []:
+                    output.append('### target '+str(target.get('host_id'))+' '+str(target.get('state'))+'\n'+str(target.get('output')))
                 for _,child,_ in fixtures:
                     output.append('### '+child+'\n'+fixture_docker(child,'ps','-a').stdout.decode(errors='replace'))
                     for container in fixture_docker(child,'ps','-aq').stdout.decode(errors='replace').split():
@@ -375,6 +379,11 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     manager=name+'-manager'
                     output.append('### stack CLI errors\n'+subprocess.run(['docker','exec',manager,'sh','-c','tail -40 /tmp/stack-cli-errors'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT).stdout.decode(errors='replace'))
                     output.append('### swarm services\n'+fixture_docker(manager,'service','ls').stdout.decode(errors='replace'))
+                    # Exit code and health log of every stack task container: a task stopped for
+                    # failing its healthcheck exits 0 and Swarm drops the reason.
+                    for _,child,_ in fixtures:
+                        for container in fixture_docker(child,'ps','-aq','--filter','label=com.docker.stack.namespace').stdout.decode(errors='replace').split():
+                            output.append(fixture_docker(child,'inspect','--format','{{.Name}} exit={{.State.ExitCode}} health={{json .State.Health}}',container).stdout.decode(errors='replace'))
                     for service in fixture_docker(manager,'service','ls','-q').stdout.decode(errors='replace').split():
                         output.append(fixture_docker(manager,'service','ps','--no-trunc','--format','{{.Name}} {{.Node}} {{.DesiredState}} {{.CurrentState}} {{.Error}}',service).stdout.decode(errors='replace'))
                 path=work/('blueprint-'+label+'-diagnostics.log')
@@ -617,11 +626,11 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     check('stack nginx load balancer serves both web replicas through the service VIP',eventually(lambda:stack_balanced('stack-v1'),120))
                     respec(nginx_id,nginx_spec(dict(nginx_values,message='stack-v2')))
                     second=start(nginx_id);row=done(nginx_id)
-                    if row['state']!='succeeded': diagnostics('nginx-stack-upgrade')
+                    if row['state']!='succeeded': diagnostics('nginx-stack-upgrade',row)
                     check('stack nginx parameter upgrade applies a new revision: '+row['latest_revision']['output'],row['state']=='succeeded')
                     check('stack nginx serves the upgraded parameter through the load balancer',eventually(lambda:stack_balanced('stack-v2'),120))
                     start(nginx_id,first);row=done(nginx_id)
-                    if row['state']!='succeeded': diagnostics('nginx-stack-rollback')
+                    if row['state']!='succeeded': diagnostics('nginx-stack-rollback',row)
                     check('stack nginx rollback to revision 1 succeeds: '+row['latest_revision']['output'],row['state']=='succeeded')
                     check('stack nginx serves the revision 1 parameter after rollback',eventually(lambda:stack_balanced('stack-v1'),120))
                     check('stack rollback revision is current on the Swarm manager',[t['current_revision'] for t in row['current_targets']]==[row['latest_revision']['id']])
