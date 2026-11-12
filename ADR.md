@@ -820,3 +820,17 @@ Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-a
 - Reason：Swarm 只经管理节点下发；有状态成员需要稳定身份与可直连地址（NATS 路由/advertise），无状态副本由 VIP 负载均衡即可。节点探测涉及远程命令，放在锁外避免长时间持锁。
 - Alternatives：stateless 也按实例拆服务并固定节点（失去调度与 VIP，否决）；stable 用 ingress（路由网格会把成员地址打散到任意任务，否决）；创建时强制在线探测（主机离线即无法创建，否决）。
 - Scope/Tradeoffs：官方 `nats-cluster`（nats 为 stable）与 `nginx-ha`（web、lb 均为 stateless；lb 的 `range .Role "web"` 在 stack 下渲染为 `web:80`，经 VIP 负载均衡；所有 web 副本共享上下文，页面为 `<message> from web`）声明 `stack`。真实验收为 `deployment-ha.yml` 的 `blueprint on three-node Swarm` 矩阵项（三个嵌套 dockerd 节点同时作为 Ferry SSH 主机）；CI 通过前不写 stack 的 `verified.yaml`。实例绑定界面（含管理节点选择）待 P2c，拓扑变更待 P2.5。
+
+## 集群编排 P2c：部署规格 + 标签调度 + 部署向导（2026-11-12，分支 feature/orchestration-p2c）
+
+- Decision（规格模型）：新增部署规格 `ferry/deploy-v1`，存于 `deployments.deploy_spec`（YAML 文本）。本期字段：`template{id,version}`、`driver`、`manager`（仅 stack）、`values`、`roles.<r>.instances`、`roles.<r>.hosts{tags[],names[],group,spread{prefix}}`、可选 `placement`（人工放置，形如 `Binding.roles`）。未知字段一律拒绝；`failover`/`backup`/`storage` 留给 P3/P4 以新增字段扩展。请求带 `deploy_spec` 时，服务端按规格渲染模板（复用 `templates::render_app`）并放置，由此派生 `manifest`、`blueprint_binding`、`mode`、`target_kind=blueprint`、`target_ref=0`，客户端同时发送的这些字段被忽略；已由规格管理的部署不带规格直接改清单或绑定返回 409 `deployments.specManaged`。
+- Decision（选择器语义）：`tags` 为主机必须同时具备的标签名，`names` 为主机名列表，`group` 为主机组名；同时给出取交集，都不给时候选为全部可用主机。候选主机限本工作空间、`state=online`、`os` 为空或 `linux`；stack 另需为管理节点所在 Swarm 的 Ready/Active 节点（沿用 P2b 探测）。`spread.prefix` 为软约束，不满足只产生警告。人工 `placement` 必须满足选择器与在线条件，否则拒绝而不是静默改写；实例地址一律取所选主机地址，用户只选主机。
+- Decision（确定性放置）：调度器为纯函数，同输入同输出，排序键：违反 spread 少 → 本部署已有实例少 → 内存余量多 → 主机 ID 升序。失败按角色给出可读原因并列出匹配到的主机（例：`nats` 需要 3 台满足 `tags=[cache]` 的在线 Linux 主机，当前 2 台）。
+- Decision（冻结规则）：首个修订之后放置冻结：规格只允许改 `values` 与 `template.version`（普通升级：重新渲染、预览、执行），沿用存储的绑定与人工放置，即使主机标签后来改名或删除也不重新调度；模板 ID、驱动、管理节点、角色（实例数与选择器）或人工放置的主机变化返回 `blueprint.topologyChangeRequiresPlan`（拓扑变更并入 P3 替换能力）。
+- Decision（工作空间级 Swarm 标签）：主机标签映射为 Swarm 节点标签 `ferry.w<工作空间ID>.tag.<标签名 SHA-256 前 12 位十六进制>=true`。仅在执行（apply）时、P2b 节点探测之后经管理节点同步，预览、回滚、重启不同步；只改本部署选择器用到的标签、只改绑定主机所在节点，节点已符合则不发命令；同步失败在创建修订之前终止执行。无状态 stack 角色按选择器标签追加 `node.labels.<label>==true` 约束（排在作者约束之后）；有状态角色仍只按 `node.id==` 固定。按工作空间区分，两个空间共用一个 Swarm 时互不调度、互不改写对方标签。
+- Decision（放置预览一致）：`POST /api/workspaces/{ws}/deployment-placements {spec}` 与创建/修改走同一段渲染 + 放置 + 绑定校验；未部署的部署没有已有实例负载，因此同一规格的预览结果与随后保存的绑定一致。具备 `deployments.create` 或 `deployments.update` 之一即可预览（创建者与编辑者都要用）。
+- Decision（监控）：监控按每台主机的编译产物理解蓝图部署；运行时检查只在当前修订的目标主机上执行，stack 的唯一目标是管理节点，工作节点没有部署目标状态，因此 stack 的运行时检查只在管理节点上进行。
+- Decision（界面）：应用市场蓝图条目「部署」先导入再进入向导 `deploy/apps/new?wizard=blueprint&template=&version=`；五步（模板与版本 → 参数 → 角色与主机 → 放置预览 → 确认并创建），任意步可切换 YAML（同一份规格，保留注释）；YAML 无效时表单锁定、显示最后一次有效内容并阻止下一步与提交，可放弃 YAML 修改。部署详情显示角色 → 实例 → 主机拓扑与健康；首次部署前可改整个规格，之后只能改参数。
+- Alternatives：放置只在前端计算（预览与保存可能不一致，否决）；标签名直接作 Swarm 标签（字符受限且跨工作空间互相覆盖，否决）；预览时同步 Swarm 标签（预览产生远程副作用，否决）；冻结后按新标签重新调度（会无计划迁移有状态成员，否决）。
+- Scope/Tradeoffs：Native/Docker 由 Ferry 放置，Compose 单机，Swarm 无状态角色交给 Swarm 按标签约束；资源打分只用主机监控的内存余量。移除主机标签是运维动作，会在下次执行时缩小无状态角色的可调度节点。验收：Rust 单元/接口测试；`scripts/test-blueprint-wizard-ui.mjs`（市场 → 向导各步 → YAML 往返与无效锁定 → 放置预览改主机 → 创建 → 详情拓扑，1440/900/390/320 无整页横向滚动、320 底部操作可达，只创建不部署）；`deployment-ha.yml` 的 blueprint 矩阵项改为经规格 + 标签选择器创建 NATS/nginx 并断言放置等于打标签主机、stack 无状态服务带工作空间级标签约束。真实 CI 结果以公开注解为准，推送前需用户确认。
+- Status：已在分支 `feature/orchestration-p2c` 实现并本地验证；未合并 main、未发布。

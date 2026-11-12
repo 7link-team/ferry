@@ -386,11 +386,13 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             if mode=='stack':
                 # The three Swarm nodes are the blueprint hosts, each reached over SSH and running
                 # its own daemon; node 0 is the manager. Members address each other by node IP.
+                # A spec places instances at their host's address, so each host is registered at
+                # its node IP (the Linux test host routes to the fixture network directly).
                 for node in swarm_nodes:
                     child=name+'-'+node
-                    host=create('hosts',{'name':'swarm-'+node,'connection':'ssh','address':'127.0.0.1','port':node_ssh[node],'username':'root','credential_id':credential})
-                    eventually(lambda host=host:api(f'/workspaces/{workspace_ops}/nodes/'+host+'/connection-tests',{},status=200)['ok'])
                     ip=json.loads(command(['docker','inspect',child]))[0]['NetworkSettings']['Networks'][name+'-swarm']['IPAddress']
+                    host=create('hosts',{'name':'swarm-'+node,'connection':'ssh','address':ip,'port':22,'username':'root','credential_id':credential})
+                    eventually(lambda host=host:api(f'/workspaces/{workspace_ops}/nodes/'+host+'/connection-tests',{},status=200)['ok'])
                     fixtures.append((host,child,ip))
                 check('three Swarm nodes registered as SSH hosts with distinct addresses',len({ip for _,_,ip in fixtures})==3)
             else:
@@ -403,8 +405,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 for index in range(3):
                     child=f'{name}-bp-{index}'
                     extra_containers.append(child)
-                    ssh=port()
-                    command(['docker','run','-d','--name',child,'--privileged','--cgroupns=private','--network',network,'--add-host','host.docker.internal:host-gateway','-p',f'127.0.0.1:{ssh}:22','deployment-live-test-'+mode])
+                    command(['docker','run','-d','--name',child,'--privileged','--cgroupns=private','--network',network,'--add-host','host.docker.internal:host-gateway','deployment-live-test-'+mode])
                     command(['docker','exec','-d',child,'nested-daemon','--host=unix:///var/run/docker.sock','--storage-driver=vfs'])
                     eventually(lambda child=child:fixture_docker(child,'info').returncode==0,120)
                     ip=json.loads(command(['docker','inspect',child]))[0]['NetworkSettings']['Networks'][network]['IPAddress']
@@ -428,10 +429,17 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                             report_log_tail(work/'blueprint-runner-diagnostics.log','blueprint fixture runner never came online',120)
                             raise
                     else:
-                        host=create('hosts',{'name':f'blueprint-ssh-{index}','connection':'ssh','address':'127.0.0.1','port':ssh,'username':'root','credential_id':credential})
+                        # Registered at its fixture IP: a spec places instances at their host's address.
+                        host=create('hosts',{'name':f'blueprint-ssh-{index}','connection':'ssh','address':ip,'port':22,'username':'root','credential_id':credential})
                         eventually(lambda host=host:api(f'/workspaces/{workspace_ops}/nodes/'+host+'/connection-tests',{},status=200)['ok'])
                     fixtures.append((host,child,ip))
                 check('three blueprint hosts with independent Docker daemons and distinct addresses',len({ip for _,_,ip in fixtures})==3)
+                # The runner reports its own address; placement uses it for the instances there.
+                recorded={h:api(f'/workspaces/{workspace_ops}/nodes/'+h)['address'] for h,_,_ in fixtures}
+                if any(recorded[h]!=ip for h,_,ip in fixtures):
+                    (work/'blueprint-host-addresses.log').write_text(json.dumps({'recorded':recorded,'fixture':{h:ip for h,_,ip in fixtures}},indent=2),encoding='utf8')
+                    report_log_tail(work/'blueprint-host-addresses.log','blueprint host addresses differ from fixture IPs')
+                check('every blueprint host is recorded at its fixture IP',all(recorded[h]==ip for h,_,ip in fixtures))
             report['blueprint']={'hosts':[{'host_id':h,'container':c,'address':ip} for h,c,ip in fixtures],'deployments':{}}
             # Import the official packages exactly as bundled: package files become config
             # templates under their own names, the blueprint becomes an application template.
@@ -462,6 +470,40 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 check(label+' blueprint deployment succeeds: '+row['latest_revision']['output'],row['state']=='succeeded')
                 report['blueprint']['deployments'][label]={'deployment':id,'revisions':[revision],'binding':bound}
                 return id,revision
+            def tag(name,members):
+                # A host tag carried by exactly `members`; selectors match it by name.
+                tag_id=create('tags',{'name':name})
+                for host in members:
+                    row=api(f'/workspaces/{workspace_ops}/nodes/'+host)
+                    api(f'/workspaces/{workspace_ops}/nodes/'+host,dict(row,tag_ids=[t['id'] for t in row.get('tags') or []]+[tag_id]),method='PATCH')
+                return name
+            def tag_label(name):
+                # The Swarm node label standing for a host tag of this workspace.
+                return f'ferry.w{workspace_ops}.tag.'+hashlib.sha256(name.encode()).hexdigest()[:12]
+            def spec_text(template,driver,values,roles,manager=None):
+                # A ferry/deploy-v1 spec (JSON is YAML) whose roles select hosts by tag only.
+                return json.dumps({'apiVersion':'ferry/deploy-v1','template':{'id':template['id'],'version':template['version']},'driver':driver,
+                                   **({'manager':manager} if manager else {}),'values':values,
+                                   'roles':{role:{'instances':count,'hosts':{'tags':tags}} for role,count,tags in roles}})
+            def deploy_from_spec(label,text,title,tagged):
+                # The server renders the template and places the instances; the stored binding must
+                # use exactly the hosts tagged for each role, as the placement preview showed.
+                previewed=api(f'/workspaces/{workspace_ops}/deployment-placements',{'spec':text})
+                id=create('deployments',{'name':title,'workdir':'/tmp/blueprint-deployments','deploy_spec':text})
+                bound=app(id)['blueprint_binding']
+                check(label+' stored binding equals the placement preview',bound==previewed['binding'])
+                for role,hosts in tagged.items():
+                    placed=[item['hostId'] for item in bound['roles'][role]]
+                    check(f'{label} {role} instances run on exactly the hosts tagged for it',sorted(placed)==sorted(hosts))
+                revision=start(id);row=done(id)
+                if row['state']!='succeeded': diagnostics(label)
+                check(label+' blueprint deployment from a spec succeeds: '+row['latest_revision']['output'],row['state']=='succeeded')
+                report['blueprint']['deployments'][label]={'deployment':id,'revisions':[revision],'binding':bound,'spec':json.loads(text)}
+                return id,revision,bound
+            def respec(id,text):
+                # A values change on a deployed spec: an ordinary upgrade, the binding stays.
+                row=app(id)
+                return api(f'/workspaces/{workspace_ops}/deployments/'+id,dict(row,deploy_spec=text),method='PATCH')
             def owned(child,id):
                 prefix=f"deployment-{workspace['id']}-{id}"
                 return sorted(n[len(prefix)+1:] for n in fixture_docker(child,'ps','--filter','label=workspace.deployment='+prefix,'--format','{{.Names}}').stdout.decode().split())
@@ -518,10 +560,18 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     def service_spec(id,service):
                         prefix=f"deployment-{workspace['id']}-{id}"
                         return json.loads(command(['docker','exec',manager,'/usr/bin/docker','service','inspect',prefix+'_'+service]))[0]['Spec']
-                    nats_id,_=deploy('nats-stack',nats_template,{'client_port':14222,'cluster_port':16222,'monitor_port':18222},binding('stack',[('nats',3)],fixtures,manager_host),'NATS cluster (stack)')
-                    for i,(node,(_,child,ip)) in enumerate(zip(swarm_nodes,fixtures)):
+                    # Hosts are chosen by tag: NATS on all three nodes, the web replicas on the
+                    # manager and the first worker, the balancer on the second worker.
+                    host_ids=[h for h,_,_ in fixtures]
+                    nats_tag,web_tag,lb_tag=tag('bp-nats',host_ids),tag('bp-web',host_ids[:2]),tag('bp-lb',host_ids[2:])
+                    fixture_of={h:(node,child,ip) for node,(h,child,ip) in zip(swarm_nodes,fixtures)}
+                    nats_values={'client_port':14222,'cluster_port':16222,'monitor_port':18222}
+                    nats_id,_,nats_bound=deploy_from_spec('nats-stack',spec_text(nats_template,'stack',nats_values,[('nats',3,[nats_tag])],manager_host),'NATS cluster (stack)',{'nats':host_ids})
+                    for i,item in enumerate(nats_bound['roles']['nats']):
+                        node,child,ip=fixture_of[item['hostId']]
                         spec=service_spec(nats_id,f'nats-{i}')
                         constraints=[c.replace(' ','') for c in spec['TaskTemplate'].get('Placement',{}).get('Constraints') or []]
+                        # A stable member is pinned by node ID only; tag labels constrain stateless roles.
                         check(f'stack nats-{i} service is pinned to Swarm node {node}',constraints==[f'node.id=={swarm_ids[node]}'])
                         endpoint=spec.get('EndpointSpec') or {}
                         check(f'stack nats-{i} uses dnsrr and host-mode ports',endpoint.get('Mode')=='dnsrr' and {p.get('PublishMode') for p in endpoint.get('Ports') or []}=={'host'})
@@ -530,15 +580,28 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                         check(f'stack nats-{i} has routes to the two other members',eventually(lambda ip=ip,i=i:two_routes(ip,18222+i),120))
                         meta=eventually(lambda ip=ip,i=i:meta_cluster(ip,18222+i),120)
                         check(f'stack nats-{i} sees a JetStream meta cluster of 3 with a leader',meta['cluster_size']==3)
-                    stream=eventually(lambda:replicated_stream(fixtures[0][2],14222,'FERRY_STACK'),120)
+                    first_ip=fixture_of[nats_bound['roles']['nats'][0]['hostId']][2]
+                    stream=eventually(lambda:replicated_stream(first_ip,14222,'FERRY_STACK'),120)
                     check('stack NATS creates a JetStream stream with 3 replicas',stream['config']['num_replicas']==3)
                     report['blueprint']['nats_stack_stream']=stream.get('cluster')
                     nginx_values={'message':'stack-v1','web_port':18080,'lb_port':18000}
-                    nginx_id,first=deploy('nginx-stack',nginx_template,nginx_values,binding('stack',[('web',2),('lb',1)],fixtures,manager_host),'Nginx HA web (stack)')
-                    for service,replicas in (('web',2),('lb',1)):
+                    nginx_spec=lambda values:spec_text(nginx_template,'stack',values,[('web',2,[web_tag]),('lb',1,[lb_tag])],manager_host)
+                    nginx_id,first,_=deploy_from_spec('nginx-stack',nginx_spec(nginx_values),'Nginx HA web (stack)',{'web':host_ids[:2],'lb':host_ids[2:]})
+                    for service,replicas,selected in (('web',2,web_tag),('lb',1,lb_tag)):
                         spec=service_spec(nginx_id,service)
                         check(f'stack nginx {service} is one service with {replicas} replica(s) on the ingress mesh',spec['Mode'].get('Replicated',{}).get('Replicas')==replicas and {p.get('PublishMode') for p in spec['EndpointSpec']['Ports']}=={'ingress'})
                         check(f'stack nginx {service} runs at most one replica per node and updates stop-first',spec['TaskTemplate'].get('Placement',{}).get('MaxReplicas')==1 and (spec.get('UpdateConfig') or {}).get('Order')=='stop-first')
+                        constraints=[c.replace(' ','') for c in spec['TaskTemplate'].get('Placement',{}).get('Constraints') or []]
+                        check(f'stateless stack nginx {service} is constrained to the workspace-scoped label of its tag',f'node.labels.{tag_label(selected)}==true' in constraints)
+                    labels={node:json.loads(engine(['node','inspect',swarm_ids[node]]))[0]['Spec'].get('Labels') or {} for node in swarm_nodes}
+                    check('apply synchronized the tag labels onto exactly the tagged Swarm nodes',
+                          all((labels[node].get(tag_label(name))=='true')==(h in members) for name,members in ((web_tag,host_ids[:2]),(lb_tag,host_ids[2:])) for node,(h,_,_) in zip(swarm_nodes,fixtures)))
+                    for members,service in ((host_ids[:2],'web'),(host_ids[2:],'lb')):
+                        for h in host_ids:
+                            node,child,_=fixture_of[h]
+                            where='runs' if h in members else 'does not run'
+                            check(f'stack nginx {service} {where} on Swarm node {node}',
+                                  eventually(lambda child=child,h=h,members=members,service=service:(service in stack_tasks(child,nginx_id))==(h in members),120))
                     prefix=f"deployment-{workspace['id']}-{nginx_id}"
                     lb_url=f'http://{fixtures[0][2]}:18000/'
                     def stack_balanced(message):
@@ -555,8 +618,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                         tasks={line.split('|',1)[0].strip() for line in logs.splitlines() if agent in line and '|' in line}
                         return tasks if len(tasks)==2 else None
                     check('stack nginx load balancer serves both web replicas through the service VIP',eventually(lambda:stack_balanced('stack-v1'),120))
-                    row=app(nginx_id)
-                    api(f'/workspaces/{workspace_ops}/deployments/'+nginx_id,dict(row,manifest=render(nginx_template,dict(nginx_values,message='stack-v2'))),method='PATCH')
+                    respec(nginx_id,nginx_spec(dict(nginx_values,message='stack-v2')))
                     second=start(nginx_id);row=done(nginx_id)
                     if row['state']!='succeeded': diagnostics('nginx-stack-upgrade')
                     check('stack nginx parameter upgrade applies a new revision: '+row['latest_revision']['output'],row['state']=='succeeded')
@@ -569,30 +631,47 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     report['blueprint']['deployments']['nginx-stack']['revisions']+=[second,row['latest_revision']['id']]
                 else:
                     print('== blueprint docker driver on three hosts',flush=True)
-                    nats_id,_=deploy('nats-docker',nats_template,{'client_port':14222,'cluster_port':16222,'monitor_port':18222},binding('docker',[('nats',3)],fixtures),'NATS cluster')
-                    for i,(_,child,ip) in enumerate(fixtures):
-                        check(f'docker host {i} runs only its own NATS member',owned(child,nats_id)==[f'nats-{i}'])
+                    # Hosts are chosen by tag: NATS on all three fixtures, the web instances on
+                    # the first two and the balancer on the third. Other online hosts of the
+                    # workspace carry no tag and must never be chosen.
+                    host_ids=[h for h,_,_ in fixtures]
+                    nats_tag,web_tag,lb_tag=tag('bp-nats',host_ids),tag('bp-web',host_ids[:2]),tag('bp-lb',host_ids[2:])
+                    fixture_of={h:(child,ip) for h,child,ip in fixtures}
+                    nats_values={'client_port':14222,'cluster_port':16222,'monitor_port':18222}
+                    nats_id,_,nats_bound=deploy_from_spec('nats-docker',spec_text(nats_template,'docker',nats_values,[('nats',3,[nats_tag])]),'NATS cluster',{'nats':host_ids})
+                    for i,item in enumerate(nats_bound['roles']['nats']):
+                        child,ip=fixture_of[item['hostId']]
+                        check(f'docker host of nats-{i} runs only that NATS member',owned(child,nats_id)==[f'nats-{i}'])
                         check(f'docker nats-{i} has routes to the two other members',eventually(lambda ip=ip,i=i:two_routes(ip,18222+i),120))
                         meta=eventually(lambda ip=ip,i=i:meta_cluster(ip,18222+i),120)
                         check(f'docker nats-{i} sees a JetStream meta cluster of 3 with a leader',meta['cluster_size']==3)
-                    stream=eventually(lambda:replicated_stream(fixtures[0][2],14222,'FERRY_DOCKER'),120)
+                    first_ip=fixture_of[nats_bound['roles']['nats'][0]['hostId']][1]
+                    stream=eventually(lambda:replicated_stream(first_ip,14222,'FERRY_DOCKER'),120)
                     check('docker NATS creates a JetStream stream with 3 replicas',stream['config']['num_replicas']==3)
                     report['blueprint']['nats_docker_stream']=stream.get('cluster')
                     nginx_values={'message':'blueprint-v1','web_port':18080,'lb_port':18000}
-                    nginx_binding=binding('docker',[('web',2),('lb',1)],fixtures)
-                    nginx_id,first=deploy('nginx-docker',nginx_template,nginx_values,nginx_binding,'Nginx HA web (docker)')
-                    check('docker nginx instances land on their bound hosts',[owned(c,nginx_id) for _,c,_ in fixtures]==[['web-0'],['web-1'],['lb-0']])
-                    lb_url=f'http://{fixtures[2][2]}:18000/'
+                    nginx_spec=lambda values:spec_text(nginx_template,'docker',values,[('web',2,[web_tag]),('lb',1,[lb_tag])])
+                    nginx_id,first,nginx_bound=deploy_from_spec('nginx-docker',nginx_spec(nginx_values),'Nginx HA web (docker)',{'web':host_ids[:2],'lb':host_ids[2:]})
+                    expected={h:[] for h in host_ids}
+                    for role,items in nginx_bound['roles'].items():
+                        for i,item in enumerate(items): expected[item['hostId']].append(f'{role}-{i}')
+                    check('docker nginx instances land on their bound hosts',[owned(c,nginx_id) for h,c,_ in fixtures]==[sorted(expected[h]) for h,_,_ in fixtures])
+                    lb_url=f"http://{fixture_of[nginx_bound['roles']['lb'][0]['hostId']][1]}:18000/"
                     check('docker nginx load balancer serves both web instances',eventually(lambda:balanced(lb_url,'blueprint-v1'),120))
                     row=app(nginx_id)
-                    moved=json.loads(json.dumps(row['blueprint_binding']))
-                    moved['roles']['lb'][0]={'hostId':fixtures[0][0],'address':fixtures[0][2]}
-                    rejected=api(f'/workspaces/{workspace_ops}/deployments/'+nginx_id,dict(row,blueprint_binding=moved),method='PATCH',status=400)
-                    frozen={json.loads(f.read_text(encoding='utf8'))['blueprint.topologyChangeRequiresPlan'] for f in Path('crates/server/src/i18n').glob('deployment-*.json')}
-                    check('binding change after the first revision is rejected as a topology change',rejected['error'] in frozen)
+                    def messages(key):
+                        return {json.loads(f.read_text(encoding='utf8'))[key] for f in Path('crates/server/src/i18n').glob('*.json') if key in json.loads(f.read_text(encoding='utf8'))}
+                    moved=json.loads(nginx_spec(nginx_values))
+                    moved['placement']={'lb':[{'hostId':host_ids[0],'address':fixtures[0][2]}]}
+                    rejected=api(f'/workspaces/{workspace_ops}/deployments/'+nginx_id,dict(row,deploy_spec=json.dumps(moved)),method='PATCH',status=400)
+                    check('placement change in the spec after the first revision is rejected as a topology change',rejected['error'] in messages('blueprint.topologyChangeRequiresPlan'))
+                    moved_binding=json.loads(json.dumps(row['blueprint_binding']))
+                    moved_binding['roles']['lb'][0]={'hostId':host_ids[0],'address':fixtures[0][2]}
+                    rejected=api(f'/workspaces/{workspace_ops}/deployments/'+nginx_id,dict(row,blueprint_binding=moved_binding,deploy_spec=None),method='PATCH',status=409)
+                    check('a spec-managed deployment rejects a binding edit outside its spec',rejected['error'] in messages('deployments.specManaged'))
                     check('binding is frozen after the first revision',app(nginx_id)['blueprint_binding']==row['blueprint_binding'])
-                    row=app(nginx_id)
-                    api(f'/workspaces/{workspace_ops}/deployments/'+nginx_id,dict(row,manifest=render(nginx_template,dict(nginx_values,message='blueprint-v2'))),method='PATCH')
+                    respec(nginx_id,nginx_spec(dict(nginx_values,message='blueprint-v2')))
+                    check('a values change keeps the frozen binding',app(nginx_id)['blueprint_binding']==row['blueprint_binding'])
                     second=start(nginx_id);row=done(nginx_id)
                     check('blueprint deployment keeps its free-text name across revisions',row['name']=='Nginx HA web (docker)')
                     if row['state']!='succeeded': diagnostics('nginx-docker-upgrade')

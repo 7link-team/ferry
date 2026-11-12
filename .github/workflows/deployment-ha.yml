@@ -162,10 +162,10 @@ jobs:
             echo '### ${{ matrix.label }}'
             echo "Commit: $GITHUB_SHA; run: $GITHUB_RUN_ID"
             if [ "$FERRY_TEST_BLUEPRINT" = 1 ] && [ "$FERRY_TEST_DEPLOY_MODE" = stack ]; then
-              echo 'Official nats-cluster and nginx-ha blueprints with the stack driver through SSH on a three-node Swarm (manager plus two workers, one Ferry host per node): NATS members as node-pinned host-mode services (routes, JetStream meta cluster and R3 stream), Nginx web and balancer as replicated ingress services (load balancing over the web VIP, parameter upgrade, rollback).'
+              echo 'Official nats-cluster and nginx-ha blueprints created from ferry/deploy-v1 specs with host-tag selectors, stack driver through SSH on a three-node Swarm (manager plus two workers, one Ferry host per node): placement equals the tagged hosts, NATS members as node-pinned host-mode services (routes, JetStream meta cluster and R3 stream), Nginx web and balancer as replicated ingress services constrained by workspace-scoped tag labels synchronized on apply (load balancing over the web VIP, parameter upgrade through the spec, rollback).'
               echo 'Swarm nodes are nested daemons sharing one kernel; does not certify physical-host HA or manager quorum.'
             elif [ "$FERRY_TEST_BLUEPRINT" = 1 ]; then
-              echo 'Official nats-cluster and nginx-ha blueprints through SSH and HostAgent: Docker driver on three fixture hosts with independent daemons (routes, JetStream meta cluster and R3 stream, load balancing, parameter upgrade, rollback, frozen binding) and Compose on one host.'
+              echo 'Official nats-cluster and nginx-ha blueprints through SSH and HostAgent: Docker driver on three fixture hosts with independent daemons, created from ferry/deploy-v1 specs with host-tag selectors (placement equals the tagged hosts and the placement preview, routes, JetStream meta cluster and R3 stream, load balancing, parameter upgrade through the spec, rollback, frozen placement) and Compose on one host from an explicit binding.'
               echo 'Fixture hosts share one kernel; does not certify physical-host HA. Native blueprints are covered by Rust compile tests only.'
             elif [ "$FERRY_TEST_DEPLOY_MODE" = native ]; then
               echo 'Initialized Actions build and Native application templates: real archive, SSH and HostAgent systemd deployment, HTTP, readiness and rollback regression.'
