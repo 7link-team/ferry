@@ -232,6 +232,8 @@ pub(crate) async fn finish(s: AppState, job: Job, revision: Id) -> Outcome;
 
 ### Task 6: 协调器循环、租约、冷却/人工确认、恢复后解除隔离、告警
 
+> 控制补充（Task 2 评审）：本任务接入 `blueprint::failover` 后删除 `blueprint/mod.rs` 上临时的 `#[allow(dead_code)]`（构建不得新增警告）；从未上报的主机（`seen_at` 为 0/空）映射为「自登记时间起计」的陈旧判定而非立即判定失联，并加测试 `never_seen_host_counts_from_registration`。
+
 **Files:**
 - Create: `crates/server/src/deployments/reconciler.rs`
 - Modify: `crates/server/src/main.rs`（spawn + 路由）、`crates/server/src/deployments/mod.rs`（`get` 返回 `failover` 摘要）、`crates/server/src/notifications/alerts.rs`（新指标）、`crates/server/src/i18n/deployment-*.json`（含告警文案 `deployment.alert.failoverAttention`/`failoverRecovered`）
