@@ -272,5 +272,12 @@
   "blueprint.bindingComposeNeedsSingleHost": "이 블루프린트는 일부 역할에 서로 다른 호스트를 요구하고 단일 호스트 배포를 허용하지 않으므로 compose 드라이버를 사용할 수 없습니다.",
   "blueprint.portConflict": "인스턴스 {instance}과(와) {other}이(가) 같은 호스트에서 동일한 포트 {port}를 게시합니다.",
   "blueprint.topologyChangeRequiresPlan": "첫 배포 이후에는 블루프린트 바인딩을 변경할 수 없습니다. 인스턴스를 이동하거나 수를 바꾸려면 새 배포 계획을 만드세요.",
-  "blueprint.deploymentInvalid": "블루프린트 배포에는 블루프린트 매니페스트, 배포 모드와 드라이버가 일치하는 바인딩, target_ref 0이 필요합니다. 다른 대상 유형은 바인딩을 가질 수 없습니다."
+  "blueprint.deploymentInvalid": "블루프린트 배포에는 블루프린트 매니페스트, 배포 모드와 드라이버가 일치하는 바인딩, target_ref 0이 필요합니다. 다른 대상 유형은 바인딩을 가질 수 없습니다.",
+  "blueprint.specInvalid": "배포 사양이 올바르지 않습니다: {detail}",
+  "blueprint.specApiVersion": "배포 사양의 apiVersion은 {expected}이어야 합니다.",
+  "blueprint.specInstancesRange": "역할 {role}의 인스턴스 수는 1에서 {max} 사이여야 합니다.",
+  "blueprint.specListTooLong": "배포 사양의 {field}에는 최대 {max}개 항목만 둘 수 있습니다.",
+  "blueprint.specItemLength": "배포 사양의 {field} 각 항목은 1자에서 {max}자여야 합니다.",
+  "blueprint.specPrefixLength": "분산 접두사는 1자에서 {max}자여야 합니다.",
+  "blueprint.specManagerOnlyStack": "manager는 stack 드라이버에서만 지정할 수 있습니다."
 }

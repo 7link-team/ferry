@@ -272,5 +272,12 @@
   "blueprint.bindingComposeNeedsSingleHost": "This blueprint requires distinct hosts for some roles and does not allow single-host deployment, so the compose driver cannot be used.",
   "blueprint.portConflict": "Instances {instance} and {other} publish the same port {port} on one host.",
   "blueprint.topologyChangeRequiresPlan": "The blueprint binding cannot change after the first deployment; create a new deployment plan to move or resize instances.",
-  "blueprint.deploymentInvalid": "A blueprint deployment needs a blueprint manifest, a binding whose driver matches the deployment mode, and target_ref 0; other target kinds cannot carry a binding."
+  "blueprint.deploymentInvalid": "A blueprint deployment needs a blueprint manifest, a binding whose driver matches the deployment mode, and target_ref 0; other target kinds cannot carry a binding.",
+  "blueprint.specInvalid": "Invalid deployment spec: {detail}",
+  "blueprint.specApiVersion": "The deployment spec apiVersion must be {expected}.",
+  "blueprint.specInstancesRange": "Role {role} must have between 1 and {max} instances.",
+  "blueprint.specListTooLong": "{field} in the deployment spec can have at most {max} items.",
+  "blueprint.specItemLength": "Each item of {field} in the deployment spec must be 1 to {max} characters long.",
+  "blueprint.specPrefixLength": "The spread prefix must be 1 to {max} characters long.",
+  "blueprint.specManagerOnlyStack": "Only the stack driver can specify a manager."
 }

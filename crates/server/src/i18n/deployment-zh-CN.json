@@ -272,5 +272,12 @@
   "blueprint.bindingComposeNeedsSingleHost": "此蓝图要求部分角色分布在不同主机且不允许单机部署，因此不能使用 compose 驱动。",
   "blueprint.portConflict": "实例 {instance} 与 {other} 在同一主机上发布了相同端口 {port}。",
   "blueprint.topologyChangeRequiresPlan": "首次部署后不能再修改蓝图绑定；如需迁移或增减实例，请创建新的部署计划。",
-  "blueprint.deploymentInvalid": "蓝图部署需要蓝图清单、驱动与部署模式一致的绑定，且 target_ref 为 0；其他目标类型不能携带绑定。"
+  "blueprint.deploymentInvalid": "蓝图部署需要蓝图清单、驱动与部署模式一致的绑定，且 target_ref 为 0；其他目标类型不能携带绑定。",
+  "blueprint.specInvalid": "部署规格无效：{detail}",
+  "blueprint.specApiVersion": "部署规格的 apiVersion 必须是 {expected}。",
+  "blueprint.specInstancesRange": "角色 {role} 的实例数必须在 1 到 {max} 之间。",
+  "blueprint.specListTooLong": "部署规格中的 {field} 最多只能有 {max} 项。",
+  "blueprint.specItemLength": "部署规格中的 {field} 每项长度必须为 1 到 {max} 个字符。",
+  "blueprint.specPrefixLength": "分散前缀长度必须为 1 到 {max} 个字符。",
+  "blueprint.specManagerOnlyStack": "只有 stack 驱动可以指定 manager。"
 }

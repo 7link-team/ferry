@@ -272,5 +272,12 @@
   "blueprint.bindingComposeNeedsSingleHost": "このブループリントは一部のロールを別々のホストに配置する必要があり、単一ホストでの配置を許可していないため、compose ドライバーは使用できません。",
   "blueprint.portConflict": "インスタンス {instance} と {other} が同じホストで同じポート {port} を公開しています。",
   "blueprint.topologyChangeRequiresPlan": "初回デプロイ後はブループリントのバインディングを変更できません。インスタンスの移動や増減には新しいデプロイ計画を作成してください。",
-  "blueprint.deploymentInvalid": "ブループリントのデプロイには、ブループリントのマニフェスト、デプロイモードと一致するドライバーのバインディング、および target_ref 0 が必要です。他のターゲット種別はバインディングを持てません。"
+  "blueprint.deploymentInvalid": "ブループリントのデプロイには、ブループリントのマニフェスト、デプロイモードと一致するドライバーのバインディング、および target_ref 0 が必要です。他のターゲット種別はバインディングを持てません。",
+  "blueprint.specInvalid": "デプロイ仕様が無効です: {detail}",
+  "blueprint.specApiVersion": "デプロイ仕様の apiVersion は {expected} である必要があります。",
+  "blueprint.specInstancesRange": "ロール {role} のインスタンス数は 1 から {max} の範囲で指定してください。",
+  "blueprint.specListTooLong": "デプロイ仕様の {field} は最大 {max} 件までです。",
+  "blueprint.specItemLength": "デプロイ仕様の {field} の各項目は 1 から {max} 文字にしてください。",
+  "blueprint.specPrefixLength": "分散プレフィックスは 1 から {max} 文字にしてください。",
+  "blueprint.specManagerOnlyStack": "manager を指定できるのは stack ドライバーのみです。"
 }

@@ -2,5 +2,6 @@
 pub mod binding;
 pub mod compile;
 pub mod model;
+pub mod spec;
 pub mod swarm;
 pub mod template;

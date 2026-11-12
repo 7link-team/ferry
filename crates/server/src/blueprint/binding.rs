@@ -21,7 +21,7 @@ pub struct Binding {
     pub roles: BTreeMap<String, Vec<InstanceBinding>>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InstanceBinding {
     pub host_id: Id,

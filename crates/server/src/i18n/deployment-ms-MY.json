@@ -272,5 +272,12 @@
   "blueprint.bindingComposeNeedsSingleHost": "Pelan tindakan ini memerlukan hos berbeza untuk sesetengah peranan dan tidak membenarkan penggunaan satu hos, jadi pemacu compose tidak boleh digunakan.",
   "blueprint.portConflict": "Instans {instance} dan {other} menerbitkan port yang sama {port} pada satu hos.",
   "blueprint.topologyChangeRequiresPlan": "Pengikatan blueprint tidak boleh diubah selepas pengerahan pertama; cipta pelan pengerahan baharu untuk memindahkan atau mengubah bilangan instans.",
-  "blueprint.deploymentInvalid": "Pengerahan blueprint memerlukan manifest blueprint, pengikatan yang pemacunya sepadan dengan mod pengerahan, dan target_ref 0; jenis sasaran lain tidak boleh membawa pengikatan."
+  "blueprint.deploymentInvalid": "Pengerahan blueprint memerlukan manifest blueprint, pengikatan yang pemacunya sepadan dengan mod pengerahan, dan target_ref 0; jenis sasaran lain tidak boleh membawa pengikatan.",
+  "blueprint.specInvalid": "Spesifikasi penggunaan tidak sah: {detail}",
+  "blueprint.specApiVersion": "apiVersion spesifikasi penggunaan mestilah {expected}.",
+  "blueprint.specInstancesRange": "Peranan {role} mesti mempunyai antara 1 hingga {max} instans.",
+  "blueprint.specListTooLong": "{field} dalam spesifikasi penggunaan boleh mempunyai paling banyak {max} item.",
+  "blueprint.specItemLength": "Setiap item {field} dalam spesifikasi penggunaan mestilah 1 hingga {max} aksara.",
+  "blueprint.specPrefixLength": "Awalan sebaran mestilah 1 hingga {max} aksara.",
+  "blueprint.specManagerOnlyStack": "Hanya pemacu stack boleh menentukan manager."
 }
