@@ -280,5 +280,9 @@
   "blueprint.specItemLength": "デプロイ仕様の {field} の各項目は 1 から {max} 文字にしてください。",
   "blueprint.specPrefixLength": "分散プレフィックスは 1 から {max} 文字にしてください。",
   "blueprint.specManagerOnlyStack": "manager を指定できるのは stack ドライバーのみです。",
-  "blueprint.specDuplicate": "デプロイ仕様の {field} に重複した項目を含めることはできません。"
+  "blueprint.specDuplicate": "デプロイ仕様の {field} に重複した項目を含めることはできません。",
+  "blueprint.placementInsufficientHosts": "ロール {role} には {selector} に一致するオンラインの Linux ホストが {needed} 台必要ですが、{matched} 台しかありません：{hosts}。",
+  "blueprint.placementSelectorEmpty": "ロール {role} に使用できる、{selector} に一致するオンラインの Linux ホストがありません。",
+  "blueprint.placementSpreadUnmet": "ロール {role}：すべてのインスタンスを異なる {prefix} タグに分散できませんでした。",
+  "blueprint.placementManagerUnavailable": "Swarm マネージャー {manager} は、このワークスペースのオンラインの Linux ホストである必要があります。"
 }

@@ -280,5 +280,9 @@
   "blueprint.specItemLength": "部署規格中的 {field} 每項長度必須為 1 到 {max} 個字元。",
   "blueprint.specPrefixLength": "分散前綴長度必須為 1 到 {max} 個字元。",
   "blueprint.specManagerOnlyStack": "只有 stack 驅動可以指定 manager。",
-  "blueprint.specDuplicate": "部署規格中的 {field} 不能包含重複項。"
+  "blueprint.specDuplicate": "部署規格中的 {field} 不能包含重複項。",
+  "blueprint.placementInsufficientHosts": "角色 {role} 需要 {needed} 台符合 {selector} 的線上 Linux 主機，目前 {matched} 台：{hosts}。",
+  "blueprint.placementSelectorEmpty": "沒有符合 {selector} 的線上 Linux 主機可用於角色 {role}。",
+  "blueprint.placementSpreadUnmet": "角色 {role}：執行個體未能全部分散到不同的 {prefix} 標籤上。",
+  "blueprint.placementManagerUnavailable": "Swarm 管理節點 {manager} 必須是本工作空間中的線上 Linux 主機。"
 }

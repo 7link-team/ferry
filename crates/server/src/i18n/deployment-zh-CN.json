@@ -280,5 +280,9 @@
   "blueprint.specItemLength": "部署规格中的 {field} 每项长度必须为 1 到 {max} 个字符。",
   "blueprint.specPrefixLength": "分散前缀长度必须为 1 到 {max} 个字符。",
   "blueprint.specManagerOnlyStack": "只有 stack 驱动可以指定 manager。",
-  "blueprint.specDuplicate": "部署规格中的 {field} 不能包含重复项。"
+  "blueprint.specDuplicate": "部署规格中的 {field} 不能包含重复项。",
+  "blueprint.placementInsufficientHosts": "角色 {role} 需要 {needed} 台满足 {selector} 的在线 Linux 主机，当前 {matched} 台：{hosts}。",
+  "blueprint.placementSelectorEmpty": "没有满足 {selector} 的在线 Linux 主机可用于角色 {role}。",
+  "blueprint.placementSpreadUnmet": "角色 {role}：实例未能全部分布到不同的 {prefix} 标签上。",
+  "blueprint.placementManagerUnavailable": "Swarm 管理节点 {manager} 必须是本工作空间中的在线 Linux 主机。"
 }

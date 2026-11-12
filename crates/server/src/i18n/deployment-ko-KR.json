@@ -280,5 +280,9 @@
   "blueprint.specItemLength": "배포 사양의 {field} 각 항목은 1자에서 {max}자여야 합니다.",
   "blueprint.specPrefixLength": "분산 접두사는 1자에서 {max}자여야 합니다.",
   "blueprint.specManagerOnlyStack": "manager는 stack 드라이버에서만 지정할 수 있습니다.",
-  "blueprint.specDuplicate": "배포 사양의 {field}에는 중복 항목을 둘 수 없습니다."
+  "blueprint.specDuplicate": "배포 사양의 {field}에는 중복 항목을 둘 수 없습니다.",
+  "blueprint.placementInsufficientHosts": "역할 {role}에는 {selector}와 일치하는 온라인 Linux 호스트 {needed}대가 필요하지만 {matched}대만 있습니다: {hosts}.",
+  "blueprint.placementSelectorEmpty": "역할 {role}에 사용할 수 있는 {selector}와 일치하는 온라인 Linux 호스트가 없습니다.",
+  "blueprint.placementSpreadUnmet": "역할 {role}: 모든 인스턴스를 서로 다른 {prefix} 태그에 분산하지 못했습니다.",
+  "blueprint.placementManagerUnavailable": "Swarm 관리자 {manager}는 이 워크스페이스의 온라인 Linux 호스트여야 합니다."
 }

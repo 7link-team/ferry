@@ -280,5 +280,9 @@
   "blueprint.specItemLength": "Each item of {field} in the deployment spec must be 1 to {max} characters long.",
   "blueprint.specPrefixLength": "The spread prefix must be 1 to {max} characters long.",
   "blueprint.specManagerOnlyStack": "Only the stack driver can specify a manager.",
-  "blueprint.specDuplicate": "{field} in the deployment spec must not contain duplicates."
+  "blueprint.specDuplicate": "{field} in the deployment spec must not contain duplicates.",
+  "blueprint.placementInsufficientHosts": "Role {role} needs {needed} online Linux hosts matching {selector}; {matched} found: {hosts}.",
+  "blueprint.placementSelectorEmpty": "No online Linux host matches {selector} for role {role}.",
+  "blueprint.placementSpreadUnmet": "Role {role}: instances could not all be spread across different {prefix} tags.",
+  "blueprint.placementManagerUnavailable": "Swarm manager {manager} must be an online Linux host in this workspace."
 }
