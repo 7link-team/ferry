@@ -972,7 +972,7 @@
     "wizard.yaml": "YAML",
     "wizard.yamlLabel": "Deployment spec (YAML)",
     "wizard.yamlHelp": "The whole spec in ferry/deploy-v1 format. Edits here and in the form stay in sync; comments are kept.",
-    "wizard.yamlInvalid": "The YAML spec has errors. Fix it in YAML mode to continue; the form shows the last valid spec, and editing the form replaces the invalid YAML.",
+    "wizard.yamlInvalid": "The YAML spec has errors. Fix it in YAML mode or discard the YAML changes to continue. Until then the form shows the last valid spec and is locked.",
     "wizard.syntax": "YAML syntax error: {{detail}}",
     "wizard.notMapping": "The spec must be a YAML mapping.",
     "wizard.apiVersion": "apiVersion must be {{expected}}.",
@@ -1033,7 +1033,12 @@
     "wizard.next": "Next",
     "wizard.back": "Back",
     "wizard.create": "Create deployment",
-    "wizard.creating": "Creating…"
+    "wizard.creating": "Creating…",
+    "wizard.driverNative": "Native (systemd)",
+    "wizard.driverDocker": "Docker",
+    "wizard.driverCompose": "Docker Compose",
+    "wizard.driverStack": "Docker Swarm (stack)",
+    "wizard.discardYaml": "Discard YAML changes"
   },
   "zh-CN": {
     "platform.storagePrefix": "S3 路径前缀",
@@ -2008,7 +2013,7 @@
     "wizard.yaml": "YAML",
     "wizard.yamlLabel": "部署规格（YAML）",
     "wizard.yamlHelp": "ferry/deploy-v1 格式的完整规格。此处与表单的修改双向同步，注释会保留。",
-    "wizard.yamlInvalid": "YAML 规格有错误。请在 YAML 模式下修正后继续；表单显示最后一次有效的规格，在表单中修改将覆盖出错的 YAML。",
+    "wizard.yamlInvalid": "YAML 规格有错误。请在 YAML 模式下修正，或放弃 YAML 修改后继续。在此之前，表单显示最后一次有效的规格且不可编辑。",
     "wizard.syntax": "YAML 语法错误：{{detail}}",
     "wizard.notMapping": "规格必须是 YAML 映射。",
     "wizard.apiVersion": "apiVersion 必须为 {{expected}}。",
@@ -2069,7 +2074,12 @@
     "wizard.next": "下一步",
     "wizard.back": "上一步",
     "wizard.create": "创建部署",
-    "wizard.creating": "正在创建…"
+    "wizard.creating": "正在创建…",
+    "wizard.driverNative": "Native（systemd）",
+    "wizard.driverDocker": "Docker",
+    "wizard.driverCompose": "Docker Compose",
+    "wizard.driverStack": "Docker Swarm（Stack）",
+    "wizard.discardYaml": "放弃 YAML 修改"
   },
   "zh-TW": {
     "platform.storagePrefix": "S3 路徑前綴",
@@ -3044,7 +3054,7 @@
     "wizard.yaml": "YAML",
     "wizard.yamlLabel": "部署規格（YAML）",
     "wizard.yamlHelp": "ferry/deploy-v1 格式的完整規格。此處與表單的修改雙向同步，註解會保留。",
-    "wizard.yamlInvalid": "YAML 規格有錯誤。請在 YAML 模式下修正後繼續；表單顯示最後一次有效的規格，在表單中修改將覆蓋出錯的 YAML。",
+    "wizard.yamlInvalid": "YAML 規格有錯誤。請在 YAML 模式下修正，或放棄 YAML 修改後繼續。在此之前，表單顯示最後一次有效的規格且不可編輯。",
     "wizard.syntax": "YAML 語法錯誤：{{detail}}",
     "wizard.notMapping": "規格必須是 YAML 對映。",
     "wizard.apiVersion": "apiVersion 必須為 {{expected}}。",
@@ -3105,7 +3115,12 @@
     "wizard.next": "下一步",
     "wizard.back": "上一步",
     "wizard.create": "建立部署",
-    "wizard.creating": "正在建立…"
+    "wizard.creating": "正在建立…",
+    "wizard.driverNative": "Native（systemd）",
+    "wizard.driverDocker": "Docker",
+    "wizard.driverCompose": "Docker Compose",
+    "wizard.driverStack": "Docker Swarm（Stack）",
+    "wizard.discardYaml": "放棄 YAML 修改"
   },
   "ja-JP": {
     "platform.storagePrefix": "S3 パスプレフィックス",
@@ -4080,7 +4095,7 @@
     "wizard.yaml": "YAML",
     "wizard.yamlLabel": "デプロイ仕様（YAML）",
     "wizard.yamlHelp": "ferry/deploy-v1 形式の仕様全体です。ここでの編集とフォームは同期され、コメントは保持されます。",
-    "wizard.yamlInvalid": "YAML 仕様にエラーがあります。続行するには YAML モードで修正してください。フォームには最後に有効だった仕様が表示され、フォームで編集すると誤った YAML は置き換えられます。",
+    "wizard.yamlInvalid": "YAML 仕様にエラーがあります。YAML モードで修正するか、YAML の変更を破棄してから続行してください。それまでフォームには最後に有効だった仕様が表示され、編集できません。",
     "wizard.syntax": "YAML 構文エラー: {{detail}}",
     "wizard.notMapping": "仕様は YAML のマッピングである必要があります。",
     "wizard.apiVersion": "apiVersion は {{expected}} である必要があります。",
@@ -4141,7 +4156,12 @@
     "wizard.next": "次へ",
     "wizard.back": "戻る",
     "wizard.create": "デプロイを作成",
-    "wizard.creating": "作成しています…"
+    "wizard.creating": "作成しています…",
+    "wizard.driverNative": "Native（systemd）",
+    "wizard.driverDocker": "Docker",
+    "wizard.driverCompose": "Docker Compose",
+    "wizard.driverStack": "Docker Swarm（スタック）",
+    "wizard.discardYaml": "YAML の変更を破棄"
   },
   "ko-KR": {
     "platform.storagePrefix": "S3 경로 접두사",
@@ -5116,7 +5136,7 @@
     "wizard.yaml": "YAML",
     "wizard.yamlLabel": "배포 사양(YAML)",
     "wizard.yamlHelp": "ferry/deploy-v1 형식의 전체 사양입니다. 여기와 양식의 편집 내용은 동기화되며 주석은 유지됩니다.",
-    "wizard.yamlInvalid": "YAML 사양에 오류가 있습니다. 계속하려면 YAML 모드에서 수정하세요. 양식에는 마지막으로 유효했던 사양이 표시되며, 양식에서 편집하면 오류가 있는 YAML이 대체됩니다.",
+    "wizard.yamlInvalid": "YAML 사양에 오류가 있습니다. YAML 모드에서 수정하거나 YAML 변경 사항을 버린 후 계속하세요. 그때까지 양식에는 마지막으로 유효했던 사양이 표시되며 편집할 수 없습니다.",
     "wizard.syntax": "YAML 구문 오류: {{detail}}",
     "wizard.notMapping": "사양은 YAML 매핑이어야 합니다.",
     "wizard.apiVersion": "apiVersion은 {{expected}}이어야 합니다.",
@@ -5177,7 +5197,12 @@
     "wizard.next": "다음",
     "wizard.back": "이전",
     "wizard.create": "배포 생성",
-    "wizard.creating": "생성하는 중…"
+    "wizard.creating": "생성하는 중…",
+    "wizard.driverNative": "Native(systemd)",
+    "wizard.driverDocker": "Docker",
+    "wizard.driverCompose": "Docker Compose",
+    "wizard.driverStack": "Docker Swarm(스택)",
+    "wizard.discardYaml": "YAML 변경 사항 버리기"
   },
   "ms-MY": {
     "platform.storagePrefix": "Awalan laluan S3",
@@ -6152,7 +6177,7 @@
     "wizard.yaml": "YAML",
     "wizard.yamlLabel": "Spesifikasi atur gerak (YAML)",
     "wizard.yamlHelp": "Spesifikasi penuh dalam format ferry/deploy-v1. Suntingan di sini dan dalam borang kekal selari; ulasan dikekalkan.",
-    "wizard.yamlInvalid": "Spesifikasi YAML mempunyai ralat. Betulkan dalam mod YAML untuk meneruskan; borang memaparkan spesifikasi sah yang terakhir, dan menyunting borang akan menggantikan YAML yang tidak sah.",
+    "wizard.yamlInvalid": "Spesifikasi YAML mempunyai ralat. Betulkan dalam mod YAML atau buang perubahan YAML untuk meneruskan. Sehingga itu, borang memaparkan spesifikasi sah yang terakhir dan dikunci.",
     "wizard.syntax": "Ralat sintaks YAML: {{detail}}",
     "wizard.notMapping": "Spesifikasi mesti berupa pemetaan YAML.",
     "wizard.apiVersion": "apiVersion mestilah {{expected}}.",
@@ -6213,6 +6238,11 @@
     "wizard.next": "Seterusnya",
     "wizard.back": "Kembali",
     "wizard.create": "Cipta atur gerak",
-    "wizard.creating": "Mencipta…"
+    "wizard.creating": "Mencipta…",
+    "wizard.driverNative": "Native (systemd)",
+    "wizard.driverDocker": "Docker",
+    "wizard.driverCompose": "Docker Compose",
+    "wizard.driverStack": "Docker Swarm (stack)",
+    "wizard.discardYaml": "Buang perubahan YAML"
   }
 }

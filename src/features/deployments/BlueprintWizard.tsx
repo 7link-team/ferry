@@ -24,7 +24,8 @@ import {
 const SpecEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 const w = (key: string, values?: Record<string, unknown>) => commonText(`resource-domain:wizard.${key}`, values);
 const STEPS = ["stepTemplate", "stepValues", "stepRoles", "stepPlacement", "stepConfirm"] as const;
-const DRIVER_LABELS: Record<string, string> = { native: "Native (systemd)", docker: "Docker", compose: "Docker Compose", stack: "Docker Swarm / Stack" };
+const DRIVER_KEYS: Record<string, string> = { native: "driverNative", docker: "driverDocker", compose: "driverCompose", stack: "driverStack" };
+const driverLabel = (driver: string) => DRIVER_KEYS[driver] ? w(DRIVER_KEYS[driver]) : driver;
 const selectClass = "min-h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm lg:min-h-9";
 const touch = "min-h-11 lg:min-h-9";
 
@@ -121,7 +122,11 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
   const form = useMemo(() => readSpec(lastValid), [lastValid]);
   const spec = form.spec;
   const invalid = current.errors.length > 0;
-  const patch = (changes: SpecChange[]) => { if (form.doc) change(writeSpec(form.doc, changes)); };
+  // While the YAML is invalid the form is locked: it never overwrites text the user is fixing.
+  const patch = (changes: SpecChange[]) => { if (!invalid && form.doc) change(writeSpec(form.doc, changes)); };
+  /** Removes a role's manual placement; the whole key goes when no role is left. */
+  const dropPlacement = (role: string): SpecChange[] => !spec?.placement?.[role] ? []
+    : [{ path: Object.keys(spec.placement).length > 1 ? ["placement", role] : ["placement"], value: undefined }];
 
   const preview = useCallback(async (source: string) => {
     placementRequest.current?.abort();
@@ -170,12 +175,17 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
   };
 
   const hostName = (id: string) => named(hosts?.find(h => h.id === id)?.name, id);
+  const binding = (hostId: string): InstanceBinding => ({ hostId, address: hosts?.find(h => h.id === hostId)?.address ?? "" });
   const choose = (role: string, index: number, hostId: string) => {
-    const list = (placement?.result?.binding.roles[role] ?? []).map(item => ({ ...item }));
-    list[index] = { hostId, address: hosts?.find(h => h.id === hostId)?.address ?? "" };
+    const list = (placement?.result?.binding.roles[role] ?? []).map(item => binding(item.hostId));
+    const previous = list[index]?.hostId;
+    // One instance per host: the instance already on the chosen host takes the old one (a swap).
+    const other = blueprint.roles.find(r => r.name === role)?.distinctHosts ? list.findIndex((item, i) => i !== index && item.hostId === hostId) : -1;
+    if (other >= 0 && previous !== undefined) list[other] = binding(previous);
+    list[index] = binding(hostId);
     patch([{ path: ["placement", role], value: list }]);
   };
-  const automatic = (role: string) => patch([{ path: Object.keys(spec?.placement ?? {}).length > 1 ? ["placement", role] : ["placement"], value: undefined }]);
+  const automatic = (role: string) => patch(dropPlacement(role));
 
   const versionChanged = template.version !== (spec?.template.version ?? version);
   return <div className="flex min-h-0 min-w-0 flex-col">
@@ -195,11 +205,14 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
     <p className="sr-only" aria-live="polite">{w("stepOf", { current: step + 1, total: STEPS.length })}</p>
 
     <div className="min-w-0 flex-1 space-y-4 py-4">
-      {(invalid || (versionChanged && spec)) && <div role="alert" className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-        {invalid && mode === "form" && <p>{w("yamlInvalid")}</p>}
+      {invalid && <div role="alert" className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+        {mode === "form" && <p>{w("yamlInvalid")}</p>}
         {current.errors.map((error, index) => <p key={index} className="break-words">{error}</p>)}
-        {versionChanged && spec && <div className="flex flex-wrap items-center gap-2"><span>{w("versionChanged", { current: template.version, requested: spec.template.version })}</span>
-          <Button type="button" size="sm" variant="outline" className={touch} onClick={() => patch([{ path: ["template", "version"], value: template.version }])}>{w("useLatest", { current: template.version })}</Button></div>}
+        {lastValid && <Button type="button" size="sm" variant="outline" className={touch} onClick={() => setText(lastValid)}>{w("discardYaml")}</Button>}
+      </div>}
+      {versionChanged && spec && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+        <span>{w("versionChanged", { current: template.version, requested: spec.template.version })}</span>
+        <Button type="button" size="sm" variant="outline" className={touch} disabled={invalid} onClick={() => patch([{ path: ["template", "version"], value: template.version }])}>{w("useLatest", { current: template.version })}</Button>
       </div>}
       {optionsError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive"><span>{w("optionsFailed", { detail: optionsError })}</span><Button type="button" variant="outline" size="sm" className={touch} onClick={() => setReload(n => n + 1)}>{commonText("common-domain:common.retry")}</Button></div>}
 
@@ -207,16 +220,16 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
         <div className="h-[60vh] min-h-72 min-w-0 overflow-hidden rounded-md border lg:h-[28rem]">
           <Suspense fallback={<LoadingSkeleton variant="editor" />}><SpecEditor value={text} language="yaml" path={`deploy-spec-${editorId}.yaml`} label={w("yamlLabel")} onChange={change} /></Suspense>
         </div>
-      </AutoField> : spec && <>
+      </AutoField> : spec && <fieldset disabled={invalid} className="m-0 min-w-0 space-y-4 border-0 p-0">
         {step === 0 && <section className="space-y-4" aria-label={w("stepTemplate")}>
           <dl className="grid min-w-0 gap-3 text-sm sm:grid-cols-2">
             <div className="min-w-0"><dt className="text-muted-foreground">{w("templateName")}</dt><dd className="break-words font-medium">{template.name}</dd></div>
             <div><dt className="text-muted-foreground">{w("templateVersion")}</dt><dd className="font-medium">v{spec.template.version}</dd></div>
           </dl>
           <AutoField label={w("driver")} required help={blueprint.drivers.length ? undefined : w("noDrivers")}>
-            <select className={selectClass} value={spec.driver} required onChange={event => patch([{ path: ["driver"], value: event.target.value }, ...(event.target.value === "stack" ? [] : [{ path: ["manager"], value: undefined }])])}>
+            <select className={selectClass} value={spec.driver} required disabled={invalid} onChange={event => patch([{ path: ["driver"], value: event.target.value }, ...(event.target.value === "stack" ? [] : [{ path: ["manager"], value: undefined }])])}>
               {!blueprint.drivers.includes(spec.driver) && <option value={spec.driver} disabled>{spec.driver || commonText("common.select")}</option>}
-              {blueprint.drivers.map(driver => <option key={driver} value={driver}>{DRIVER_LABELS[driver] ?? driver}</option>)}
+              {blueprint.drivers.map(driver => <option key={driver} value={driver}>{driverLabel(driver)}</option>)}
             </select>
           </AutoField>
           <div className="min-w-0 space-y-2">
@@ -235,7 +248,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
             const parameter = parameters[index]!;
             const value = spec.values[field.key];
             return <AutoField key={field.key} label={field.label} help={field.help} required={!!field.required}>
-              <FieldControl name={field.key} required={!!field.required}
+              <FieldControl name={field.key} required={!!field.required} disabled={invalid}
                 field={{ name: field.label, type: field.type === "select" ? "select" : field.type === "number" ? "number" : "text", config: { ...(Array.isArray(field.options) ? { options: field.options } : {}), ...(parameter.min === undefined ? {} : { min: parameter.min }), ...(parameter.max === undefined ? {} : { max: parameter.max }) } }}
                 value={value === undefined ? "" : String(value)}
                 onChange={next => patch([{ path: ["values", field.key], value: parameter.type === "boolean" ? (next === "" ? undefined : next === "true") : next }])} />
@@ -245,7 +258,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
 
         {step === 2 && <section className="space-y-4" aria-label={w("stepRoles")}>
           {spec.driver === "stack" && <AutoField label={w("manager")} help={w("managerHelp")} required>
-            <select className={selectClass} value={spec.manager ?? ""} required onChange={event => patch([{ path: ["manager"], value: event.target.value }])}>
+            <select className={selectClass} value={spec.manager ?? ""} required disabled={invalid} onChange={event => patch([{ path: ["manager"], value: event.target.value }])}>
               <option value="">{commonText("common.select")}</option>
               {spec.manager && !hosts?.some(h => h.name === spec.manager) && <option value={spec.manager}>{spec.manager}</option>}
               {hosts?.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
@@ -256,33 +269,35 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
             const count = entry?.instances ?? role.instances.default;
             const selector = entry?.hosts ?? {};
             const problem = entry ? instancesProblem(count, role.instances) : undefined;
-            const set = (key: string, value: unknown) => patch([{ path: ["roles", role.name, "hosts", key], value }]);
+            // Instances and the selector decide where instances may run, so they void a manual placement.
+            const set = (key: string, value: unknown) => patch([{ path: ["roles", role.name, "hosts", key], value }, ...(key === "spread" ? [] : dropPlacement(role.name))]);
+            const resize = (delta: 1 | -1) => patch([{ path: ["roles", role.name, "instances"], value: stepInstances(count, delta, role.instances) }, ...dropPlacement(role.name)]);
             return <fieldset key={role.name} className="min-w-0 space-y-4 rounded-md border p-3 sm:p-4">
               <legend className="break-all px-1 text-sm font-medium">{w("role")}: {role.name}</legend>
               <AutoField label={w("instances")} help={w(role.instances.odd ? "instancesHintOdd" : "instancesHint", { min: role.instances.min, max: role.instances.max })}
                 error={problem ? w(problem === "odd" ? "instancesOdd" : "instancesRange", { role: role.name, min: role.instances.min, max: role.instances.max }) : undefined}>
                 <div className="flex items-center gap-2">
-                  <Button type="button" variant="outline" size="icon" className="size-11 lg:size-9" aria-label={w("decrease", { role: role.name })} disabled={stepInstances(count, -1, role.instances) === count} onClick={() => patch([{ path: ["roles", role.name, "instances"], value: stepInstances(count, -1, role.instances) }])}><Minus /></Button>
+                  <Button type="button" variant="outline" size="icon" className="size-11 lg:size-9" aria-label={w("decrease", { role: role.name })} disabled={invalid || stepInstances(count, -1, role.instances) === count} onClick={() => resize(-1)}><Minus /></Button>
                   <output aria-label={w("instances")} className="min-w-10 text-center text-base font-medium tabular-nums">{count}</output>
-                  <Button type="button" variant="outline" size="icon" className="size-11 lg:size-9" aria-label={w("increase", { role: role.name })} disabled={stepInstances(count, 1, role.instances) === count} onClick={() => patch([{ path: ["roles", role.name, "instances"], value: stepInstances(count, 1, role.instances) }])}><Plus /></Button>
+                  <Button type="button" variant="outline" size="icon" className="size-11 lg:size-9" aria-label={w("increase", { role: role.name })} disabled={invalid || stepInstances(count, 1, role.instances) === count} onClick={() => resize(1)}><Plus /></Button>
                 </div>
               </AutoField>
               <div className="grid min-w-0 gap-4 md:grid-cols-2">
                 <AutoField label={w("tags")} help={tags.length ? w("tagsHelp") : w("noTags")}>
-                  <FieldControl name={`${role.name}-tags`} field={{ name: w("tags"), type: "multi-select", config: { options: tags } }} value={selector.tags ?? []} onChange={value => set("tags", value)} />
+                  <FieldControl name={`${role.name}-tags`} field={{ name: w("tags"), type: "multi-select", config: { options: tags } }} value={selector.tags ?? []} disabled={invalid} onChange={value => set("tags", value)} />
                 </AutoField>
                 <AutoField label={w("names")} help={w("namesHelp")}>
-                  <FieldControl name={`${role.name}-names`} field={{ name: w("names"), type: "multi-select", config: { options: (hosts ?? []).map(h => ({ value: h.name, label: h.name })) } }} value={selector.names ?? []} onChange={value => set("names", value)} />
+                  <FieldControl name={`${role.name}-names`} field={{ name: w("names"), type: "multi-select", config: { options: (hosts ?? []).map(h => ({ value: h.name, label: h.name })) } }} value={selector.names ?? []} disabled={invalid} onChange={value => set("names", value)} />
                 </AutoField>
                 <AutoField label={w("group")}>
-                  <select className={selectClass} value={selector.group ?? ""} onChange={event => set("group", event.target.value)}>
+                  <select className={selectClass} value={selector.group ?? ""} disabled={invalid} onChange={event => set("group", event.target.value)}>
                     <option value="">{commonText("common.notSet")}</option>
                     {selector.group && !groups.some(g => g.value === selector.group) && <option value={selector.group}>{selector.group}</option>}
                     {groups.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
                   </select>
                 </AutoField>
                 <AutoField label={w("spread")} help={w("spreadHelp")}>
-                  <Input className={touch} maxLength={30} value={selector.spread?.prefix ?? ""} onChange={event => set("spread", event.target.value ? { prefix: event.target.value } : undefined)} />
+                  <Input className={touch} maxLength={30} disabled={invalid} value={selector.spread?.prefix ?? ""} onChange={event => set("spread", event.target.value ? { prefix: event.target.value } : undefined)} />
                 </AutoField>
               </div>
             </fieldset>;
@@ -294,6 +309,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
             <Button type="button" variant="outline" className={touch} disabled={invalid || placement?.busy} onClick={() => void preview(text)}>{w("refreshPlacement")}</Button>
             {placement?.busy && <span role="status" className="text-sm text-muted-foreground">{w("previewing")}</span>}
           </div>
+          {Object.keys(spec.placement ?? {}).length > 0 && <div className="flex flex-wrap gap-2">{Object.keys(spec.placement ?? {}).map(role => <Button key={role} type="button" variant="outline" size="sm" className={touch} disabled={invalid} onClick={() => automatic(role)}>{w("autoPlacement")} · {role}</Button>)}</div>}
           {placement?.error && placement.for === text && <p role="alert" className="break-words text-sm text-destructive">{placement.error}</p>}
           {placement?.for !== text && !placement?.busy && <p className="text-sm text-muted-foreground">{w("placementStale")}</p>}
           {placement?.result && <>
@@ -301,14 +317,13 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
             <div role="region" aria-label={w("placementTitle")} className="min-w-0 rounded-md border">
               <AutoTable<PlacementRow> data={placementRows(blueprint, placement.result)} rowKey={row => row.instance} pagination={false} minWidth={480} layout="auto" columns={[
                 { field: "instance", name: w("instance"), render: (_, row) => <span className="inline-flex min-w-0 flex-wrap items-center gap-2"><span className="break-all">{row.instance}</span>{spec.placement?.[row.role] && row.index === 0 && <Badge variant="outline">{w("manual")}</Badge>}</span> },
-                { field: "hostId", name: w("host"), render: (_, row) => <select aria-label={w("hostOf", { instance: row.instance })} className={selectClass} value={row.hostId} disabled={placement.busy} onChange={event => choose(row.role, row.index, event.target.value)}>
+                { field: "hostId", name: w("host"), render: (_, row) => <select aria-label={w("hostOf", { instance: row.instance })} className={selectClass} value={row.hostId} disabled={invalid || placement.busy} onChange={event => choose(row.role, row.index, event.target.value)}>
                   {!hosts?.some(h => h.id === row.hostId) && <option value={row.hostId}>{hostName(row.hostId)}</option>}
                   {hosts?.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
                 </select> },
                 { field: "address", name: w("address"), render: (_, row) => <span className="font-mono break-all">{row.address}</span> },
               ]} />
             </div>
-            {Object.keys(spec.placement ?? {}).length > 0 && <div className="flex flex-wrap gap-2">{Object.keys(spec.placement ?? {}).map(role => <Button key={role} type="button" variant="outline" size="sm" className={touch} onClick={() => automatic(role)}>{w("autoPlacement")} · {role}</Button>)}</div>}
             {placement.result.warnings.length > 0 && <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
               <h3 className="font-medium">{w("warnings")}</h3>
               <ul className="mt-1 list-disc space-y-1 ps-5">{placement.result.warnings.map((warning, index) => <li key={index} className="break-words">{warning.message}</li>)}</ul>
@@ -318,19 +333,19 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
 
         {step === 4 && <section className="space-y-4" aria-label={w("stepConfirm")}>
           <div className="grid min-w-0 gap-4 md:grid-cols-2">
-            <AutoField label={commonText("common-domain:common.name")} required><Input name="name" className={touch} required maxLength={60} value={name} onChange={event => setName(event.target.value)} /></AutoField>
-            <AutoField label={commonText("resource-domain:deployment.workdir")} help={commonText("resource-domain:deployment.workdirHelp")} required><Input name="workdir" className={touch} required value={workdir} onChange={event => setWorkdir(event.target.value)} /></AutoField>
+            <AutoField label={commonText("common-domain:common.name")} required><Input name="name" className={touch} required disabled={invalid} maxLength={60} value={name} onChange={event => setName(event.target.value)} /></AutoField>
+            <AutoField label={commonText("resource-domain:deployment.workdir")} help={commonText("resource-domain:deployment.workdirHelp")} required><Input name="workdir" className={touch} required disabled={invalid} value={workdir} onChange={event => setWorkdir(event.target.value)} /></AutoField>
           </div>
           <div className="rounded-md border p-3 text-sm">
             <h3 className="font-medium">{w("summary")}</h3>
             <ul className="mt-1 space-y-1 text-muted-foreground">
-              <li className="break-words">{template.name} · v{spec.template.version} · {DRIVER_LABELS[spec.driver] ?? spec.driver}</li>
+              <li className="break-words">{template.name} · v{spec.template.version} · {driverLabel(spec.driver)}</li>
               {Object.entries(spec.roles).map(([role, entry]) => <li key={role} className="break-all">{w("summaryRole", { role, count: entry.instances })}</li>)}
             </ul>
           </div>
           {submitError && <p role="alert" className="break-words text-sm text-destructive">{submitError}</p>}
         </section>}
-      </>}
+      </fieldset>}
     </div>
 
     <FormActions>

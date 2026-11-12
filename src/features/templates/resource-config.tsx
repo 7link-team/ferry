@@ -80,7 +80,10 @@ export const templateList = (
         labelKey: "resource-domain:template.use",
         permission: `${target}.create`,
         to: () => ({ group, item, mode: "new" }),
-        query: (r) => ({ template: r.id }),
+        // Cluster blueprints are deployed through the wizard, like the detail page's "Deploy".
+        query: (r) => resource === "app-templates" && isBlueprint(r.content ?? "")
+          ? { wizard: "blueprint", template: r.id, version: String(r.version) }
+          : { template: r.id },
       },
       {
         label: "复制",

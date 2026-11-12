@@ -46,6 +46,16 @@ it("rejects syntax errors, wrong apiVersion and unknown keys at every level", ()
   expect(readSpec(commented.replace("tags: [cache]", "tags: [cache]\n      zone: a")).errors[0]).toContain("zone");
   expect(readSpec(commented.replace("instances: 3", "instances: three")).errors[0]).toContain("instances");
   expect(readSpec(`${commented}placement:\n  nats:\n    - {host: "1"}\n`).errors[0]).toContain("host");
+  // Types mirror the server: strings stay strings, IDs may be integers, instances are 1–100.
+  expect(readSpec(commented.replace("driver: docker", "driver: 7")).errors[0]).toContain("driver");
+  expect(readSpec(commented.replace("tags: [cache]", "group: 5")).errors[0]).toContain("group");
+  expect(readSpec(commented.replace("tags: [cache]", "spread: {prefix: 3}")).errors[0]).toContain("spread.prefix");
+  expect(readSpec(`${commented}manager: 12\n`).errors[0]).toContain("manager");
+  expect(readSpec(`${commented}placement:\n  nats:\n    - {hostId: 1, address: 10}\n`).errors[0]).toContain("address");
+  expect(readSpec(`${commented}placement:\n  nats:\n    - {hostId: 1, address: "10.0.0.1"}\n`).spec?.placement).toEqual({ nats: [{ hostId: "1", address: "10.0.0.1" }] });
+  expect(readSpec(commented.replace("instances: 3", "instances: 0")).errors[0]).toContain("instances");
+  expect(readSpec(commented.replace("instances: 3", "instances: 101")).errors[0]).toContain("instances");
+  expect(readSpec(commented.replace("instances: 3", "instances: 100")).errors).toEqual([]);
 });
 
 it("instances stepper keeps odd counts inside the template bounds", () => {

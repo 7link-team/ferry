@@ -38,10 +38,14 @@ function mapping(value: unknown, field: string): Row {
   return value as Row;
 }
 function string(value: unknown, field: string): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" && Number.isInteger(value)) return String(value);
-  return fail("invalidField", { field });
+  return typeof value === "string" ? value : fail("invalidField", { field });
 }
+/** Snowflake IDs: the server accepts a string or an integer. */
+function id(value: unknown, field: string): string {
+  if (typeof value === "number" && Number.isInteger(value)) return String(value);
+  return string(value, field);
+}
+const MAX_INSTANCES = 100;
 function strings(value: unknown, field: string): string[] | undefined {
   if (value == null) return undefined;
   if (!Array.isArray(value) || !value.every(item => typeof item === "string")) fail("invalidField", { field });
@@ -63,7 +67,7 @@ function toSpec(value: unknown): DeploySpec {
     if (!isRow(raw)) fail("invalidField", { field: `roles.${name}` });
     const role = raw as Row;
     only(role, ["instances", "hosts"], `roles.${name}`);
-    if (!Number.isInteger(role.instances) || (role.instances as number) < 0) fail("invalidField", { field: `roles.${name}.instances` });
+    if (!Number.isInteger(role.instances) || (role.instances as number) < 1 || (role.instances as number) > MAX_INSTANCES) fail("invalidField", { field: `roles.${name}.instances` });
     const hosts = mapping(role.hosts, `roles.${name}.hosts`);
     only(hosts, ["tags", "names", "group", "spread"], `roles.${name}.hosts`);
     const selector: HostSelector = {};
@@ -79,7 +83,7 @@ function toSpec(value: unknown): DeploySpec {
     roles[name] = { instances: role.instances as number, ...(Object.keys(selector).length ? { hosts: selector } : {}) };
   }
   const spec: DeploySpec = {
-    template: { id: string(template.id, "template.id"), version: template.version as number },
+    template: { id: id(template.id, "template.id"), version: template.version as number },
     driver: string(root.driver, "driver"),
     values: mapping(root.values, "values"),
     roles,
@@ -93,7 +97,7 @@ function toSpec(value: unknown): DeploySpec {
         const at = `placement.${name}.${index}`;
         if (!isRow(item)) return fail("invalidField", { field: at });
         only(item, ["hostId", "address"], at);
-        return { hostId: string(item.hostId, `${at}.hostId`), address: string(item.address, `${at}.address`) };
+        return { hostId: id(item.hostId, `${at}.hostId`), address: string(item.address, `${at}.address`) };
       });
     }
   }
