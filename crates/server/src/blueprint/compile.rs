@@ -1,6 +1,7 @@
 //! Driver adapters: a phase-1-rendered blueprint plus a binding → one ferry/v2 Application per host.
 use super::binding::Binding;
 use super::model::{self, Blueprint, Identity, Role};
+use super::swarm;
 use super::template::{self, Context, Instance, Member, Phase};
 use crate::deployments::manifest;
 use crate::error::{ApiError, Result};
@@ -412,7 +413,12 @@ pub fn compile(
     binding: &Binding,
     nodes: Option<&BTreeMap<String, String>>,
 ) -> Result<Vec<HostPlan>> {
-    compile_with(bp_text, binding, nodes.map(Nodes::Resolved))
+    compile_with(
+        bp_text,
+        binding,
+        nodes.map(Nodes::Resolved),
+        &RoleTags::new(),
+    )
 }
 
 /// Prefix of the stand-in a stable instance is pinned to by [`compile_unresolved`]: never a
@@ -428,7 +434,32 @@ pub const UNRESOLVED: &str = "unresolved:";
 /// node, still are). Node pinning and those conflicts are settled when the deployment is
 /// previewed, by [`compile`] with the nodes `swarm::assign` resolves. Never deploy the result.
 pub fn compile_unresolved(bp_text: &str, binding: &Binding) -> Result<Vec<HostPlan>> {
-    compile_with(bp_text, binding, Some(Nodes::Unresolved))
+    compile_with(bp_text, binding, Some(Nodes::Unresolved), &RoleTags::new())
+}
+
+/// Role name → the host tags its deployment spec selects hosts by (`roles.<r>.hosts.tags`).
+pub type RoleTags = BTreeMap<String, Vec<String>>;
+
+/// [`compile`] for a deployment spec: each stateless `stack` role is also constrained to
+/// Swarm nodes labelled with every tag its selector requires (`node.labels.<label>==true`,
+/// labels from [`swarm::tag_label`]). Stable instances are already pinned to their node, and
+/// other drivers place by binding, so they are unchanged; so is everything without `tags`.
+pub fn compile_tagged(
+    bp_text: &str,
+    binding: &Binding,
+    nodes: Option<&BTreeMap<String, String>>,
+    tags: &RoleTags,
+) -> Result<Vec<HostPlan>> {
+    compile_with(bp_text, binding, nodes.map(Nodes::Resolved), tags)
+}
+
+/// [`compile_unresolved`] with the label constraints of [`compile_tagged`].
+pub fn compile_unresolved_tagged(
+    bp_text: &str,
+    binding: &Binding,
+    tags: &RoleTags,
+) -> Result<Vec<HostPlan>> {
+    compile_with(bp_text, binding, Some(Nodes::Unresolved), tags)
 }
 
 /// Instance name → Swarm node ID, or deliberately unknown.
@@ -437,7 +468,12 @@ enum Nodes<'a> {
     Unresolved,
 }
 
-fn compile_with(bp_text: &str, binding: &Binding, nodes: Option<Nodes>) -> Result<Vec<HostPlan>> {
+fn compile_with(
+    bp_text: &str,
+    binding: &Binding,
+    nodes: Option<Nodes>,
+    tags: &RoleTags,
+) -> Result<Vec<HostPlan>> {
     let bp = model::parse(bp_text)?;
     let adapter = adapter(&binding.driver)?;
     let driver = adapter.id();
@@ -532,6 +568,25 @@ fn compile_with(bp_text: &str, binding: &Binding, nodes: Option<Nodes>) -> Resul
                     let placement = service.entry("placement").or_insert_with(|| json!({}));
                     if let Value::Object(placement) = placement {
                         placement.insert("maxReplicasPerNode".into(), json!(1));
+                    }
+                }
+                // Replicas go only to nodes whose hosts carry every selected tag (after the
+                // author's own constraints); names and groups have no node-side equivalent.
+                let mut labels = Vec::new();
+                for tag in tags.get(&role.name).into_iter().flatten() {
+                    let label = format!("node.labels.{}==true", swarm::tag_label(tag));
+                    if !labels.contains(&label) {
+                        labels.push(label);
+                    }
+                }
+                if !labels.is_empty() {
+                    let placement = service.entry("placement").or_insert_with(|| json!({}));
+                    if let Value::Object(placement) = placement {
+                        let constraints =
+                            placement.entry("constraints").or_insert_with(|| json!([]));
+                        if let Value::Array(constraints) = constraints {
+                            constraints.extend(labels.into_iter().map(Value::from));
+                        }
                     }
                 }
                 role.placement.distinct_hosts
@@ -1130,6 +1185,74 @@ mod tests {
                 ])
             );
         }
+    }
+
+    fn role_tags(rows: &[(&str, &[&str])]) -> RoleTags {
+        rows.iter()
+            .map(|(role, tags)| {
+                (
+                    role.to_string(),
+                    tags.iter().map(|t| t.to_string()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stateless_stack_role_gets_tag_label_constraints() {
+        use super::super::swarm::tag_label;
+        let tags = role_tags(&[("gateway", &["edge", "zone:a", "edge"]), ("nats", &["mq"])]);
+        let mut v: Value = serde_json::from_str(&nats_with_gateway(8080)).unwrap();
+        v["roles"][1]["placement"] = json!({"distinctHosts": true});
+        v["roles"][1]["service"]["placement"] = json!({"constraints": ["node.role==worker"]});
+        let text = v.to_string();
+        let plans = compile_tagged(&text, &stack_hosts(), Some(&stack_nodes()), &tags).unwrap();
+        let d = doc(&plans[0]);
+        // One label constraint per selector tag, after the author's own constraints.
+        assert_eq!(
+            service(&d, "gateway")["placement"],
+            json!({"constraints": ["node.role==worker",
+                                   format!("node.labels.{}==true", tag_label("edge")),
+                                   format!("node.labels.{}==true", tag_label("zone:a"))],
+                   "maxReplicasPerNode": 1})
+        );
+        // Stable instances stay pinned to their node only.
+        for i in 0..3 {
+            assert_eq!(
+                service(&d, &format!("nats-{i}"))["placement"]["constraints"],
+                json!([format!("node.id==n{i}node")])
+            );
+        }
+        assert!(manifest::parse_for(&plans[0].manifest, "stack").is_ok());
+        // The unresolved compile (offline readers, stored checks) carries the same constraints.
+        let offline = compile_unresolved_tagged(&text, &stack_hosts(), &tags).unwrap();
+        assert_eq!(
+            service(&doc(&offline[0]), "gateway")["placement"],
+            service(&d, "gateway")["placement"]
+        );
+        // Without selector tags (no deployment spec) the output is unchanged.
+        let plain = compile(&text, &stack_hosts(), Some(&stack_nodes())).unwrap();
+        let none = compile_tagged(
+            &text,
+            &stack_hosts(),
+            Some(&stack_nodes()),
+            &RoleTags::new(),
+        )
+        .unwrap();
+        assert_eq!(plain[0].manifest, none[0].manifest);
+        assert_eq!(
+            service(&doc(&plain[0]), "gateway")["placement"]["constraints"],
+            json!(["node.role==worker"])
+        );
+        // Other drivers have no Swarm labels: tags change nothing.
+        let b = binding("native", &[three_hosts("nats")]);
+        let tagged =
+            compile_tagged(&nats_native(), &b, None, &role_tags(&[("nats", &["mq"])])).unwrap();
+        let plain = compile(&nats_native(), &b, None).unwrap();
+        assert_eq!(
+            tagged.iter().map(|p| &p.manifest).collect::<Vec<_>>(),
+            plain.iter().map(|p| &p.manifest).collect::<Vec<_>>()
+        );
     }
 
     #[test]

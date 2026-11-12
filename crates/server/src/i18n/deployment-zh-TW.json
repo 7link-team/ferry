@@ -264,6 +264,7 @@
   "blueprint.swarmManagerRequired": "管理節點主機 {host} 必須是可用的 Docker Swarm 管理節點（docker info 中 Swarm.ControlAvailable 為 true）。",
   "blueprint.swarmNodeUnavailable": "主機 {host} 不是管理節點所在 Docker Swarm 的可用節點：必須已加入該 Swarm，且狀態為 Ready、可用性為 Active。",
   "blueprint.swarmNodesRequired": "stack 藍圖須先將每個綁定主機解析為管理節點所在 Docker Swarm 的節點，才能編譯。",
+  "blueprint.swarmLabelSyncFailed": "無法透過管理節點主機 {host} 更新 Swarm 節點 {node} 的 Ferry 標籤 label：{detail}",
   "blueprint.stableReplicasInvalid": "角色 {role} 為穩定身分，每個實例對應一個服務：replicas 必須為 1 或省略。",
   "blueprint.statelessPlacementInvalid": "角色 {role} 為無狀態：其放置約束不能使用 node.id 或 node.hostname，請改為在綁定中指定實例主機。",
   "blueprint.bindingColocateCount": "角色 {role} 與 {target} 同機部署，兩者的實例數必須相同。",

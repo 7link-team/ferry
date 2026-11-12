@@ -259,7 +259,10 @@ async fn check_blueprint(
         )
     })?;
     let name = b.name.trim().to_owned();
-    for plan in groups::compile_offline(conn, scope.workspace_id, &manifest, &binding).await? {
+    let tags = groups::role_tags(b.deploy_spec.as_deref())?;
+    for plan in
+        groups::compile_offline(conn, scope.workspace_id, &manifest, &binding, &tags).await?
+    {
         if manifest::parse_for(&plan.manifest, &b.mode)?
             .services
             .iter()
@@ -1399,7 +1402,12 @@ async fn trigger(
                 crate::i18n::Message::new("deployment.error.030"),
             ));
         }
-        groups::swarm_nodes(s, scope.workspace_id, &before).await?
+        let nodes = groups::swarm_nodes(s, scope.workspace_id, &before).await?;
+        // Node labels for the spec's host tags must hold before the stack is deployed.
+        if let Some(nodes) = &nodes {
+            groups::sync_labels(s, scope.workspace_id, &before, nodes).await?;
+        }
+        nodes
     };
     let tx = crate::variables::transaction(s, scope.workspace_id).await?;
     let r = scoped(&tx, scope, id).await?;

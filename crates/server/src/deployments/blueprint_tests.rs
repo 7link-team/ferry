@@ -1222,6 +1222,103 @@ async fn stack_apply_checks_version_before_probing() {
     }
 }
 
+/// A stack deployment of [`stack_body`] whose stored spec selects `nats` hosts tagged `mq`.
+async fn stack_with_spec(s: &AppState, base: i64) -> String {
+    let id = create_app(s, stack_body(base)).await.unwrap();
+    let spec = json!({
+        "apiVersion": "ferry/deploy-v1",
+        "template": {"id": "9101", "version": 1},
+        "driver": "stack",
+        "manager": base.to_string(),
+        "roles": {"nats": {"instances": 3, "hosts": {"tags": ["mq"]}}}
+    });
+    apps::Entity::update_many()
+        .col_expr(apps::Column::DeploySpec, Expr::value(spec.to_string()))
+        .filter(apps::Column::Id.eq(id.parse::<i64>().unwrap()))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn stack_apply_syncs_tag_labels_before_deploy() {
+    let base = 970;
+    let (_dir, s) = stack_fixture(base).await;
+    join_swarm(base);
+    // The first two workers carry `mq`; the third lost it after placement.
+    tag_host(&s, "mq", base + 1).await;
+    tag_host(&s, "mq", base + 2).await;
+    let label = crate::blueprint::swarm::tag_label("mq");
+    let (n1, n2, n3) = (base + 1, base + 2, base + 3);
+    crate::hosts::fake::get(base).respond(
+        "docker node inspect",
+        &format!(
+            "node-{n1} null\nnode-{n2} {{\"{label}\":\"true\"}}\nnode-{n3} {{\"{label}\":\"true\",\"zone\":\"x\"}}\n"
+        ),
+    );
+    let id = stack_with_spec(&s, base).await;
+    // Preview stays read-only.
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    assert_eq!(commands(base, "docker node inspect"), 0);
+    assert_eq!(commands(base, "docker node update"), 0);
+    let rev = apply_preview(&s, &id, &preview).await.unwrap();
+    let manager = crate::hosts::fake::get(base);
+    let updates: Vec<String> = manager
+        .commands
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|c| c.starts_with("docker node "))
+        .filter(|c| !c.starts_with("docker node ls"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        updates,
+        [
+            format!(
+                "docker node inspect --format '{{{{.ID}}}} {{{{json .Spec.Labels}}}}' 'node-{n1}' 'node-{n2}' 'node-{n3}'"
+            ),
+            format!("docker node update --label-add '{label}=true' 'node-{n1}'"),
+            format!("docker node update --label-rm '{label}' 'node-{n3}'"),
+        ]
+    );
+    // Workers are never asked to change labels; the manager deploys afterwards.
+    for host in [n1, n2, n3] {
+        assert_eq!(commands(host, "docker node update"), 0);
+    }
+    let (ok, output) = execute(&s, &revision(&s, &rev).await).await.unwrap();
+    assert!(ok, "{output}");
+    assert_eq!(commands(base, "docker stack deploy"), 1);
+}
+
+#[tokio::test]
+async fn stack_apply_stops_when_label_sync_fails() {
+    let base = 980;
+    let (_dir, s) = stack_fixture(base).await;
+    join_swarm(base);
+    tag_host(&s, "mq", base + 1).await;
+    let manager = crate::hosts::fake::get(base);
+    manager.fail_on(
+        "docker node update",
+        "Error response from daemon: rpc error",
+    );
+    let id = stack_with_spec(&s, base).await;
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let error = apply_preview(&s, &id, &preview).await.unwrap_err();
+    let message = error.2.unwrap();
+    assert_eq!(message.key, "blueprint.swarmLabelSyncFailed");
+    assert_eq!(message.params["host"], format!("Host {base}"));
+    assert_eq!(message.params["node"], format!("node-{}", base + 1));
+    assert_eq!(revision_count(&s, &id).await, 0);
+    assert_eq!(commands(base, "docker stack deploy"), 0);
+    // A deployment without a spec has no tags to sync.
+    let plain = create_app(&s, stack_body(base)).await.unwrap();
+    let preview = preview_of(&s, &plain, None).await.unwrap();
+    apply_preview(&s, &plain, &preview).await.unwrap();
+    assert_eq!(commands(base, "docker node inspect"), 1);
+}
+
 // ---- Deployment specs (`ferry/deploy-v1`) ----
 
 const SPEC_TEMPLATE: i64 = 9101;

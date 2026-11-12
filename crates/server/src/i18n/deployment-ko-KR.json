@@ -264,6 +264,7 @@
   "blueprint.swarmManagerRequired": "매니저 호스트 {host}은(는) 활성 Docker Swarm 매니저여야 합니다(docker info의 Swarm.ControlAvailable이 true).",
   "blueprint.swarmNodeUnavailable": "호스트 {host}은(는) 매니저의 Docker Swarm에서 사용 가능한 노드가 아닙니다. 해당 Swarm에 참여하고 Ready 및 Active 상태여야 합니다.",
   "blueprint.swarmNodesRequired": "stack 블루프린트는 바인딩된 모든 호스트를 매니저의 Docker Swarm 노드로 확인한 후에만 컴파일할 수 있습니다.",
+  "blueprint.swarmLabelSyncFailed": "매니저 호스트 {host}을(를) 통해 Swarm 노드 {node}의 Ferry 태그 레이블을 업데이트할 수 없습니다: {detail}",
   "blueprint.stableReplicasInvalid": "역할 {role}은(는) 안정 ID이므로 각 인스턴스가 하나의 서비스입니다. replicas는 1이거나 생략해야 합니다.",
   "blueprint.statelessPlacementInvalid": "역할 {role}은(는) 무상태이므로 배치 제약 조건에 node.id 또는 node.hostname을 사용할 수 없습니다. 대신 바인딩에서 인스턴스 호스트를 지정하세요.",
   "blueprint.bindingColocateCount": "역할 {role}은(는) {target}과(와) 같은 호스트에 배치되므로 인스턴스 수가 같아야 합니다.",

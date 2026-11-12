@@ -23,6 +23,9 @@ pub(crate) struct FakeHost {
     pub fail: AtomicBool,
     /// Canned stdout: the first entry whose pattern the command contains answers it.
     pub responses: Mutex<Vec<(String, String)>>,
+    /// Canned failures: a command containing the pattern exits 1 with this stderr; checked
+    /// before `responses`.
+    pub failures: Mutex<Vec<(String, String)>>,
 }
 
 impl FakeHost {
@@ -32,6 +35,13 @@ impl FakeHost {
             .lock()
             .unwrap()
             .push((pattern.into(), stdout.into()));
+    }
+    /// Fails every later command containing `pattern` (exit 1, `stderr`).
+    pub fn fail_on(&self, pattern: &str, stderr: &str) {
+        self.failures
+            .lock()
+            .unwrap()
+            .push((pattern.into(), stderr.into()));
     }
 }
 
@@ -84,6 +94,21 @@ impl HostChannel for Channel {
                 code: 1,
                 stdout: String::new(),
                 stderr: "fake failure".into(),
+            });
+        }
+        let failed = self
+            .0
+            .failures
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(pattern, _)| command.contains(pattern.as_str()))
+            .map(|(_, stderr)| stderr.clone());
+        if let Some(stderr) = failed {
+            return Ok(Output {
+                code: 1,
+                stdout: String::new(),
+                stderr,
             });
         }
         let canned = self

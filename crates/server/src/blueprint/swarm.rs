@@ -2,6 +2,7 @@
 //! node of the manager's Swarm, and `distinctHosts` is judged by Swarm node ID.
 use super::binding::Binding;
 use super::model::Blueprint;
+use crate::deployments::quote;
 use crate::error::{ApiError, Result};
 use crate::hosts::channel::HostChannel;
 use crate::i18n::Message;
@@ -31,10 +32,14 @@ fn unavailable<T>(host: &str) -> Result<T> {
 }
 
 /// Names the Ferry host in a `swarmNodeUnavailable` error from [`manager_nodes`] or
-/// [`node_id`], which only see the channel; other errors pass through unchanged.
+/// [`node_id`], or a `swarmLabelSyncFailed` from [`sync_labels`] (the manager), which only
+/// see the channel; other errors pass through unchanged.
 pub fn on_host(error: ApiError, host: &str) -> ApiError {
     match &error.2 {
-        Some(m) if m.key == "blueprint.swarmNodeUnavailable" => {
+        Some(m)
+            if m.key == "blueprint.swarmNodeUnavailable"
+                || m.key == "blueprint.swarmLabelSyncFailed" =>
+        {
             ApiError::localized(error.0, m.clone().with("host", host))
         }
         _ => error,
@@ -71,6 +76,89 @@ pub async fn node_id(ch: &dyn HostChannel) -> Result<String> {
         return unavailable("");
     }
     Ok(id.to_string())
+}
+
+/// The Swarm node label standing for Ferry host tag `tag`: `ferry.tag.` + the first 12 hex
+/// characters of the SHA-256 of its name, so any tag name makes a valid label. A node carries
+/// it (value `true`) when its Ferry host has the tag.
+pub fn tag_label(tag: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = hex::encode(Sha256::digest(tag.as_bytes()));
+    format!("ferry.tag.{}", &digest[..12])
+}
+
+/// `swarmLabelSyncFailed` for `node`; an empty host until [`on_host`] names the manager.
+fn label_sync_failed<T>(node: &str, detail: &str) -> Result<T> {
+    fail(
+        Message::new("blueprint.swarmLabelSyncFailed")
+            .with("host", "")
+            .with("node", node)
+            .with("detail", detail.trim()),
+    )
+}
+
+/// Brings the tag labels of Swarm nodes to `desired` (node ID → label → whether the node
+/// carries it) through the manager behind `ch`. Only the listed labels of the listed nodes
+/// are touched, and a node already in the desired state is left alone: the current labels
+/// are read first (`--label-rm` of an absent label fails).
+pub async fn sync_labels(
+    ch: &dyn HostChannel,
+    desired: &BTreeMap<String, BTreeMap<String, bool>>,
+) -> Result<()> {
+    let Some(first) = desired.keys().next() else {
+        return Ok(());
+    };
+    let ids: Vec<String> = desired.keys().map(|id| quote(id)).collect();
+    let inspect = ch
+        .exec(
+            &format!(
+                "docker node inspect --format '{{{{.ID}}}} {{{{json .Spec.Labels}}}}' {}",
+                ids.join(" ")
+            ),
+            TIMEOUT,
+        )
+        .await?;
+    if inspect.code != 0 {
+        return label_sync_failed(first, &inspect.stderr);
+    }
+    let mut current: BTreeMap<&str, BTreeMap<String, String>> = BTreeMap::new();
+    for line in inspect
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+    {
+        let (id, labels) = line.split_once(' ').unwrap_or((line, "null"));
+        let Ok(labels) = serde_json::from_str::<Option<BTreeMap<String, String>>>(labels) else {
+            return label_sync_failed(id, line);
+        };
+        current.insert(id, labels.unwrap_or_default());
+    }
+    let none = BTreeMap::new();
+    for (node, labels) in desired {
+        let have = current.get(node.as_str()).unwrap_or(&none);
+        let mut args = Vec::new();
+        for (label, want) in labels {
+            match (*want, have.get(label).map(String::as_str)) {
+                (true, Some("true")) | (false, None) => {}
+                (true, _) => args.push(format!("--label-add {}", quote(&format!("{label}=true")))),
+                (false, Some(_)) => args.push(format!("--label-rm {}", quote(label))),
+            }
+        }
+        if args.is_empty() {
+            continue;
+        }
+        let out = ch
+            .exec(
+                &format!("docker node update {} {}", args.join(" "), quote(node)),
+                TIMEOUT,
+            )
+            .await?;
+        if out.code != 0 {
+            return label_sync_failed(node, &out.stderr);
+        }
+    }
+    Ok(())
 }
 
 /// One line of `docker node ls --format '{{json .}}'`.
@@ -427,5 +515,108 @@ mod tests {
         .map(|(a, b)| (a.to_string(), b.to_string()))
         .collect();
         assert_eq!(map, expected);
+    }
+
+    #[test]
+    fn label_name_is_stable_hash() {
+        // sha256("cache") = 5e1ecee06a7fc06f...; the first 12 lowercase hex characters.
+        assert_eq!(tag_label("cache"), "ferry.tag.5e1ecee06a7f");
+        // Any tag name is hashed over its UTF-8 bytes, so the label is always valid.
+        assert_eq!(tag_label("数据库"), "ferry.tag.263200d7d529");
+        assert_eq!(tag_label("zone:a"), "ferry.tag.349cd40b95a9");
+        assert_ne!(tag_label("cache"), tag_label("Cache"));
+    }
+
+    fn desired(rows: &[(&str, &[(&str, bool)])]) -> BTreeMap<String, BTreeMap<String, bool>> {
+        rows.iter()
+            .map(|(node, labels)| {
+                let labels = labels
+                    .iter()
+                    .map(|(tag, want)| (tag_label(tag), *want))
+                    .collect();
+                (node.to_string(), labels)
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn label_sync_adds_and_removes_on_manager() {
+        let (cache, mq) = (tag_label("cache"), tag_label("mq"));
+        let (host, ch) = channel(931_010);
+        // n1 already matches; n2 has no labels; n3 carries a stale `mq` and an unrelated
+        // label (and a `ferry.tag.` label of a tag this deployment does not use).
+        let other = tag_label("other");
+        host.respond(
+            "docker node inspect",
+            &format!(
+                "n1 {{\"{cache}\":\"true\",\"zone\":\"a\"}}\nn2 null\nn3 {{\"{mq}\":\"true\",\"zone\":\"b\",\"{other}\":\"true\"}}\n"
+            ),
+        );
+        sync_labels(
+            ch.as_ref(),
+            &desired(&[
+                ("n1", &[("cache", true), ("mq", false)]),
+                ("n2", &[("cache", true), ("mq", true)]),
+                ("n3", &[("cache", false), ("mq", false)]),
+            ]),
+        )
+        .await
+        .expect("synced");
+        let commands = host.commands.lock().unwrap().clone();
+        assert_eq!(
+            commands,
+            vec![
+                "docker node inspect --format '{{.ID}} {{json .Spec.Labels}}' 'n1' 'n2' 'n3'"
+                    .to_string(),
+                format!(
+                    "docker node update --label-add '{cache}=true' --label-add '{mq}=true' 'n2'"
+                ),
+                format!("docker node update --label-rm '{mq}' 'n3'"),
+            ]
+        );
+        // Nothing to sync: no command at all.
+        let (host, ch) = channel(931_011);
+        sync_labels(ch.as_ref(), &BTreeMap::new())
+            .await
+            .expect("empty");
+        assert!(host.commands.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn label_sync_failure_is_localized() {
+        let (host, ch) = channel(931_012);
+        host.respond("docker node inspect", "n1 null\n");
+        host.fail_on("docker node update", "Error: node n1 not found");
+        let e = sync_labels(ch.as_ref(), &desired(&[("n1", &[("cache", true)])]))
+            .await
+            .expect_err("update fails");
+        let m = message(on_host(e, "alpha"));
+        assert_eq!(m.key, "blueprint.swarmLabelSyncFailed");
+        assert_eq!(m.params["node"], "n1");
+        assert_eq!(m.params["host"], "alpha");
+        assert_eq!(m.params["detail"], "Error: node n1 not found");
+        for locale in crate::i18n::Locale::ALL {
+            let text = crate::i18n::render(locale, &m);
+            assert!(
+                text.contains("alpha") && text.contains("n1"),
+                "{locale:?}: {text}"
+            );
+        }
+        // An unreadable label state stops before any update.
+        let (host, ch) = channel(931_013);
+        host.fail_on("docker node inspect", "permission denied");
+        let e = sync_labels(ch.as_ref(), &desired(&[("n1", &[("cache", true)])]))
+            .await
+            .expect_err("inspect fails");
+        assert_eq!(message(e).key, "blueprint.swarmLabelSyncFailed");
+        assert_eq!(
+            host.commands
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|c| c.contains("docker node update"))
+                .count(),
+            0
+        );
     }
 }

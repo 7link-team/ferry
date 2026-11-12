@@ -1,7 +1,12 @@
 //! Ordered multi-host snapshots (host groups and cluster blueprints) and per-host outcomes;
 //! mode execution is shared.
 use super::*;
-use crate::blueprint::{binding, compile::HostPlan, swarm, template::Context};
+use crate::blueprint::{
+    binding,
+    compile::{HostPlan, RoleTags},
+    swarm,
+    template::Context,
+};
 use crate::entities::{
     deployment_revision_targets as targets, deployment_target_states as current, host_groups,
 };
@@ -58,7 +63,20 @@ fn host_app(app: &apps::Model, host: Id, manifest: String) -> apps::Model {
 /// A stack is compiled unresolved (stand-in Swarm nodes), which is enough for readers.
 pub(crate) fn compiled(app: &apps::Model) -> Result<Vec<HostPlan>> {
     let binding = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
-    crate::blueprint::compile::compile_unresolved(&app.manifest, &binding)
+    let tags = role_tags(app.deploy_spec.as_deref())?;
+    crate::blueprint::compile::compile_unresolved_tagged(&app.manifest, &binding, &tags)
+}
+/// The host tags each role of a deployment spec selects by; none without a spec.
+pub(super) fn role_tags(spec: Option<&str>) -> Result<RoleTags> {
+    let Some(text) = spec else {
+        return Ok(RoleTags::new());
+    };
+    Ok(crate::blueprint::spec::parse(text)?
+        .roles
+        .into_iter()
+        .map(|(role, r)| (role, r.hosts.tags))
+        .filter(|(_, tags)| !tags.is_empty())
+        .collect())
 }
 /// Validates a binding against this workspace's current hosts and returns them by id.
 async fn known_hosts(
@@ -98,10 +116,11 @@ pub(super) async fn compile_offline(
     workspace: Id,
     manifest: &str,
     b: &binding::Binding,
+    tags: &RoleTags,
 ) -> Result<Vec<HostPlan>> {
     let bp = crate::blueprint::model::parse(manifest)?;
     known_hosts(conn, workspace, &bp, b).await?;
-    crate::blueprint::compile::compile_unresolved(manifest, b)
+    crate::blueprint::compile::compile_unresolved_tagged(manifest, b, tags)
 }
 /// A stack blueprint's Swarm node per instance, looked up through its hosts for one
 /// manifest and binding. Looked up before any transaction opens: reaching hosts can take
@@ -110,6 +129,10 @@ pub(super) struct SwarmNodes {
     manifest: String,
     binding: Option<String>,
     nodes: BTreeMap<String, String>,
+    /// The manager host, and each bound host's own Swarm node ID.
+    manager: Id,
+    manager_name: String,
+    hosts: BTreeMap<Id, String>,
 }
 /// Where a preview records the Swarm nodes its stack artifact is pinned to.
 const PREVIEW_NODES: &str = "x-swarm-nodes";
@@ -156,7 +179,50 @@ pub(super) async fn swarm_nodes(
         manifest: app.manifest.clone(),
         binding: app.blueprint_binding.clone(),
         nodes: swarm::assign(&bp, &b, &nodes, &host_nodes, &names)?,
+        manager,
+        manager_name: names[&manager].clone(),
+        hosts: host_nodes,
     }))
+}
+/// Before a stack deployment from a spec is applied, labels the Swarm nodes of its bound
+/// hosts (the [`swarm_nodes`] just looked up) with the tags its role selectors use, so the
+/// compiled `node.labels.ferry.tag.*` constraints match the hosts' current tags: a node gets
+/// a tag's label when its host has the tag and loses it otherwise. Other labels, other tags'
+/// labels and nodes of hosts this deployment does not bind are never touched. Changes the
+/// cluster, so only apply calls it, outside any transaction (it reaches the manager).
+pub(super) async fn sync_labels(
+    s: &AppState,
+    workspace: Id,
+    app: &apps::Model,
+    nodes: &SwarmNodes,
+) -> Result<()> {
+    let used: BTreeSet<String> = role_tags(app.deploy_spec.as_deref())?
+        .into_values()
+        .flatten()
+        .collect();
+    if used.is_empty() {
+        return Ok(());
+    }
+    let host_tags: BTreeMap<Id, Vec<String>> = super::candidates::load(&s.db, workspace)
+        .await?
+        .into_iter()
+        .map(|c| (c.id, c.tags))
+        .collect();
+    let mut desired: BTreeMap<String, BTreeMap<String, bool>> = BTreeMap::new();
+    for (host, node) in &nodes.hosts {
+        let own = host_tags.get(host).map(Vec::as_slice).unwrap_or_default();
+        let labels = desired.entry(node.clone()).or_default();
+        for tag in &used {
+            // Two Ferry hosts on one node: the node has the tag if either host does.
+            *labels.entry(swarm::tag_label(tag)).or_default() |= own.contains(tag);
+        }
+    }
+    let result = async {
+        let channel = remote::open(s, &workspace, &nodes.manager).await?;
+        swarm::sync_labels(channel.as_ref(), &desired).await
+    }
+    .await;
+    result.map_err(|e| swarm::on_host(e, &nodes.manager_name))
 }
 /// What one Swarm probe found: the manager's node list, or one host's own node ID.
 #[derive(Default)]
@@ -227,7 +293,8 @@ pub(super) async fn targets(
             }
             None => None,
         };
-        let plans = crate::blueprint::compile::compile(&app.manifest, &b, nodes)?;
+        let tags = role_tags(app.deploy_spec.as_deref())?;
+        let plans = crate::blueprint::compile::compile_tagged(&app.manifest, &b, nodes, &tags)?;
         return Ok(blueprint_targets(app, plans));
     }
     member_targets(conn, workspace, app).await
@@ -241,7 +308,8 @@ pub(super) async fn offline_targets(
 ) -> Result<Vec<HostTarget>> {
     if app.target_kind == "blueprint" {
         let b = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
-        let plans = compile_offline(conn, workspace, &app.manifest, &b).await?;
+        let tags = role_tags(app.deploy_spec.as_deref())?;
+        let plans = compile_offline(conn, workspace, &app.manifest, &b, &tags).await?;
         return Ok(blueprint_targets(app, plans));
     }
     member_targets(conn, workspace, app).await
