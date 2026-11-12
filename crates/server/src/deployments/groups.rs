@@ -111,6 +111,16 @@ pub(super) struct SwarmNodes {
     binding: Option<String>,
     nodes: BTreeMap<String, String>,
 }
+/// Where a preview records the Swarm nodes its stack artifact is pinned to.
+const PREVIEW_NODES: &str = "x-swarm-nodes";
+impl SwarmNodes {
+    /// Whether `preview` (a stored preview artifact) was pinned to these same nodes; a node
+    /// that left and rejoined, or a changed assignment, means the preview is stale.
+    pub(super) fn match_preview(&self, preview: &str) -> bool {
+        serde_json::from_str::<Value>(preview)
+            .is_ok_and(|doc| doc.get(PREVIEW_NODES) == Some(&json!(self.nodes)))
+    }
+}
 /// Looks up a stack blueprint deployment's Swarm nodes: the manager lists the Swarm's nodes
 /// and each distinct bound host reports its own node ID, each host asked once. `None` for
 /// any other deployment.
@@ -177,11 +187,9 @@ async fn probe(s: &AppState, workspace: Id, host: Id, name: &str, manager: bool)
         if e.0 == axum::http::StatusCode::INTERNAL_SERVER_ERROR {
             return e;
         }
-        if e.2
-            .as_ref()
-            .is_some_and(|m| m.key.starts_with("blueprint."))
-        {
-            return swarm::on_host(e, name);
+        // Swarm errors from the probe itself only see the channel; name the host in each.
+        if let Some(m) = e.2.as_ref().filter(|m| m.key.starts_with("blueprint.")) {
+            return ApiError::localized(e.0, m.clone().with("host", name));
         }
         let key = if manager {
             "blueprint.swarmManagerRequired"
@@ -374,10 +382,11 @@ pub(super) async fn preview(
             rows.push(json!({"host_id":target.host_id,"artifact":artifact}));
             metadata.push(bound);
         }
-        let desired = serde_json::to_string_pretty(
-            &json!({"targets":rows,"x-variable-bindings":merge(&encoded)}),
-        )
-        .map_err(|_| {
+        let mut doc = json!({"targets":rows,"x-variable-bindings":merge(&encoded)});
+        if let Some(nodes) = &nodes {
+            doc[PREVIEW_NODES] = json!(nodes.nodes);
+        }
+        let desired = serde_json::to_string_pretty(&doc).map_err(|_| {
             ApiError::localized(
                 axum::http::StatusCode::BAD_REQUEST,
                 crate::i18n::Message::new("deployment.error.052"),

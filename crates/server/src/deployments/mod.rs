@@ -1355,11 +1355,19 @@ async fn trigger(
         "deployments.apply"
     })?;
     // A new stack blueprint revision pins instances to Swarm nodes looked up through its
-    // hosts, before the transaction opens; `targets` rejects them if the record changed since.
+    // hosts, before the transaction opens; `targets` rejects them if the record changed since,
+    // and they must be the nodes the preview was pinned to.
     let nodes = if rollback || restart {
         None
     } else {
-        groups::swarm_nodes(s, scope.workspace_id, &scoped(&s.db, scope, id).await?).await?
+        let before = scoped(&s.db, scope, id).await?;
+        if b.version != before.version {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("deployment.error.030"),
+            ));
+        }
+        groups::swarm_nodes(s, scope.workspace_id, &before).await?
     };
     let tx = crate::variables::transaction(s, scope.workspace_id).await?;
     let r = scoped(&tx, scope, id).await?;
@@ -1440,6 +1448,9 @@ async fn trigger(
         if r.preview_artifact.is_empty()
             || artifact_bindings(&r.preview_artifact)?
                 != groups::merge(bound.iter().map(|(metadata, _, _)| metadata))
+            || nodes
+                .as_ref()
+                .is_some_and(|nodes| !nodes.match_preview(&r.preview_artifact))
         {
             return Err(ApiError::localized(
                 axum::http::StatusCode::CONFLICT,

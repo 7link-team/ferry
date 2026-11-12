@@ -1031,6 +1031,7 @@ async fn stack_blueprint_rejects_host_outside_swarm_at_preview() {
     crate::hosts::fake::register(base);
     let message = preview_of(&s, &id, None).await.unwrap_err().2.unwrap();
     assert_eq!(message.key, "blueprint.swarmManagerRequired");
+    assert_eq!(message.params["host"], format!("Host {base}"));
 }
 
 #[tokio::test]
@@ -1123,6 +1124,90 @@ async fn stack_blueprint_rollback_replays_without_node_lookup() {
     let (ok, output) = execute(&s, &replay).await.unwrap();
     assert!(ok, "{output}");
     assert_eq!(commands(base, "docker stack deploy"), 1);
+    for i in SWARM {
+        assert_eq!(commands(base + i, "docker node ls"), 0);
+        assert_eq!(commands(base + i, "Swarm.NodeID"), 0);
+    }
+}
+
+#[tokio::test]
+async fn stack_apply_rejects_changed_swarm_node() {
+    let base = 950;
+    let (_dir, s) = stack_fixture(base).await;
+    join_swarm(base);
+    let id = create_app(&s, stack_body(base)).await.unwrap();
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    // The second worker leaves and rejoins the Swarm under a new node ID.
+    let rejoined = |host: i64| {
+        if host == base + 2 {
+            format!("node-{host}-new")
+        } else {
+            format!("node-{host}")
+        }
+    };
+    let list: Vec<String> = SWARM
+        .iter()
+        .map(|i| {
+            json!({"ID": rejoined(base + i), "Hostname": format!("h{}", base + i),
+                   "Status": "Ready", "Availability": "Active"})
+            .to_string()
+        })
+        .collect();
+    for i in SWARM {
+        crate::hosts::fake::get(base + i)
+            .responses
+            .lock()
+            .unwrap()
+            .clear();
+    }
+    let manager = crate::hosts::fake::get(base);
+    manager.respond("Swarm.ControlAvailable", "true\n");
+    manager.respond("docker node ls", &(list.join("\n") + "\n"));
+    for i in SWARM {
+        crate::hosts::fake::get(base + i)
+            .respond("Swarm.NodeID", &format!("{}\n", rejoined(base + i)));
+    }
+    let error = apply_preview(&s, &id, &preview).await.unwrap_err();
+    assert_eq!(error.0, StatusCode::CONFLICT);
+    assert_eq!(key(error), "deployment.error.040");
+    assert_eq!(revision_count(&s, &id).await, 0);
+    // A fresh preview pins the new node and applies.
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    assert!(
+        preview["desired"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("node.id==node-{}-new", base + 2))
+    );
+    let rev = apply_preview(&s, &id, &preview).await.unwrap();
+    assert_eq!(target_rows(&s, &rev).await.len(), 1);
+}
+
+#[tokio::test]
+async fn stack_apply_checks_version_before_probing() {
+    let base = 960;
+    let (_dir, s) = stack_fixture(base).await;
+    join_swarm(base);
+    let id = create_app(&s, stack_body(base)).await.unwrap();
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    for i in SWARM {
+        crate::hosts::fake::get(base + i)
+            .commands
+            .lock()
+            .unwrap()
+            .clear();
+    }
+    let mut body = run_body(&preview, "");
+    body.version += 1;
+    let error = apply(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id.clone())),
+        Json(body),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(key(error), "deployment.error.030");
     for i in SWARM {
         assert_eq!(commands(base + i, "docker node ls"), 0);
         assert_eq!(commands(base + i, "Swarm.NodeID"), 0);
