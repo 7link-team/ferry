@@ -394,7 +394,10 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
           ) : (route.mode === "view" || (route.mode === "edit" && new URLSearchParams(location.search).get("tab") === "monitoring")) && item.resource === "code-connections" && route.id && formConfig ? (
             <RepositoryConnectionDetail key={`${current.id}/${route.id}`} workspace={current.id} connectionId={route.id} permissions={permissions} form={formConfig} />
           ) : route.mode === "new" && item.resource === "deployments" && new URLSearchParams(location.search).get("wizard") === "blueprint" ? (
-            <BlueprintWizard key={`${current.id}/${location.search}`} workspace={current.id} templateId={new URLSearchParams(location.search).get("template") ?? ""} version={Number(new URLSearchParams(location.search).get("version")) || 0} permissions={permissions} navigation={{ href, navigate }} />
+            // Its own scroll area, like the shared form: the sticky actions stay above the phone navigation.
+            <div className="min-h-0 overflow-auto">
+              <BlueprintWizard key={`${current.id}/${location.search}`} workspace={current.id} templateId={new URLSearchParams(location.search).get("template") ?? ""} version={Number(new URLSearchParams(location.search).get("version")) || 0} permissions={permissions} navigation={{ href, navigate }} />
+            </div>
           ) : route.mode === "view" && (item.resource === "deployments" || item.resource === "deployment-revisions") && route.id ? (
             <DeploymentDetail key={`${current.id}/${item.resource}/${route.id}`} workspace={current.id} {...(item.resource === "deployments" ? { deploymentId: route.id } : { revisionId: route.id })} permissions={permissions} />
           ) : route.mode === "view" && item.resource === "pipeline-runs" && route.id ? (
