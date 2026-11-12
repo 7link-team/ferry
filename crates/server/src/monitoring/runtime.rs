@@ -110,35 +110,25 @@ pub(super) fn blueprint_instance_hosts(app: &deployments::Model) -> HashMap<Stri
     // from its manager: it has no fixed host.
     if let Some(manager) = binding.manager {
         for role in binding.roles.keys() {
-            hosts.insert(role.clone(), (role.clone(), manager.into()));
+            hosts
+                .entry(role.clone())
+                .or_insert_with(|| (role.clone(), manager.into()));
         }
     }
     hosts
 }
 /// Hosts a runtime check may observe a blueprint deployment from: its current revision's
-/// targets and, for a stack, the manager and every host its binding pins instances to.
+/// targets only. A stack's single target is its manager; worker hosts have no deployment
+/// target state, so a check there could never see a running revision.
 async fn blueprint_hosts(
     conn: &impl ConnectionTrait,
     app: &deployments::Model,
 ) -> Result<Vec<i64>> {
-    let mut hosts: Vec<i64> = blueprint_targets(conn, app)
+    Ok(blueprint_targets(conn, app)
         .await?
         .into_iter()
         .map(|(host, _)| host)
-        .collect();
-    if app.mode == "stack" {
-        let binding =
-            crate::blueprint::binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
-        hosts.extend(binding.manager.map(i64::from));
-        hosts.extend(
-            binding
-                .roles
-                .values()
-                .flatten()
-                .map(|i| i64::from(i.host_id)),
-        );
-    }
-    Ok(hosts)
+        .collect())
 }
 pub(super) async fn running_revision(
     conn: &impl ConnectionTrait,

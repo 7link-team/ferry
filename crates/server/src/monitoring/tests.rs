@@ -797,16 +797,16 @@ async fn runtime_check_allowed_for_blueprint_target_host() {
             .await
             .is_err()
     );
-    // A stack: its manager target and the hosts its binding pins instances to.
-    for host in [base + 2, base, base + 1] {
-        create_check(&s, runtime_body(base + 1, host))
-            .await
-            .unwrap();
-    }
-    let error = create_check(&s, runtime_body(base + 1, base + 4))
+    // A stack: only its manager target; pinned worker hosts have no target state to observe.
+    create_check(&s, runtime_body(base + 1, base + 2))
         .await
-        .unwrap_err();
-    assert_eq!(error_key(error), "monitoring.bindingInvalid");
+        .unwrap();
+    for host in [base, base + 1, base + 4] {
+        let error = create_check(&s, runtime_body(base + 1, host))
+            .await
+            .unwrap_err();
+        assert_eq!(error_key(error), "monitoring.bindingInvalid");
+    }
     // Never deployed: no targets yet.
     let error = create_check(&s, runtime_body(base + 3, base))
         .await
