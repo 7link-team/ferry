@@ -225,11 +225,12 @@ pub fn is_blueprint(text: &str) -> bool {
 }
 
 pub fn parse(text: &str) -> Result<Blueprint> {
-    let Ok(doc) = serde_json::from_str::<Value>(text) else {
-        return fail(Message::new("blueprint.invalidDocument"));
-    };
-    check_hook_shapes(&doc)?;
-    let Ok(blueprint) = serde_json::from_value::<Blueprint>(doc) else {
+    // The typed parse is the gate (it also rejects duplicate keys); the loose read only
+    // explains a failure caused by a malformed hook.
+    let Ok(blueprint) = serde_json::from_str::<Blueprint>(text) else {
+        if let Ok(doc) = serde_json::from_str::<Value>(text) {
+            check_hook_shapes(&doc)?;
+        }
         return fail(Message::new("blueprint.invalidDocument"));
     };
     validate(&blueprint)?;
@@ -244,8 +245,8 @@ fn hook_invalid<T>(role: &str, hook: &str) -> Result<T> {
     )
 }
 
-/// A role hook that is not a list of strings would otherwise surface only as an invalid
-/// document; name the role and hook instead.
+/// Called only after the typed parse failed: a role hook that is not a list of strings would
+/// otherwise surface only as an invalid document, so name the role and hook instead.
 fn check_hook_shapes(doc: &Value) -> Result<()> {
     let roles = doc
         .get("roles")
@@ -629,6 +630,56 @@ mod tests {
         assert_eq!(err_key(&v), "blueprint.hooksNotYetSupported");
         v.as_object_mut().unwrap().remove("hooks");
         assert!(parse_v(&v).is_ok());
+    }
+
+    /// `nats()` as text with `from` replaced once by `to`.
+    fn nats_text_with(from: &str, to: &str) -> String {
+        let text = nats().to_string();
+        assert!(text.contains(from), "{from} not in {text}");
+        text.replacen(from, to, 1)
+    }
+
+    fn text_err_key(text: &str) -> String {
+        let e = parse(text).err().expect("expected error");
+        e.2.map(|m| m.key).unwrap_or_default()
+    }
+
+    #[test]
+    fn duplicate_keys_are_invalid_documents() {
+        let cases = [
+            // Top level.
+            nats_text_with(
+                r#""kind":"Blueprint""#,
+                r#""kind":"Blueprint","kind":"Blueprint""#,
+            ),
+            // The document name.
+            nats_text_with(
+                r#""name":"nats-cluster""#,
+                r#""name":"nats-cluster","name":"other-name""#,
+            ),
+            // A role's instances.
+            nats_text_with(
+                r#""instances":{"#,
+                r#""instances":{"default":1,"max":1,"min":1,"odd":false},"instances":{"#,
+            ),
+        ];
+        for text in cases {
+            assert_eq!(text_err_key(&text), "blueprint.invalidDocument", "{text}");
+        }
+    }
+
+    #[test]
+    fn unknown_key_with_non_string_hook_item_names_the_hook() {
+        let mut v = nats();
+        v["surprise"] = json!(1);
+        v["roles"][1]["hooks"] = json!({"leave": ["ok", 7]});
+        let m = parse_v(&v).unwrap_err().2.expect("localized");
+        assert_eq!(m.key, "blueprint.hookInvalid");
+        assert_eq!(m.params["role"], "exporter");
+        assert_eq!(m.params["hook"], "leave");
+        // Without the bad hook item the unknown key is the generic error, as before.
+        v["roles"][1]["hooks"] = json!({"leave": ["ok"]});
+        assert_eq!(err_key(&v), "blueprint.invalidDocument");
     }
 
     #[test]
