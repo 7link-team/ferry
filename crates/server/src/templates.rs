@@ -995,6 +995,14 @@ fn validate_body(body: &Body, kind: Kind) -> Result<()> {
 pub(crate) fn validate_app(content: &str, parameters: &str) -> Result<()> {
     validate_template(content, parameters, Kind::App).map(|_| ())
 }
+/// Renders an app template with `values`, exactly as the template render endpoint does.
+pub(crate) fn render_app(
+    content: &str,
+    parameters: &str,
+    values: &BTreeMap<String, Value>,
+) -> Result<String> {
+    render_content(content, parameters, values, Kind::App)
+}
 pub(crate) fn validate_config(content: &str, parameters: &str) -> Result<()> {
     validate_template(content, parameters, Kind::Config).map(|_| ())
 }

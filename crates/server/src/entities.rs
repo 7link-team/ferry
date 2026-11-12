@@ -1100,6 +1100,9 @@ pub mod deployments {
         /// Instance binding JSON; set only when `target_kind` is `blueprint`.
         #[sea_orm(column_type = "Text", nullable)]
         pub blueprint_binding: Option<String>,
+        /// Deployment spec (`ferry/deploy-v1`) the manifest and binding derive from, if any.
+        #[sea_orm(column_type = "Text", nullable)]
+        pub deploy_spec: Option<String>,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

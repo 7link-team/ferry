@@ -284,5 +284,7 @@
   "blueprint.placementInsufficientHosts": "角色 {role} 需要 {needed} 台符合 {selector} 的線上 Linux 主機，目前 {matched} 台：{hosts}。",
   "blueprint.placementSelectorEmpty": "沒有符合 {selector} 的線上 Linux 主機可用於角色 {role}。",
   "blueprint.placementSpreadUnmet": "角色 {role}：執行個體未能全部分散到不同的 {prefix} 標籤上。",
-  "blueprint.placementManagerUnavailable": "Swarm 管理節點 {manager} 必須是本工作空間中的線上 Linux 主機。"
+  "blueprint.placementManagerUnavailable": "Swarm 管理節點 {manager} 必須是本工作空間中的線上 Linux 主機。",
+  "blueprint.placementManualInvalid": "角色 {role} 的實例 {instance} 被指定到主機 {host}，但該主機不是本工作空間內符合該角色主機選擇條件的線上 Linux 主機。",
+  "deployments.specManaged": "此部署由部署規格管理；請修改部署規格，而不是直接修改清單或綁定。"
 }

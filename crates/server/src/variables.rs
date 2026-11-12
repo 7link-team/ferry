@@ -1250,6 +1250,7 @@ mod tests {
             updated_at: Set(1),
             version: Set(1),
             blueprint_binding: Set(None),
+            deploy_spec: Set(None),
         })
         .exec(&s.db)
         .await

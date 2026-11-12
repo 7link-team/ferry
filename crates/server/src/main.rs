@@ -893,6 +893,10 @@ fn workspace_routes() -> Router<state::AppState> {
             get(deployments::list).post(deployments::create),
         )
         .route(
+            "/{workspace}/deployment-placements",
+            post(deployments::placement),
+        )
+        .route(
             "/{workspace}/deployments/{id}",
             get(deployments::get)
                 .patch(deployments::update)

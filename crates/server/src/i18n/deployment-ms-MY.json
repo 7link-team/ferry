@@ -284,5 +284,7 @@
   "blueprint.placementInsufficientHosts": "Peranan {role} memerlukan {needed} hos Linux dalam talian yang sepadan dengan {selector}; {matched} ditemui: {hosts}.",
   "blueprint.placementSelectorEmpty": "Tiada hos Linux dalam talian yang sepadan dengan {selector} untuk peranan {role}.",
   "blueprint.placementSpreadUnmet": "Peranan {role}: tidak semua instans dapat disebarkan merentasi tag {prefix} yang berbeza.",
-  "blueprint.placementManagerUnavailable": "Pengurus Swarm {manager} mestilah hos Linux dalam talian dalam ruang kerja ini."
+  "blueprint.placementManagerUnavailable": "Pengurus Swarm {manager} mestilah hos Linux dalam talian dalam ruang kerja ini.",
+  "blueprint.placementManualInvalid": "Instans {instance} bagi peranan {role} diletakkan pada {host}, yang bukan hos Linux dalam talian di ruang kerja ini yang sepadan dengan pemilih hos peranan tersebut.",
+  "deployments.specManaged": "Pengerahan ini diurus oleh spesifikasi pengerahannya; ubah spesifikasi itu dan bukannya manifest atau pengikatan."
 }

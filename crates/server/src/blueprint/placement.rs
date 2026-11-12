@@ -100,6 +100,35 @@ fn zones<'a>(c: &'a Candidate, prefix: &str) -> BTreeSet<Option<&'a str>> {
     }
 }
 
+/// Every manually placed instance (`spec.placement`) must run on a candidate host that is
+/// online, Linux (or unknown OS) and matches its role's selector. A violating entry is refused,
+/// never rewritten.
+pub fn check_manual(spec: &DeploySpec, candidates: &[Candidate]) -> Result<()> {
+    for (role, list) in spec.placement.iter().flatten() {
+        let selector = spec
+            .roles
+            .get(role)
+            .map(|r| r.hosts.clone())
+            .unwrap_or_default();
+        for (index, inst) in list.iter().enumerate() {
+            let host = candidates.iter().find(|c| c.id == inst.host_id);
+            if host.is_some_and(|c| eligible(c) && matches(&selector, c)) {
+                continue;
+            }
+            return fail(
+                Message::new("blueprint.placementManualInvalid")
+                    .with("role", role)
+                    .with("instance", format!("{role}-{index}"))
+                    .with(
+                        "host",
+                        host.map_or_else(|| inst.host_id.to_string(), |c| c.name.clone()),
+                    ),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Places every blueprint role without a manual `placement` entry onto the candidate hosts.
 ///
 /// `existing` counts THIS deployment's instances already on each host, excluding any instance

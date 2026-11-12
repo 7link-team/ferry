@@ -2,7 +2,9 @@
 pub(crate) mod candidates;
 pub(crate) mod manifest;
 pub(crate) mod modes;
+mod specs;
 use crate::i18n::{Message, StoredText};
+pub use specs::placement;
 mod groups;
 use crate::error::{Json, Path, Query};
 use crate::hosts::channel::HostChannel;
@@ -65,6 +67,7 @@ fn app_json(r: &apps::Model) -> Value {
         "target_ref":Id::from(r.target_ref),"workdir":r.workdir,"description":r.description,"state":r.state,
         "revision_number":r.revision_number,"current_revision":Id::from(r.current_revision),
         "blueprint_binding":r.blueprint_binding.as_deref().and_then(|b| serde_json::from_str::<Value>(b).ok()),
+        "deploy_spec":r.deploy_spec,
         "created_at":r.created_at,"updated_at":r.updated_at,"version":r.version})
 }
 fn revision_json(r: &revisions::Model) -> Value {
@@ -90,9 +93,14 @@ pub struct Body {
     name: String,
     #[serde(default)]
     category: Option<String>,
+    // Optional only because a `deploy_spec` derives them; without one they are validated.
+    #[serde(default)]
     manifest: String,
+    #[serde(default)]
     mode: String,
+    #[serde(default)]
     target_kind: String,
+    #[serde(default)]
     target_ref: String,
     workdir: String,
     #[serde(default)]
@@ -102,6 +110,10 @@ pub struct Body {
     /// Instance binding; required when `target_kind` is `blueprint`, rejected otherwise.
     #[serde(default)]
     blueprint_binding: Option<Value>,
+    /// Deployment spec (`ferry/deploy-v1`); when present the server derives `manifest`,
+    /// `blueprint_binding`, `mode`, `target_kind` and `target_ref` from it.
+    #[serde(default)]
+    deploy_spec: Option<String>,
 }
 async fn check_category(
     conn: &impl sea_orm::ConnectionTrait,
@@ -447,6 +459,8 @@ pub(crate) async fn create_in(
     b: Body,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("deployments.create")?;
+    let mut b = b;
+    let deploy_spec = specs::resolve(tx, scope, &mut b, None).await?;
     let (name, manifest, target_ref, blueprint_binding) = check(tx, &scope, &b).await?;
     check_category(tx, scope, b.category.as_deref().unwrap_or_default(), None).await?;
     let (id, now) = (s.next_id()?, db::now());
@@ -469,6 +483,7 @@ pub(crate) async fn create_in(
         updated_at: now,
         version: 1,
         blueprint_binding,
+        deploy_spec,
     };
     if row.target_kind == "host-group" {
         groups::members(tx, scope.workspace_id, row.target_ref).await?;
@@ -497,7 +512,22 @@ pub async fn update(
 ) -> Result<Json<Value>> {
     scope.require("deployments.update")?;
     let r = scoped(&s.db, &scope, &id).await?;
+    let mut b = b;
+    let deploy_spec = match specs::resolve(&s.db, &scope, &mut b, Some(&r)).await? {
+        Some(spec) => Some(spec),
+        None => r.deploy_spec.clone(),
+    };
     let (name, manifest, host, binding) = check(&s.db, &scope, &b).await?;
+    // A spec-managed deployment changes topology or manifest only through its spec.
+    if b.deploy_spec.is_none()
+        && r.deploy_spec.is_some()
+        && (manifest != r.manifest || binding != r.blueprint_binding)
+    {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            Message::new("deployments.specManaged"),
+        ));
+    }
     if i64::from(host) != r.target_ref
         || b.target_kind != r.target_kind
         || b.workdir.trim_end_matches('/') != r.workdir
@@ -529,6 +559,7 @@ pub async fn update(
         .col_expr(apps::Column::Category, Expr::value(category))
         .col_expr(apps::Column::Manifest, Expr::value(manifest))
         .col_expr(apps::Column::BlueprintBinding, Expr::value(binding))
+        .col_expr(apps::Column::DeploySpec, Expr::value(deploy_spec))
         .col_expr(apps::Column::PreviewArtifact, Expr::value(""))
         .col_expr(apps::Column::Description, Expr::value(b.description))
         .col_expr(
@@ -2107,6 +2138,7 @@ mod variable_snapshot_tests {
                     description: String::new(),
                     version: 1,
                     blueprint_binding: None,
+                    deploy_spec: None,
                 },
             )
             .await?;
@@ -2359,6 +2391,7 @@ mod blueprint_binding_tests {
             updated_at: 1,
             version: 1,
             blueprint_binding: None,
+            deploy_spec: None,
         }
     }
 

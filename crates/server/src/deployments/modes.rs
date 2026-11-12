@@ -1097,6 +1097,7 @@ mod stack_finalize_tests {
             updated_at: 0,
             version: 1,
             blueprint_binding: None,
+            deploy_spec: None,
         }
     }
 

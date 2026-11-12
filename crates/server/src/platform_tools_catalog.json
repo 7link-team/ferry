@@ -1345,6 +1345,23 @@
     "permission": "deployments.read"
   },
   {
+    "path": "/deployment-placements",
+    "method": "POST",
+    "handler": "deployments::placement",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn placement(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<PlacementBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct PlacementBody {\n    spec: String,\n}"
+    ],
+    "permission_checks": [
+      "app-templates.read",
+      "deployments.create",
+      "hosts.read"
+    ],
+    "documentation": "Renders and schedules a spec for a new deployment without storing anything.",
+    "permission": "deployments.create"
+  },
+  {
     "path": "/deployment-revisions",
     "method": "GET",
     "handler": "deployments::revision_list",
@@ -1388,7 +1405,7 @@
     "source": "crates/server/src/main.rs",
     "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(b): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct Body {\n    name: String,\n    #[serde(default)]\n    category: Option<String>,\n    manifest: String,\n    mode: String,\n    target_kind: String,\n    target_ref: String,\n    workdir: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n    /// Instance binding; required when `target_kind` is `blueprint`, rejected otherwise.\n    #[serde(default)]\n    blueprint_binding: Option<Value>,\n}"
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    category: Option<String>,\n    // Optional only because a `deploy_spec` derives them; without one they are validated.\n    #[serde(default)]\n    manifest: String,\n    #[serde(default)]\n    mode: String,\n    #[serde(default)]\n    target_kind: String,\n    #[serde(default)]\n    target_ref: String,\n    workdir: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n    /// Instance binding; required when `target_kind` is `blueprint`, rejected otherwise.\n    #[serde(default)]\n    blueprint_binding: Option<Value>,\n    /// Deployment spec (`ferry/deploy-v1`); when present the server derives `manifest`,\n    /// `blueprint_binding`, `mode`, `target_kind` and `target_ref` from it.\n    #[serde(default)]\n    deploy_spec: Option<String>,\n}"
     ],
     "permission_checks": [
       "deployments.create"
@@ -1426,7 +1443,7 @@
     "source": "crates/server/src/main.rs",
     "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Json(b): Json<Body>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct Body {\n    name: String,\n    #[serde(default)]\n    category: Option<String>,\n    manifest: String,\n    mode: String,\n    target_kind: String,\n    target_ref: String,\n    workdir: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n    /// Instance binding; required when `target_kind` is `blueprint`, rejected otherwise.\n    #[serde(default)]\n    blueprint_binding: Option<Value>,\n}"
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    category: Option<String>,\n    // Optional only because a `deploy_spec` derives them; without one they are validated.\n    #[serde(default)]\n    manifest: String,\n    #[serde(default)]\n    mode: String,\n    #[serde(default)]\n    target_kind: String,\n    #[serde(default)]\n    target_ref: String,\n    workdir: String,\n    #[serde(default)]\n    description: String,\n    #[serde(default)]\n    version: i64,\n    /// Instance binding; required when `target_kind` is `blueprint`, rejected otherwise.\n    #[serde(default)]\n    blueprint_binding: Option<Value>,\n    /// Deployment spec (`ferry/deploy-v1`); when present the server derives `manifest`,\n    /// `blueprint_binding`, `mode`, `target_kind` and `target_ref` from it.\n    #[serde(default)]\n    deploy_spec: Option<String>,\n}"
     ],
     "permission_checks": [
       "config-templates.read",

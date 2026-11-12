@@ -284,5 +284,7 @@
   "blueprint.placementInsufficientHosts": "Role {role} needs {needed} online Linux hosts matching {selector}; {matched} found: {hosts}.",
   "blueprint.placementSelectorEmpty": "No online Linux host matches {selector} for role {role}.",
   "blueprint.placementSpreadUnmet": "Role {role}: instances could not all be spread across different {prefix} tags.",
-  "blueprint.placementManagerUnavailable": "Swarm manager {manager} must be an online Linux host in this workspace."
+  "blueprint.placementManagerUnavailable": "Swarm manager {manager} must be an online Linux host in this workspace.",
+  "blueprint.placementManualInvalid": "Instance {instance} of role {role} is placed on {host}, which is not an online Linux host in this workspace matching the role's host selector.",
+  "deployments.specManaged": "This deployment is managed by its deployment spec; change the spec instead of the manifest or binding."
 }

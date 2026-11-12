@@ -284,5 +284,7 @@
   "blueprint.placementInsufficientHosts": "ロール {role} には {selector} に一致するオンラインの Linux ホストが {needed} 台必要ですが、{matched} 台しかありません：{hosts}。",
   "blueprint.placementSelectorEmpty": "ロール {role} に使用できる、{selector} に一致するオンラインの Linux ホストがありません。",
   "blueprint.placementSpreadUnmet": "ロール {role}：すべてのインスタンスを異なる {prefix} タグに分散できませんでした。",
-  "blueprint.placementManagerUnavailable": "Swarm マネージャー {manager} は、このワークスペースのオンラインの Linux ホストである必要があります。"
+  "blueprint.placementManagerUnavailable": "Swarm マネージャー {manager} は、このワークスペースのオンラインの Linux ホストである必要があります。",
+  "blueprint.placementManualInvalid": "ロール {role} のインスタンス {instance} はホスト {host} に配置されていますが、このホストはこのワークスペース内でロールのホスト条件を満たすオンラインの Linux ホストではありません。",
+  "deployments.specManaged": "このデプロイはデプロイ仕様で管理されています。マニフェストやバインディングではなく、デプロイ仕様を変更してください。"
 }

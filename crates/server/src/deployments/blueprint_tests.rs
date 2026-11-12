@@ -1221,3 +1221,410 @@ async fn stack_apply_checks_version_before_probing() {
         assert_eq!(commands(base + i, "Swarm.NodeID"), 0);
     }
 }
+
+// ---- Deployment specs (`ferry/deploy-v1`) ----
+
+const SPEC_TEMPLATE: i64 = 9101;
+const SPEC_PARAMETERS: &str = r#"[{"name":"tag","type":"string","default":"2"}]"#;
+
+/// App template `SPEC_TEMPLATE` in `workspace`, holding the NATS blueprint with a `tag` value.
+async fn app_template(s: &AppState, workspace: i64, version: i64) {
+    use crate::entities::app_templates as t;
+    t::Entity::delete_by_id(SPEC_TEMPLATE)
+        .exec(&s.db)
+        .await
+        .unwrap();
+    t::Entity::insert(t::ActiveModel {
+        id: Set(SPEC_TEMPLATE),
+        workspace_id: Set(workspace),
+        name: Set("nats".into()),
+        description: Set(String::new()),
+        content: Set(blueprint("nats:{{ .Values.tag }}")),
+        parameters: Set(SPEC_PARAMETERS.into()),
+        version: Set(version),
+        created_at: Set(1),
+        updated_at: Set(1),
+        ..Default::default()
+    })
+    .exec(&s.db)
+    .await
+    .unwrap();
+}
+
+/// Attaches tag `name` (workspace 1, created on first use) to `host`.
+async fn tag_host(s: &AppState, name: &str, host: i64) {
+    use crate::entities::{host_tags, tags};
+    let found = tags::Entity::find()
+        .filter(tags::Column::WorkspaceId.eq(1))
+        .filter(tags::Column::Name.eq(name))
+        .one(&s.db)
+        .await
+        .unwrap();
+    let id = match found {
+        Some(t) => t.id,
+        None => {
+            let id = i64::from(s.next_id().unwrap());
+            tags::Entity::insert(tags::ActiveModel {
+                id: Set(id),
+                workspace_id: Set(1),
+                name: Set(name.into()),
+                color: Set(String::new()),
+                created_at: Set(0),
+                updated_at: Set(0),
+                version: Set(1),
+                ..Default::default()
+            })
+            .exec(&s.db)
+            .await
+            .unwrap();
+            id
+        }
+    };
+    host_tags::Entity::insert(host_tags::ActiveModel {
+        host_id: Set(host),
+        tag_id: Set(id),
+    })
+    .exec(&s.db)
+    .await
+    .unwrap();
+}
+
+/// Hosts tagged `mq` plus the spec's app template (version 1).
+async fn spec_fixture(hosts: &[i64]) -> (tempfile::TempDir, AppState) {
+    let (dir, s) = fixture(hosts).await;
+    for h in hosts {
+        tag_host(&s, "mq", *h).await;
+    }
+    app_template(&s, 1, 1).await;
+    (dir, s)
+}
+
+fn spec_doc(version: i64, tag: &str, instances: u32) -> Value {
+    json!({
+        "apiVersion": "ferry/deploy-v1",
+        "template": {"id": SPEC_TEMPLATE.to_string(), "version": version},
+        "driver": "docker",
+        "values": {"tag": tag},
+        "roles": {"nats": {"instances": instances, "hosts": {"tags": ["mq"]}}}
+    })
+}
+
+fn spec_body(spec: &Value) -> Value {
+    json!({"name": "mq", "workdir": "/srv", "deploy_spec": spec.to_string()})
+}
+
+async fn place_spec(s: &AppState, scope: Scope, spec: &Value) -> Result<Value> {
+    let body = serde_json::from_value(json!({"spec": spec.to_string()})).unwrap();
+    let Json(out) = placement(State(s.clone()), scope, Json(body)).await?;
+    Ok(out)
+}
+
+fn bound_hosts(binding: &str) -> Vec<String> {
+    let b: Value = serde_json::from_str(binding).unwrap();
+    b["roles"]["nats"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["hostId"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+async fn deployment_count(s: &AppState) -> u64 {
+    apps::Entity::find().count(&s.db).await.unwrap()
+}
+
+#[tokio::test]
+async fn placement_endpoint_renders_and_places() {
+    let (_dir, s) = spec_fixture(&[1511, 1512, 1513]).await;
+    tag_host(&s, "zone:a", 1511).await;
+    tag_host(&s, "zone:a", 1512).await;
+    tag_host(&s, "zone:b", 1513).await;
+    let mut spec = spec_doc(1, "2.10", 2);
+    spec["roles"]["nats"]["hosts"]["spread"] = json!({"prefix": "zone:"});
+    let before = deployment_count(&s).await;
+    let out = place_spec(&s, admin(1), &spec).await.unwrap();
+    let manifest = out["manifest"].as_str().unwrap();
+    assert!(manifest.contains("nats:2.10"), "{manifest}");
+    assert!(crate::blueprint::model::is_blueprint(manifest));
+    // Spread puts the second instance in the other zone.
+    assert_eq!(bound_hosts(&out["binding"].to_string()), ["1511", "1513"]);
+    assert_eq!(out["binding"]["driver"], "docker");
+    assert_eq!(out["warnings"], json!([]));
+    assert_eq!(deployment_count(&s).await, before);
+
+    // Only zone a matches: both instances share it and the plan carries a warning.
+    let mut spec = spec_doc(1, "2.10", 2);
+    spec["roles"]["nats"]["hosts"]["tags"] = json!(["zone:a"]);
+    spec["roles"]["nats"]["hosts"]["spread"] = json!({"prefix": "zone:"});
+    let out = place_spec(&s, admin(1), &spec).await.unwrap();
+    assert_eq!(out["warnings"][0]["key"], "blueprint.placementSpreadUnmet");
+    assert!(!out["warnings"][0]["message"].as_str().unwrap().is_empty());
+
+    for permission in ["deployments.create", "app-templates.read", "hosts.read"] {
+        let mut scope = admin(1);
+        scope.permissions.remove(permission);
+        let error = place_spec(&s, scope, &spec_doc(1, "2", 2))
+            .await
+            .unwrap_err();
+        assert_eq!(error.0, StatusCode::FORBIDDEN, "{permission}");
+    }
+    // Not enough matching hosts: explained, nothing placed.
+    let error = place_spec(&s, admin(1), &spec_doc(1, "2", 4))
+        .await
+        .unwrap_err();
+    assert_eq!(key(error), "blueprint.placementInsufficientHosts");
+}
+
+#[tokio::test]
+async fn create_from_spec_stores_spec_manifest_and_binding() {
+    let (_dir, s) = spec_fixture(&[1521, 1522, 1523]).await;
+    let mut b = spec_body(&spec_doc(1, "2.10", 2));
+    // Client-sent derived fields are ignored.
+    b["manifest"] = json!("not a blueprint");
+    b["mode"] = json!("native");
+    b["target_kind"] = json!("host");
+    b["target_ref"] = json!("1521");
+    b["blueprint_binding"] = binding(&[1523]);
+    let id = create_app(&s, b).await.unwrap();
+    let r = row(&s, &id).await;
+    assert_eq!(
+        (r.target_kind.as_str(), r.target_ref, r.mode.as_str()),
+        ("blueprint", 0, "docker")
+    );
+    assert!(r.manifest.contains("nats:2.10"));
+    assert_eq!(
+        bound_hosts(r.blueprint_binding.as_deref().unwrap()),
+        ["1521", "1522"]
+    );
+    let stored = r.deploy_spec.clone().unwrap();
+    let parsed = crate::blueprint::spec::parse(&stored).unwrap();
+    assert_eq!(parsed.values["tag"], "2.10");
+    assert_eq!(app_json(&r)["deploy_spec"], stored);
+    // The ordinary blueprint machinery takes over: one target per bound host.
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let desired: Value = serde_json::from_str(preview["desired"].as_str().unwrap()).unwrap();
+    assert_eq!(desired["targets"].as_array().unwrap().len(), 2);
+
+    // Without a spec, only edits that keep manifest and binding are accepted.
+    let stored_binding: Value =
+        serde_json::from_str(r.blueprint_binding.as_deref().unwrap()).unwrap();
+    let unchanged = json!({"name": "renamed", "manifest": r.manifest, "mode": "docker",
+        "target_kind": "blueprint", "target_ref": "0", "workdir": "/srv",
+        "blueprint_binding": stored_binding});
+    let mut edited = unchanged.clone();
+    edited["manifest"] = json!(blueprint("nats:9"));
+    let error = update_body(&s, &id, edited).await.unwrap_err();
+    assert_eq!(error.0, StatusCode::CONFLICT);
+    assert_eq!(key(error), "deployments.specManaged");
+    let mut moved = unchanged.clone();
+    moved["blueprint_binding"] = binding(&[1521, 1523]);
+    let error = update_body(&s, &id, moved).await.unwrap_err();
+    assert_eq!(key(error), "deployments.specManaged");
+    update_body(&s, &id, unchanged).await.unwrap();
+    let r = row(&s, &id).await;
+    assert_eq!(r.name, "renamed");
+    assert_eq!(r.deploy_spec.as_deref(), Some(stored.as_str()));
+
+    // Legacy blueprint deployments (no spec) keep working as before.
+    let legacy = create_app(&s, body(&[1521, 1522])).await.unwrap();
+    assert_eq!(row(&s, &legacy).await.deploy_spec, None);
+}
+
+#[tokio::test]
+async fn manual_placement_must_satisfy_selector() {
+    let (_dir, s) = spec_fixture(&[1531, 1532, 1533, 1534, 1535, 1536]).await;
+    // 1532 offline, 1533 untagged, 1534 not Linux, 1535 in another workspace.
+    hosts::Entity::update_many()
+        .col_expr(hosts::Column::State, Expr::value("offline"))
+        .filter(hosts::Column::Id.eq(1532))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    crate::entities::host_tags::Entity::delete_many()
+        .filter(crate::entities::host_tags::Column::HostId.eq(1533))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    hosts::Entity::update_many()
+        .col_expr(hosts::Column::Os, Expr::value("windows"))
+        .filter(hosts::Column::Id.eq(1534))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    hosts::Entity::update_many()
+        .col_expr(hosts::Column::WorkspaceId, Expr::value(2))
+        .filter(hosts::Column::Id.eq(1535))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let manual = |bad: i64| {
+        let mut spec = spec_doc(1, "2", 2);
+        spec["placement"] = json!({"nats": [
+            {"hostId": "1531", "address": "10.0.0.1"},
+            {"hostId": bad.to_string(), "address": "10.0.0.2"}]});
+        spec
+    };
+    let before = deployment_count(&s).await;
+    for (bad, host) in [
+        (1532, "Host 1532"),
+        (1533, "Host 1533"),
+        (1534, "Host 1534"),
+        (1535, "1535"),
+        (1599, "1599"),
+    ] {
+        for error in [
+            place_spec(&s, admin(1), &manual(bad)).await.unwrap_err(),
+            create_app(&s, spec_body(&manual(bad))).await.unwrap_err(),
+        ] {
+            let message = error.2.expect("localized");
+            assert_eq!(message.key, "blueprint.placementManualInvalid", "{bad}");
+            assert_eq!(message.params["role"], "nats");
+            assert_eq!(message.params["instance"], "nats-1");
+            assert_eq!(message.params["host"], host);
+        }
+    }
+    assert_eq!(deployment_count(&s).await, before);
+    // A valid manual placement is kept exactly as written, never rescheduled.
+    let id = create_app(&s, spec_body(&manual(1536))).await.unwrap();
+    let r = row(&s, &id).await;
+    let stored: Value = serde_json::from_str(r.blueprint_binding.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        stored["roles"]["nats"],
+        json!([{"hostId": "1531", "address": "10.0.0.1"},
+               {"hostId": "1536", "address": "10.0.0.2"}])
+    );
+}
+
+#[tokio::test]
+async fn template_version_mismatch_conflicts() {
+    let (_dir, s) = spec_fixture(&[1541, 1542]).await;
+    let stale = spec_doc(2, "2", 2);
+    let error = place_spec(&s, admin(1), &stale).await.unwrap_err();
+    assert_eq!(error.0, StatusCode::CONFLICT);
+    assert_eq!(key(error), "templates.changed");
+    let error = create_app(&s, spec_body(&stale)).await.unwrap_err();
+    assert_eq!(error.0, StatusCode::CONFLICT);
+    assert_eq!(key(error), "templates.changed");
+    // Another workspace's template is never read.
+    app_template(&s, 2, 1).await;
+    let error = create_app(&s, spec_body(&spec_doc(1, "2", 2)))
+        .await
+        .unwrap_err();
+    assert_eq!(key(error), "templates.changed");
+}
+
+async fn update_spec(s: &AppState, id: &str, spec: &Value) -> Result<()> {
+    update_body(s, id, spec_body(spec)).await
+}
+
+#[tokio::test]
+async fn values_change_after_deploy_is_upgrade() {
+    let (_dir, s) = spec_fixture(&[1551, 1552, 1553]).await;
+    let id = create_app(&s, spec_body(&spec_doc(1, "2.10", 2)))
+        .await
+        .unwrap();
+    assert!(run_first(&s, &id, &[]).await);
+    let binding_before = row(&s, &id).await.blueprint_binding;
+    update_spec(&s, &id, &spec_doc(1, "2.11", 2)).await.unwrap();
+    let r = row(&s, &id).await;
+    assert!(r.manifest.contains("nats:2.11"));
+    assert_eq!(r.blueprint_binding, binding_before);
+    // A template version bump with new values re-renders as well.
+    app_template(&s, 1, 2).await;
+    let error = update_spec(&s, &id, &spec_doc(1, "2.12", 2))
+        .await
+        .unwrap_err();
+    assert_eq!(key(error), "templates.changed");
+    update_spec(&s, &id, &spec_doc(2, "2.12", 2)).await.unwrap();
+    let r = row(&s, &id).await;
+    assert!(r.manifest.contains("nats:2.12"));
+    assert_eq!(r.blueprint_binding, binding_before);
+    let stored = crate::blueprint::spec::parse(r.deploy_spec.as_deref().unwrap()).unwrap();
+    assert_eq!(stored.template.version, 2);
+    // The upgrade previews like any manifest change.
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let desired: Value = serde_json::from_str(preview["desired"].as_str().unwrap()).unwrap();
+    assert_eq!(desired["targets"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn topology_change_after_deploy_rejected() {
+    let (_dir, s) = spec_fixture(&[1561, 1562, 1563, 1564]).await;
+    let id = create_app(&s, spec_body(&spec_doc(1, "2", 2)))
+        .await
+        .unwrap();
+    // Before anything is deployed the spec may resize; the stored binding counts as load.
+    update_spec(&s, &id, &spec_doc(1, "2", 3)).await.unwrap();
+    assert_eq!(
+        bound_hosts(row(&s, &id).await.blueprint_binding.as_deref().unwrap()),
+        ["1563", "1564", "1561"]
+    );
+    assert!(run_first(&s, &id, &[]).await);
+    let binding_before = row(&s, &id).await.blueprint_binding;
+    let mut names = spec_doc(1, "2", 3);
+    names["roles"]["nats"]["hosts"]["names"] = json!(["Host 1561"]);
+    let mut manual = spec_doc(1, "2", 3);
+    manual["placement"] = json!({"nats": [{"hostId": "1561", "address": "10.0.0.1"},
+        {"hostId": "1562", "address": "10.0.0.2"}, {"hostId": "1564", "address": "10.0.0.4"}]});
+    let mut driver = spec_doc(1, "2", 3);
+    driver["driver"] = json!("compose");
+    for changed in [spec_doc(1, "2", 2), names, manual, driver] {
+        let error = update_spec(&s, &id, &changed).await.unwrap_err();
+        assert_eq!(
+            key(error),
+            "blueprint.topologyChangeRequiresPlan",
+            "{changed}"
+        );
+    }
+    assert_eq!(row(&s, &id).await.blueprint_binding, binding_before);
+    // A deployed legacy blueprint deployment cannot adopt a spec in place either.
+    let legacy = create_app(&s, body(&[1561, 1562])).await.unwrap();
+    assert!(run_first(&s, &legacy, &[]).await);
+    let error = update_spec(&s, &legacy, &spec_doc(1, "2", 2))
+        .await
+        .unwrap_err();
+    assert_eq!(key(error), "blueprint.topologyChangeRequiresPlan");
+}
+
+#[tokio::test]
+async fn frozen_placement_ignores_tag_changes() {
+    let (_dir, s) = spec_fixture(&[1571, 1572, 1573]).await;
+    let id = create_app(&s, spec_body(&spec_doc(1, "2", 2)))
+        .await
+        .unwrap();
+    assert!(run_first(&s, &id, &[]).await);
+    let binding_before = row(&s, &id).await.blueprint_binding;
+    assert_eq!(
+        bound_hosts(binding_before.as_deref().unwrap()),
+        ["1571", "1572"]
+    );
+    // The bound hosts lose the tag and the tag is renamed: nothing matches `mq` any more.
+    use crate::entities::{host_tags, tags};
+    host_tags::Entity::delete_many()
+        .filter(host_tags::Column::HostId.is_in([1571, 1572]))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    tags::Entity::update_many()
+        .col_expr(tags::Column::Name, Expr::value("queue"))
+        .filter(tags::Column::Name.eq("mq"))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let error = place_spec(&s, admin(1), &spec_doc(1, "2", 2))
+        .await
+        .unwrap_err();
+    assert_eq!(key(error), "blueprint.placementSelectorEmpty");
+    // The deployed placement is reused, not rescheduled.
+    update_spec(&s, &id, &spec_doc(1, "2.1", 2)).await.unwrap();
+    assert_eq!(row(&s, &id).await.blueprint_binding, binding_before);
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let desired: Value = serde_json::from_str(preview["desired"].as_str().unwrap()).unwrap();
+    let hosts: Vec<&str> = desired["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["host_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(hosts, ["1571", "1572"]);
+}
