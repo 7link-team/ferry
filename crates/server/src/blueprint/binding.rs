@@ -15,6 +15,9 @@ const MAX_LABEL: usize = 63;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Binding {
     pub driver: String,
+    /// Swarm manager host; required for `stack` and rejected for every other driver.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manager: Option<Id>,
     pub roles: BTreeMap<String, Vec<InstanceBinding>>,
 }
 
@@ -79,16 +82,15 @@ fn valid_address(address: &str) -> bool {
 }
 
 pub fn validate(bp: &Blueprint, b: &Binding, hosts: &BTreeMap<Id, HostInfo>) -> Result<()> {
-    match b.driver.as_str() {
-        "stack" => return fail(Message::new("blueprint.driverNotYetSupported")),
-        "k8s" => return fail(Message::new("blueprint.driverNotImplemented")),
-        _ => {}
+    if b.driver == "k8s" {
+        return fail(Message::new("blueprint.driverNotImplemented"));
     }
     let driver = b.driver.as_str();
     let listed = bp.drivers.get(driver).is_some_and(|d| d.supported);
-    if !matches!(driver, "native" | "docker" | "compose") || !listed {
+    if !matches!(driver, "native" | "docker" | "compose" | "stack") || !listed {
         return fail(Message::new("blueprint.driverUnsupported").with("driver", driver));
     }
+    validate_manager(b, hosts)?;
     let known: BTreeSet<&str> = bp.roles.iter().map(|r| r.name.as_str()).collect();
     if let Some(extra) = b.roles.keys().find(|k| !known.contains(k.as_str())) {
         return fail(Message::new("blueprint.bindingRoleUnknown").with("role", extra));
@@ -122,13 +124,7 @@ pub fn validate(bp: &Blueprint, b: &Binding, hosts: &BTreeMap<Id, HostInfo>) -> 
             let Some(host) = hosts.get(&inst.host_id) else {
                 return fail(Message::new("blueprint.bindingHostUnknown").with("instance", &name));
             };
-            if !host.os.is_empty() && host.os != "linux" {
-                return fail(
-                    Message::new("blueprint.hostOsUnsupported")
-                        .with("instance", &name)
-                        .with("os", &host.os),
-                );
-            }
+            require_linux(host, &name)?;
             if !valid_address(&inst.address) {
                 return fail(
                     Message::new("blueprint.bindingAddressInvalid").with("instance", &name),
@@ -137,6 +133,32 @@ pub fn validate(bp: &Blueprint, b: &Binding, hosts: &BTreeMap<Id, HostInfo>) -> 
         }
     }
     validate_placement(bp, b)
+}
+
+fn require_linux(host: &HostInfo, name: &str) -> Result<()> {
+    if !host.os.is_empty() && host.os != "linux" {
+        return fail(
+            Message::new("blueprint.hostOsUnsupported")
+                .with("instance", name)
+                .with("os", &host.os),
+        );
+    }
+    Ok(())
+}
+
+fn validate_manager(b: &Binding, hosts: &BTreeMap<Id, HostInfo>) -> Result<()> {
+    match (b.driver == "stack", b.manager) {
+        (true, Some(id)) => {
+            let Some(host) = hosts.get(&id) else {
+                return fail(
+                    Message::new("blueprint.bindingHostUnknown").with("instance", "manager"),
+                );
+            };
+            require_linux(host, "manager")
+        }
+        (false, None) => Ok(()),
+        _ => fail(Message::new("blueprint.bindingInvalid")),
+    }
 }
 
 fn validate_placement(bp: &Blueprint, b: &Binding) -> Result<()> {
@@ -475,11 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn stack_and_k8s_not_available_yet() {
-        assert_eq!(
-            key(check("stack", three())),
-            "blueprint.driverNotYetSupported"
-        );
+    fn k8s_not_available_and_unknown_drivers_rejected() {
         assert_eq!(key(check("k8s", three())), "blueprint.driverNotImplemented");
         assert_eq!(key(check("podman", three())), "blueprint.driverUnsupported");
         let bp = blueprint(
@@ -512,6 +530,62 @@ mod tests {
         bp.drivers.clear();
         assert_eq!(
             key(validate(&bp, &b, &std_hosts())),
+            "blueprint.driverUnsupported"
+        );
+    }
+
+    fn stack_binding(manager: Option<&str>) -> Binding {
+        let mut v = json!({"driver": "stack", "roles": three()});
+        if let Some(m) = manager {
+            v["manager"] = json!(m);
+        }
+        parse(&v.to_string()).expect("binding")
+    }
+
+    fn check_stack(b: &Binding) -> Result<()> {
+        validate(&nats(), b, &std_hosts())
+    }
+
+    #[test]
+    fn stack_binding_requires_manager() {
+        assert_eq!(
+            key(check_stack(&stack_binding(None))),
+            "blueprint.bindingInvalid"
+        );
+        assert_eq!(
+            key(check_stack(&stack_binding(Some("77")))),
+            "blueprint.bindingHostUnknown"
+        );
+    }
+
+    #[test]
+    fn manager_only_for_stack() {
+        let mut b = binding("native", three());
+        b.manager = Some(Id::from(1));
+        assert_eq!(key(check_stack(&b)), "blueprint.bindingInvalid");
+        // absent manager is not serialized, so stored non-stack bindings stay identical
+        let text = serde_json::to_string(&binding("native", three())).unwrap();
+        assert!(!text.contains("manager"), "{text}");
+    }
+
+    #[test]
+    fn stack_manager_must_be_linux_host() {
+        let m = check_stack(&stack_binding(Some("9")))
+            .expect_err("windows manager")
+            .2
+            .expect("message");
+        assert_eq!(m.key, "blueprint.hostOsUnsupported");
+        assert_eq!(m.params["instance"], "manager");
+    }
+
+    #[test]
+    fn stack_accepted_when_blueprint_supports_it() {
+        check_stack(&stack_binding(Some("1"))).expect("valid");
+        let text = serde_json::to_string(&stack_binding(Some("1"))).unwrap();
+        assert!(text.contains(r#""manager":"1""#), "{text}");
+        let bp = blueprint(nats_roles(), json!({"native": {"supported": true}}), false);
+        assert_eq!(
+            key(validate(&bp, &stack_binding(Some("1")), &std_hosts())),
             "blueprint.driverUnsupported"
         );
     }
