@@ -989,7 +989,8 @@ fn validate_compose(doc: &Value, mode: &str, portable: bool) -> Result<()> {
         .as_object()
         .filter(|s| !s.is_empty() && s.len() <= 50)
         .ok_or_else(|| bad("deployment.manifest.047"))?;
-    let mut published = BTreeSet::new();
+    // (published, protocol) → the node each claim is pinned to; None binds on every machine.
+    let mut published = BTreeMap::<(u16, String), Vec<Option<String>>>::new();
     let mut dependencies = BTreeMap::<String, Vec<String>>::new();
     if let Some(volumes) = doc.get("volumes") {
         let volumes = volumes
@@ -1211,6 +1212,19 @@ fn validate_compose(doc: &Value, mode: &str, portable: bool) -> Result<()> {
                 }
             }
         }
+        // A Swarm host-mode port binds only on the node its service is pinned to.
+        let pinned = service
+            .get("deploy")
+            .and_then(|d| d.get("placement"))
+            .and_then(|p| p.get("constraints"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .find_map(|c| {
+                let (key, value) = c.split_once("==")?;
+                (key.trim() == "node.id").then(|| value.trim().to_owned())
+            });
         if let Some(ports) = service.get("ports") {
             for p in ports
                 .as_array()
@@ -1247,11 +1261,17 @@ fn validate_compose(doc: &Value, mode: &str, portable: bool) -> Result<()> {
                         .and_then(|s| s.parse::<u16>().ok())
                         .filter(|n| *n > 0)
                         .ok_or_else(|| bad("deployment.manifest.074"))?;
-                    if (mode != "stack" && replicas > 1)
-                        || !published.insert((port, protocol.to_owned()))
-                    {
+                    let node = (mode == "stack" && p.get("mode") == Some(&json!("host")))
+                        .then(|| pinned.clone())
+                        .flatten();
+                    let claims = published.entry((port, protocol.to_owned())).or_default();
+                    let clash = claims
+                        .iter()
+                        .any(|other| other.is_none() || node.is_none() || *other == node);
+                    if (mode != "stack" && replicas > 1) || clash {
                         return Err(bad("deployment.manifest.075"));
                     }
+                    claims.push(node);
                 }
             }
         }
@@ -1522,6 +1542,45 @@ mod tests {
                 .is_none()
         );
         assert!(doc["services"]["web"]["ports"][0].get("mode").is_none());
+    }
+    #[test]
+    fn stack_host_ports_unique_per_pinned_node() {
+        let service = |name: &str, node: Option<&str>, mode: &str| {
+            let mut s = json!({"name": name, "image": "nats:2",
+                               "ports": [{"container": 4222, "published": 4222, "mode": mode}]});
+            if let Some(node) = node {
+                s["placement"] = json!({"constraints": [format!("node.id=={node}")]});
+            }
+            s
+        };
+        let doc = |services: Vec<Value>| {
+            json!({"apiVersion": "ferry/v2", "kind": "Application",
+                   "metadata": {"name": "demo"}, "services": services})
+            .to_string()
+        };
+        // Host-mode ports pinned to different nodes do not collide.
+        let spread = doc(vec![
+            service("a", Some("n1"), "host"),
+            service("b", Some("n2"), "host"),
+        ]);
+        assert!(parse_for(&spread, "stack").is_ok());
+        // Same node, an unpinned host port, or an ingress port (every node) all collide.
+        for (node, mode) in [
+            (Some("n1"), "host"),
+            (None, "host"),
+            (Some("n2"), "ingress"),
+        ] {
+            let clash = doc(vec![
+                service("a", Some("n1"), "host"),
+                service("b", node, mode),
+            ]);
+            let e = parse_for(&clash, "stack").expect_err("conflict");
+            assert_eq!(
+                e.2.unwrap().key,
+                "deployment.manifest.075",
+                "{node:?} {mode}"
+            );
+        }
     }
     #[test]
     fn stack_only_fields_rejected_elsewhere() {

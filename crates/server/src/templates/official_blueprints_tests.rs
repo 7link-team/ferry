@@ -62,7 +62,7 @@ fn compile_version(key: &str, version: &Value) -> Rendered {
     assert_eq!(drivers, ["compose", "docker"], "{key}");
     let mut rendered = Rendered::new();
     for driver in drivers {
-        let plans = compile::compile(&stored, &sample_binding(&bp, driver))
+        let plans = compile::compile(&stored, &sample_binding(&bp, driver), None)
             .unwrap_or_else(|e| panic!("{key} {driver}: {:?}", e.2));
         assert_eq!(plans.len(), if driver == "compose" { 1 } else { 3 });
         for plan in &plans {

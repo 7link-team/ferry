@@ -1,6 +1,6 @@
 //! Driver adapters: a phase-1-rendered blueprint plus a binding → one ferry/v2 Application per host.
 use super::binding::Binding;
-use super::model::{self, Blueprint, Role};
+use super::model::{self, Blueprint, Identity, Role};
 use super::template::{self, Context, Instance, Member, Phase};
 use crate::deployments::manifest;
 use crate::error::{ApiError, Result};
@@ -81,14 +81,67 @@ impl DriverAdapter for ComposeAdapter {
             return fail(Message::new("blueprint.bindingComposeSingleHost"));
         }
         topology(bp, b, |role, base| {
-            let ports = role
-                .ports
-                .iter()
-                .map(|p| (p.name.clone(), p.container))
-                .collect();
-            Ok((base.name.clone(), ports))
+            Ok((base.name.clone(), container_ports(role)))
         })
     }
+}
+
+/// stack: one Swarm stack deployed through the manager. A stable instance is its own
+/// service pinned to its node and reached at the bound address and published (host-mode)
+/// port; a stateless role is one replicated service reached by its service name (VIP) and
+/// container port, with one member per replica.
+struct StackAdapter;
+
+impl DriverAdapter for StackAdapter {
+    fn id(&self) -> &'static str {
+        "stack"
+    }
+    fn resolve(
+        &self,
+        bp: &Blueprint,
+        b: &Binding,
+        values: &BTreeMap<String, Value>,
+    ) -> Result<Topology> {
+        let Some(manager) = b.manager else {
+            return fail(Message::new("blueprint.bindingInvalid"));
+        };
+        let mut topo = topology(bp, b, |role, base| match role.identity {
+            Identity::Stable => Ok((
+                base.host.clone(),
+                published_ports(role, base, values, "stack")?,
+            )),
+            Identity::Stateless => Ok((role.name.clone(), container_ports(role))),
+        })?;
+        // Every service lives on the manager; a stateless role keeps only its first instance,
+        // renamed to the role, as the one context all replicas share.
+        let identity: BTreeMap<&str, Identity> = bp
+            .roles
+            .iter()
+            .map(|r| (r.name.as_str(), r.identity))
+            .collect();
+        for (_, name, instance) in std::mem::take(&mut topo.placement) {
+            match identity[instance.role.as_str()] {
+                Identity::Stable => topo.placement.push((manager, name, instance)),
+                Identity::Stateless if instance.index == 0 => {
+                    let role = instance.role.clone();
+                    let instance = Instance {
+                        name: role.clone(),
+                        ..instance
+                    };
+                    topo.placement.push((manager, role, instance));
+                }
+                Identity::Stateless => {}
+            }
+        }
+        Ok(topo)
+    }
+}
+
+fn container_ports(role: &Role) -> BTreeMap<String, u16> {
+    role.ports
+        .iter()
+        .map(|p| (p.name.clone(), p.container))
+        .collect()
 }
 
 fn fail<T>(message: Message) -> Result<T> {
@@ -100,7 +153,7 @@ fn adapter(driver: &str) -> Result<Box<dyn DriverAdapter>> {
         "native" => Ok(Box::new(AddressAdapter("native"))),
         "docker" => Ok(Box::new(AddressAdapter("docker"))),
         "compose" => Ok(Box::new(ComposeAdapter)),
-        "stack" => fail(Message::new("blueprint.driverNotYetSupported")),
+        "stack" => Ok(Box::new(StackAdapter)),
         "k8s" => fail(Message::new("blueprint.driverNotImplemented")),
         _ => fail(Message::new("blueprint.driverUnsupported").with("driver", driver)),
     }
@@ -303,18 +356,63 @@ fn coerce(value: &mut Value, kind: &Kind) {
 struct Target {
     services: Vec<Value>,
     contexts: BTreeMap<String, Context>,
-    /// (published, protocol) → instance name.
-    ports: BTreeMap<(u16, String), String>,
+    /// (published, protocol) → (where it is bound, service name) for each claim.
+    ports: BTreeMap<(u16, String), Vec<(Bind, String)>>,
+}
+
+/// Where a published port is bound within one target.
+#[derive(Clone, PartialEq, Eq)]
+enum Bind {
+    /// On one machine: the target host, or one Swarm node (host mode) by node ID.
+    Node(String),
+    /// On every node of the Swarm (ingress routing mesh).
+    Everywhere,
+}
+
+impl Target {
+    /// Records `name`'s claim on a published port; two claims collide when they can land on
+    /// the same machine.
+    fn claim(&mut self, name: &str, bind: Bind, number: u16, protocol: &str) -> Result<()> {
+        let claims = self.ports.entry((number, protocol.to_owned())).or_default();
+        let clash = claims.iter().find(|(other, _)| {
+            *other == bind || *other == Bind::Everywhere || bind == Bind::Everywhere
+        });
+        if let Some((_, other)) = clash {
+            return fail(
+                Message::new("blueprint.portConflict")
+                    .with("instance", name)
+                    .with("other", other)
+                    .with("port", format!("{number}/{protocol}")),
+            );
+        }
+        claims.push((bind, name.to_owned()));
+        Ok(())
+    }
 }
 
 /// Compiles a stored (phase-1) blueprint text and a validated binding into one ferry/v2
 /// Application per host, named after the blueprint (`metadata.name`, owned by the template
 /// and stable across deployment renames). `.Values` are already inlined, so only instance
 /// actions remain.
-pub fn compile(bp_text: &str, binding: &Binding) -> Result<Vec<HostPlan>> {
+///
+/// `stack` compiles to a single Application on `binding.manager` and needs `nodes`
+/// (instance name → Swarm node ID, from `swarm::assign`) to pin stable instances; other
+/// drivers ignore it.
+pub fn compile(
+    bp_text: &str,
+    binding: &Binding,
+    nodes: Option<&BTreeMap<String, String>>,
+) -> Result<Vec<HostPlan>> {
     let bp = model::parse(bp_text)?;
     let adapter = adapter(&binding.driver)?;
     let driver = adapter.id();
+    let stack = driver == "stack";
+    let no_nodes = BTreeMap::new();
+    let nodes = match nodes {
+        Some(nodes) => nodes,
+        None if stack => return fail(Message::new("blueprint.swarmNodesRequired")),
+        None => &no_nodes,
+    };
     let values = BTreeMap::new();
     let topo = adapter.resolve(&bp, binding, &values)?;
     let roles: BTreeMap<&str, &Role> = bp.roles.iter().map(|r| (r.name.as_str(), r)).collect();
@@ -322,7 +420,23 @@ pub fn compile(bp_text: &str, binding: &Binding) -> Result<Vec<HostPlan>> {
     // Placement was resolved from this `bp` and `binding`, so these lookups always hit.
     for (host_id, name, instance) in topo.placement {
         let role = roles[instance.role.as_str()];
-        let address = &binding.roles[&role.name][instance.index as usize].address;
+        let bound_at = &binding.roles[&role.name][instance.index as usize];
+        let address = &bound_at.address;
+        // A non-stack target is one host; a stack binds host-mode ports on the instance's
+        // node and ingress ports on every node.
+        let (bind, mode) = match (stack, role.identity) {
+            (false, _) => (Bind::Node(String::new()), None),
+            (true, Identity::Stable) => {
+                let Some(node) = nodes.get(&name) else {
+                    return fail(
+                        Message::new("blueprint.swarmNodeUnavailable")
+                            .with("host", bound_at.host_id.to_string()),
+                    );
+                };
+                (Bind::Node(node.clone()), Some("host"))
+            }
+            (true, Identity::Stateless) => (Bind::Everywhere, Some("ingress")),
+        };
         let published =
             published_ports(role, &bound(role, instance.index, address), &values, driver)?;
         let ctx = Context {
@@ -341,22 +455,31 @@ pub fn compile(bp_text: &str, binding: &Binding) -> Result<Vec<HostPlan>> {
         for port in &role.ports {
             let protocol = port.protocol.clone().unwrap_or_else(|| "tcp".to_owned());
             let number = published[&port.name];
-            if let Some(other) = target
-                .ports
-                .insert((number, protocol.clone()), name.clone())
-            {
-                return fail(
-                    Message::new("blueprint.portConflict")
-                        .with("instance", &name)
-                        .with("other", other)
-                        .with("port", format!("{number}/{protocol}")),
-                );
+            target.claim(&name, bind.clone(), number, &protocol)?;
+            let mut entry = json!({"name": port.name, "container": port.container,
+                                   "published": number, "protocol": protocol});
+            if let Some(mode) = mode {
+                entry["mode"] = json!(mode);
             }
-            ports.push(json!({"name": port.name, "container": port.container,
-                              "published": number, "protocol": protocol}));
+            ports.push(entry);
         }
         service.insert("name".into(), json!(name));
         service.insert("ports".into(), json!(ports));
+        match (&bind, mode) {
+            // Stable stack instance: pinned to its node, addressed directly (no VIP).
+            (Bind::Node(node), Some(_)) => {
+                let placement = service.entry("placement").or_insert_with(|| json!({}));
+                if let Value::Object(placement) = placement {
+                    placement.insert("constraints".into(), json!([format!("node.id=={node}")]));
+                }
+                service.insert("endpointMode".into(), json!("dnsrr"));
+            }
+            // Stateless stack role: one service with a replica per bound instance.
+            (Bind::Everywhere, _) => {
+                service.insert("replicas".into(), json!(binding.roles[&role.name].len()));
+            }
+            (Bind::Node(_), None) => {}
+        }
         target.services.push(Value::Object(service));
         target.contexts.insert(name, ctx);
     }
@@ -461,7 +584,7 @@ mod tests {
     #[test]
     fn native_three_hosts_one_application_each() {
         let b = binding("native", &[three_hosts("nats")]);
-        let plans = compile(&nats_native(), &b).unwrap();
+        let plans = compile(&nats_native(), &b, None).unwrap();
         assert_eq!(plans.len(), 3);
         for (i, plan) in plans.iter().enumerate() {
             assert_eq!(plan.host_id, Id::from(i as i64 + 1));
@@ -509,7 +632,7 @@ mod tests {
             "compose",
             &[("nats", &[(7, "10.0.0.7"), (7, "10.0.0.7"), (7, "10.0.0.7")])],
         );
-        let plans = compile(&text, &b).unwrap();
+        let plans = compile(&text, &b, None).unwrap();
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].host_id, Id::from(7));
         let d = doc(&plans[0]);
@@ -528,7 +651,7 @@ mod tests {
         assert_eq!((inst.host.as_str(), inst.ports["client"]), ("nats-1", 4222));
         let split = binding("compose", &[("nats", &[(7, "a"), (8, "b"), (7, "a")])]);
         assert_eq!(
-            err_key(compile(&text, &split)).0,
+            err_key(compile(&text, &split, None)).0,
             "blueprint.bindingComposeSingleHost"
         );
     }
@@ -557,7 +680,7 @@ mod tests {
     #[test]
     fn colocated_sentinel_and_redis_share_host_application() {
         let b = binding("docker", &[three_hosts("redis"), three_hosts("sentinel")]);
-        let plans = compile(&redis_sentinel(26379, "tcp"), &b).unwrap();
+        let plans = compile(&redis_sentinel(26379, "tcp"), &b, None).unwrap();
         assert_eq!(plans.len(), 3);
         for (i, plan) in plans.iter().enumerate() {
             let d = doc(plan);
@@ -582,26 +705,26 @@ mod tests {
     #[test]
     fn colocated_instances_with_same_published_port_rejected() {
         let b = binding("docker", &[three_hosts("redis"), three_hosts("sentinel")]);
-        let (key, params) = err_key(compile(&redis_sentinel(6379, "tcp"), &b));
+        let (key, params) = err_key(compile(&redis_sentinel(6379, "tcp"), &b, None));
         assert_eq!(key, "blueprint.portConflict");
         assert_eq!(params["instance"], "sentinel-0");
         assert_eq!(params["other"], "redis-0");
         assert_eq!(params["port"], "6379/tcp");
         // Same number on another protocol does not collide.
-        assert!(compile(&redis_sentinel(6379, "udp"), &b).is_ok());
+        assert!(compile(&redis_sentinel(6379, "udp"), &b, None).is_ok());
     }
 
     #[test]
     fn compiled_manifest_passes_driver_validation() {
         let b = binding("docker", &[three_hosts("redis"), three_hosts("sentinel")]);
-        for plan in compile(&redis_sentinel(26379, "tcp"), &b).unwrap() {
+        for plan in compile(&redis_sentinel(26379, "tcp"), &b, None).unwrap() {
             assert!(manifest::parse_for(&plan.manifest, "docker").is_ok());
         }
         // A driver-level rule (docker forbids replicas) surfaces unchanged.
         let mut v: Value = serde_json::from_str(&redis_sentinel(26379, "tcp")).unwrap();
         v["roles"][0]["service"]["replicas"] = json!(2);
         assert_eq!(
-            err_key(compile(&v.to_string(), &b)).0,
+            err_key(compile(&v.to_string(), &b, None)).0,
             "deployment.manifest.028"
         );
         // Native requires published == container.
@@ -609,7 +732,7 @@ mod tests {
         v["roles"][0]["ports"][0]["published"] = json!(14222);
         let b = binding("native", &[three_hosts("nats")]);
         assert_eq!(
-            err_key(compile(&v.to_string(), &b)).0,
+            err_key(compile(&v.to_string(), &b, None)).0,
             "deployment.manifest.036"
         );
     }
@@ -629,7 +752,7 @@ mod tests {
                        "periodSeconds": "{{ add 10 .Instance.Index }}"}}}),
         )]);
         let b = binding("docker", &[three_hosts("redis")]);
-        let plans = compile(&text, &b).unwrap();
+        let plans = compile(&text, &b, None).unwrap();
         for (i, plan) in plans.iter().enumerate() {
             let s = &doc(plan)["services"][0];
             // String fields in the schema receive text.
@@ -643,22 +766,260 @@ mod tests {
     }
 
     #[test]
-    fn stack_rejected_until_p2b() {
-        let b = binding("stack", &[three_hosts("nats")]);
-        assert_eq!(
-            err_key(compile(&nats_native(), &b)).0,
-            "blueprint.driverNotYetSupported"
-        );
+    fn unsupported_drivers_rejected() {
         let b = binding("k8s", &[three_hosts("nats")]);
         assert_eq!(
-            err_key(compile(&nats_native(), &b)).0,
+            err_key(compile(&nats_native(), &b, None)).0,
             "blueprint.driverNotImplemented"
         );
         let b = binding("podman", &[three_hosts("nats")]);
-        let (key, params) = err_key(compile(&nats_native(), &b));
+        let (key, params) = err_key(compile(&nats_native(), &b, None));
         assert_eq!(
             (key.as_str(), params["driver"].as_str()),
             ("blueprint.driverUnsupported", "podman")
+        );
+    }
+
+    const MANAGER: i64 = 9;
+
+    fn stack_binding(roles: &[(&str, &[(i64, &str)])]) -> Binding {
+        let mut b = binding("stack", roles);
+        b.manager = Some(Id::from(MANAGER));
+        b
+    }
+
+    /// Stable NATS (cluster published per index) plus a stateless gateway listing its peers.
+    fn nats_with_gateway(gateway_published: u16) -> String {
+        let mut gateway = role(
+            "gateway",
+            2,
+            json!({}),
+            json!([{"name": "http", "container": 80, "published": gateway_published}]),
+            json!({"image": "nginx:1",
+                   "command": ["gw", "{{ .Instance.Name }}", "{{ .Instance.Index }}",
+                       r#"{{ range .Role "gateway" }}{{ .Host }}:{{ .Port "http" }} {{ end }}"#,
+                       ROUTES]}),
+        );
+        gateway["identity"] = json!("stateless");
+        blueprint(vec![
+            role(
+                "nats",
+                3,
+                json!({"distinctHosts": true}),
+                json!([{"name": "client", "container": 4222, "published": 4222},
+                       {"name": "cluster", "container": 6222,
+                        "published": "{{ add 16222 .Instance.Index }}"}]),
+                json!({"image": "nats:2", "command": ["--name", "{{ .Instance.Name }}", ROUTES]}),
+            ),
+            gateway,
+        ])
+    }
+
+    fn stack_hosts() -> Binding {
+        stack_binding(&[
+            three_hosts("nats"),
+            ("gateway", &[(1, "10.0.0.1"), (2, "10.0.0.2")]),
+        ])
+    }
+
+    fn nodes(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    fn stack_nodes() -> BTreeMap<String, String> {
+        nodes(&[
+            ("nats-0", "n0node"),
+            ("nats-1", "n1node"),
+            ("nats-2", "n2node"),
+            ("gateway-0", "n0node"),
+            ("gateway-1", "n1node"),
+        ])
+    }
+
+    fn service<'a>(d: &'a Value, name: &str) -> &'a Value {
+        d["services"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == name)
+            .unwrap_or_else(|| panic!("service {name}"))
+    }
+
+    #[test]
+    fn stack_stable_role_one_service_per_instance_pinned_to_node() {
+        let plans = compile(
+            &nats_with_gateway(8080),
+            &stack_hosts(),
+            Some(&stack_nodes()),
+        )
+        .unwrap();
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].host_id, Id::from(MANAGER));
+        let d = doc(&plans[0]);
+        let names: Vec<&str> = d["services"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["nats-0", "nats-1", "nats-2", "gateway"]);
+        for i in 0..3u16 {
+            let s = service(&d, &format!("nats-{i}"));
+            assert_eq!(
+                s["placement"]["constraints"],
+                json!([format!("node.id==n{i}node")])
+            );
+            assert_eq!(s["endpointMode"], "dnsrr");
+            assert!(s.get("replicas").is_none());
+            assert_eq!(
+                s["ports"],
+                json!([{"name": "client", "container": 4222, "published": 4222,
+                        "protocol": "tcp", "mode": "host"},
+                       {"name": "cluster", "container": 6222, "published": 16222 + i,
+                        "protocol": "tcp", "mode": "host"}])
+            );
+            let inst = plans[0].contexts[&format!("nats-{i}")]
+                .instance
+                .clone()
+                .unwrap();
+            assert_eq!(inst.host, format!("10.0.0.{}", i + 1));
+            assert_eq!(inst.ports["cluster"], 16222 + i);
+        }
+    }
+
+    #[test]
+    fn stack_stateless_role_single_service_with_replicas() {
+        let plans = compile(
+            &nats_with_gateway(8080),
+            &stack_hosts(),
+            Some(&stack_nodes()),
+        )
+        .unwrap();
+        let d = doc(&plans[0]);
+        let s = service(&d, "gateway");
+        assert_eq!(s["replicas"], 2);
+        assert!(s.get("placement").is_none());
+        assert!(s.get("endpointMode").is_none());
+        assert_eq!(
+            s["ports"],
+            json!([{"name": "http", "container": 80, "published": 8080,
+                    "protocol": "tcp", "mode": "ingress"}])
+        );
+        // All replicas share one context rendered as index 0 named after the role.
+        assert_eq!(s["command"][1], "gateway");
+        assert_eq!(s["command"][2], "0");
+        assert_eq!(
+            plans[0].contexts.keys().collect::<Vec<_>>(),
+            ["gateway", "nats-0", "nats-1", "nats-2"]
+        );
+        let inst = plans[0].contexts["gateway"].instance.clone().unwrap();
+        assert_eq!(
+            (inst.name.as_str(), inst.index, inst.host.as_str()),
+            ("gateway", 0, "gateway")
+        );
+        assert_eq!(inst.ports["http"], 80);
+    }
+
+    #[test]
+    fn stack_members_resolve_host_and_port() {
+        let plans = compile(
+            &nats_with_gateway(8080),
+            &stack_hosts(),
+            Some(&stack_nodes()),
+        )
+        .unwrap();
+        let d = doc(&plans[0]);
+        let routes = "nats://10.0.0.1:16222,nats://10.0.0.2:16223,nats://10.0.0.3:16224,";
+        assert_eq!(service(&d, "nats-1")["command"][2], routes);
+        let gateway = service(&d, "gateway");
+        assert_eq!(gateway["command"][3], "gateway:80 gateway:80 ");
+        assert_eq!(gateway["command"][4], routes);
+        let members = &plans[0].contexts["nats-0"].members;
+        assert_eq!(members["gateway"].len(), 2);
+        assert_eq!(members["gateway"][1].index, 1);
+        assert_eq!(members["nats"][2].host, "10.0.0.3");
+    }
+
+    #[test]
+    fn host_mode_port_conflict_on_same_node() {
+        let text = nats_with_gateway(8080);
+        let b = stack_hosts();
+        // Two stable instances on one node publish the same host port.
+        let mut shared = stack_nodes();
+        shared.insert("nats-1".into(), "n0node".into());
+        let (key, params) = err_key(compile(&text, &b, Some(&shared)));
+        assert_eq!(key, "blueprint.portConflict");
+        assert_eq!(params["instance"], "nats-1");
+        assert_eq!(params["other"], "nats-0");
+        assert_eq!(params["port"], "4222/tcp");
+        // An ingress port is published on every node, so it collides with any host port.
+        let (key, params) = err_key(compile(&nats_with_gateway(4222), &b, Some(&stack_nodes())));
+        assert_eq!(key, "blueprint.portConflict");
+        assert_eq!(params["instance"], "gateway");
+        assert_eq!(params["other"], "nats-0");
+        // Two stateless roles publishing the same ingress port collide stack-wide.
+        let mut v: Value = serde_json::from_str(&text).unwrap();
+        let mut second = v["roles"][1].clone();
+        second["name"] = json!("proxy");
+        v["roles"].as_array_mut().unwrap().push(second);
+        let mut b = stack_hosts();
+        b.roles.insert("proxy".into(), b.roles["gateway"].clone());
+        let mut n = stack_nodes();
+        n.insert("proxy-0".into(), "n2node".into());
+        n.insert("proxy-1".into(), "n2node".into());
+        let (key, params) = err_key(compile(&v.to_string(), &b, Some(&n)));
+        assert_eq!(key, "blueprint.portConflict");
+        assert_eq!(params["instance"], "proxy");
+        assert_eq!(params["other"], "gateway");
+        assert_eq!(params["port"], "8080/tcp");
+    }
+
+    #[test]
+    fn stack_manifest_passes_driver_validation() {
+        let plans = compile(
+            &nats_with_gateway(8080),
+            &stack_hosts(),
+            Some(&stack_nodes()),
+        )
+        .unwrap();
+        let m = manifest::parse_for(&plans[0].manifest, "stack").unwrap();
+        assert_eq!(m.services.len(), 4);
+        // A driver-level rule (stack forbids dependsOn) surfaces unchanged.
+        let mut v: Value = serde_json::from_str(&nats_with_gateway(8080)).unwrap();
+        v["roles"][1]["service"]["dependsOn"] = json!(["nats-0"]);
+        assert_eq!(
+            err_key(compile(
+                &v.to_string(),
+                &stack_hosts(),
+                Some(&stack_nodes())
+            ))
+            .0,
+            "deployment.manifest.030"
+        );
+    }
+
+    #[test]
+    fn stack_requires_nodes() {
+        let text = nats_with_gateway(8080);
+        assert_eq!(
+            err_key(compile(&text, &stack_hosts(), None)).0,
+            "blueprint.swarmNodesRequired"
+        );
+        // A stable instance without a resolved node cannot be pinned.
+        let mut partial = stack_nodes();
+        partial.remove("nats-2");
+        let (key, params) = err_key(compile(&text, &stack_hosts(), Some(&partial)));
+        assert_eq!(key, "blueprint.swarmNodeUnavailable");
+        assert_eq!(params["host"], Id::from(3).to_string());
+        // A stack binding names its manager.
+        let mut b = stack_hosts();
+        b.manager = None;
+        assert_eq!(
+            err_key(compile(&text, &b, Some(&stack_nodes()))).0,
+            "blueprint.bindingInvalid"
         );
     }
 
@@ -666,17 +1027,20 @@ mod tests {
     fn inconsistent_inputs_return_errors() {
         let b = binding("native", &[]);
         assert_eq!(
-            err_key(compile(&nats_native(), &b)).0,
+            err_key(compile(&nats_native(), &b, None)).0,
             "blueprint.bindingRoleMissing"
         );
         let mut v: Value = serde_json::from_str(&nats_native()).unwrap();
         v["roles"][0]["ports"][0]["published"] = json!("{{ .Instance.Name }}");
         let b = binding("native", &[three_hosts("nats")]);
-        let (key, params) = err_key(compile(&v.to_string(), &b));
+        let (key, params) = err_key(compile(&v.to_string(), &b, None));
         assert_eq!(
             (key.as_str(), params["role"].as_str()),
             ("blueprint.portInvalid", "nats")
         );
-        assert_eq!(err_key(compile("{}", &b)).0, "blueprint.invalidDocument");
+        assert_eq!(
+            err_key(compile("{}", &b, None)).0,
+            "blueprint.invalidDocument"
+        );
     }
 }

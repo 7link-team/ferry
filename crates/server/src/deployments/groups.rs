@@ -57,7 +57,7 @@ fn host_app(app: &apps::Model, host: Id, manifest: String) -> apps::Model {
 /// it was stored, so readers that only need the compiled services never fail on a host change.
 pub(crate) fn compiled(app: &apps::Model) -> Result<Vec<HostPlan>> {
     let binding = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
-    crate::blueprint::compile::compile(&app.manifest, &binding)
+    crate::blueprint::compile::compile(&app.manifest, &binding, None)
 }
 /// Validates a binding against this workspace's current hosts, then compiles every host's plan.
 pub(super) async fn compile(
@@ -78,7 +78,7 @@ pub(super) async fn compile(
         })
         .collect();
     binding::validate(&bp, b, &known)?;
-    crate::blueprint::compile::compile(manifest, b)
+    crate::blueprint::compile::compile(manifest, b, None)
 }
 /// Every host a new revision of `app` deploys to, in target order: host-group members share
 /// the deployment manifest; a blueprint compiles one application per bound host.
