@@ -813,3 +813,10 @@ Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-a
 - Scope：仅 Linux 主机；驱动 docker/native（每实例绑定主机，成员按绑定地址+发布端口互访）与 compose（单机，服务名+容器端口，需模板声明 `allowSingleHost`，非 HA）；stack 待 P2b，k8s 预留。绑定在首个修订后冻结（改变实例位置需拓扑变更计划，P2.5），参数与镜像可升级。官方包 `marketplace/apps/nats-cluster`（3 成员 JetStream，`identity: stable`、`distinctHosts`、`odd`，路由用 `range .Role "nats"`）与 `nginx-ha`（无状态 web×2 + lb×1，upstream 用 `range .Role "web"`）只声明 docker/compose；native 需流水线制品，暂不提供。端口按 `add <base> .Instance.Index` 偏移，避免共享网络命名空间时冲突。
 - Alternatives：一次性完整渲染（参数值进入修订快照后无法逐主机重算，否决）；新表/新执行器承载蓝图（重复主机组机制，否决）；把所有实例下发到每台主机（泄露其他实例配置且相互清理，否决）。
 - Tradeoffs：编译后的 Application 名取蓝图自身 `metadata.name`（模板拥有、部署改名不变），部署名可为任意文本；市场导入时蓝图角色内的 `fromTemplate` 同样改写为配置模板 ID。验证：Rust 单元/编译测试（含 `official_blueprints_compile_for_supported_drivers`）；真实驱动验收为 `deployment-ha.yml` 的 `blueprint` 矩阵项（`FERRY_TEST_BLUEPRINT=1`），CI 未运行前不写 `verified.json`。
+
+## 集群蓝图 P2b：Docker Swarm stack（2026-11-12，分支 feature/marketplace-p2b）
+
+- Decision：蓝图支持 `stack` 驱动。绑定新增 `manager`（Swarm 管理节点主机，仅 stack 必填、其他驱动拒绝），整个蓝图编译为管理节点上的一个 Application，经 `docker stack deploy` 部署。预览与执行时在部署锁外逐主机探测 Swarm 节点 ID（管理节点 `ControlAvailable` + `docker node ls`，实例主机 `docker info .Swarm.NodeID`），`distinctHosts` 按节点 ID 判断；创建/检查等离线路径用 `node.id==unresolved:<实例>` 占位编译，占位清单不得部署。`identity: stable` 角色每个实例一个服务，固定 `node.id==<节点>`、host 模式端口、`endpoint_mode: dnsrr`，成员按绑定地址+发布端口互访；`stateless` 角色合并为一个 `<role>` 服务，副本数 = 绑定实例数，ingress 端口，成员按服务名（VIP）+容器端口访问。执行前若节点固定与预览不一致则拒绝（需重新预览）；回滚重放已存修订，不再探测节点。
+- Reason：Swarm 只经管理节点下发；有状态成员需要稳定身份与可直连地址（NATS 路由/advertise），无状态副本由 VIP 负载均衡即可。节点探测涉及远程命令，放在锁外避免长时间持锁。
+- Alternatives：stateless 也按实例拆服务并固定节点（失去调度与 VIP，否决）；stable 用 ingress（路由网格会把成员地址打散到任意任务，否决）；创建时强制在线探测（主机离线即无法创建，否决）。
+- Scope/Tradeoffs：官方 `nats-cluster`（nats 为 stable）与 `nginx-ha`（web、lb 均为 stateless；lb 的 `range .Role "web"` 在 stack 下渲染为 `web:80`，经 VIP 负载均衡；所有 web 副本共享上下文，页面为 `<message> from web`）声明 `stack`。真实验收为 `deployment-ha.yml` 的 `blueprint on three-node Swarm` 矩阵项（三个嵌套 dockerd 节点同时作为 Ferry SSH 主机）；CI 通过前不写 stack 的 `verified.yaml`。实例绑定界面（含管理节点选择）待 P2c，拓扑变更待 P2.5。

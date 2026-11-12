@@ -12,6 +12,10 @@ balancers (`lb-0`, …). Every web instance serves `<message> from <instance>`.
   address and published port; with Compose at the service name and port `80`.
 - Readiness: web `/`, load balancer `/healthz` (answered locally, so a balancer can
   start before its upstreams).
-- Drivers: Docker (instances on distinct hosts) and Compose (single host; demo only,
-  not highly available). Native is not offered by this package.
+- Drivers: Docker (instances on distinct hosts), Compose (single host; demo only,
+  not highly available) and Swarm stack. Native is not offered by this package.
+- Swarm stack: `web` and `lb` are each one replicated service (one replica per bound
+  instance) publishing `web_port` / `lb_port` on the ingress routing mesh. The balancer
+  reaches web replicas through the `web` service VIP on port `80`, and every web replica
+  serves `<message> from web`.
 - Changing `message` is a parameter upgrade: a new revision replaces every web instance.

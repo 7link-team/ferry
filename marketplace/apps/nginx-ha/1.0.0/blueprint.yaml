@@ -92,6 +92,8 @@ drivers:
     supported: true
   compose:
     supported: true
+  stack:
+    supported: true
   native:
     supported: false
 update:

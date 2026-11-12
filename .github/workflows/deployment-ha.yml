@@ -70,6 +70,10 @@ jobs:
             swarm_ha: "0"
             blueprint: "1"
             label: blueprint
+          - mode: stack
+            swarm_ha: "1"
+            blueprint: "1"
+            label: blueprint on three-node Swarm
     env:
       FERRY_REQUIRE_ALL: "1"
       FERRY_TEST_DEPLOY_MODE: ${{ matrix.mode }}
@@ -157,7 +161,10 @@ jobs:
           {
             echo '### ${{ matrix.label }}'
             echo "Commit: $GITHUB_SHA; run: $GITHUB_RUN_ID"
-            if [ "$FERRY_TEST_BLUEPRINT" = 1 ]; then
+            if [ "$FERRY_TEST_BLUEPRINT" = 1 ] && [ "$FERRY_TEST_DEPLOY_MODE" = stack ]; then
+              echo 'Official nats-cluster and nginx-ha blueprints with the stack driver through SSH on a three-node Swarm (manager plus two workers, one Ferry host per node): NATS members as node-pinned host-mode services (routes, JetStream meta cluster and R3 stream), Nginx web and balancer as replicated ingress services (load balancing over the web VIP, parameter upgrade, rollback).'
+              echo 'Swarm nodes are nested daemons sharing one kernel; does not certify physical-host HA or manager quorum.'
+            elif [ "$FERRY_TEST_BLUEPRINT" = 1 ]; then
               echo 'Official nats-cluster and nginx-ha blueprints through SSH and HostAgent: Docker driver on three fixture hosts with independent daemons (routes, JetStream meta cluster and R3 stream, load balancing, parameter upgrade, rollback, frozen binding) and Compose on one host.'
               echo 'Fixture hosts share one kernel; does not certify physical-host HA. Native blueprints are covered by Rust compile tests only.'
             elif [ "$FERRY_TEST_DEPLOY_MODE" = native ]; then
@@ -172,7 +179,7 @@ jobs:
               echo 'Covers placement, replica distribution, task replacement, worker outage/rejoin, rolling update, rollback and unsatisfied constraints.'
               echo 'Shares one host kernel; does not certify physical-host isolation, manager quorum, database HA or volume migration.'
             fi
-            if [ "$FERRY_TEST_DEPLOY_MODE" = compose ] || [ "$FERRY_TEST_DEPLOY_MODE" = stack ]; then
+            if [ "$FERRY_TEST_BLUEPRINT" != 1 ] && { [ "$FERRY_TEST_DEPLOY_MODE" = compose ] || [ "$FERRY_TEST_DEPLOY_MODE" = stack ]; }; then
               echo 'Initialized NATS application through SSH and HostAgent: three persistent members, token authentication, client discovery, leader loss, durable consumer recovery and quorum refusal/restoration.'
               echo 'Initialized Redis Sentinel application through SSH and HostAgent: six authenticated members, asynchronous replication, majority failover, old-master demotion, persisted dynamic roles and Sentinel quorum loss/restoration.'
               echo 'Sentinel results do not certify RPO=0, full-outage recovery or network-partition fencing.'

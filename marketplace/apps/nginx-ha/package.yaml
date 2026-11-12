@@ -17,6 +17,7 @@ topology: cluster
 drivers:
   - docker
   - compose
+  - stack
 tags:
   - nginx
   - http

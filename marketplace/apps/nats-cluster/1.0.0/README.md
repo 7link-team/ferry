@@ -13,8 +13,11 @@ Each member is a stable instance `nats-<index>` with its own `nats-<index>-data`
   Compose at its service name and container port.
 - Readiness: `/healthz?js-enabled-only=true`, so a member becomes ready before the
   cluster has a meta leader and members on later hosts can still join.
-- Drivers: Docker (one host per member) and Compose (single host). Native needs a
-  pipeline-built `nats-server` artifact and is not offered by this package.
+- Drivers: Docker (one host per member), Compose (single host) and Swarm stack. Native
+  needs a pipeline-built `nats-server` artifact and is not offered by this package.
+- Swarm stack: deployed through the bound manager; each member is its own service pinned
+  to its host's Swarm node (`node.id==…`, `dnsrr`) and publishes its ports in host mode,
+  so members advertise and route to each other exactly as with the Docker driver.
 - No authentication or TLS is configured; keep the ports on a private network or add
   them before exposing the cluster.
 - Topology changes (adding or removing members) are not supported yet; change
