@@ -262,6 +262,8 @@
   "blueprint.hostOsUnsupported": "インスタンス {instance}：ホストの OS は {os} です。Linux ホストのみサポートされます。",
   "blueprint.bindingAddressInvalid": "インスタンス {instance}：公開アドレスにはループバックでない IP アドレスまたはホスト名（253 文字以内）を指定してください。空、0.0.0.0、::、127.0.0.0/8、::1、localhost は使用できません。",
   "blueprint.bindingDistinctHosts": "ロール {role}：各インスタンスは異なるホストで実行する必要があります。",
+  "blueprint.swarmManagerRequired": "マネージャーホストは有効な Docker Swarm マネージャーである必要があります（docker info の Swarm.ControlAvailable が true）。",
+  "blueprint.swarmNodeUnavailable": "ホスト {host} はマネージャーの Docker Swarm で利用可能なノードではありません。その Swarm に参加し、Ready かつ Active である必要があります。",
   "blueprint.bindingColocateCount": "ロール {role} は {target} と同じホストに配置されるため、インスタンス数が同じである必要があります。",
   "blueprint.bindingColocateHost": "インスタンス {instance} は {target} と同じホストで実行する必要があります。",
   "blueprint.bindingComposeSingleHost": "compose ドライバーでは、すべてのインスタンスを 1 台のホストに配置する必要があります。",

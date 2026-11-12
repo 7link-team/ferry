@@ -21,6 +21,18 @@ pub(crate) struct FakeHost {
     /// When set, deployment scripts (`set -eu; ...`) exit non-zero before changing anything,
     /// as on a host without a usable container runtime; image pulls still succeed.
     pub fail: AtomicBool,
+    /// Canned stdout: the first entry whose pattern the command contains answers it.
+    pub responses: Mutex<Vec<(String, String)>>,
+}
+
+impl FakeHost {
+    /// Answers every later command containing `pattern` with `stdout` (exit 0).
+    pub fn respond(&self, pattern: &str, stdout: &str) {
+        self.responses
+            .lock()
+            .unwrap()
+            .push((pattern.into(), stdout.into()));
+    }
 }
 
 static HOSTS: LazyLock<Mutex<HashMap<i64, Arc<FakeHost>>>> = LazyLock::new(Default::default);
@@ -65,6 +77,17 @@ impl HostChannel for Channel {
                 stdout: String::new(),
                 stderr: "fake failure".into(),
             });
+        }
+        let canned = self
+            .0
+            .responses
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(pattern, _)| command.contains(pattern.as_str()))
+            .map(|(_, stdout)| stdout.clone());
+        if let Some(stdout) = canned {
+            return Ok(ok(stdout));
         }
         if command.starts_with("docker image inspect") {
             return Ok(ok(format!("[\"example/image@{DIGEST}\"]\n")));

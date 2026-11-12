@@ -1341,6 +1341,7 @@ mod tests {
             include_str!("blueprint/binding.rs"),
             include_str!("blueprint/compile.rs"),
             include_str!("blueprint/model.rs"),
+            include_str!("blueprint/swarm.rs"),
             include_str!("blueprint/template.rs"),
             include_str!("templates.rs"),
             include_str!("pipelines/actions.rs"),

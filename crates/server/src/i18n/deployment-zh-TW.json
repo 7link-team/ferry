@@ -262,6 +262,8 @@
   "blueprint.hostOsUnsupported": "實例 {instance}：該主機系統為 {os}，僅支援 Linux 主機。",
   "blueprint.bindingAddressInvalid": "實例 {instance}：通告位址必須是非迴環的 IP 位址或主機名稱（最長 253 個字元），空值、0.0.0.0、::、127.0.0.0/8、::1 與 localhost 均不允許。",
   "blueprint.bindingDistinctHosts": "角色 {role}：各實例必須位於不同主機。",
+  "blueprint.swarmManagerRequired": "管理節點主機必須是可用的 Docker Swarm 管理節點（docker info 中 Swarm.ControlAvailable 為 true）。",
+  "blueprint.swarmNodeUnavailable": "主機 {host} 不是管理節點所在 Docker Swarm 的可用節點：必須已加入該 Swarm，且狀態為 Ready、可用性為 Active。",
   "blueprint.bindingColocateCount": "角色 {role} 與 {target} 同機部署，兩者的實例數必須相同。",
   "blueprint.bindingColocateHost": "實例 {instance} 必須與 {target} 位於同一主機。",
   "blueprint.bindingComposeSingleHost": "compose 驅動要求所有實例位於同一台主機。",
