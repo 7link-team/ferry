@@ -220,7 +220,7 @@ pub(crate) async fn begin(s: &AppState, scope: &Scope, job: &Job) -> Result<std:
 /// 无钩子时用监控实例状态 up，监控无数据（unknown）则以修订自身的就绪等待为准 → 记 replaceSucceeded / replaceFailed；第 3 次连续失败追加 needsAttention{tooManyFailures}；释放锁。
 pub(crate) async fn finish(s: AppState, job: Job, revision: Id) -> Outcome;
 ```
-- 手动 API：`begin` 同步执行（含 leave 钩子，最长约 120s），成功返回 202 `{"id": revision}` 并 `tokio::spawn(finish(..))`；`Manual{quorumLost}` → 409 `deployment.replaceQuorumLost`；锁被占用 → 409 `deployment.failoverBusy`。手动替换不受冷却限制，但仍计入连续失败。
+- 手动 API（控制决策：请求不得长时间阻塞）：同步部分只做校验、类型/驱动判定、取动作锁与仲裁检查（不执行任何远程钩子），随即返回 202 `{"id": revision}`；leave 钩子、修订执行、join、healthy 全部在 `tokio::spawn` 中完成，进度与失败只通过事件时间线呈现；`Manual{quorumLost}` → 409 `deployment.replaceQuorumLost`；锁被占用 → 409 `deployment.failoverBusy`。手动替换不受冷却限制，但仍计入连续失败。
 
 - [ ] Step 1 失败测试（sequence.rs 单元）：`quorum_rule`（(3,2)→true、(3,1)→false、(5,3)→true、(5,2)→false、(1,0)→false）。
 - [ ] Step 2 失败测试（hooks.rs 单元）：`hook_command_docker_and_native`（argv 中 `{{ .Instance.Name }}` 渲染为 `nats-1`；含空格与单引号的项被 quote；docker 形如 `timeout 120 docker exec 'deployment-1-9-nats-1' …`；native 以 `cd '<dir>' &&` 开头）。
