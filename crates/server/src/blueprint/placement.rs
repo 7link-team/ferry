@@ -62,31 +62,48 @@ fn insufficient(
     needed: usize,
     hosts: &[&Candidate],
 ) -> Message {
-    let names: Vec<&str> = hosts
+    let mut names: Vec<&str> = hosts
         .iter()
         .take(MAX_LISTED_HOSTS)
         .map(|c| c.name.as_str())
         .collect();
+    if hosts.len() > MAX_LISTED_HOSTS {
+        names.push("…");
+    }
+    // An empty list still reads naturally after the message's colon.
+    let names = if names.is_empty() {
+        "-".to_string()
+    } else {
+        names.join(", ")
+    };
     Message::new("blueprint.placementInsufficientHosts")
         .with("role", role)
         .with("selector", describe(selector))
         .with("needed", needed.to_string())
         .with("matched", hosts.len().to_string())
-        .with("hosts", names.join(", "))
+        .with("hosts", names)
 }
 
-/// Tags of `c` that name its spread domain (e.g. `zone:a` for prefix `zone:`).
-fn zones<'a>(c: &'a Candidate, prefix: &str) -> BTreeSet<&'a str> {
-    c.tags
+/// Spread domains of `c`: its tags with `prefix` (e.g. `zone:a` for `zone:`). A host with no
+/// such tag belongs to one shared pseudo-domain (`None`) with every other untagged host.
+fn zones<'a>(c: &'a Candidate, prefix: &str) -> BTreeSet<Option<&'a str>> {
+    let tagged: BTreeSet<Option<&str>> = c
+        .tags
         .iter()
         .filter(|t| t.starts_with(prefix))
-        .map(String::as_str)
-        .collect()
+        .map(|t| Some(t.as_str()))
+        .collect();
+    if tagged.is_empty() {
+        BTreeSet::from([None])
+    } else {
+        tagged
+    }
 }
 
 /// Places every blueprint role without a manual `placement` entry onto the candidate hosts.
 ///
-/// `existing` counts this deployment's instances already on each host. Instances are placed
+/// `existing` counts THIS deployment's instances already on each host, excluding any instance
+/// listed in `spec.placement`: manual placements are counted here. Instances are placed
 /// one at a time on the host with, in order: fewest spread violations, fewest instances of
 /// this deployment (existing + placed so far), most free memory (unknown last), lowest id.
 pub fn place(
@@ -114,8 +131,12 @@ pub fn place(
         roles: manual,
         warnings: Vec::new(),
     };
-    for role in &bp.roles {
-        scheduler.place_role(role)?;
+    if spec.driver == "compose" {
+        scheduler.place_single_host()?;
+    } else {
+        for role in &bp.roles {
+            scheduler.place_role(role)?;
+        }
     }
     Ok(Placed {
         binding: Binding {
@@ -134,9 +155,13 @@ fn resolve_manager(spec: &DeploySpec, candidates: &[Candidate]) -> Result<Option
     }
     let wanted = spec.manager.as_deref().unwrap_or_default();
     let usable = || candidates.iter().filter(|c| eligible(c));
-    let found = usable()
-        .find(|c| c.name == wanted)
-        .or_else(|| usable().find(|c| c.id.to_string() == wanted));
+    let by_name: Vec<&Candidate> = usable().filter(|c| c.name == wanted).collect();
+    // An ambiguous name is refused rather than resolved to an arbitrary host.
+    let found = match by_name.as_slice() {
+        [one] => Some(*one),
+        [] => usable().find(|c| c.id.to_string() == wanted),
+        _ => None,
+    };
     match found {
         Some(c) if !wanted.is_empty() => Ok(Some(c.id)),
         _ => fail(Message::new("blueprint.placementManagerUnavailable").with("manager", wanted)),
@@ -153,17 +178,101 @@ struct Scheduler<'a> {
 }
 
 impl<'a> Scheduler<'a> {
+    fn selector(&self, role: &Role) -> HostSelector {
+        self.spec
+            .roles
+            .get(&role.name)
+            .map(|r| r.hosts.clone())
+            .unwrap_or_default()
+    }
+
+    /// Compose runs on one host: every instance of every role goes to the best host that
+    /// satisfies all scheduled roles' selectors (and holds any manual placement).
+    fn place_single_host(&mut self) -> Result<()> {
+        let bp = self.bp;
+        if !bp.allow_single_host && bp.roles.iter().any(|r| r.placement.distinct_hosts) {
+            return fail(Message::new("blueprint.bindingComposeNeedsSingleHost"));
+        }
+        let pinned: BTreeSet<Id> = self.roles.values().flatten().map(|i| i.host_id).collect();
+        if pinned.len() > 1 {
+            return fail(Message::new("blueprint.bindingComposeSingleHost"));
+        }
+        let scheduled: Vec<&Role> = bp
+            .roles
+            .iter()
+            .filter(|r| !self.roles.contains_key(&r.name))
+            .collect();
+        let Some(first) = scheduled.first() else {
+            return Ok(());
+        };
+        let mut counts = BTreeMap::new();
+        for role in &scheduled {
+            counts.insert(role.name.as_str(), self.count(role)?);
+        }
+        for role in &scheduled {
+            if let Some(target) = &role.placement.colocate_with {
+                let target_count = self
+                    .roles
+                    .get(target)
+                    .map(Vec::len)
+                    .or_else(|| counts.get(target.as_str()).copied());
+                if target_count != Some(counts[role.name.as_str()]) {
+                    return fail(
+                        Message::new("blueprint.bindingColocateCount")
+                            .with("role", &role.name)
+                            .with("target", target),
+                    );
+                }
+            }
+        }
+        let selectors: Vec<HostSelector> = scheduled.iter().map(|r| self.selector(r)).collect();
+        let fitting: Vec<&'a Candidate> = self
+            .candidates
+            .iter()
+            .filter(|c| eligible(c) && selectors.iter().all(|s| matches(s, c)))
+            .collect();
+        let best = fitting.iter().copied().min_by_key(|c| {
+            (
+                self.load.get(&c.id).copied().unwrap_or(0),
+                Reverse(c.mem_free.unwrap_or(0)),
+                c.id,
+            )
+        });
+        let host = match (pinned.first(), best) {
+            (Some(id), _) => match fitting.iter().copied().find(|c| c.id == *id) {
+                Some(c) => c,
+                None => return fail(Message::new("blueprint.bindingComposeSingleHost")),
+            },
+            (None, Some(c)) => c,
+            (None, None) => {
+                return fail(
+                    Message::new("blueprint.placementSelectorEmpty")
+                        .with("role", &first.name)
+                        .with("selector", describe(&selectors[0])),
+                );
+            }
+        };
+        for role in scheduled {
+            let n = counts[role.name.as_str()];
+            let list = vec![
+                InstanceBinding {
+                    host_id: host.id,
+                    address: host.address.clone(),
+                };
+                n
+            ];
+            *self.load.entry(host.id).or_default() += n as u32;
+            self.roles.insert(role.name.clone(), list);
+        }
+        Ok(())
+    }
+
     fn place_role(&mut self, role: &Role) -> Result<()> {
         if self.roles.contains_key(&role.name) {
             return Ok(());
         }
         let count = self.count(role)?;
-        let selector = self
-            .spec
-            .roles
-            .get(&role.name)
-            .map(|r| r.hosts.clone())
-            .unwrap_or_default();
+        let selector = self.selector(role);
         let mut matched: Vec<&'a Candidate> = self
             .candidates
             .iter()
@@ -230,6 +339,15 @@ impl<'a> Scheduler<'a> {
                     .with("target", target),
             );
         }
+        if role.placement.distinct_hosts {
+            let distinct: BTreeSet<Id> = targets.iter().map(|t| t.host_id).collect();
+            if distinct.len() != targets.len() {
+                return fail(
+                    Message::new("blueprint.bindingDistinctHosts").with("role", &role.name),
+                );
+            }
+        }
+        // Spread does not apply: the hosts are the target's.
         let hosts: Vec<Option<&'a Candidate>> = targets
             .iter()
             .map(|t| matched.iter().copied().find(|c| c.id == t.host_id))
@@ -270,10 +388,6 @@ impl<'a> Scheduler<'a> {
             let violations = |c: &Candidate| -> usize {
                 let Some(prefix) = prefix else { return 0 };
                 let own = zones(c, prefix);
-                if own.is_empty() {
-                    // A host outside every spread domain cannot help spreading.
-                    return 1;
-                }
                 placed
                     .iter()
                     .filter(|p| !zones(p, prefix).is_disjoint(&own))
@@ -330,12 +444,18 @@ mod tests {
     }
 
     fn blueprint(roles: Vec<Value>) -> Blueprint {
+        blueprint_with(roles, false)
+    }
+
+    fn blueprint_with(roles: Vec<Value>, single: bool) -> Blueprint {
         let text = json!({
             "apiVersion": "ferry/blueprint-v1",
             "kind": "Blueprint",
             "metadata": {"name": "demo"},
             "roles": roles,
-            "drivers": {"native": {"supported": true}, "stack": {"supported": true}},
+            "drivers": {"native": {"supported": true}, "stack": {"supported": true},
+                        "compose": {"supported": true}},
+            "allowSingleHost": single,
         })
         .to_string();
         super::super::model::parse(&text).expect("blueprint")
@@ -499,8 +619,36 @@ mod tests {
         let m = err(place(&bp, &s, &tagged, &none()));
         assert_eq!(m.key, "blueprint.placementInsufficientHosts");
         assert_eq!(m.params["role"], "exporter");
+        assert_eq!(m.params["needed"], "3");
         assert_eq!(m.params["matched"], "1");
         assert_eq!(m.params["hosts"], "host-2");
+        // No target host passes: the list reads "-" rather than ending empty.
+        let mut tagged = hosts(4);
+        tagged[3].tags = vec!["metrics".into()];
+        let m = err(place(&bp, &s, &tagged, &none()));
+        assert_eq!(m.key, "blueprint.placementInsufficientHosts");
+        assert_eq!(m.params["matched"], "0");
+        assert_eq!(m.params["hosts"], "-");
+        // Spread on a colocated role is ignored, without a warning.
+        let s = spec("native", &[("exporter", 3, spread_sel("zone:"))]);
+        let p = place(&bp, &s, &hosts(3), &none()).unwrap();
+        assert_eq!(ids(&p.binding, "exporter"), [1, 2, 3]);
+        assert!(p.warnings.is_empty());
+        // A distinctHosts role cannot follow a target that shares hosts.
+        let shared = blueprint(vec![
+            role("web", 1, 3, 5, false, json!({})),
+            role(
+                "sidecar",
+                1,
+                3,
+                5,
+                false,
+                json!({"colocateWith": "web", "distinctHosts": true}),
+            ),
+        ]);
+        let m = err(place(&shared, &spec("native", &[]), &hosts(1), &none()));
+        assert_eq!(m.key, "blueprint.bindingDistinctHosts");
+        assert_eq!(m.params["role"], "sidecar");
         // Manual placement is kept verbatim and the colocated role follows it.
         let mut s = spec("native", &[]);
         s.placement = Some(BTreeMap::from([(
@@ -632,6 +780,13 @@ mod tests {
             place(&bp, &s, &cands, &none()).unwrap().binding.manager,
             Some(Id::from(5))
         );
+        let mut dup = cands.clone();
+        dup[4].name = "host-4".into();
+        s.manager = Some("host-4".into());
+        assert_eq!(
+            err(place(&bp, &s, &dup, &none())).key,
+            "blueprint.placementManagerUnavailable"
+        );
         for bad in [Some("host-1"), Some("host-2"), Some("nope"), None] {
             s.manager = bad.map(String::from);
             let m = err(place(&bp, &s, &cands, &none()));
@@ -674,7 +829,10 @@ mod tests {
         let m = err(place(&bp, &s, &hosts(12), &none()));
         assert_eq!(m.params["matched"], "12");
         assert_eq!(m.params["needed"], "20");
-        assert_eq!(m.params["hosts"].split(", ").count(), 10);
+        let listed: Vec<&str> = m.params["hosts"].split(", ").collect();
+        assert_eq!(listed.len(), 11);
+        assert_eq!(listed[9], "host-10");
+        assert_eq!(listed[10], "…");
         // Without distinctHosts a single host is enough.
         let bp = blueprint(vec![role("web", 1, 3, 5, false, json!({}))]);
         let p = place(&bp, &s, &hosts(1), &none()).unwrap();
@@ -741,10 +899,12 @@ mod tests {
         assert_eq!(p.warnings[0].key, "blueprint.placementSpreadUnmet");
         assert_eq!(p.warnings[0].params["role"], "nats");
         assert_eq!(p.warnings[0].params["prefix"], "zone:");
-        // Hosts without any zone tag cannot satisfy spreading either.
-        let s = spec("native", &[("nats", 1, spread_sel("rack:"))]);
+        // Hosts without any zone tag share one pseudo-zone.
+        let s = spec("native", &[("nats", 3, spread_sel("rack:"))]);
         let p = place(&bp, &s, &cands, &none()).unwrap();
         assert_eq!(p.warnings[0].key, "blueprint.placementSpreadUnmet");
+        let s = spec("native", &[("nats", 1, spread_sel("rack:"))]);
+        assert!(place(&bp, &s, &cands, &none()).unwrap().warnings.is_empty());
     }
 
     #[test]
@@ -771,5 +931,118 @@ mod tests {
         let s = spec("native", &[("web", 1, Default::default())]);
         let p = place(&bp, &s, &cands, &existing).unwrap();
         assert_eq!(ids(&p.binding, "web"), [2]);
+    }
+
+    #[test]
+    fn spread_untagged_hosts_share_one_pseudo_zone() {
+        let bp = blueprint(vec![role(
+            "nats",
+            1,
+            3,
+            5,
+            true,
+            json!({"distinctHosts": true}),
+        )]);
+        let cands = vec![
+            host(1, &["zone:a"]),
+            host(2, &["zone:a"]),
+            host(3, &["zone:a"]),
+            host(4, &[]),
+            host(5, &[]),
+        ];
+        // Pick 1: all free, lowest id -> 1. Pick 2: zone:a hosts have 1 violation, untagged 0
+        // -> 4. Pick 3: host 2 (zone:a holds 1) ties host 5 (untagged holds 1) -> lower id 2.
+        let s = spec("native", &[("nats", 3, spread_sel("zone:"))]);
+        let p = place(&bp, &s, &cands, &none()).unwrap();
+        assert_eq!(ids(&p.binding, "nats"), [1, 4, 2]);
+        assert_eq!(p.warnings.len(), 1);
+        assert_eq!(p.warnings[0].key, "blueprint.placementSpreadUnmet");
+    }
+
+    #[test]
+    fn compose_places_all_instances_on_one_host() {
+        let bp = blueprint_with(
+            vec![
+                role("nats", 1, 3, 5, true, json!({"distinctHosts": true})),
+                role("exporter", 1, 3, 5, false, json!({"colocateWith": "nats"})),
+            ],
+            true,
+        );
+        let mut cands = vec![
+            host(1, &["metrics"]),
+            host(2, &[]),
+            host(3, &["metrics"]),
+            host(4, &["metrics"]),
+        ];
+        for (c, mem) in cands.iter_mut().zip([100, 900, 500, 500]) {
+            c.mem_free = Some(mem);
+        }
+        let s = spec("compose", &[("exporter", 3, tags(&["metrics"]))]);
+        let existing = BTreeMap::from([(Id::from(3), 1)]);
+        // Host 2 fails the exporter selector; host 3 carries load; host 4 beats host 1 on memory.
+        let p = place(&bp, &s, &cands, &existing).unwrap();
+        assert_eq!(ids(&p.binding, "nats"), [4, 4, 4]);
+        assert_eq!(ids(&p.binding, "exporter"), [4, 4, 4]);
+        assert_eq!(p.binding.roles["nats"][0].address, "10.0.0.4");
+        assert_eq!(p.binding.manager, None);
+        let info: BTreeMap<Id, super::super::binding::HostInfo> = cands
+            .iter()
+            .map(|h| {
+                (
+                    h.id,
+                    super::super::binding::HostInfo {
+                        id: h.id,
+                        os: h.os.clone(),
+                    },
+                )
+            })
+            .collect();
+        super::super::binding::validate(&bp, &p.binding, &info).expect("valid compose binding");
+        // A manual placement fixes the host.
+        let manual = |hosts: &[i64]| {
+            let mut s = s.clone();
+            s.placement = Some(BTreeMap::from([(
+                "nats".to_string(),
+                hosts
+                    .iter()
+                    .map(|id| InstanceBinding {
+                        host_id: Id::from(*id),
+                        address: format!("10.0.0.{id}"),
+                    })
+                    .collect(),
+            )]));
+            s
+        };
+        let p = place(&bp, &manual(&[1, 1, 1]), &cands, &none()).unwrap();
+        assert_eq!(ids(&p.binding, "exporter"), [1, 1, 1]);
+        for conflict in [&[2, 2, 2][..], &[1, 3, 1][..]] {
+            assert_eq!(
+                err(place(&bp, &manual(conflict), &cands, &none())).key,
+                "blueprint.bindingComposeSingleHost"
+            );
+        }
+        // No host satisfies every selector.
+        let s = spec(
+            "compose",
+            &[
+                ("nats", 3, tags(&["cache"])),
+                ("exporter", 3, tags(&["metrics"])),
+            ],
+        );
+        let m = err(place(&bp, &s, &cands, &none()));
+        assert_eq!(m.key, "blueprint.placementSelectorEmpty");
+        assert_eq!(m.params["role"], "nats");
+    }
+
+    #[test]
+    fn compose_rejects_blueprint_without_single_host_support() {
+        assert_eq!(
+            err(place(&nats(), &spec("compose", &[]), &hosts(5), &none())).key,
+            "blueprint.bindingComposeNeedsSingleHost"
+        );
+        // Without distinctHosts roles a single host is always acceptable.
+        let plain = blueprint(vec![role("web", 1, 2, 3, false, json!({}))]);
+        let p = place(&plain, &spec("compose", &[]), &hosts(3), &none()).unwrap();
+        assert_eq!(ids(&p.binding, "web"), [1, 1]);
     }
 }
