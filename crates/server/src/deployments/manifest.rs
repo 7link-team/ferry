@@ -1223,7 +1223,7 @@ fn validate_compose(doc: &Value, mode: &str, portable: bool) -> Result<()> {
             .filter_map(Value::as_str)
             .find_map(|c| {
                 let (key, value) = c.split_once("==")?;
-                (key.trim() == "node.id").then(|| value.trim().to_owned())
+                (key.trim() == "node.id").then(|| value.trim().to_ascii_lowercase())
             });
         if let Some(ports) = service.get("ports") {
             for p in ports
@@ -1581,6 +1581,13 @@ mod tests {
                 "{node:?} {mode}"
             );
         }
+        // Swarm node IDs are case-insensitive.
+        let clash = doc(vec![
+            service("a", Some("ABC"), "host"),
+            service("b", Some("abc"), "host"),
+        ]);
+        let e = parse_for(&clash, "stack").expect_err("case-insensitive conflict");
+        assert_eq!(e.2.unwrap().key, "deployment.manifest.075");
     }
     #[test]
     fn stack_only_fields_rejected_elsewhere() {

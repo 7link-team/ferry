@@ -264,6 +264,8 @@
   "blueprint.swarmManagerRequired": "マネージャーホストは有効な Docker Swarm マネージャーである必要があります（docker info の Swarm.ControlAvailable が true）。",
   "blueprint.swarmNodeUnavailable": "ホスト {host} はマネージャーの Docker Swarm で利用可能なノードではありません。その Swarm に参加し、Ready かつ Active である必要があります。",
   "blueprint.swarmNodesRequired": "stack ブループリントは、バインドされた各ホストをマネージャーの Docker Swarm のノードに解決してからでないとコンパイルできません。",
+  "blueprint.stableReplicasInvalid": "ロール {role} は安定 ID のため、各インスタンスが 1 つのサービスになります。replicas は 1 にするか省略してください。",
+  "blueprint.statelessPlacementInvalid": "ロール {role} はステートレスのため、配置制約に node.id や node.hostname は使用できません。代わりにバインディングでインスタンスのホストを指定してください。",
   "blueprint.bindingColocateCount": "ロール {role} は {target} と同じホストに配置されるため、インスタンス数が同じである必要があります。",
   "blueprint.bindingColocateHost": "インスタンス {instance} は {target} と同じホストで実行する必要があります。",
   "blueprint.bindingComposeSingleHost": "compose ドライバーでは、すべてのインスタンスを 1 台のホストに配置する必要があります。",

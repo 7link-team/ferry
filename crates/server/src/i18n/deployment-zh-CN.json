@@ -264,6 +264,8 @@
   "blueprint.swarmManagerRequired": "管理节点主机必须是可用的 Docker Swarm 管理节点（docker info 中 Swarm.ControlAvailable 为 true）。",
   "blueprint.swarmNodeUnavailable": "主机 {host} 不是管理节点所在 Docker Swarm 的可用节点：必须已加入该 Swarm，且状态为 Ready、可用性为 Active。",
   "blueprint.swarmNodesRequired": "stack 蓝图须先将每个绑定主机解析为管理节点所在 Docker Swarm 的节点，才能编译。",
+  "blueprint.stableReplicasInvalid": "角色 {role} 为稳定身份，每个实例对应一个服务：replicas 必须为 1 或省略。",
+  "blueprint.statelessPlacementInvalid": "角色 {role} 为无状态：其放置约束不能使用 node.id 或 node.hostname，请改为在绑定中指定实例主机。",
   "blueprint.bindingColocateCount": "角色 {role} 与 {target} 同机部署，两者的实例数必须相同。",
   "blueprint.bindingColocateHost": "实例 {instance} 必须与 {target} 位于同一主机。",
   "blueprint.bindingComposeSingleHost": "compose 驱动要求所有实例位于同一台主机。",

@@ -205,6 +205,7 @@ fn validate(b: &Blueprint) -> Result<()> {
         }
         total += i.default;
         validate_service(role)?;
+        validate_identity(role)?;
         validate_ports(role)?;
     }
     if total > MAX_INSTANCES {
@@ -262,6 +263,43 @@ fn validate_service(role: &Role) -> Result<()> {
         }
         _ => fail(Message::new("blueprint.serviceInvalid").with("role", &role.name)),
     }
+}
+
+/// A stable instance is one pinned Swarm service, so it runs exactly one task; a stateless
+/// role must not pin nodes itself, since its bound hosts are what the binding checks.
+fn validate_identity(role: &Role) -> Result<()> {
+    let service = &role.service;
+    match role.identity {
+        Identity::Stable => {
+            if service
+                .get("replicas")
+                .is_some_and(|r| r.as_u64() != Some(1))
+            {
+                return fail(
+                    Message::new("blueprint.stableReplicasInvalid").with("role", &role.name),
+                );
+            }
+        }
+        Identity::Stateless => {
+            let pins_node = service
+                .pointer("/placement/constraints")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .any(|c| {
+                    let key = c.split(['=', '!']).next().unwrap_or_default();
+                    let key = key.trim().to_ascii_lowercase();
+                    key == "node.id" || key == "node.hostname"
+                });
+            if pins_node {
+                return fail(
+                    Message::new("blueprint.statelessPlacementInvalid").with("role", &role.name),
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_ports(role: &Role) -> Result<()> {
@@ -484,6 +522,52 @@ mod tests {
         v["update"]["maxParallel"] = json!(2);
         assert_eq!(err_key(&v), "blueprint.stableMaxParallel");
         v["roles"][0]["identity"] = json!("stateless");
+        assert!(parse_v(&v).is_ok());
+    }
+
+    #[test]
+    fn stable_role_replicas_must_be_one() {
+        let mut v = nats();
+        v["roles"][0]["service"]["replicas"] = json!(3);
+        assert_eq!(err_key(&v), "blueprint.stableReplicasInvalid");
+        let e = parse_v(&v).unwrap_err().2.unwrap();
+        assert_eq!(e.params["role"], "nats");
+        v["roles"][0]["service"]["replicas"] = json!("3");
+        assert_eq!(err_key(&v), "blueprint.stableReplicasInvalid");
+        v["roles"][0]["service"]["replicas"] = json!(1);
+        assert!(parse_v(&v).is_ok());
+        v["roles"][0]["service"]
+            .as_object_mut()
+            .unwrap()
+            .remove("replicas");
+        assert!(parse_v(&v).is_ok());
+        // Stateless roles may carry replicas; the stack compiler replaces them.
+        let mut v = nats();
+        v["roles"][2]["service"]["replicas"] = json!(3);
+        assert!(parse_v(&v).is_ok());
+    }
+
+    #[test]
+    fn stateless_role_cannot_pin_nodes() {
+        for constraint in [
+            "node.id==abc",
+            "node.hostname==web1",
+            " Node.ID != abc",
+            "node.hostname!=web1",
+        ] {
+            let mut v = nats();
+            v["roles"][2]["service"]["placement"] = json!({"constraints": [constraint]});
+            assert_eq!(
+                err_key(&v),
+                "blueprint.statelessPlacementInvalid",
+                "{constraint}"
+            );
+            let e = parse_v(&v).unwrap_err().2.unwrap();
+            assert_eq!(e.params["role"], "gateway");
+        }
+        let mut v = nats();
+        v["roles"][2]["service"]["placement"] = json!({"constraints": [
+            "node.role==worker", "node.labels.zone==a", "node.platform.os==linux"]});
         assert!(parse_v(&v).is_ok());
     }
 

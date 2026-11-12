@@ -264,6 +264,8 @@
   "blueprint.swarmManagerRequired": "The manager host must be an active Docker Swarm manager (docker info reports Swarm.ControlAvailable=true).",
   "blueprint.swarmNodeUnavailable": "Host {host} is not an available node of the manager's Docker Swarm; it must have joined that Swarm and be Ready and Active.",
   "blueprint.swarmNodesRequired": "Stack blueprints compile only after every bound host has been resolved to a node of the manager's Docker Swarm.",
+  "blueprint.stableReplicasInvalid": "Role {role} has a stable identity, so each instance is one service: replicas must be 1 or omitted.",
+  "blueprint.statelessPlacementInvalid": "Role {role} is stateless: its placement constraints may not use node.id or node.hostname; bind its instances to hosts instead.",
   "blueprint.bindingColocateCount": "Role {role} is colocated with {target}, so both must have the same number of instances.",
   "blueprint.bindingColocateHost": "Instance {instance} must run on the same host as {target}.",
   "blueprint.bindingComposeSingleHost": "The compose driver requires all instances to be on a single host.",

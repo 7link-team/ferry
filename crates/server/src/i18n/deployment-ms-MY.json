@@ -264,6 +264,8 @@
   "blueprint.swarmManagerRequired": "Hos pengurus mestilah pengurus Docker Swarm yang aktif (docker info melaporkan Swarm.ControlAvailable=true).",
   "blueprint.swarmNodeUnavailable": "Hos {host} bukan nod tersedia dalam Docker Swarm pengurus; ia mesti menyertai Swarm tersebut dan berstatus Ready serta Active.",
   "blueprint.swarmNodesRequired": "Pelan tindakan stack hanya boleh dikompil selepas setiap hos terikat dipadankan dengan nod dalam Docker Swarm pengurus.",
+  "blueprint.stableReplicasInvalid": "Peranan {role} mempunyai identiti stabil, jadi setiap instans ialah satu perkhidmatan: replicas mesti 1 atau ditinggalkan.",
+  "blueprint.statelessPlacementInvalid": "Peranan {role} tanpa keadaan: kekangan penempatannya tidak boleh menggunakan node.id atau node.hostname; ikat instansnya kepada hos sebaliknya.",
   "blueprint.bindingColocateCount": "Peranan {role} diletakkan bersama {target}, jadi kedua-duanya mesti mempunyai bilangan instans yang sama.",
   "blueprint.bindingColocateHost": "Instans {instance} mesti berjalan pada hos yang sama dengan {target}.",
   "blueprint.bindingComposeSingleHost": "Pemacu compose memerlukan semua instans berada pada satu hos.",

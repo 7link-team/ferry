@@ -720,8 +720,10 @@ mod tests {
         for plan in compile(&redis_sentinel(26379, "tcp"), &b, None).unwrap() {
             assert!(manifest::parse_for(&plan.manifest, "docker").is_ok());
         }
-        // A driver-level rule (docker forbids replicas) surfaces unchanged.
+        // A driver-level rule (docker forbids replicas) surfaces unchanged; the role is
+        // stateless because the model already rejects replicas on stable roles.
         let mut v: Value = serde_json::from_str(&redis_sentinel(26379, "tcp")).unwrap();
+        v["roles"][0]["identity"] = json!("stateless");
         v["roles"][0]["service"]["replicas"] = json!(2);
         assert_eq!(
             err_key(compile(&v.to_string(), &b, None)).0,
@@ -921,6 +923,11 @@ mod tests {
             ("gateway", 0, "gateway")
         );
         assert_eq!(inst.ports["http"], 80);
+        // The binding's instance count wins over replicas written by the author.
+        let mut v: Value = serde_json::from_str(&nats_with_gateway(8080)).unwrap();
+        v["roles"][1]["service"]["replicas"] = json!(5);
+        let plans = compile(&v.to_string(), &stack_hosts(), Some(&stack_nodes())).unwrap();
+        assert_eq!(service(&doc(&plans[0]), "gateway")["replicas"], 2);
     }
 
     #[test]
