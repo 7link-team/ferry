@@ -300,10 +300,21 @@ async fn validate(conn: &impl ConnectionTrait, scope: &Scope, body: &Body) -> Re
             .await?
             .ok_or_else(ApiError::missing)?;
         if !body.service_name.is_empty() {
-            let manifest = crate::deployments::manifest::parse_for(&app.manifest, &app.mode)?;
-            if !manifest
-                .services
+            let manifests = if app.target_kind == "blueprint" {
+                runtime::blueprint_targets(conn, &app)
+                    .await?
+                    .into_iter()
+                    .map(|(_, manifest)| manifest)
+                    .collect()
+            } else {
+                vec![crate::deployments::manifest::parse_for(
+                    &app.manifest,
+                    &app.mode,
+                )?]
+            };
+            if !manifests
                 .iter()
+                .flat_map(|manifest| &manifest.services)
                 .any(|service| service.name == body.service_name)
             {
                 return Err(bad("monitoring.bindingInvalid"));
@@ -843,9 +854,16 @@ pub async fn applications(
             .cloned()
             .collect();
         let mut required_hosts = Vec::new();
-        // Blueprint revisions store per-host applications, not one manifest: no derived
-        // topology for them yet.
-        if app.target_kind == "host" {
+        // Blueprint revisions store each target host's compiled application.
+        let mut compiled = HashMap::new();
+        if app.target_kind == "blueprint" && scope.permissions.contains("hosts.read") {
+            compiled = runtime::blueprint_targets(&s.db, &app)
+                .await?
+                .into_iter()
+                .collect();
+            required_hosts = compiled.keys().copied().collect();
+            required_hosts.sort_unstable();
+        } else if app.target_kind == "host" {
             required_hosts.push(app.target_ref);
         } else if app.target_kind == "host-group" && scope.permissions.contains("hosts.read") {
             use crate::entities::hosts;
@@ -870,21 +888,27 @@ pub async fn applications(
         // Derive expected replicas from the deployed topology, including targets
         // that have never produced a sample. An empty observation is not zero demand.
         let mut topology = Vec::new();
+        let instance_hosts = runtime::blueprint_instance_hosts(&app);
+        let mut placement = Vec::new();
         for host in &required_hosts {
             let revision_id = runtime::running_revision(&s.db, &app, *host).await?;
             if revision_id == 0 {
                 continue;
             }
-            use crate::entities::deployment_revisions as revisions;
-            let Some(revision) = revisions::Entity::find_by_id(revision_id)
-                .filter(revisions::Column::WorkspaceId.eq(scope.workspace_id))
-                .filter(revisions::Column::DeploymentId.eq(app.id))
-                .one(&s.db)
-                .await?
-            else {
-                continue;
+            let manifest = if let Some(manifest) = compiled.remove(host) {
+                manifest
+            } else {
+                use crate::entities::deployment_revisions as revisions;
+                let Some(revision) = revisions::Entity::find_by_id(revision_id)
+                    .filter(revisions::Column::WorkspaceId.eq(scope.workspace_id))
+                    .filter(revisions::Column::DeploymentId.eq(app.id))
+                    .one(&s.db)
+                    .await?
+                else {
+                    continue;
+                };
+                crate::deployments::manifest::parse_for(&revision.manifest, &app.mode)?
             };
-            let manifest = crate::deployments::manifest::parse_for(&revision.manifest, &app.mode)?;
             let runtime_scope = own
                 .iter()
                 .filter(|row| row.kind == "runtime" && row.host_id == *host && row.enabled == 1)
@@ -931,8 +955,23 @@ pub async fn applications(
                     .map(|sample| sample.observed)
                     .min()
                     .unwrap_or(0);
+                if app.target_kind == "blueprint" {
+                    // One entry per instance; its own name is unique across the deployment.
+                    let (role, instance_host) = instance_hosts
+                        .get(&service.name)
+                        .cloned()
+                        .unwrap_or_else(|| (String::new(), *host));
+                    let state = if unknown > 0 {
+                        "unknown"
+                    } else if healthy >= expected {
+                        "up"
+                    } else {
+                        "down"
+                    };
+                    placement.push(json!({"name":service.name,"role":role,"host_id":Id::from(instance_host),"state":state,"expected":expected,"healthy":healthy,"unknown":unknown}));
+                }
                 topology.push(runtime::Service {
-                    name: if required_hosts.len() > 1 {
+                    name: if required_hosts.len() > 1 && app.target_kind != "blueprint" {
                         format!(
                             "{} · {}",
                             service.name,
@@ -978,12 +1017,23 @@ pub async fn applications(
             // Missing collectors are an explicit coverage gap, never zero failed replicas.
             // Unknown host coverage is reported separately from instance counts.
         }
+        crate::resources::names::attach(
+            &s.db,
+            scope.workspace_id,
+            &mut placement,
+            &[crate::resources::names::of(
+                "host_id",
+                "host_name",
+                crate::resources::names::Kind::Host,
+            )],
+        )
+        .await?;
         let checks: Vec<_> = own.into_iter().map(public).collect();
         let instances: Vec<Value> = checks
             .iter()
             .flat_map(|row| row["instances"].as_array().cloned().unwrap_or_default())
             .collect();
-        items.push(json!({"id":Id::from(app.id),"name":app.name,"deployment_state":app.state,"health":if matches!(app.state.as_str(),"running"|"queued"|"applying") {"updating"} else {summary.state.as_str()},"entry_state":summary.entry_state,"healthy_instances":summary.healthy,"expected_instances":summary.expected,"unknown_instances":summary.unknown,"unmonitored_hosts":missing_hosts,"services":summary.services,"instances":instances,"checks":checks}));
+        items.push(json!({"id":Id::from(app.id),"name":app.name,"deployment_state":app.state,"health":if matches!(app.state.as_str(),"running"|"queued"|"applying") {"updating"} else {summary.state.as_str()},"entry_state":summary.entry_state,"healthy_instances":summary.healthy,"expected_instances":summary.expected,"unknown_instances":summary.unknown,"unmonitored_hosts":missing_hosts,"services":summary.services,"placement":placement,"instances":instances,"checks":checks}));
     }
     Ok(Json(
         json!({"items":items,"total":total,"page":query.page,"page_size":query.page_size}),

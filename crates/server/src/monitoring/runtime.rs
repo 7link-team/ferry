@@ -40,11 +40,105 @@ pub(super) async fn validate_host(
         .ok_or_else(ApiError::missing)?;
     if (app.target_kind == "host" && app.target_ref == host_id)
         || (app.target_kind == "host-group" && app.target_ref == host.group_id)
+        || (app.target_kind == "blueprint" && blueprint_hosts(conn, &app).await?.contains(&host_id))
     {
         Ok(())
     } else {
         Err(bad("monitoring.bindingInvalid"))
     }
+}
+/// Each target host's compiled application in a blueprint revision's stored `rendered`.
+fn rendered_targets(rendered: &str) -> Vec<(i64, String)> {
+    let doc: Value = serde_json::from_str(rendered).unwrap_or_default();
+    doc["targets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|target| {
+            let host = Id::reference(target["host_id"].as_str()?).ok()?;
+            Some((host.into(), target["manifest"].as_str()?.to_owned()))
+        })
+        .collect()
+}
+/// A blueprint deployment's target hosts and their compiled applications, as its current
+/// revision stored them (never recompiled); none before the first revision.
+pub(super) async fn blueprint_targets(
+    conn: &impl ConnectionTrait,
+    app: &deployments::Model,
+) -> Result<Vec<(i64, crate::deployments::manifest::Manifest)>> {
+    let Some(revision) = deployment_revisions::Entity::find_by_id(app.current_revision)
+        .filter(deployment_revisions::Column::WorkspaceId.eq(app.workspace_id))
+        .filter(deployment_revisions::Column::DeploymentId.eq(app.id))
+        .one(conn)
+        .await?
+    else {
+        return Ok(Vec::new());
+    };
+    rendered_targets(&revision.rendered)
+        .into_iter()
+        .map(|(host, manifest)| {
+            Ok((
+                host,
+                crate::deployments::manifest::parse_for(&manifest, &app.mode)?,
+            ))
+        })
+        .collect()
+}
+/// Where each blueprint instance (service) runs: a stack's stable instances on the hosts its
+/// binding pins them to, a stateless role on the manager; elsewhere on the bound host.
+pub(super) fn blueprint_instance_hosts(app: &deployments::Model) -> HashMap<String, (String, i64)> {
+    let Some(binding) = app
+        .blueprint_binding
+        .as_deref()
+        .and_then(|text| crate::blueprint::binding::parse(text).ok())
+    else {
+        return HashMap::new();
+    };
+    let mut hosts: HashMap<String, (String, i64)> = binding
+        .roles
+        .iter()
+        .flat_map(|(role, list)| {
+            list.iter().enumerate().map(move |(index, instance)| {
+                (
+                    format!("{role}-{index}"),
+                    (role.clone(), i64::from(instance.host_id)),
+                )
+            })
+        })
+        .collect();
+    // A stack's stateless role is one service named after the role, replicated by Swarm
+    // from its manager: it has no fixed host.
+    if let Some(manager) = binding.manager {
+        for role in binding.roles.keys() {
+            hosts.insert(role.clone(), (role.clone(), manager.into()));
+        }
+    }
+    hosts
+}
+/// Hosts a runtime check may observe a blueprint deployment from: its current revision's
+/// targets and, for a stack, the manager and every host its binding pins instances to.
+async fn blueprint_hosts(
+    conn: &impl ConnectionTrait,
+    app: &deployments::Model,
+) -> Result<Vec<i64>> {
+    let mut hosts: Vec<i64> = blueprint_targets(conn, app)
+        .await?
+        .into_iter()
+        .map(|(host, _)| host)
+        .collect();
+    if app.mode == "stack" {
+        let binding =
+            crate::blueprint::binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
+        hosts.extend(binding.manager.map(i64::from));
+        hosts.extend(
+            binding
+                .roles
+                .values()
+                .flatten()
+                .map(|i| i64::from(i.host_id)),
+        );
+    }
+    Ok(hosts)
 }
 pub(super) async fn running_revision(
     conn: &impl ConnectionTrait,
@@ -94,7 +188,19 @@ pub(super) async fn probe(
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
-    let manifest = crate::deployments::manifest::parse_for(&revision.manifest, &app.mode)?;
+    let manifest = if app.target_kind == "blueprint" {
+        // A blueprint revision stores each target host's compiled application.
+        let Some((_, manifest)) = rendered_targets(&revision.rendered)
+            .into_iter()
+            .find(|(host, _)| *host == row.host_id)
+        else {
+            return Ok(unknown("monitoring.noRevision"));
+        };
+        manifest
+    } else {
+        revision.manifest.clone()
+    };
+    let manifest = crate::deployments::manifest::parse_for(&manifest, &app.mode)?;
     let channel = crate::hosts::remote::open(s, &scope.workspace_id, &row.host_id.into()).await?;
     let mut result = Observation {
         outcome: "up".into(),

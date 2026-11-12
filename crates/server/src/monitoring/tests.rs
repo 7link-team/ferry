@@ -467,3 +467,393 @@ fn application_entry_success_cannot_hide_a_service_failure_or_stale_observer() {
     );
     assert_eq!(runtime::aggregate(&[&entry], 1001).state, "unknown");
 }
+
+// ---------------------------------------------------------------- blueprint deployments
+
+fn application(services: &[(&str, u32)]) -> String {
+    let services: Vec<Value> = services
+        .iter()
+        .map(|(name, replicas)| json!({"name": name, "image": "nats:2", "replicas": replicas}))
+        .collect();
+    json!({"apiVersion": "ferry/v2", "kind": "Application",
+           "metadata": {"name": "nats"}, "services": services})
+    .to_string()
+}
+
+/// Workspace 1 hosts `base`..`base+4` (`base+4` is in no deployment) and, in workspace 2,
+/// host `base+9`. Blueprint deployment `base` (docker) runs `nats-0` on `base` and `nats-1`
+/// on `base+1`; deployment `base+1` (stack, managed by `base+2`) pins `nats-0`/`nats-1` to
+/// `base`/`base+1` and replicates the stateless `gateway`; deployment `base+3` has never
+/// been deployed.
+async fn blueprint_fixture(base: i64) -> (tempfile::TempDir, AppState) {
+    use crate::entities::{deployment_revisions as revisions, deployment_target_states, hosts};
+    use sea_orm::IntoActiveModel;
+    let (dir, s) = crate::platform_tools::tests::setup().await;
+    for (id, workspace) in (0..5).map(|i| (base + i, 1)).chain([(base + 9, 2)]) {
+        crate::hosts::fake::register(id);
+        hosts::Entity::insert(hosts::ActiveModel {
+            id: Set(id),
+            workspace_id: Set(workspace),
+            name: Set(format!("Host {id}")),
+            address: Set("192.0.2.1".into()),
+            port: Set(22),
+            username: Set("test".into()),
+            connection: Set("fake".into()),
+            state: Set("online".into()),
+            group_id: Set(0),
+            description: Set(String::new()),
+            host_key: Set(String::new()),
+            runner_key_hash: Set(String::new()),
+            enroll_token: Set(String::new()),
+            enroll_token_hash: Set(String::new()),
+            seen_at: Set(0),
+            created_at: Set(0),
+            updated_at: Set(0),
+            version: Set(1),
+            os: Set("linux".into()),
+            arch: Set(String::new()),
+            agent_version: Set(String::new()),
+            metrics: Set(String::new()),
+            credential_id: Set(0),
+            ..Default::default()
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+    }
+    let bound = |hosts: &[i64]| -> Vec<Value> {
+        hosts
+            .iter()
+            .map(|h| json!({"hostId": h.to_string(), "address": "10.0.0.1"}))
+            .collect()
+    };
+    let docker = json!({"driver": "docker", "roles": {"nats": bound(&[base, base + 1])}});
+    let stack = json!({"driver": "stack", "manager": (base + 2).to_string(),
+                       "roles": {"nats": bound(&[base, base + 1]),
+                                 "gateway": bound(&[base, base + 1])}});
+    let rendered = |targets: Vec<(i64, String)>| {
+        json!({"targets": targets.into_iter().map(|(host, manifest)|
+            json!({"host_id": host.to_string(), "manifest": manifest, "files": []}))
+            .collect::<Vec<_>>()})
+        .to_string()
+    };
+    let deployments = [
+        (
+            base,
+            "docker",
+            docker,
+            rendered(vec![
+                (base, application(&[("nats-0", 1)])),
+                (base + 1, application(&[("nats-1", 1)])),
+            ]),
+            vec![base, base + 1],
+        ),
+        (
+            base + 1,
+            "stack",
+            stack,
+            rendered(vec![(
+                base + 2,
+                application(&[("nats-0", 1), ("nats-1", 1), ("gateway", 2)]),
+            )]),
+            vec![base + 2],
+        ),
+    ];
+    for (id, mode, binding, rendered, targets) in deployments {
+        let revision = id + 100;
+        deployments::Entity::insert(
+            deployments::Model {
+                id,
+                workspace_id: 1,
+                name: format!("bp-{id}"),
+                category: String::new(),
+                manifest: "{\"kind\":\"Blueprint\"}".into(),
+                preview_artifact: String::new(),
+                mode: mode.into(),
+                target_kind: "blueprint".into(),
+                target_ref: 0,
+                workdir: "/srv".into(),
+                description: String::new(),
+                state: "succeeded".into(),
+                revision_number: 1,
+                current_revision: revision,
+                created_at: 0,
+                updated_at: 0,
+                version: 1,
+                blueprint_binding: Some(binding.to_string()),
+                deploy_spec: None,
+            }
+            .into_active_model(),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+        revisions::Entity::insert(
+            revisions::Model {
+                id: revision,
+                workspace_id: 1,
+                deployment_id: id,
+                number: 1,
+                action: "deploy".into(),
+                source_revision: 0,
+                manifest: "{\"kind\":\"Blueprint\"}".into(),
+                rendered,
+                artifact: String::new(),
+                variable_snapshot: None,
+                expected_hash: String::new(),
+                state: "succeeded".into(),
+                output: String::new(),
+                triggered_by: 1,
+                started_at: 0,
+                finished_at: 0,
+                created_at: 0,
+                updated_at: 0,
+                version: 1,
+            }
+            .into_active_model(),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+        for (index, host) in (0..).zip(targets) {
+            deployment_target_states::Entity::insert(deployment_target_states::ActiveModel {
+                id: Set(revision * 10 + index),
+                workspace_id: Set(1),
+                deployment_id: Set(id),
+                host_id: Set(host),
+                current_revision: Set(revision),
+            })
+            .exec(&s.db)
+            .await
+            .unwrap();
+        }
+    }
+    let mut never = deployments::Entity::find_by_id(base)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    never.id = base + 3;
+    never.current_revision = 0;
+    never.state = "draft".into();
+    deployments::Entity::insert(never.into_active_model())
+        .exec(&s.db)
+        .await
+        .unwrap();
+    (dir, s)
+}
+
+fn admin() -> Scope {
+    crate::agents::tests::admin(1)
+}
+
+async fn create_check(s: &AppState, body: Value) -> Result<(StatusCode, Json<Value>)> {
+    create(
+        State(s.clone()),
+        admin(),
+        Json(serde_json::from_value(body).unwrap()),
+    )
+    .await
+}
+
+fn runtime_body(deployment: i64, host: i64) -> Value {
+    json!({"name": "runtime", "kind": "runtime", "role": "service",
+           "deployment_id": deployment.to_string(), "host_id": host.to_string()})
+}
+
+fn service_body(deployment: i64, service: &str) -> Value {
+    json!({"name": "svc", "kind": "http", "role": "service", "address": "http://example.invalid/",
+           "deployment_id": deployment.to_string(), "service_name": service})
+}
+
+fn error_key(error: ApiError) -> String {
+    error.2.map(|m| m.key).unwrap_or(error.1)
+}
+
+async fn health_of(s: &AppState, deployment: i64) -> Value {
+    let Json(value) = applications(
+        State(s.clone()),
+        admin(),
+        Query(HashMap::from([(
+            "id".into(),
+            Id::from(deployment).to_string(),
+        )])),
+    )
+    .await
+    .unwrap();
+    value["items"][0].clone()
+}
+
+fn placed(item: &Value) -> Vec<(String, String, String)> {
+    item["placement"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            (
+                entry["name"].as_str().unwrap().to_owned(),
+                entry["host_name"].as_str().unwrap().to_owned(),
+                entry["state"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn blueprint_application_lists_instances_per_host() {
+    let base = 7100;
+    let (_dir, s) = blueprint_fixture(base).await;
+    // One collector on the first docker host, observing its own instance as healthy.
+    let mut check = row();
+    check.id = 9;
+    check.kind = "runtime".into();
+    check.role = "service".into();
+    check.deployment_id = base;
+    check.host_id = base;
+    check.checked_at = db::now();
+    let mut observation = observed("up");
+    observation.revision_id = Id::from(base + 100).to_string();
+    observation.services = vec![runtime::Service {
+        name: "nats-0".into(),
+        expected: 1,
+        healthy: 1,
+        observed: 1,
+        unknown: 0,
+    }];
+    check.result = serde_json::to_string(&CheckResult {
+        confirmed: "up".into(),
+        observation,
+        ..Default::default()
+    })
+    .unwrap();
+    {
+        use sea_orm::IntoActiveModel;
+        checks::Entity::insert(check.into_active_model())
+            .exec(&s.db)
+            .await
+            .unwrap();
+    }
+    let docker = health_of(&s, base).await;
+    assert_eq!(
+        placed(&docker),
+        [
+            ("nats-0".into(), format!("Host {base}"), "up".into()),
+            (
+                "nats-1".into(),
+                format!("Host {}", base + 1),
+                "unknown".into()
+            ),
+        ]
+    );
+    assert_eq!(docker["expected_instances"], 2);
+    assert_eq!(docker["healthy_instances"], 1);
+    // The second host has no collector: a coverage gap, never a claim of health.
+    assert_eq!(docker["unmonitored_hosts"], 1);
+    assert_eq!(docker["health"], "unknown");
+
+    // A stack runs on its manager; stable instances report their pinned hosts, the
+    // stateless role one entry on the manager.
+    let stack = health_of(&s, base + 1).await;
+    assert_eq!(
+        placed(&stack),
+        [
+            ("nats-0".into(), format!("Host {base}"), "unknown".into()),
+            (
+                "nats-1".into(),
+                format!("Host {}", base + 1),
+                "unknown".into()
+            ),
+            (
+                "gateway".into(),
+                format!("Host {}", base + 2),
+                "unknown".into()
+            ),
+        ]
+    );
+    assert_eq!(stack["expected_instances"], 4);
+    assert_eq!(stack["unmonitored_hosts"], 1);
+
+    // Never deployed: nothing to list, and not an error.
+    let never = health_of(&s, base + 3).await;
+    assert_eq!(never["placement"], json!([]));
+    assert_eq!(never["health"], "unknown");
+}
+
+#[tokio::test]
+async fn runtime_check_allowed_for_blueprint_target_host() {
+    let base = 7200;
+    let (_dir, s) = blueprint_fixture(base).await;
+    for host in [base, base + 1] {
+        create_check(&s, runtime_body(base, host)).await.unwrap();
+    }
+    // A workspace host the current revision does not deploy to.
+    let error = create_check(&s, runtime_body(base, base + 4))
+        .await
+        .unwrap_err();
+    assert_eq!(error_key(error), "monitoring.bindingInvalid");
+    // Another workspace's host stays invisible.
+    assert!(
+        create_check(&s, runtime_body(base, base + 9))
+            .await
+            .is_err()
+    );
+    // A stack: its manager target and the hosts its binding pins instances to.
+    for host in [base + 2, base, base + 1] {
+        create_check(&s, runtime_body(base + 1, host))
+            .await
+            .unwrap();
+    }
+    let error = create_check(&s, runtime_body(base + 1, base + 4))
+        .await
+        .unwrap_err();
+    assert_eq!(error_key(error), "monitoring.bindingInvalid");
+    // Never deployed: no targets yet.
+    let error = create_check(&s, runtime_body(base + 3, base))
+        .await
+        .unwrap_err();
+    assert_eq!(error_key(error), "monitoring.bindingInvalid");
+}
+
+#[tokio::test]
+async fn service_check_validates_against_compiled_manifests() {
+    let base = 7300;
+    let (_dir, s) = blueprint_fixture(base).await;
+    for (deployment, service) in [(base, "nats-0"), (base, "nats-1"), (base + 1, "gateway")] {
+        create_check(&s, service_body(deployment, service))
+            .await
+            .unwrap();
+    }
+    // The role name and an instance the revision does not deploy are not services.
+    for (deployment, service) in [(base, "nats"), (base, "nats-2"), (base + 3, "nats-0")] {
+        let error = create_check(&s, service_body(deployment, service))
+            .await
+            .unwrap_err();
+        assert_eq!(error_key(error), "monitoring.bindingInvalid", "{service}");
+    }
+}
+
+#[tokio::test]
+async fn runtime_probe_reads_blueprint_target_manifest() {
+    let base = 7400;
+    let (_dir, s) = blueprint_fixture(base).await;
+    crate::hosts::fake::get(base + 1).respond(
+        "docker container ls",
+        "{\"ID\":\"c1\",\"State\":\"running\",\"Status\":\"Up 1 minute\"}\n",
+    );
+    let mut check = row();
+    check.kind = "runtime".into();
+    check.role = "service".into();
+    check.deployment_id = base;
+    check.host_id = base + 1;
+    let observation = runtime::probe(&s, &admin(), &check, &Settings::default())
+        .await
+        .unwrap();
+    assert_eq!(observation.outcome, "up", "{observation:?}");
+    assert_eq!(observation.revision_id, Id::from(base + 100).to_string());
+    let names: Vec<_> = observation
+        .services
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    assert_eq!(names, ["nats-1"]);
+}
