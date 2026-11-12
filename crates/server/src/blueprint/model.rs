@@ -12,6 +12,10 @@ const MAX_ROLES: usize = 10;
 pub(super) const MAX_INSTANCES: u32 = 100;
 const DRIVERS: [&str; 5] = ["native", "docker", "compose", "stack", "k8s"];
 const ENDPOINT_KINDS: [&str; 3] = ["discovery", "vip", "direct"];
+const HOOK_NAMES: [&str; 3] = ["join", "leave", "healthy"];
+const MAX_HOOK_ARGS: usize = 32;
+const MAX_HOOK_ARG_CHARS: usize = 1024;
+const MAX_HOOK_BYTES: usize = 4096;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -55,6 +59,60 @@ pub struct Role {
     pub ports: Vec<RolePort>,
     /// ferry/v2 Service template without `name` and `ports`.
     pub service: Value,
+    /// Read by failover only; the compiler ignores it.
+    #[serde(default, skip_serializing_if = "RoleFailover::is_default")]
+    pub failover: RoleFailover,
+    /// Per-instance commands run around a replacement; the compiler ignores them.
+    #[serde(default, skip_serializing_if = "RoleHooks::is_empty")]
+    pub hooks: RoleHooks,
+}
+
+/// Whether a stable role's members may be replaced on another host (replicated data).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Replace {
+    Supported,
+    #[default]
+    Unsupported,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoleFailover {
+    #[serde(default)]
+    pub replace: Replace,
+}
+
+impl RoleFailover {
+    fn is_default(&self) -> bool {
+        self.replace == Replace::default()
+    }
+}
+
+/// Argv lists rendered with the instance context (`.Instance`, `.Role`) when they run.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoleHooks {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leave: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub healthy: Option<Vec<String>>,
+}
+
+impl RoleHooks {
+    fn is_empty(&self) -> bool {
+        self.join.is_none() && self.leave.is_none() && self.healthy.is_none()
+    }
+
+    fn named(&self) -> [(&'static str, Option<&Vec<String>>); 3] {
+        [
+            ("join", self.join.as_ref()),
+            ("leave", self.leave.as_ref()),
+            ("healthy", self.healthy.as_ref()),
+        ]
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -167,11 +225,67 @@ pub fn is_blueprint(text: &str) -> bool {
 }
 
 pub fn parse(text: &str) -> Result<Blueprint> {
-    let Ok(blueprint) = serde_json::from_str::<Blueprint>(text) else {
+    let Ok(doc) = serde_json::from_str::<Value>(text) else {
+        return fail(Message::new("blueprint.invalidDocument"));
+    };
+    check_hook_shapes(&doc)?;
+    let Ok(blueprint) = serde_json::from_value::<Blueprint>(doc) else {
         return fail(Message::new("blueprint.invalidDocument"));
     };
     validate(&blueprint)?;
     Ok(blueprint)
+}
+
+fn hook_invalid<T>(role: &str, hook: &str) -> Result<T> {
+    fail(
+        Message::new("blueprint.hookInvalid")
+            .with("role", role)
+            .with("hook", hook),
+    )
+}
+
+/// A role hook that is not a list of strings would otherwise surface only as an invalid
+/// document; name the role and hook instead.
+fn check_hook_shapes(doc: &Value) -> Result<()> {
+    let roles = doc
+        .get("roles")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten();
+    for role in roles {
+        let Some(hooks) = role.get("hooks").and_then(Value::as_object) else {
+            continue;
+        };
+        let name = role.get("name").and_then(Value::as_str).unwrap_or_default();
+        for hook in HOOK_NAMES {
+            let argv_ok = match hooks.get(hook) {
+                None | Some(Value::Null) => true,
+                Some(Value::Array(items)) => items.iter().all(Value::is_string),
+                Some(_) => false,
+            };
+            if !argv_ok {
+                return hook_invalid(name, hook);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Each hook: 1–32 arguments of 1–1024 characters, at most 4096 bytes in all, each a valid
+/// template.
+fn validate_hooks(role: &Role) -> Result<()> {
+    for (hook, argv) in role.hooks.named() {
+        let Some(argv) = argv else { continue };
+        let bounded = (1..=MAX_HOOK_ARGS).contains(&argv.len())
+            && argv
+                .iter()
+                .all(|a| (1..=MAX_HOOK_ARG_CHARS).contains(&a.chars().count()))
+            && argv.iter().map(String::len).sum::<usize>() <= MAX_HOOK_BYTES;
+        if !bounded || argv.iter().any(|a| super::template::check(a).is_err()) {
+            return hook_invalid(&role.name, hook);
+        }
+    }
+    Ok(())
 }
 
 fn validate(b: &Blueprint) -> Result<()> {
@@ -207,6 +321,7 @@ fn validate(b: &Blueprint) -> Result<()> {
         validate_service(role)?;
         validate_identity(role)?;
         validate_ports(role)?;
+        validate_hooks(role)?;
     }
     if total > MAX_INSTANCES {
         return fail(Message::new("blueprint.instancesTotal"));
@@ -514,6 +629,122 @@ mod tests {
         assert_eq!(err_key(&v), "blueprint.hooksNotYetSupported");
         v.as_object_mut().unwrap().remove("hooks");
         assert!(parse_v(&v).is_ok());
+    }
+
+    #[test]
+    fn role_failover_and_hooks_parse() {
+        let b = parse_v(&nats()).unwrap();
+        for role in &b.roles {
+            assert_eq!(role.failover.replace, Replace::Unsupported);
+            assert_eq!(role.hooks.join, None);
+            assert_eq!(role.hooks.leave, None);
+            assert_eq!(role.hooks.healthy, None);
+        }
+        let mut v = nats();
+        v["roles"][0]["failover"] = json!({"replace": "supported"});
+        v["roles"][0]["hooks"] = json!({
+            "join": ["nats-join", "{{ .Instance.Name }}"],
+            "leave": ["nats-leave", "{{ .Instance.Host }}"],
+            "healthy": ["curl", "-f", "http://127.0.0.1:8222/healthz"]
+        });
+        let b = parse_v(&v).unwrap();
+        let role = &b.roles[0];
+        assert_eq!(role.failover.replace, Replace::Supported);
+        assert_eq!(
+            role.hooks.join.as_deref(),
+            Some(&["nats-join".to_string(), "{{ .Instance.Name }}".to_string()][..])
+        );
+        assert_eq!(role.hooks.leave.as_ref().unwrap().len(), 2);
+        assert_eq!(role.hooks.healthy.as_ref().unwrap()[0], "curl");
+        // Defaults are not written back.
+        let text = serde_json::to_string(&parse_v(&nats()).unwrap().roles[0]).unwrap();
+        assert!(
+            !text.contains("failover") && !text.contains("hooks"),
+            "{text}"
+        );
+        let mut v = nats();
+        v["roles"][0]["failover"] = json!({"replace": "sometimes"});
+        assert_eq!(err_key(&v), "blueprint.invalidDocument");
+        let mut v = nats();
+        v["roles"][0]["failover"] = json!({"replace": "supported", "promote": true});
+        assert_eq!(err_key(&v), "blueprint.invalidDocument");
+        let mut v = nats();
+        v["roles"][0]["hooks"] = json!({"backup": ["true"]});
+        assert_eq!(err_key(&v), "blueprint.invalidDocument");
+    }
+
+    #[test]
+    fn hooks_must_be_bounded_argv() {
+        let long_items: Vec<String> = (0..5).map(|_| "x".repeat(1000)).collect();
+        let cases = [
+            ("join", json!([])),
+            (
+                "leave",
+                json!((0..33).map(|i| format!("a{i}")).collect::<Vec<_>>()),
+            ),
+            ("healthy", json!(["ok", "x".repeat(1025)])),
+            ("join", json!(long_items)),
+            ("leave", json!(["ok", 7])),
+            ("healthy", json!("true")),
+            ("join", json!(["echo", "{{ .Bogus }}"])),
+            ("join", json!([""])),
+        ];
+        for (hook, list) in cases {
+            let mut v = nats();
+            v["roles"][1]["hooks"] = json!({ hook: list.clone() });
+            let e = parse_v(&v).expect_err(&format!("{hook}: {list}"));
+            let m = e.2.expect("localized");
+            assert_eq!(m.key, "blueprint.hookInvalid", "{hook}: {list}");
+            assert_eq!(m.params["role"], "exporter");
+            assert_eq!(m.params["hook"], hook);
+        }
+        // The limits themselves are allowed.
+        let mut v = nats();
+        v["roles"][1]["hooks"] = json!({
+            "join": (0..32).map(|i| format!("a{i}")).collect::<Vec<_>>(),
+            "leave": ["x".repeat(1024)],
+            "healthy": (0..4).map(|_| "y".repeat(1024)).collect::<Vec<_>>(),
+        });
+        assert!(parse_v(&v).is_ok());
+        // An explicit null is the same as no hook.
+        let mut v = nats();
+        v["roles"][1]["hooks"] = json!({"join": null});
+        assert_eq!(parse_v(&v).unwrap().roles[1].hooks.join, None);
+    }
+
+    #[test]
+    fn role_hooks_do_not_change_compiled_manifest() {
+        let mut plain = nats();
+        plain["roles"][0]["ports"][0]["published"] = json!(4222);
+        plain["drivers"] = json!({"docker": {"supported": true}});
+        let mut hooked = plain.clone();
+        hooked["roles"][0]["failover"] = json!({"replace": "supported"});
+        hooked["roles"][0]["hooks"] = json!({
+            "join": ["nats-join", "{{ .Instance.Name }}"],
+            "healthy": ["true"]
+        });
+        hooked["roles"][2]["failover"] = json!({"replace": "unsupported"});
+        let hosts = |n: usize| -> Vec<Value> {
+            (1..=n)
+                .map(|i| json!({"hostId": i.to_string(), "address": format!("10.0.0.{i}")}))
+                .collect()
+        };
+        let binding = super::super::binding::parse(
+            &json!({"driver": "docker", "roles": {
+                "nats": hosts(3), "exporter": hosts(3), "gateway": hosts(1)}})
+            .to_string(),
+        )
+        .unwrap();
+        let compile = |v: &Value| {
+            super::super::compile::compile_unresolved(&v.to_string(), &binding)
+                .unwrap()
+                .into_iter()
+                .map(|p| (p.host_id, p.manifest))
+                .collect::<Vec<_>>()
+        };
+        let before = compile(&plain);
+        assert_eq!(before.len(), 3);
+        assert_eq!(compile(&hooked), before);
     }
 
     #[test]

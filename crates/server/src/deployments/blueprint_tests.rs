@@ -1750,6 +1750,33 @@ async fn values_change_after_deploy_is_upgrade() {
 }
 
 #[tokio::test]
+async fn failover_change_after_deploy_is_accepted() {
+    let (_dir, s) = spec_fixture(&[1581, 1582, 1583]).await;
+    let mut spec = spec_doc(1, "2", 2);
+    spec["failover"] = json!({"mode": "auto"});
+    let id = create_app(&s, spec_body(&spec)).await.unwrap();
+    assert!(run_first(&s, &id, &[]).await);
+    let binding_before = row(&s, &id).await.blueprint_binding;
+    // Failover settings are not topology: they change in place once deployed.
+    spec["failover"] = json!({"mode": "alert", "hostDownAfter": 120});
+    update_spec(&s, &id, &spec).await.unwrap();
+    let r = row(&s, &id).await;
+    assert_eq!(r.blueprint_binding, binding_before);
+    let text = r.deploy_spec.as_deref().unwrap();
+    assert!(text.contains("mode: alert"), "{text}");
+    let stored = crate::blueprint::spec::parse(text).unwrap();
+    let failover = stored.failover.unwrap();
+    assert_eq!(failover.mode, crate::blueprint::spec::FailoverMode::Alert);
+    assert_eq!(failover.host_down_after, 120);
+    // Dropping the key is a change too.
+    spec.as_object_mut().unwrap().remove("failover");
+    update_spec(&s, &id, &spec).await.unwrap();
+    let r = row(&s, &id).await;
+    assert_eq!(r.blueprint_binding, binding_before);
+    assert!(!r.deploy_spec.unwrap().contains("failover"));
+}
+
+#[tokio::test]
 async fn topology_change_after_deploy_rejected() {
     let (_dir, s) = spec_fixture(&[1561, 1562, 1563, 1564]).await;
     let id = create_app(&s, spec_body(&spec_doc(1, "2", 2)))

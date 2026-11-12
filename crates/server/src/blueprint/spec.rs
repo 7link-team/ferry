@@ -13,6 +13,9 @@ const MAX_INSTANCES: u32 = 100;
 const MAX_LIST: usize = 32;
 const MAX_ITEM: usize = 60;
 const MAX_PREFIX: usize = 30;
+/// Seconds a host may stay silent before failover suspects it.
+pub const HOST_DOWN_AFTER_DEFAULT: u32 = 90;
+const HOST_DOWN_AFTER_RANGE: std::ops::RangeInclusive<u32> = 30..=3600;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -28,6 +31,35 @@ pub struct DeploySpec {
     /// Manual placement override, shaped like `Binding.roles`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<BTreeMap<String, Vec<InstanceBinding>>>,
+    /// What to do when a bound host goes down. Not topology: it may change after deploying.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failover: Option<FailoverSpec>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FailoverMode {
+    /// Do nothing.
+    Off,
+    /// Record and alert only.
+    Alert,
+    /// Replace instances where the role supports it, alert otherwise.
+    #[default]
+    Auto,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FailoverSpec {
+    #[serde(default)]
+    pub mode: FailoverMode,
+    /// Seconds without contact before a host is suspected down.
+    #[serde(default = "host_down_after")]
+    pub host_down_after: u32,
+}
+
+fn host_down_after() -> u32 {
+    HOST_DOWN_AFTER_DEFAULT
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -190,6 +222,15 @@ pub fn validate(spec: &DeploySpec) -> Result<()> {
             }
         }
     }
+    if let Some(failover) = &spec.failover
+        && !HOST_DOWN_AFTER_RANGE.contains(&failover.host_down_after)
+    {
+        return fail(
+            Message::new("blueprint.specHostDownAfterRange")
+                .with("min", HOST_DOWN_AFTER_RANGE.start().to_string())
+                .with("max", HOST_DOWN_AFTER_RANGE.end().to_string()),
+        );
+    }
     Ok(())
 }
 
@@ -264,7 +305,7 @@ placement:
 
     #[test]
     fn unknown_top_level_key_rejected() {
-        for k in ["failover", "backup", "storage"] {
+        for k in ["restore", "backup", "storage"] {
             let text = json_with(|v| v[k] = json!({}));
             assert!(err(parse(&text)).contains("blueprint.specInvalid"), "{k}");
         }
@@ -365,6 +406,70 @@ roles:
         let spec = parse(YAML).unwrap();
         let yaml = to_yaml(&spec);
         assert!(yaml.starts_with("apiVersion: ferry/deploy-v1"));
+        assert!(!yaml.contains("failover"), "{yaml}");
         assert_eq!(parse(&yaml).unwrap(), spec);
+        let with = format!(
+            "{YAML}failover: {{mode: alert, hostDownAfter: 120}}
+"
+        );
+        let spec = parse(&with).unwrap();
+        let yaml = to_yaml(&spec);
+        assert!(yaml.contains("mode: alert"), "{yaml}");
+        assert!(yaml.contains("hostDownAfter: 120"), "{yaml}");
+        let back = parse(&yaml).unwrap();
+        assert_eq!(
+            back.failover,
+            Some(FailoverSpec {
+                mode: FailoverMode::Alert,
+                host_down_after: 120
+            })
+        );
+        assert_eq!(back, spec);
+    }
+
+    #[test]
+    fn failover_parses_with_defaults() {
+        let spec = parse(&json_with(|_| {})).unwrap();
+        assert_eq!(spec.failover, None);
+        let spec = parse(&json_with(|v| v["failover"] = json!({}))).unwrap();
+        assert_eq!(
+            spec.failover,
+            Some(FailoverSpec {
+                mode: FailoverMode::Auto,
+                host_down_after: HOST_DOWN_AFTER_DEFAULT
+            })
+        );
+        assert_eq!(HOST_DOWN_AFTER_DEFAULT, 90);
+        for (text, mode) in [
+            ("off", FailoverMode::Off),
+            ("alert", FailoverMode::Alert),
+            ("auto", FailoverMode::Auto),
+        ] {
+            let spec = parse(&json_with(|v| v["failover"] = json!({"mode": text}))).unwrap();
+            assert_eq!(spec.failover.unwrap().mode, mode, "{text}");
+        }
+    }
+
+    #[test]
+    fn failover_mode_and_range_checked() {
+        let f = |f: Value| json_with(|v| v["failover"] = f);
+        assert!(err(parse(&f(json!({"mode": "sometimes"})))).contains("blueprint.specInvalid"));
+        for secs in [29, 3601] {
+            let e = parse(&f(json!({"hostDownAfter": secs}))).unwrap_err();
+            let m = e.2.expect("localized");
+            assert_eq!(m.key, "blueprint.specHostDownAfterRange", "{secs}");
+            assert_eq!(m.params["min"], "30");
+            assert_eq!(m.params["max"], "3600");
+        }
+        for secs in [30, 3600] {
+            let spec = parse(&f(json!({"hostDownAfter": secs}))).unwrap();
+            assert_eq!(spec.failover.unwrap().host_down_after, secs);
+        }
+    }
+
+    #[test]
+    fn failover_rejects_unknown_keys() {
+        let text = json_with(|v| v["failover"] = json!({"maxConcurrent": 1}));
+        assert!(err(parse(&text)).contains("blueprint.specInvalid"));
     }
 }

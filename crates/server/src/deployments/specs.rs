@@ -74,6 +74,8 @@ async fn schedule(
 }
 
 /// Everything but the values and the template version: what decides where instances run.
+/// `failover` is not topology either (it only decides how a down host is handled), so it
+/// may change after deploying.
 fn same_topology(a: &DeploySpec, b: &DeploySpec) -> bool {
     a.template.id == b.template.id
         && a.driver == b.driver

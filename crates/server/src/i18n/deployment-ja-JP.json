@@ -282,6 +282,8 @@
   "blueprint.specPrefixLength": "分散プレフィックスは 1 から {max} 文字にしてください。",
   "blueprint.specManagerOnlyStack": "manager を指定できるのは stack ドライバーのみです。",
   "blueprint.specDuplicate": "デプロイ仕様の {field} に重複した項目を含めることはできません。",
+  "blueprint.specHostDownAfterRange": "デプロイ仕様の failover.hostDownAfter は {min} 秒から {max} 秒の間で指定してください。",
+  "blueprint.hookInvalid": "ロール {role} の {hook} フックが無効です。引数は 1-32 個、各 1-1024 文字、合計 4096 バイト以内で、それぞれ有効なテンプレートである必要があります。",
   "blueprint.placementInsufficientHosts": "ロール {role} には {selector} に一致するオンラインの Linux ホストが {needed} 台必要ですが、{matched} 台しかありません：{hosts}。",
   "blueprint.placementSelectorEmpty": "ロール {role} に使用できる、{selector} に一致するオンラインの Linux ホストがありません。",
   "blueprint.placementSpreadUnmet": "ロール {role}：すべてのインスタンスを異なる {prefix} タグに分散できませんでした。",

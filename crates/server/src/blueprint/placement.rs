@@ -552,6 +552,7 @@ mod tests {
                 })
                 .collect(),
             placement: None,
+            failover: None,
         }
     }
 

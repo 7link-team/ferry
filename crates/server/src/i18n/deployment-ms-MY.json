@@ -282,6 +282,8 @@
   "blueprint.specPrefixLength": "Awalan sebaran mestilah 1 hingga {max} aksara.",
   "blueprint.specManagerOnlyStack": "Hanya pemacu stack boleh menentukan manager.",
   "blueprint.specDuplicate": "{field} dalam spesifikasi penggunaan tidak boleh mengandungi pendua.",
+  "blueprint.specHostDownAfterRange": "failover.hostDownAfter dalam spesifikasi penggunaan mesti antara {min} dan {max} saat.",
+  "blueprint.hookInvalid": "Hook {hook} bagi peranan {role} tidak sah: ia memerlukan 1-32 argumen, setiap satu 1-1024 aksara, jumlah tidak melebihi 4096 bait, dan setiap satu templat yang sah.",
   "blueprint.placementInsufficientHosts": "Peranan {role} memerlukan {needed} hos Linux dalam talian yang sepadan dengan {selector}; {matched} ditemui: {hosts}.",
   "blueprint.placementSelectorEmpty": "Tiada hos Linux dalam talian yang sepadan dengan {selector} untuk peranan {role}.",
   "blueprint.placementSpreadUnmet": "Peranan {role}: tidak semua instans dapat disebarkan merentasi tag {prefix} yang berbeza.",

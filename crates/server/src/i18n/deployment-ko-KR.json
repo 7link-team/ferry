@@ -282,6 +282,8 @@
   "blueprint.specPrefixLength": "분산 접두사는 1자에서 {max}자여야 합니다.",
   "blueprint.specManagerOnlyStack": "manager는 stack 드라이버에서만 지정할 수 있습니다.",
   "blueprint.specDuplicate": "배포 사양의 {field}에는 중복 항목을 둘 수 없습니다.",
+  "blueprint.specHostDownAfterRange": "배포 사양의 failover.hostDownAfter는 {min}초에서 {max}초 사이여야 합니다.",
+  "blueprint.hookInvalid": "역할 {role}의 {hook} 훅이 올바르지 않습니다. 인수는 1-32개, 각각 1-1024자, 합계 4096바이트 이하이며 각각 올바른 템플릿이어야 합니다.",
   "blueprint.placementInsufficientHosts": "역할 {role}에는 {selector}와 일치하는 온라인 Linux 호스트 {needed}대가 필요하지만 {matched}대만 있습니다: {hosts}.",
   "blueprint.placementSelectorEmpty": "역할 {role}에 사용할 수 있는 {selector}와 일치하는 온라인 Linux 호스트가 없습니다.",
   "blueprint.placementSpreadUnmet": "역할 {role}: 모든 인스턴스를 서로 다른 {prefix} 태그에 분산하지 못했습니다.",

@@ -282,6 +282,8 @@
   "blueprint.specPrefixLength": "The spread prefix must be 1 to {max} characters long.",
   "blueprint.specManagerOnlyStack": "Only the stack driver can specify a manager.",
   "blueprint.specDuplicate": "{field} in the deployment spec must not contain duplicates.",
+  "blueprint.specHostDownAfterRange": "failover.hostDownAfter in the deployment spec must be between {min} and {max} seconds.",
+  "blueprint.hookInvalid": "The {hook} hook of role {role} is invalid: it needs 1-32 arguments of 1-1024 characters each, at most 4096 bytes in total, each a valid template.",
   "blueprint.placementInsufficientHosts": "Role {role} needs {needed} online Linux hosts matching {selector}; {matched} found: {hosts}.",
   "blueprint.placementSelectorEmpty": "No online Linux host matches {selector} for role {role}.",
   "blueprint.placementSpreadUnmet": "Role {role}: instances could not all be spread across different {prefix} tags.",
