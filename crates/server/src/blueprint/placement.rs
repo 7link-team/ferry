@@ -103,9 +103,11 @@ fn zones<'a>(c: &'a Candidate, prefix: &str) -> BTreeSet<Option<&'a str>> {
 /// Places every blueprint role without a manual `placement` entry onto the candidate hosts.
 ///
 /// `existing` counts THIS deployment's instances already on each host, excluding any instance
-/// listed in `spec.placement`: manual placements are counted here. Instances are placed
-/// one at a time on the host with, in order: fewest spread violations, fewest instances of
-/// this deployment (existing + placed so far), most free memory (unknown last), lowest id.
+/// listed in `spec.placement`; `place` adds the manual placements to the load itself.
+/// Instances are placed one at a time on the host with, in order: fewest spread violations,
+/// fewest instances of this deployment (existing + placed so far), most free memory
+/// (unknown last), lowest id. The compose driver instead puts every instance on one host
+/// chosen by load, then free memory, then id, ignoring spread.
 pub fn place(
     bp: &Blueprint,
     spec: &DeploySpec,
