@@ -314,5 +314,15 @@
   "deployment.failoverReason.driverUnsupported": "pemacu ini tidak digantikan oleh Ferry.",
   "deployment.failoverReason.needsBackup": "instans berkeadaan memerlukan sandaran sebelum boleh digantikan.",
   "deployment.failoverReason.modeAlert": "mod failover hanya amaran.",
-  "deployment.failoverReason.tooManyFailures": "penggantian gagal terlalu banyak kali berturut-turut."
+  "deployment.failoverReason.tooManyFailures": "penggantian gagal terlalu banyak kali berturut-turut.",
+  "blueprint.replaceNoCandidate": "Tiada hos Linux dalam talian lain yang sepadan dengan {selector} boleh mengambil alih instans {instance} bagi peranan {role}.",
+  "blueprint.replaceInstanceUnknown": "Peranan {role} tidak mempunyai instans {instance}.",
+  "deployment.replaceNotBlueprint": "Hanya deployment pelan tindakan kluster boleh menggantikan instans.",
+  "deployment.replaceUnsupportedDriver": "Hanya deployment native dan Docker boleh menggantikan instans; Ferry tidak memindahkan instans Swarm atau Compose.",
+  "deployment.replaceNeedsBackup": "Instans ini menyimpan datanya sendiri dan tidak boleh dibina semula pada hos lain sehingga sandaran disokong.",
+  "deployment.replaceNotDeployed": "Deployment ini belum mempunyai revisi yang berjaya, jadi tiada instans untuk diganti.",
+  "deployment.rollbackAcrossReplace": "Revisi ini lebih lama daripada penggantian instans dan milik peletakan terdahulu. Undur balik ke revisi penggantian atau yang lebih baharu.",
+  "deployment.output.hostUnchanged": "Hos {host} sudah menjalankan artifak ini; tiada perubahan dibuat.",
+  "deployment.replaceTrigger.auto": "automatik",
+  "deployment.replaceTrigger.manual": "secara manual"
 }

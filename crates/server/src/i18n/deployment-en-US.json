@@ -314,5 +314,15 @@
   "deployment.failoverReason.driverUnsupported": "this driver is not replaced by Ferry.",
   "deployment.failoverReason.needsBackup": "stateful instances need a backup before they can be replaced.",
   "deployment.failoverReason.modeAlert": "failover mode is alert only.",
-  "deployment.failoverReason.tooManyFailures": "replacement failed too many times in a row."
+  "deployment.failoverReason.tooManyFailures": "replacement failed too many times in a row.",
+  "blueprint.replaceNoCandidate": "No other online Linux host matching {selector} can take instance {instance} of role {role}.",
+  "blueprint.replaceInstanceUnknown": "Role {role} has no instance {instance}.",
+  "deployment.replaceNotBlueprint": "Only cluster blueprint deployments can replace an instance.",
+  "deployment.replaceUnsupportedDriver": "Only native and Docker deployments can replace an instance; Ferry does not move Swarm or Compose instances.",
+  "deployment.replaceNeedsBackup": "This instance keeps its own data and cannot be rebuilt on another host until backups are supported.",
+  "deployment.replaceNotDeployed": "The deployment has no successful revision yet, so there is no instance to replace.",
+  "deployment.rollbackAcrossReplace": "This revision is older than an instance replacement and belongs to the earlier placement. Roll back to the replacement revision or a later one.",
+  "deployment.output.hostUnchanged": "Host {host} already runs this artifact; nothing was changed.",
+  "deployment.replaceTrigger.auto": "automatic",
+  "deployment.replaceTrigger.manual": "manual"
 }

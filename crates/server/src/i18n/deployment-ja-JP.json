@@ -314,5 +314,15 @@
   "deployment.failoverReason.driverUnsupported": "このドライバーは Ferry による置き換えの対象外です。",
   "deployment.failoverReason.needsBackup": "ステートフルなインスタンスを置き換えるにはバックアップが必要です。",
   "deployment.failoverReason.modeAlert": "フェイルオーバーモードはアラートのみです。",
-  "deployment.failoverReason.tooManyFailures": "置き換えが連続して失敗しました。"
+  "deployment.failoverReason.tooManyFailures": "置き換えが連続して失敗しました。",
+  "blueprint.replaceNoCandidate": "ロール {role} のインスタンス {instance} を引き継げる、{selector} に一致する他のオンライン Linux ホストがありません。",
+  "blueprint.replaceInstanceUnknown": "ロール {role} にインスタンス {instance} はありません。",
+  "deployment.replaceNotBlueprint": "インスタンスを置き換えられるのはクラスターブループリントのデプロイのみです。",
+  "deployment.replaceUnsupportedDriver": "インスタンスを置き換えられるのは Native と Docker のデプロイのみです。Ferry は Swarm や Compose のインスタンスを移動しません。",
+  "deployment.replaceNeedsBackup": "このインスタンスは独自のデータを持つため、バックアップに対応するまで他のホストで再構築できません。",
+  "deployment.replaceNotDeployed": "このデプロイにはまだ成功したリビジョンがないため、置き換えるインスタンスがありません。",
+  "deployment.rollbackAcrossReplace": "このリビジョンはインスタンスの置き換えより前のもので、以前の配置に属します。置き換えのリビジョン以降にロールバックしてください。",
+  "deployment.output.hostUnchanged": "ホスト {host} はすでにこの成果物を実行しているため、変更していません。",
+  "deployment.replaceTrigger.auto": "自動",
+  "deployment.replaceTrigger.manual": "手動"
 }

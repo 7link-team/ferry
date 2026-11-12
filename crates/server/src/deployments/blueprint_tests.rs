@@ -42,7 +42,7 @@ pub(super) fn body(hosts: &[i64]) -> Value {
            "blueprint_binding": binding(hosts)})
 }
 
-fn key(e: ApiError) -> String {
+pub(super) fn key(e: ApiError) -> String {
     e.2.map(|m| m.key).unwrap_or_else(|| e.1)
 }
 
@@ -119,11 +119,11 @@ pub(super) async fn create_app(s: &AppState, b: Value) -> Result<String> {
     Ok(out["id"].as_str().unwrap().to_owned())
 }
 
-async fn row(s: &AppState, id: &str) -> apps::Model {
+pub(super) async fn row(s: &AppState, id: &str) -> apps::Model {
     scoped(&s.db, &admin(1), id).await.unwrap()
 }
 
-async fn preview_of(s: &AppState, id: &str, revision: Option<String>) -> Result<Value> {
+pub(super) async fn preview_of(s: &AppState, id: &str, revision: Option<String>) -> Result<Value> {
     let Json(out) = preview(
         State(s.clone()),
         admin(1),
@@ -136,7 +136,7 @@ async fn preview_of(s: &AppState, id: &str, revision: Option<String>) -> Result<
     Ok(out)
 }
 
-fn run_body(preview: &Value, revision: &str) -> RunBody {
+pub(super) fn run_body(preview: &Value, revision: &str) -> RunBody {
     RunBody {
         version: preview["version"].as_i64().unwrap(),
         expected_hash: preview["expected_hash"].as_str().unwrap().into(),
@@ -157,7 +157,7 @@ async fn apply_preview(s: &AppState, id: &str, preview: &Value) -> Result<String
     Ok(out["id"].as_str().unwrap().to_owned())
 }
 
-async fn revision(s: &AppState, id: &str) -> revisions::Model {
+pub(super) async fn revision(s: &AppState, id: &str) -> revisions::Model {
     revisions::Entity::find_by_id(i64::from(id.parse::<Id>().unwrap()))
         .one(&s.db)
         .await
@@ -165,7 +165,7 @@ async fn revision(s: &AppState, id: &str) -> revisions::Model {
         .unwrap()
 }
 
-async fn target_rows(s: &AppState, revision: &str) -> Vec<targets::Model> {
+pub(super) async fn target_rows(s: &AppState, revision: &str) -> Vec<targets::Model> {
     targets::Entity::find()
         .filter(targets::Column::RevisionId.eq(i64::from(revision.parse::<Id>().unwrap())))
         .order_by_asc(targets::Column::Position)
@@ -406,7 +406,7 @@ async fn binding_frozen_after_first_revision() {
     assert_eq!(row(&s, &id).await.description, "same topology");
 }
 
-async fn update_body(s: &AppState, id: &str, mut b: Value) -> Result<()> {
+pub(super) async fn update_body(s: &AppState, id: &str, mut b: Value) -> Result<()> {
     b["version"] = json!(row(s, id).await.version);
     update(
         State(s.clone()),
@@ -500,7 +500,7 @@ async fn blueprint_rejects_non_string_pipeline_reference() {
 }
 
 /// Applies and runs a first revision; `failing` hosts exit non-zero.
-async fn run_first(s: &AppState, id: &str, failing: &[i64]) -> bool {
+pub(super) async fn run_first(s: &AppState, id: &str, failing: &[i64]) -> bool {
     for host in failing {
         crate::hosts::fake::get(*host)
             .fail
@@ -1403,7 +1403,7 @@ async fn app_template(s: &AppState, workspace: i64, version: i64) {
 }
 
 /// Attaches tag `name` (workspace 1, created on first use) to `host`.
-async fn tag_host(s: &AppState, name: &str, host: i64) {
+pub(super) async fn tag_host(s: &AppState, name: &str, host: i64) {
     use crate::entities::{host_tags, tags};
     let found = tags::Entity::find()
         .filter(tags::Column::WorkspaceId.eq(1))
@@ -1460,7 +1460,7 @@ fn spec_doc(version: i64, tag: &str, instances: u32) -> Value {
     })
 }
 
-fn spec_body(spec: &Value) -> Value {
+pub(super) fn spec_body(spec: &Value) -> Value {
     json!({"name": "mq", "workdir": "/srv", "deploy_spec": spec.to_string()})
 }
 
@@ -1470,7 +1470,7 @@ async fn place_spec(s: &AppState, scope: Scope, spec: &Value) -> Result<Value> {
     Ok(out)
 }
 
-fn bound_hosts(binding: &str) -> Vec<String> {
+pub(super) fn bound_hosts(binding: &str) -> Vec<String> {
     let b: Value = serde_json::from_str(binding).unwrap();
     b["roles"]["nats"]
         .as_array()
@@ -1715,7 +1715,7 @@ async fn template_version_mismatch_conflicts() {
     assert_eq!(key(error), "templates.changed");
 }
 
-async fn update_spec(s: &AppState, id: &str, spec: &Value) -> Result<()> {
+pub(super) async fn update_spec(s: &AppState, id: &str, spec: &Value) -> Result<()> {
     update_body(s, id, spec_body(spec)).await
 }
 

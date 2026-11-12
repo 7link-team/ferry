@@ -471,6 +471,144 @@ impl<'a> Scheduler<'a> {
     }
 }
 
+/// The role a `colocateWith` chain starts from (the role itself when it follows nothing).
+fn chain_root<'a>(bp: &'a Blueprint, role: &'a Role) -> &'a Role {
+    let mut current = role;
+    // Chains are acyclic (checked when the blueprint is parsed); the bound guards anyway.
+    for _ in 0..bp.roles.len() {
+        match current
+            .placement
+            .colocate_with
+            .as_deref()
+            .and_then(|t| bp.roles.iter().find(|r| r.name == t))
+        {
+            Some(target) => current = target,
+            None => break,
+        }
+    }
+    current
+}
+
+/// The roles whose instances move together with `role`'s: the root of its `colocateWith`
+/// chain and every role following that root, in blueprint order.
+pub fn colocated<'a>(bp: &'a Blueprint, role: &'a Role) -> Vec<&'a Role> {
+    let root = chain_root(bp, role);
+    bp.roles
+        .iter()
+        .filter(|r| chain_root(bp, r).name == root.name)
+        .collect()
+}
+
+/// Moves instance `role[index]` to a new host, together with the instance of the same index
+/// of every role on its `colocateWith` chain (starting from the chain's root).
+///
+/// Candidates are eligible hosts matching every moved role's selector, outside `excluded`,
+/// other than the instance's current host and, for a `distinctHosts` role, not running another
+/// instance of it. They are ordered as [`place`] orders them: fewest spread violations, fewest
+/// instances of this deployment (moved instances not counted), lowest id. Only the moved
+/// instances' bindings change; every other entry is kept verbatim.
+pub fn replace(
+    bp: &Blueprint,
+    spec: Option<&DeploySpec>,
+    binding: &Binding,
+    role: &str,
+    index: usize,
+    candidates: &[Candidate],
+    excluded: &BTreeSet<Id>,
+) -> Result<Binding> {
+    let Some(wanted) = bp.roles.iter().find(|r| r.name == role) else {
+        return fail(Message::new("blueprint.bindingRoleUnknown").with("role", role));
+    };
+    let instance = format!("{role}-{index}");
+    let root = chain_root(bp, wanted);
+    let group = colocated(bp, wanted);
+    let current = |r: &Role| binding.roles.get(&r.name).and_then(|list| list.get(index));
+    let Some(from) = current(root).map(|i| i.host_id) else {
+        return fail(
+            Message::new("blueprint.replaceInstanceUnknown")
+                .with("role", role)
+                .with("instance", &instance),
+        );
+    };
+    if group.iter().any(|r| current(r).is_none()) {
+        return fail(
+            Message::new("blueprint.replaceInstanceUnknown")
+                .with("role", role)
+                .with("instance", &instance),
+        );
+    }
+    let selector = |r: &Role| -> HostSelector {
+        spec.and_then(|s| s.roles.get(&r.name))
+            .map(|r| r.hosts.clone())
+            .unwrap_or_default()
+    };
+    let selectors: Vec<HostSelector> = group.iter().map(|r| selector(r)).collect();
+    // Hosts of the instances that stay, per moved role; and this deployment's load.
+    let others = |r: &Role| -> Vec<Id> {
+        binding.roles[&r.name]
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != index)
+            .map(|(_, inst)| inst.host_id)
+            .collect()
+    };
+    let moved: BTreeSet<&str> = group.iter().map(|r| r.name.as_str()).collect();
+    let mut load: BTreeMap<Id, u32> = BTreeMap::new();
+    for (name, list) in &binding.roles {
+        for (i, inst) in list.iter().enumerate() {
+            if !(i == index && moved.contains(name.as_str())) {
+                *load.entry(inst.host_id).or_default() += 1;
+            }
+        }
+    }
+    let by_id: BTreeMap<Id, &Candidate> = candidates.iter().map(|c| (c.id, c)).collect();
+    let violations = |c: &Candidate| -> usize {
+        group
+            .iter()
+            .zip(&selectors)
+            .filter_map(|(r, sel)| Some((r, sel.spread.as_ref()?.prefix.as_str())))
+            .map(|(r, prefix)| {
+                let own = zones(c, prefix);
+                others(r)
+                    .iter()
+                    .filter_map(|h| by_id.get(h))
+                    .filter(|p| !zones(p, prefix).is_disjoint(&own))
+                    .count()
+            })
+            .sum()
+    };
+    let best = candidates
+        .iter()
+        .filter(|c| {
+            eligible(c)
+                && c.id != from
+                && !excluded.contains(&c.id)
+                && selectors.iter().all(|s| matches(s, c))
+                && group
+                    .iter()
+                    .all(|r| !r.placement.distinct_hosts || !others(r).contains(&c.id))
+        })
+        .min_by_key(|c| (violations(c), load.get(&c.id).copied().unwrap_or(0), c.id));
+    let Some(best) = best else {
+        return fail(
+            Message::new("blueprint.replaceNoCandidate")
+                .with("role", role)
+                .with("instance", instance)
+                .with("selector", describe(&selector(root))),
+        );
+    };
+    let mut out = binding.clone();
+    for r in &group {
+        if let Some(inst) = out.roles.get_mut(&r.name).and_then(|l| l.get_mut(index)) {
+            *inst = InstanceBinding {
+                host_id: best.id,
+                address: best.address.clone(),
+            };
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1105,5 +1243,215 @@ mod tests {
         let plain = blueprint(vec![role("web", 1, 2, 3, false, json!({}))]);
         let p = place(&plain, &spec("compose", &[]), &hosts(3), &none()).unwrap();
         assert_eq!(ids(&p.binding, "web"), [1, 1]);
+    }
+
+    fn bind(roles: &[(&str, &[i64])]) -> Binding {
+        Binding {
+            driver: "docker".into(),
+            manager: None,
+            roles: roles
+                .iter()
+                .map(|(role, hosts)| {
+                    let list = hosts
+                        .iter()
+                        .map(|id| InstanceBinding {
+                            host_id: Id::from(*id),
+                            address: format!("{role}{id}.internal"),
+                        })
+                        .collect();
+                    (role.to_string(), list)
+                })
+                .collect(),
+        }
+    }
+
+    fn no_fences() -> BTreeSet<Id> {
+        BTreeSet::new()
+    }
+
+    fn refused(r: Result<Binding>) -> Message {
+        r.expect_err("expected error").2.expect("message")
+    }
+
+    #[test]
+    fn replace_moves_only_that_instance() {
+        let bp = blueprint(vec![
+            role("nats", 1, 3, 5, true, json!({"distinctHosts": true})),
+            role("web", 1, 2, 5, false, json!({})),
+        ]);
+        let before = bind(&[("nats", &[1, 2, 3]), ("web", &[1, 2])]);
+        let out = replace(&bp, None, &before, "nats", 1, &hosts(4), &no_fences()).unwrap();
+        assert_eq!(ids(&out, "nats"), [1, 4, 3]);
+        assert_eq!(out.roles["nats"][1].address, "10.0.0.4");
+        // Every other entry is kept verbatim, addresses included.
+        assert_eq!(out.roles["nats"][0], before.roles["nats"][0]);
+        assert_eq!(out.roles["nats"][2], before.roles["nats"][2]);
+        assert_eq!(out.roles["web"], before.roles["web"]);
+        assert_eq!((out.driver.as_str(), out.manager), ("docker", None));
+        // Unknown role or instance: refused, never a panic.
+        let m = refused(replace(
+            &bp,
+            None,
+            &before,
+            "ghost",
+            0,
+            &hosts(4),
+            &no_fences(),
+        ));
+        assert_eq!(m.key, "blueprint.bindingRoleUnknown");
+        let m = refused(replace(
+            &bp,
+            None,
+            &before,
+            "nats",
+            3,
+            &hosts(4),
+            &no_fences(),
+        ));
+        assert_eq!(m.key, "blueprint.replaceInstanceUnknown");
+        assert_eq!(m.params["instance"], "nats-3");
+    }
+
+    #[test]
+    fn replace_respects_selector_distinct_and_spread() {
+        let bp = blueprint(vec![role(
+            "nats",
+            1,
+            3,
+            5,
+            true,
+            json!({"distinctHosts": true}),
+        )]);
+        let mut sel = tags(&["mq"]);
+        sel.spread = Some(Spread {
+            prefix: "zone:".into(),
+        });
+        let s = spec("native", &[("nats", 3, sel)]);
+        let before = bind(&[("nats", &[1, 2, 3])]);
+        let base = vec![
+            host(1, &["mq", "zone:a"]),
+            host(2, &["mq", "zone:b"]),
+            host(3, &["mq", "zone:c"]),
+        ];
+        // Host 4 lacks the tag; hosts 1 and 3 already run nats.
+        let mut cands = base.clone();
+        cands.push(host(4, &["zone:b"]));
+        let m = refused(replace(
+            &bp,
+            Some(&s),
+            &before,
+            "nats",
+            1,
+            &cands,
+            &no_fences(),
+        ));
+        assert_eq!(m.key, "blueprint.replaceNoCandidate");
+        assert_eq!(m.params["selector"], "tags=[mq]");
+        // Spread first: host 6 shares no zone with nats-0/nats-2, host 5 does.
+        let mut cands = base.clone();
+        cands.push(host(5, &["mq", "zone:a"]));
+        cands.push(host(6, &["mq", "zone:b"]));
+        let out = replace(&bp, Some(&s), &before, "nats", 1, &cands, &no_fences()).unwrap();
+        assert_eq!(ids(&out, "nats"), [1, 6, 3]);
+        // Then this deployment's load, then id.
+        let two = blueprint(vec![
+            role("nats", 1, 3, 5, true, json!({"distinctHosts": true})),
+            role("web", 1, 1, 5, false, json!({})),
+        ]);
+        let loaded = bind(&[("nats", &[1, 2, 3]), ("web", &[5])]);
+        let mut cands = base.clone();
+        cands.push(host(5, &["mq", "zone:d"]));
+        cands.push(host(6, &["mq", "zone:d"]));
+        let out = replace(&two, Some(&s), &loaded, "nats", 1, &cands, &no_fences()).unwrap();
+        assert_eq!(ids(&out, "nats"), [1, 6, 3]);
+        let idle = bind(&[("nats", &[1, 2, 3]), ("web", &[1])]);
+        let out = replace(&two, Some(&s), &idle, "nats", 1, &cands, &no_fences()).unwrap();
+        assert_eq!(ids(&out, "nats"), [1, 5, 3]);
+        // Offline or non-Linux spares are never chosen.
+        let mut cands = base;
+        let mut off = host(5, &["mq", "zone:d"]);
+        off.online = false;
+        let mut win = host(6, &["mq", "zone:d"]);
+        win.os = "windows".into();
+        cands.extend([off, win]);
+        let m = refused(replace(
+            &bp,
+            Some(&s),
+            &before,
+            "nats",
+            1,
+            &cands,
+            &no_fences(),
+        ));
+        assert_eq!(m.key, "blueprint.replaceNoCandidate");
+    }
+
+    #[test]
+    fn replace_moves_colocated_group() {
+        let bp = blueprint(vec![
+            role("sentinel", 1, 3, 5, false, json!({"colocateWith": "redis"})),
+            role("redis", 1, 3, 5, false, json!({"distinctHosts": true})),
+            role("web", 1, 1, 5, false, json!({})),
+        ]);
+        let before = bind(&[
+            ("redis", &[1, 2, 3]),
+            ("sentinel", &[1, 2, 3]),
+            ("web", &[2]),
+        ]);
+        let by_redis = replace(&bp, None, &before, "redis", 1, &hosts(4), &no_fences()).unwrap();
+        assert_eq!(ids(&by_redis, "redis"), [1, 4, 3]);
+        assert_eq!(ids(&by_redis, "sentinel"), [1, 4, 3]);
+        assert_eq!(by_redis.roles["sentinel"][1].address, "10.0.0.4");
+        assert_eq!(by_redis.roles["web"], before.roles["web"]);
+        let by_sentinel =
+            replace(&bp, None, &before, "sentinel", 1, &hosts(4), &no_fences()).unwrap();
+        assert_eq!(by_sentinel.roles, by_redis.roles);
+    }
+
+    #[test]
+    fn replace_without_candidate_is_an_error_not_a_panic() {
+        let before = bind(&[("nats", &[1, 2, 3]), ("exporter", &[1, 2, 3])]);
+        let m = refused(replace(
+            &nats(),
+            None,
+            &before,
+            "nats",
+            2,
+            &hosts(3),
+            &no_fences(),
+        ));
+        assert_eq!(m.key, "blueprint.replaceNoCandidate");
+        assert_eq!(m.params["role"], "nats");
+        assert_eq!(m.params["instance"], "nats-2");
+        assert_eq!(m.params["selector"], "*");
+        // No candidates at all.
+        let m = refused(replace(
+            &nats(),
+            None,
+            &before,
+            "nats",
+            0,
+            &[],
+            &no_fences(),
+        ));
+        assert_eq!(m.key, "blueprint.replaceNoCandidate");
+    }
+
+    #[test]
+    fn fenced_host_excluded_from_candidates() {
+        let bp = blueprint(vec![role(
+            "nats",
+            1,
+            3,
+            5,
+            true,
+            json!({"distinctHosts": true}),
+        )]);
+        let before = bind(&[("nats", &[1, 2, 3])]);
+        let fenced = BTreeSet::from([Id::from(4)]);
+        let m = refused(replace(&bp, None, &before, "nats", 1, &hosts(4), &fenced));
+        assert_eq!(m.key, "blueprint.replaceNoCandidate");
+        let out = replace(&bp, None, &before, "nats", 1, &hosts(5), &fenced).unwrap();
+        assert_eq!(ids(&out, "nats"), [1, 5, 3]);
     }
 }

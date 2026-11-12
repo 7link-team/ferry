@@ -300,7 +300,19 @@ pub(super) async fn targets(
         };
         let tags = role_tags(workspace, app.deploy_spec.as_deref())?;
         let plans = crate::blueprint::compile::compile_tagged(&app.manifest, &b, nodes, &tags)?;
-        return Ok(blueprint_targets(app, plans));
+        let mut out = blueprint_targets(app, plans);
+        // Hosts that never ran this deployment (a replacement's new member) are rebuilt
+        // first; the rest keep host id order.
+        let ran: BTreeSet<i64> = current::Entity::find()
+            .filter(current::Column::WorkspaceId.eq(workspace))
+            .filter(current::Column::DeploymentId.eq(app.id))
+            .all(conn)
+            .await?
+            .into_iter()
+            .map(|row| row.host_id)
+            .collect();
+        out.sort_by_key(|t| (ran.contains(&i64::from(t.host_id)), t.host_id));
+        return Ok(out);
     }
     member_targets(conn, workspace, app).await
 }
@@ -696,6 +708,7 @@ pub(super) async fn execute(
         }
     }
     let mut output = StoredText::new();
+    let hosts: Vec<i64> = rows.iter().map(|row| row.host_id).collect();
     for row in rows {
         let scope =
             match Scope::for_actor(s, rev.workspace_id.into(), rev.triggered_by.into()).await {
@@ -730,9 +743,24 @@ pub(super) async fn execute(
             host_revision.manifest = manifest.clone();
             host_revision.variable_snapshot = Some(sealed.clone());
         }
+        // A replacement rebuilds every member, but a host whose artifact is already in place
+        // (only the moved instance's address could have changed it) is left untouched.
+        let unchanged =
+            rev.action.ends_with("-replace") && hash(&row.artifact) == row.expected_hash;
         host_revision.artifact = row.artifact;
         host_revision.expected_hash = row.expected_hash;
-        let result = execute_host(s, &host_revision, protected, &host_app).await;
+        let result = if unchanged {
+            Ok((
+                true,
+                StoredText::from_message(
+                    Message::new("deployment.output.hostUnchanged")
+                        .with("host", row.host_id.to_string()),
+                )
+                .stored(),
+            ))
+        } else {
+            execute_host(s, &host_revision, protected, &host_app).await
+        };
         let (success, text) = match result {
             Ok(value) => value,
             Err(error) => {
@@ -797,6 +825,16 @@ pub(super) async fn execute(
         if !success {
             return Ok((false, output.stored()));
         }
+    }
+    // Every target of this blueprint revision now runs it; a host it no longer targets (an
+    // instance replaced away) no longer carries the deployment.
+    if app.target_kind == "blueprint" {
+        current::Entity::delete_many()
+            .filter(current::Column::WorkspaceId.eq(rev.workspace_id))
+            .filter(current::Column::DeploymentId.eq(app.id))
+            .filter(current::Column::HostId.is_not_in(hosts))
+            .exec(&s.db)
+            .await?;
     }
     Ok((true, output.stored()))
 }

@@ -935,6 +935,10 @@ fn workspace_routes() -> Router<state::AppState> {
             post(deployments::acknowledge),
         )
         .route(
+            "/{workspace}/deployments/{id}/instances/{role}/{index}/replace",
+            post(deployments::replace::replace),
+        )
+        .route(
             "/{workspace}/pipelines/{id}/runs",
             post(pipelines::runs::trigger),
         )

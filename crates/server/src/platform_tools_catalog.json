@@ -1495,6 +1495,21 @@
     ]
   },
   {
+    "path": "/deployments/{id}/instances/{role}/{index}/replace",
+    "method": "POST",
+    "handler": "deployments::replace::replace",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn replace(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, role, index)): Path<(String, String, String, u32)>,\n    Json(b): Json<ReplaceBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct ReplaceBody {\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "deployments.apply"
+    ],
+    "documentation": "`POST /deployments/{id}/instances/{role}/{index}/replace`: moves one instance to another\nhost as a `manual-replace` revision. Answers 202 with the revision; the revision runs\nlike any other.",
+    "permission": "deployments.apply"
+  },
+  {
     "path": "/deployments/{id}/previews",
     "method": "POST",
     "handler": "deployments::preview",

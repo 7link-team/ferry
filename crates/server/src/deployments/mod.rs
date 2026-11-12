@@ -9,6 +9,7 @@ pub use specs::placement;
 #[allow(dead_code)]
 pub(crate) mod events;
 mod groups;
+pub(crate) mod replace;
 use crate::error::{Json, Path, Query};
 use crate::hosts::channel::HostChannel;
 use crate::{
@@ -1134,7 +1135,7 @@ async fn old_revision(
     id: &str,
 ) -> Result<revisions::Model> {
     let id = Id::reference(id)?;
-    revisions::Entity::find_by_id(i64::from(id))
+    let old = revisions::Entity::find_by_id(i64::from(id))
         .filter(revisions::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(revisions::Column::DeploymentId.eq(app_id))
         .filter(revisions::Column::State.eq("succeeded"))
@@ -1145,7 +1146,24 @@ async fn old_revision(
                 axum::http::StatusCode::BAD_REQUEST,
                 crate::i18n::Message::new("deployment.error.028"),
             )
-        })
+        })?;
+    // An older revision's artifacts belong to the placement before a replacement, while the
+    // binding already holds the new one; rolling the placement back is not supported.
+    let replaced = revisions::Entity::find()
+        .filter(revisions::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(revisions::Column::DeploymentId.eq(app_id))
+        .filter(revisions::Column::State.eq("succeeded"))
+        .filter(revisions::Column::Action.is_in(replace::ACTIONS))
+        .filter(revisions::Column::Number.gt(old.number))
+        .one(conn)
+        .await?;
+    if replaced.is_some() {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("deployment.rollbackAcrossReplace"),
+        ));
+    }
+    Ok(old)
 }
 pub async fn preview(
     State(s): State<AppState>,
@@ -1332,10 +1350,29 @@ pub async fn apply(
     Path((_, id)): Path<(String, String)>,
     Json(b): Json<RunBody>,
 ) -> Result<(StatusCode, Json<Value>)> {
-    trigger(&s, &scope, &id, b, false, false).await
+    trigger(&s, &scope, &id, b, "apply").await
 }
 /// Reuses exact preview/version/variable checks for an authorized scheduled action.
 pub async fn scheduled(s: &AppState, scope: Scope, id: &str, restart: bool) -> Result<Id> {
+    scheduled_action(s, scope, id, if restart { "restart" } else { "apply" }).await
+}
+/// Previews and queues a new revision of `id` that rebuilds its (just rebound) placement,
+/// recorded with `action` (`auto-replace` or `manual-replace`).
+pub(crate) async fn scheduled_replace(
+    s: &AppState,
+    scope: Scope,
+    id: &str,
+    action: &'static str,
+) -> Result<Id> {
+    scheduled_action(s, scope, id, action).await
+}
+async fn scheduled_action(
+    s: &AppState,
+    scope: Scope,
+    id: &str,
+    action: &'static str,
+) -> Result<Id> {
+    let restart = action == "restart";
     scope.require("deployments.apply")?;
     let row = scoped(&s.db, &scope, id).await?;
     if restart && row.current_revision == 0 {
@@ -1378,7 +1415,7 @@ pub async fn scheduled(s: &AppState, scope: Scope, id: &str, restart: bool) -> R
         })?,
         revision_id: revision_id.unwrap_or_default(),
     };
-    let (_, Json(result)) = trigger(s, &scope, id, body, false, restart).await?;
+    let (_, Json(result)) = trigger(s, &scope, id, body, action).await?;
     Id::reference(result["id"].as_str().unwrap_or_default())
 }
 pub async fn rollback(
@@ -1387,16 +1424,18 @@ pub async fn rollback(
     Path((_, id)): Path<(String, String)>,
     Json(b): Json<RunBody>,
 ) -> Result<(StatusCode, Json<Value>)> {
-    trigger(&s, &scope, &id, b, true, false).await
+    trigger(&s, &scope, &id, b, "rollback").await
 }
+/// Queues a revision recorded as `action`: `apply`, `rollback` and `restart` as requested;
+/// `auto-replace`/`manual-replace` apply a placement that failover just rebound.
 async fn trigger(
     s: &AppState,
     scope: &Scope,
     id: &str,
     b: RunBody,
-    rollback: bool,
-    restart: bool,
+    action: &'static str,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let (rollback, restart) = (action == "rollback", action == "restart");
     scope.require(if rollback {
         "deployments.rollback"
     } else {
@@ -1605,13 +1644,6 @@ async fn trigger(
         .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
-    let action = if restart {
-        "restart"
-    } else if rollback {
-        "rollback"
-    } else {
-        "apply"
-    };
     revisions::Entity::insert(
         revisions::Model {
             id: id.into(),

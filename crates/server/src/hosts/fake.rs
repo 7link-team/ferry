@@ -26,6 +26,9 @@ pub(crate) struct FakeHost {
     /// Canned failures: a command containing the pattern exits 1 with this stderr; checked
     /// before `responses`.
     pub failures: Mutex<Vec<(String, String)>>,
+    /// When set, opening a channel or running a command fails with a connection error, as for
+    /// a host that went down.
+    pub unreachable: AtomicBool,
 }
 
 impl FakeHost {
@@ -69,7 +72,19 @@ pub(crate) fn open(host: &Host) -> Result<Box<dyn HostChannel>> {
                     .with("detail", "fake host not registered"),
             )
         })?;
+    if fake.unreachable.load(Ordering::SeqCst) {
+        return Err(connection_lost(&host.address));
+    }
     Ok(Box::new(Channel(fake)))
+}
+
+fn connection_lost(address: &str) -> ApiError {
+    ApiError::localized(
+        axum::http::StatusCode::BAD_GATEWAY,
+        crate::i18n::Message::new("ssh.unreachable")
+            .with("address", address)
+            .with("detail", "fake host unreachable"),
+    )
 }
 
 struct Channel(Arc<FakeHost>);
@@ -88,6 +103,10 @@ impl HostChannel for Channel {
         Err(ApiError::bad("fake host has no monitor"))
     }
     async fn exec(&self, command: &str, _: Duration) -> Result<Output> {
+        // A command never reaches an unreachable host, so it is not recorded.
+        if self.0.unreachable.load(Ordering::SeqCst) {
+            return Err(connection_lost("fake"));
+        }
         self.0.commands.lock().unwrap().push(command.into());
         if command.starts_with("set -eu") && self.0.fail.load(Ordering::SeqCst) {
             return Ok(Output {

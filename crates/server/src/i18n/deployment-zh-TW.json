@@ -314,5 +314,15 @@
   "deployment.failoverReason.driverUnsupported": "此驅動不由 Ferry 執行替換。",
   "deployment.failoverReason.needsBackup": "有狀態實例需要先設定備份才能替換。",
   "deployment.failoverReason.modeAlert": "故障轉移模式為僅告警。",
-  "deployment.failoverReason.tooManyFailures": "替換已連續失敗多次。"
+  "deployment.failoverReason.tooManyFailures": "替換已連續失敗多次。",
+  "blueprint.replaceNoCandidate": "沒有其他符合 {selector} 的線上 Linux 主機可接管角色 {role} 的實例 {instance}。",
+  "blueprint.replaceInstanceUnknown": "角色 {role} 沒有實例 {instance}。",
+  "deployment.replaceNotBlueprint": "只有叢集藍圖部署可以替換實例。",
+  "deployment.replaceUnsupportedDriver": "只有 Native 與 Docker 部署可以替換實例；Ferry 不遷移 Swarm 或 Compose 實例。",
+  "deployment.replaceNeedsBackup": "此實例自帶資料，在支援備份之前不能在其他主機上重建。",
+  "deployment.replaceNotDeployed": "此部署尚無成功的修訂版本，沒有可替換的實例。",
+  "deployment.rollbackAcrossReplace": "此修訂版本早於一次實例替換，屬於替換前的放置。請回復到替換修訂版本或之後的版本。",
+  "deployment.output.hostUnchanged": "主機 {host} 已執行此產物，未做任何變更。",
+  "deployment.replaceTrigger.auto": "自動",
+  "deployment.replaceTrigger.manual": "手動"
 }
