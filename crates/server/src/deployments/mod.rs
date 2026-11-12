@@ -259,7 +259,7 @@ async fn check_blueprint(
         )
     })?;
     let name = b.name.trim().to_owned();
-    let tags = groups::role_tags(b.deploy_spec.as_deref())?;
+    let tags = groups::role_tags(scope.workspace_id, b.deploy_spec.as_deref())?;
     for plan in
         groups::compile_offline(conn, scope.workspace_id, &manifest, &binding, &tags).await?
     {
@@ -683,6 +683,16 @@ pub(crate) fn directory(r: &apps::Model) -> String {
 }
 pub(crate) fn project(r: &apps::Model) -> String {
     format!("deployment-{}-{}", r.workspace_id, r.id)
+}
+/// A run request's `expected_hash` must be a SHA-256 hex digest.
+fn check_expected_hash(hash: &str) -> Result<()> {
+    if hash.len() != 64 || !hash.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("deployment.error.037"),
+        ));
+    }
+    Ok(())
 }
 fn hash(s: &str) -> String {
     hex::encode(Sha256::digest(s.as_bytes()))
@@ -1392,6 +1402,10 @@ async fn trigger(
     // A new stack blueprint revision pins instances to Swarm nodes looked up through its
     // hosts, before the transaction opens; `targets` rejects them if the record changed since,
     // and they must be the nodes the preview was pinned to.
+    //
+    // Rollback and restart replay stored artifacts, which keep the label constraints compiled
+    // when they were applied; labels are not resynced, so a tag removed from a host since then
+    // can leave stateless replicas pending.
     let nodes = if rollback || restart {
         None
     } else {
@@ -1403,8 +1417,18 @@ async fn trigger(
             ));
         }
         let nodes = groups::swarm_nodes(s, scope.workspace_id, &before).await?;
-        // Node labels for the spec's host tags must hold before the stack is deployed.
+        // Node labels for the spec's host tags must hold before the stack is deployed. Syncing
+        // changes the cluster, so a malformed or stale request is turned away first (cheaply;
+        // the authoritative checks below still run in the transaction).
         if let Some(nodes) = &nodes {
+            check_expected_hash(&b.expected_hash)?;
+            if before.preview_artifact.is_empty() || !nodes.match_preview(&before.preview_artifact)
+            {
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::CONFLICT,
+                    crate::i18n::Message::new("deployment.error.040"),
+                ));
+            }
             groups::sync_labels(s, scope.workspace_id, &before, nodes).await?;
         }
         nodes
@@ -1423,12 +1447,7 @@ async fn trigger(
             crate::i18n::Message::new("deployment.error.030"),
         ));
     }
-    if b.expected_hash.len() != 64 || !b.expected_hash.bytes().all(|c| c.is_ascii_hexdigit()) {
-        return Err(ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("deployment.error.037"),
-        ));
-    }
+    check_expected_hash(&b.expected_hash)?;
     let (source, manifest, rendered, artifact, files) = if rollback || restart {
         let old = old_revision(&tx, scope, r.id, &b.revision_id).await?;
         if restart && old.id != r.current_revision {

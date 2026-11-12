@@ -417,7 +417,7 @@ pub fn compile(
         bp_text,
         binding,
         nodes.map(Nodes::Resolved),
-        &RoleTags::new(),
+        &RoleTags::default(),
     )
 }
 
@@ -434,11 +434,22 @@ pub const UNRESOLVED: &str = "unresolved:";
 /// node, still are). Node pinning and those conflicts are settled when the deployment is
 /// previewed, by [`compile`] with the nodes `swarm::assign` resolves. Never deploy the result.
 pub fn compile_unresolved(bp_text: &str, binding: &Binding) -> Result<Vec<HostPlan>> {
-    compile_with(bp_text, binding, Some(Nodes::Unresolved), &RoleTags::new())
+    compile_with(
+        bp_text,
+        binding,
+        Some(Nodes::Unresolved),
+        &RoleTags::default(),
+    )
 }
 
-/// Role name → the host tags its deployment spec selects hosts by (`roles.<r>.hosts.tags`).
-pub type RoleTags = BTreeMap<String, Vec<String>>;
+/// The host tags a deployment spec's role selectors use (`roles.<r>.hosts.tags`), with the
+/// workspace their Swarm node labels are scoped to.
+#[derive(Clone, Debug, Default)]
+pub struct RoleTags {
+    pub workspace: Id,
+    /// Role name → its selector's tags.
+    pub roles: BTreeMap<String, Vec<String>>,
+}
 
 /// [`compile`] for a deployment spec: each stateless `stack` role is also constrained to
 /// Swarm nodes labelled with every tag its selector requires (`node.labels.<label>==true`,
@@ -573,8 +584,11 @@ fn compile_with(
                 // Replicas go only to nodes whose hosts carry every selected tag (after the
                 // author's own constraints); names and groups have no node-side equivalent.
                 let mut labels = Vec::new();
-                for tag in tags.get(&role.name).into_iter().flatten() {
-                    let label = format!("node.labels.{}==true", swarm::tag_label(tag));
+                for tag in tags.roles.get(&role.name).into_iter().flatten() {
+                    let label = format!(
+                        "node.labels.{}==true",
+                        swarm::tag_label(tags.workspace, tag)
+                    );
                     if !labels.contains(&label) {
                         labels.push(label);
                     }
@@ -1188,14 +1202,19 @@ mod tests {
     }
 
     fn role_tags(rows: &[(&str, &[&str])]) -> RoleTags {
-        rows.iter()
+        let roles = rows
+            .iter()
             .map(|(role, tags)| {
                 (
                     role.to_string(),
                     tags.iter().map(|t| t.to_string()).collect(),
                 )
             })
-            .collect()
+            .collect();
+        RoleTags {
+            workspace: Id::from(1),
+            roles,
+        }
     }
 
     #[test]
@@ -1212,8 +1231,8 @@ mod tests {
         assert_eq!(
             service(&d, "gateway")["placement"],
             json!({"constraints": ["node.role==worker",
-                                   format!("node.labels.{}==true", tag_label("edge")),
-                                   format!("node.labels.{}==true", tag_label("zone:a"))],
+                                   format!("node.labels.{}==true", tag_label(Id::from(1), "edge")),
+                                   format!("node.labels.{}==true", tag_label(Id::from(1), "zone:a"))],
                    "maxReplicasPerNode": 1})
         );
         // Stable instances stay pinned to their node only.
@@ -1236,7 +1255,7 @@ mod tests {
             &text,
             &stack_hosts(),
             Some(&stack_nodes()),
-            &RoleTags::new(),
+            &RoleTags::default(),
         )
         .unwrap();
         assert_eq!(plain[0].manifest, none[0].manifest);

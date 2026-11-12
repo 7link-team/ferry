@@ -78,16 +78,19 @@ pub async fn node_id(ch: &dyn HostChannel) -> Result<String> {
     Ok(id.to_string())
 }
 
-/// The Swarm node label standing for Ferry host tag `tag`: `ferry.tag.` + the first 12 hex
-/// characters of the SHA-256 of its name, so any tag name makes a valid label. A node carries
-/// it (value `true`) when its Ferry host has the tag.
-pub fn tag_label(tag: &str) -> String {
+/// The Swarm node label standing for host tag `tag` of `workspace`:
+/// `ferry.w<workspace>.tag.` + the first 12 hex characters of the SHA-256 of its name, so any
+/// tag name makes a valid label. Scoped by workspace: two workspaces sharing a Swarm never
+/// schedule by, or rewrite, each other's labels. A node carries it (value `true`) when its
+/// Ferry host has the tag.
+pub fn tag_label(workspace: Id, tag: &str) -> String {
     use sha2::{Digest, Sha256};
     let digest = hex::encode(Sha256::digest(tag.as_bytes()));
-    format!("ferry.tag.{}", &digest[..12])
+    format!("ferry.w{workspace}.tag.{}", &digest[..12])
 }
 
-/// `swarmLabelSyncFailed` for `node`; an empty host until [`on_host`] names the manager.
+/// `swarmLabelSyncFailed` for `node` (one or several node IDs); an empty host until
+/// [`on_host`] names the manager.
 fn label_sync_failed<T>(node: &str, detail: &str) -> Result<T> {
     fail(
         Message::new("blueprint.swarmLabelSyncFailed")
@@ -105,9 +108,9 @@ pub async fn sync_labels(
     ch: &dyn HostChannel,
     desired: &BTreeMap<String, BTreeMap<String, bool>>,
 ) -> Result<()> {
-    let Some(first) = desired.keys().next() else {
+    if desired.is_empty() {
         return Ok(());
-    };
+    }
     let ids: Vec<String> = desired.keys().map(|id| quote(id)).collect();
     let inspect = ch
         .exec(
@@ -119,7 +122,8 @@ pub async fn sync_labels(
         )
         .await?;
     if inspect.code != 0 {
-        return label_sync_failed(first, &inspect.stderr);
+        let all: Vec<&str> = desired.keys().map(String::as_str).collect();
+        return label_sync_failed(&all.join(", "), &inspect.stderr);
     }
     let mut current: BTreeMap<&str, BTreeMap<String, String>> = BTreeMap::new();
     for line in inspect
@@ -517,14 +521,65 @@ mod tests {
         assert_eq!(map, expected);
     }
 
+    /// The workspace of the label tests.
+    fn ws() -> Id {
+        Id::from(7)
+    }
+
     #[test]
     fn label_name_is_stable_hash() {
-        // sha256("cache") = 5e1ecee06a7fc06f...; the first 12 lowercase hex characters.
-        assert_eq!(tag_label("cache"), "ferry.tag.5e1ecee06a7f");
+        // `ferry.w<workspace>.tag.` + the first 12 lowercase hex characters of
+        // sha256("cache") = 5e1ecee06a7fc06f...
+        assert_eq!(tag_label(ws(), "cache"), "ferry.w7.tag.5e1ecee06a7f");
         // Any tag name is hashed over its UTF-8 bytes, so the label is always valid.
-        assert_eq!(tag_label("数据库"), "ferry.tag.263200d7d529");
-        assert_eq!(tag_label("zone:a"), "ferry.tag.349cd40b95a9");
-        assert_ne!(tag_label("cache"), tag_label("Cache"));
+        assert_eq!(tag_label(ws(), "数据库"), "ferry.w7.tag.263200d7d529");
+        assert_eq!(tag_label(ws(), "zone:a"), "ferry.w7.tag.349cd40b95a9");
+        assert_ne!(tag_label(ws(), "cache"), tag_label(ws(), "Cache"));
+        assert_eq!(
+            tag_label(Id::from(42), "cache"),
+            "ferry.w42.tag.5e1ecee06a7f"
+        );
+    }
+
+    #[tokio::test]
+    async fn labels_are_workspace_scoped() {
+        let (w1, w2) = (Id::from(1), Id::from(2));
+        let (mine, theirs) = (tag_label(w2, "mq"), tag_label(w1, "mq"));
+        assert_ne!(mine, theirs);
+        // Workspace 2 syncs `mq` on a node workspace 1 also labelled for its own `mq`: W1's
+        // label is never added or removed, whether W2's host has the tag or not.
+        for want in [false, true] {
+            let (host, ch) = channel(931_020 + i64::from(want));
+            host.respond(
+                "docker node inspect",
+                &format!(
+                    "n1 {{\"{theirs}\":\"true\"}}
+"
+                ),
+            );
+            let desired =
+                BTreeMap::from([("n1".to_string(), BTreeMap::from([(mine.clone(), want)]))]);
+            sync_labels(ch.as_ref(), &desired).await.expect("synced");
+            let commands = host.commands.lock().unwrap().clone();
+            assert!(
+                commands.iter().all(|c| !c.contains(&theirs)),
+                "{commands:?}"
+            );
+            let updates: Vec<&String> = commands
+                .iter()
+                .filter(|c| c.starts_with("docker node update"))
+                .collect();
+            if want {
+                assert_eq!(
+                    updates,
+                    [&format!(
+                        "docker node update --label-add '{mine}=true' 'n1'"
+                    )]
+                );
+            } else {
+                assert!(updates.is_empty(), "{updates:?}");
+            }
+        }
     }
 
     fn desired(rows: &[(&str, &[(&str, bool)])]) -> BTreeMap<String, BTreeMap<String, bool>> {
@@ -532,7 +587,7 @@ mod tests {
             .map(|(node, labels)| {
                 let labels = labels
                     .iter()
-                    .map(|(tag, want)| (tag_label(tag), *want))
+                    .map(|(tag, want)| (tag_label(ws(), tag), *want))
                     .collect();
                 (node.to_string(), labels)
             })
@@ -541,11 +596,11 @@ mod tests {
 
     #[tokio::test]
     async fn label_sync_adds_and_removes_on_manager() {
-        let (cache, mq) = (tag_label("cache"), tag_label("mq"));
+        let (cache, mq) = (tag_label(ws(), "cache"), tag_label(ws(), "mq"));
         let (host, ch) = channel(931_010);
         // n1 already matches; n2 has no labels; n3 carries a stale `mq` and an unrelated
         // label (and a `ferry.tag.` label of a tag this deployment does not use).
-        let other = tag_label("other");
+        let other = tag_label(ws(), "other");
         host.respond(
             "docker node inspect",
             &format!(
@@ -605,10 +660,16 @@ mod tests {
         // An unreadable label state stops before any update.
         let (host, ch) = channel(931_013);
         host.fail_on("docker node inspect", "permission denied");
-        let e = sync_labels(ch.as_ref(), &desired(&[("n1", &[("cache", true)])]))
-            .await
-            .expect_err("inspect fails");
-        assert_eq!(message(e).key, "blueprint.swarmLabelSyncFailed");
+        let e = sync_labels(
+            ch.as_ref(),
+            &desired(&[("n1", &[("cache", true)]), ("n2", &[("cache", false)])]),
+        )
+        .await
+        .expect_err("inspect fails");
+        let m = message(e);
+        assert_eq!(m.key, "blueprint.swarmLabelSyncFailed");
+        // Every requested node is named: the failing one is unknown.
+        assert_eq!(m.params["node"], "n1, n2");
         assert_eq!(
             host.commands
                 .lock()

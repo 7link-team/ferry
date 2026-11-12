@@ -60,23 +60,26 @@ fn host_app(app: &apps::Model, host: Id, manifest: String) -> apps::Model {
 }
 /// Compiles a blueprint deployment without consulting hosts: the binding was validated when
 /// it was stored, so readers that only need the compiled services never fail on a host change.
-/// A stack is compiled unresolved (stand-in Swarm nodes), which is enough for readers.
+/// A stack is compiled unresolved (stand-in Swarm nodes), which is enough for readers. A
+/// stored `deploy_spec` is parsed for its selector tags (label constraints); it was validated
+/// when written, so this does not fail on a host change either.
 pub(crate) fn compiled(app: &apps::Model) -> Result<Vec<HostPlan>> {
     let binding = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
-    let tags = role_tags(app.deploy_spec.as_deref())?;
+    let tags = role_tags(app.workspace_id.into(), app.deploy_spec.as_deref())?;
     crate::blueprint::compile::compile_unresolved_tagged(&app.manifest, &binding, &tags)
 }
-/// The host tags each role of a deployment spec selects by; none without a spec.
-pub(super) fn role_tags(spec: Option<&str>) -> Result<RoleTags> {
-    let Some(text) = spec else {
-        return Ok(RoleTags::new());
+/// The host tags each role of `workspace`'s deployment spec selects by; none without a spec.
+pub(super) fn role_tags(workspace: Id, spec: Option<&str>) -> Result<RoleTags> {
+    let roles = match spec {
+        Some(text) => crate::blueprint::spec::parse(text)?
+            .roles
+            .into_iter()
+            .map(|(role, r)| (role, r.hosts.tags))
+            .filter(|(_, tags)| !tags.is_empty())
+            .collect(),
+        None => BTreeMap::new(),
     };
-    Ok(crate::blueprint::spec::parse(text)?
-        .roles
-        .into_iter()
-        .map(|(role, r)| (role, r.hosts.tags))
-        .filter(|(_, tags)| !tags.is_empty())
-        .collect())
+    Ok(RoleTags { workspace, roles })
 }
 /// Validates a binding against this workspace's current hosts and returns them by id.
 async fn known_hosts(
@@ -188,7 +191,8 @@ pub(super) async fn swarm_nodes(
 /// hosts (the [`swarm_nodes`] just looked up) with the tags its role selectors use, so the
 /// compiled `node.labels.ferry.tag.*` constraints match the hosts' current tags: a node gets
 /// a tag's label when its host has the tag and loses it otherwise. Other labels, other tags'
-/// labels and nodes of hosts this deployment does not bind are never touched. Changes the
+/// labels (another workspace's included: labels are workspace-scoped) and nodes of hosts
+/// this deployment does not bind are never touched. Changes the
 /// cluster, so only apply calls it, outside any transaction (it reaches the manager).
 pub(super) async fn sync_labels(
     s: &AppState,
@@ -196,7 +200,8 @@ pub(super) async fn sync_labels(
     app: &apps::Model,
     nodes: &SwarmNodes,
 ) -> Result<()> {
-    let used: BTreeSet<String> = role_tags(app.deploy_spec.as_deref())?
+    let used: BTreeSet<String> = role_tags(workspace, app.deploy_spec.as_deref())?
+        .roles
         .into_values()
         .flatten()
         .collect();
@@ -214,7 +219,7 @@ pub(super) async fn sync_labels(
         let labels = desired.entry(node.clone()).or_default();
         for tag in &used {
             // Two Ferry hosts on one node: the node has the tag if either host does.
-            *labels.entry(swarm::tag_label(tag)).or_default() |= own.contains(tag);
+            *labels.entry(swarm::tag_label(workspace, tag)).or_default() |= own.contains(tag);
         }
     }
     let result = async {
@@ -293,7 +298,7 @@ pub(super) async fn targets(
             }
             None => None,
         };
-        let tags = role_tags(app.deploy_spec.as_deref())?;
+        let tags = role_tags(workspace, app.deploy_spec.as_deref())?;
         let plans = crate::blueprint::compile::compile_tagged(&app.manifest, &b, nodes, &tags)?;
         return Ok(blueprint_targets(app, plans));
     }
@@ -308,7 +313,7 @@ pub(super) async fn offline_targets(
 ) -> Result<Vec<HostTarget>> {
     if app.target_kind == "blueprint" {
         let b = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
-        let tags = role_tags(app.deploy_spec.as_deref())?;
+        let tags = role_tags(workspace, app.deploy_spec.as_deref())?;
         let plans = compile_offline(conn, workspace, &app.manifest, &b, &tags).await?;
         return Ok(blueprint_targets(app, plans));
     }

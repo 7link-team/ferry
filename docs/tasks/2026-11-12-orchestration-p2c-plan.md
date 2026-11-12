@@ -97,9 +97,9 @@ pub fn place(bp: &model::Blueprint, spec: &spec::DeploySpec, candidates: &[deplo
 - Modify: `crates/server/src/blueprint/swarm.rs`、`crates/server/src/blueprint/compile.rs`、`crates/server/src/deployments/groups.rs`
 
 **Interfaces:**
-- 节点 label 名：`ferry.tag.<sha256(tag名)[..12]>=true`（标签名可含任意字符，哈希保证 label 合法）。
-- 预览/执行前（P2b 的节点探测处）：对规格中任一角色选择器用到的标签，在管理节点执行 `docker node update --label-add ferry.tag.<h>=true <node>`（主机有该标签）或 `--label-rm`（没有），仅涉及该 Swarm 中已登记的节点。
-- 编译：无状态 stack 角色按选择器追加 `node.labels.ferry.tag.<h>==true` 约束（每个标签一条）；有状态角色已固定节点，不追加。
+- 节点 label 名：`ferry.w<工作空间ID>.tag.<sha256(tag名)[..12]>=true`（标签名可含任意字符，哈希保证 label 合法；按工作空间隔离，共享同一 Swarm 的工作空间互不调度到、也不改写对方的 label）。
+- 仅执行时（P2b 执行期节点探测处，预览只读）：先做请求的廉价校验（expected_hash 格式、预览匹配），再对规格中任一角色选择器用到的标签，在管理节点执行 `docker node update --label-add ferry.w<ws>.tag.<h>=true <node>`（主机有该标签）或 `--label-rm`（没有），仅涉及本部署绑定主机对应的节点；先读取现有 label，已一致则跳过；失败则执行失败（`blueprint.swarmLabelSyncFailed`），不部署。
+- 编译：无状态 stack 角色按选择器追加 `node.labels.ferry.w<ws>.tag.<h>==true` 约束（每个标签一条）；有状态角色已固定节点，不追加。
 - [ ] 失败测试：`stateless_stack_role_gets_tag_label_constraints`、`label_sync_adds_and_removes_on_manager`（FakeHost 记录命令）、`label_name_is_stable_hash`。
 - [ ] FAIL → 实现 → PASS → Commit `feat(blueprint): map host tags to swarm node labels`
 

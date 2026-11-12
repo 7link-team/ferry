@@ -1222,15 +1222,28 @@ async fn stack_apply_checks_version_before_probing() {
     }
 }
 
-/// A stack deployment of [`stack_body`] whose stored spec selects `nats` hosts tagged `mq`.
+/// A stack deployment of [`stack_body`] plus a stateless `web` role on the first worker,
+/// whose stored spec selects hosts tagged `mq` for both roles.
 async fn stack_with_spec(s: &AppState, base: i64) -> String {
-    let id = create_app(s, stack_body(base)).await.unwrap();
+    let mut body = stack_body(base);
+    let mut manifest: Value = serde_json::from_str(body["manifest"].as_str().unwrap()).unwrap();
+    manifest["roles"].as_array_mut().unwrap().push(json!({
+        "name": "web",
+        "instances": {"min": 1, "max": 3, "default": 1},
+        "identity": "stateless",
+        "service": {"image": "nginx:1"}
+    }));
+    body["manifest"] = json!(manifest.to_string());
+    body["blueprint_binding"]["roles"]["web"] =
+        json!([{"hostId": (base + 1).to_string(), "address": "10.0.0.1"}]);
+    let id = create_app(s, body).await.unwrap();
     let spec = json!({
         "apiVersion": "ferry/deploy-v1",
         "template": {"id": "9101", "version": 1},
         "driver": "stack",
         "manager": base.to_string(),
-        "roles": {"nats": {"instances": 3, "hosts": {"tags": ["mq"]}}}
+        "roles": {"nats": {"instances": 3, "hosts": {"tags": ["mq"]}},
+                  "web": {"instances": 1, "hosts": {"tags": ["mq"]}}}
     });
     apps::Entity::update_many()
         .col_expr(apps::Column::DeploySpec, Expr::value(spec.to_string()))
@@ -1249,7 +1262,8 @@ async fn stack_apply_syncs_tag_labels_before_deploy() {
     // The first two workers carry `mq`; the third lost it after placement.
     tag_host(&s, "mq", base + 1).await;
     tag_host(&s, "mq", base + 2).await;
-    let label = crate::blueprint::swarm::tag_label("mq");
+    let label = crate::blueprint::swarm::tag_label(Id::from(1), "mq");
+    assert_eq!(label, "ferry.w1.tag.d4a2b734a5b9");
     let (n1, n2, n3) = (base + 1, base + 2, base + 3);
     crate::hosts::fake::get(base).respond(
         "docker node inspect",
@@ -1262,6 +1276,34 @@ async fn stack_apply_syncs_tag_labels_before_deploy() {
     let preview = preview_of(&s, &id, None).await.unwrap();
     assert_eq!(commands(base, "docker node inspect"), 0);
     assert_eq!(commands(base, "docker node update"), 0);
+    // A malformed or stale request is turned away before the cluster changes.
+    let mut body = run_body(&preview, "");
+    body.expected_hash = "nope".into();
+    let error = apply(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id.clone())),
+        Json(body),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(key(error), "deployment.error.037");
+    let stale = row(&s, &id).await.preview_artifact;
+    apps::Entity::update_many()
+        .col_expr(apps::Column::PreviewArtifact, Expr::value(""))
+        .filter(apps::Column::Id.eq(id.parse::<i64>().unwrap()))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let error = apply_preview(&s, &id, &preview).await.unwrap_err();
+    assert_eq!(key(error), "deployment.error.040");
+    assert_eq!(commands(base, "docker node inspect"), 0);
+    apps::Entity::update_many()
+        .col_expr(apps::Column::PreviewArtifact, Expr::value(stale))
+        .filter(apps::Column::Id.eq(id.parse::<i64>().unwrap()))
+        .exec(&s.db)
+        .await
+        .unwrap();
     let rev = apply_preview(&s, &id, &preview).await.unwrap();
     let manager = crate::hosts::fake::get(base);
     let updates: Vec<String> = manager
@@ -1287,6 +1329,18 @@ async fn stack_apply_syncs_tag_labels_before_deploy() {
     for host in [n1, n2, n3] {
         assert_eq!(commands(host, "docker node update"), 0);
     }
+    // The stored artifact constrains the stateless role to the label (stable ones are pinned).
+    let stored = target_rows(&s, &rev).await;
+    let doc: Value = serde_json::from_str(&stored[0].artifact).unwrap();
+    let constraint = format!("node.labels.{label}==true");
+    assert!(
+        doc["services"]["web"]["deploy"]["placement"]["constraints"]
+            .as_array()
+            .is_some_and(|c| c.contains(&json!(constraint))),
+        "{}",
+        stored[0].artifact
+    );
+    assert_eq!(stored[0].artifact.matches(&constraint).count(), 1);
     let (ok, output) = execute(&s, &revision(&s, &rev).await).await.unwrap();
     assert!(ok, "{output}");
     assert_eq!(commands(base, "docker stack deploy"), 1);
