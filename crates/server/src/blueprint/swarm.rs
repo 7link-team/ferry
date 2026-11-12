@@ -599,7 +599,7 @@ mod tests {
         let (cache, mq) = (tag_label(ws(), "cache"), tag_label(ws(), "mq"));
         let (host, ch) = channel(931_010);
         // n1 already matches; n2 has no labels; n3 carries a stale `mq` and an unrelated
-        // label (and a `ferry.tag.` label of a tag this deployment does not use).
+        // label (and a `ferry.w<ws>.tag.` label of a tag this deployment does not use).
         let other = tag_label(ws(), "other");
         host.respond(
             "docker node inspect",

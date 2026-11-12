@@ -189,7 +189,7 @@ pub(super) async fn swarm_nodes(
 }
 /// Before a stack deployment from a spec is applied, labels the Swarm nodes of its bound
 /// hosts (the [`swarm_nodes`] just looked up) with the tags its role selectors use, so the
-/// compiled `node.labels.ferry.tag.*` constraints match the hosts' current tags: a node gets
+/// compiled `node.labels.ferry.w<ws>.tag.*` constraints match the hosts' current tags: a node gets
 /// a tag's label when its host has the tag and loses it otherwise. Other labels, other tags'
 /// labels (another workspace's included: labels are workspace-scoped) and nodes of hosts
 /// this deployment does not bind are never touched. Changes the
