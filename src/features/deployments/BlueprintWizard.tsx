@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "cn";
 import { Minus, Plus } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
@@ -151,12 +151,15 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
     if (key === "stepPlacement" && mode === "form" && !invalid && text && placement?.for !== text) void preview(text);
   }, [key, mode, invalid, text, placement?.for, preview]);
 
-  if (!allowed) return <p role="alert">{w("forbidden")}</p>;
-  if (!templateId) return <p role="alert">{w("missingTemplate")}</p>;
-  if (loadError) return <div role="alert" className="space-y-3"><p>{loadError}</p><Button variant="outline" className={touch} onClick={() => setReload(n => n + 1)}>{commonText("common-domain:common.retry")}</Button></div>;
-  if (!loaded) return <LoadingSkeleton variant="page" label={w("loading")} />;
+  // Editing is embedded in the detail page: every early state keeps a way back.
+  const cancel = onCancel && <Button type="button" variant="outline" className={touch} onClick={onCancel}>{w("cancel")}</Button>;
+  const early = (body: ReactNode) => cancel ? <div className="space-y-3">{body}<div>{cancel}</div></div> : body;
+  if (!allowed) return early(<p role="alert">{w("forbidden")}</p>);
+  if (!templateId) return early(<p role="alert">{w("missingTemplate")}</p>);
+  if (loadError) return <div role="alert" className="space-y-3"><p>{loadError}</p><div className="flex flex-wrap gap-2"><Button variant="outline" className={touch} onClick={() => setReload(n => n + 1)}>{commonText("common-domain:common.retry")}</Button>{cancel}</div></div>;
+  if (!loaded) return early(<LoadingSkeleton variant="page" label={w("loading")} />);
   const { template, blueprint, parameters } = loaded;
-  if (!blueprint) return <p role="alert">{w("notBlueprint")}</p>;
+  if (!blueprint) return early(<p role="alert">{w("notBlueprint")}</p>);
 
   const problems = (at: string): string[] => {
     if (!spec) return [];

@@ -33,6 +33,7 @@ const deployment = (patch: Partial<Deployment> = {}): Deployment => ({
 let root: Root, host: HTMLDivElement, requests: { url: string; method: string; body?: Record<string, unknown> }[];
 let health: () => { status: number; body: unknown } | Promise<{ status: number; body: unknown }>;
 let patchReply: () => { status: number; body: unknown };
+let templateReply: () => { status: number; body: unknown } | Promise<{ status: number; body: unknown }>;
 
 beforeEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -42,6 +43,7 @@ beforeEach(async () => {
   requests = [];
   health = () => ({ status: 200, body: { id: "7", placement: [] } });
   patchReply = () => ({ status: 200, body: {} });
+  templateReply = () => ({ status: 200, body: { id: "42", name: "NATS cluster", version: 3, content: JSON.stringify(blueprint("docker")), parameters: JSON.stringify([{ name: "client_port", type: "integer", default: 4222, min: 1, max: 65535 }]) } });
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     const body = init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
@@ -49,7 +51,7 @@ beforeEach(async () => {
     const reply = (status: number, data: unknown) => ({ ok: status < 400, status, headers: new Headers({ "content-type": "application/json" }), json: async () => data });
     if (url.includes("/application-health/7")) { const r = await health(); return reply(r.status, r.body); }
     if (url.includes("/nodes")) return reply(200, { items: hosts, total: 3, page: 1, page_size: 200 });
-    if (url.includes("/app-templates/42")) return reply(200, { id: "42", name: "NATS cluster", version: 3, content: JSON.stringify(blueprint("docker")), parameters: JSON.stringify([{ name: "client_port", type: "integer", default: 4222, min: 1, max: 65535 }]) });
+    if (url.includes("/app-templates/42")) { const r = await templateReply(); return reply(r.status, r.body); }
     if (url.includes("/tags")) return reply(200, { items: [], total: 0, page: 1, page_size: 200 });
     if (url.includes("/node-groups")) return reply(200, { items: [], total: 0, page: 1, page_size: 200 });
     if (url.includes("/deployment-placements")) return reply(200, { manifest: "{}", binding: { driver: "docker", roles: { nats: [bind("1"), bind("2"), bind("3")], web: [bind("1")] } }, warnings: [] });
@@ -104,7 +106,7 @@ it("health_badges_from_application_health", async () => {
 });
 
 it("stateless swarm role is one replicated row on the manager", async () => {
-  health = () => ({ status: 200, body: { id: "7", placement: [{ name: "web", role: "web", host_id: "1", host_name: "host-a", state: "up", expected: 2, healthy: 2, unknown: 0 }] } });
+  health = () => ({ status: 200, body: { id: "7", placement: [{ name: "web", role: "web", host_id: "1", host_name: "host-a", state: "down", expected: 2, healthy: 1, unknown: 0 }] } });
   await mountTopology(deployment({
     mode: "stack", manifest: JSON.stringify(blueprint("stack")), current_revision: "11",
     blueprint_binding: { driver: "stack", manager: "1", roles: { nats: [bind("1"), bind("2"), bind("3")], web: [bind("2"), bind("3")] } },
@@ -113,7 +115,9 @@ it("stateless swarm role is one replicated row on the manager", async () => {
   expect(rowsOf("web")[0]!.getAttribute("data-topology-instance")).toBe("web");
   expect(rowsOf("web")[0]!.textContent).toContain(t("replicated", { count: 2 }));
   expect(rowsOf("web")[0]!.textContent).toContain("host-a");
-  expect(stateOf("web")).toBe("up");
+  expect(stateOf("web")).toBe("down");
+  // The summary counts Swarm replicas from the health entry, not rows.
+  expect(roleGroups()[1]!.querySelector("header")!.textContent).toContain(t("summary", { up: 1, total: 2 }));
   // Stable roles keep one row per pinned instance.
   expect(rowsOf("nats")).toHaveLength(3);
 });
@@ -196,7 +200,8 @@ it("spec_edit_limited_to_values_after_deploy", async () => {
   expect(alertWith(w("topologyLocked"))).toBeUndefined();
   expect(button(w("save")).disabled).toBe(false);
   // The server's localized rejection is shown and the editor stays open.
-  patchReply = () => ({ status: 409, body: { error: "首次部署后不能再修改蓝图绑定" } });
+  // The server rejects a topology change with 400 `blueprint.topologyChangeRequiresPlan`.
+  patchReply = () => ({ status: 400, body: { error: "首次部署后不能再修改蓝图绑定" } });
   await click(w("save"));
   expect(alertWith("首次部署后不能再修改蓝图绑定")).toBeDefined();
   expect(onSaved).not.toHaveBeenCalled();
@@ -236,4 +241,45 @@ it("cancel closes the spec editor without saving", async () => {
   await click(w("cancel"));
   expect(steps()).toHaveLength(0);
   expect(requests.some(r => r.method === "PATCH")).toBe(false);
+});
+
+it("the embedded editor offers cancel while loading and after a load error", async () => {
+  let release!: () => void;
+  templateReply = () => new Promise(resolve => { release = () => resolve({ status: 500, body: { error: "template store offline" } }); });
+  await mountEdit(deployment());
+  await click(w("editSpec"));
+  expect(button(w("cancel"))).toBeDefined();
+  await act(async () => release()); await flush();
+  expect(alertWith("template store offline")).toBeDefined();
+  await click(w("cancel"));
+  expect(button(w("editSpec"))).toBeDefined();
+  // A template that is no longer a blueprint is a dead end too, with a way back.
+  templateReply = () => ({ status: 200, body: { id: "42", name: "plain", version: 3, content: "services: {}", parameters: "[]" } });
+  await click(w("editSpec"));
+  expect(alertWith(w("notBlueprint"))).toBeDefined();
+  await click(w("cancel"));
+  expect(button(w("editSpec"))).toBeDefined();
+});
+
+it("labels use the locale's separator", async () => {
+  await i18n.changeLanguage("zh-CN");
+  await mountTopology(deployment());
+  expect(rowsOf("nats")[0]!.textContent).toContain(`${w("host")}：`);
+  expect(roleGroups()[0]!.getAttribute("aria-label")).toBe(`${w("role")}：nats`);
+});
+
+it("a refresh skipped while hidden runs when the page becomes visible", async () => {
+  vi.useFakeTimers();
+  try {
+    await mountTopology(deployment({ current_revision: "11" }));
+    const count = () => requests.filter(r => r.url.includes("application-health")).length;
+    expect(count()).toBe(1);
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(count()).toBe(1);
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await flush();
+    expect(count()).toBe(2);
+  } finally { vi.useRealTimers(); Object.defineProperty(document, "hidden", { configurable: true, value: false }); }
 });

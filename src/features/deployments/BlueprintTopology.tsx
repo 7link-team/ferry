@@ -11,7 +11,7 @@ const t = (key: string, values?: Record<string, unknown>) => commonText(`resourc
 const w = (key: string, values?: Record<string, unknown>) => commonText(`resource-domain:wizard.${key}`, values);
 
 export type InstanceState = "up" | "down" | "unknown" | "loading";
-export interface TopologyRow { instance: string; hostId: string; hostName?: string; state: InstanceState; replicas?: number }
+export interface TopologyRow { instance: string; hostId: string; hostName?: string; state: InstanceState; replicas?: number; healthy?: number; expected?: number }
 export interface TopologyGroup { role: string; identity: string; rows: TopologyRow[] }
 
 /**
@@ -21,10 +21,15 @@ export interface TopologyGroup { role: string; identity: string; rows: TopologyR
  */
 export function topologyGroups(binding: BlueprintBinding, blueprint: BlueprintSummary | undefined, health: InstanceHealth[] | undefined, loading = false): TopologyGroup[] {
   const byName = new Map((health ?? []).map(entry => [entry.name, entry]));
-  const state = (instance: string): Pick<TopologyRow, "state" | "hostName"> => {
+  const state = (instance: string): Pick<TopologyRow, "state" | "hostName" | "healthy" | "expected"> => {
     const entry = byName.get(instance);
     if (!entry) return { state: loading ? "loading" : "unknown" };
-    return { state: entry.state === "up" || entry.state === "down" ? entry.state : "unknown", ...(entry.host_name ? { hostName: entry.host_name } : {}) };
+    return {
+      state: entry.state === "up" || entry.state === "down" ? entry.state : "unknown",
+      ...(entry.host_name ? { hostName: entry.host_name } : {}),
+      ...(typeof entry.healthy === "number" ? { healthy: entry.healthy } : {}),
+      ...(typeof entry.expected === "number" ? { expected: entry.expected } : {}),
+    };
   };
   const ordered = blueprint?.roles.map(role => role.name).filter(role => role in binding.roles) ?? [];
   const roles = [...ordered, ...Object.keys(binding.roles).filter(role => !ordered.includes(role))];
@@ -75,13 +80,16 @@ export function BlueprintTopology({ workspace, deployment, permissions }: { work
           <Button type="button" size="sm" variant="outline" className="min-h-11 lg:min-h-9" onClick={health.retry}>{commonText("common-domain:common.retry")}</Button>
         </div>}
         <div className="grid min-w-0 gap-3 xl:grid-cols-2">{groups.map(group => {
-          const up = group.rows.filter(row => row.state === "up").length;
-          return <section key={group.role} data-topology-role={group.role} aria-label={`${w("role")}: ${group.role}`} className="min-w-0 rounded-md border">
+          // A replicated role counts Swarm replicas (healthy/expected); others count instances.
+          const replicated = group.rows.length === 1 && group.rows[0]!.replicas !== undefined ? group.rows[0]! : undefined;
+          const up = replicated ? replicated.healthy ?? 0 : group.rows.filter(row => row.state === "up").length;
+          const total = replicated ? replicated.expected ?? replicated.replicas ?? 0 : group.rows.length;
+          return <section key={group.role} data-topology-role={group.role} aria-label={t("labeled", { label: w("role"), value: group.role })} className="min-w-0 rounded-md border">
             <header className="flex min-w-0 flex-wrap items-center gap-2 border-b px-3 py-2 text-sm">
               <h4 className="min-w-0 break-all font-medium">{group.role}</h4>
               {group.identity && <Badge variant="outline">{w(group.identity === "stable" ? "identityStable" : "identityStateless")}</Badge>}
               <span className="text-muted-foreground">{t("instanceCount", { count: group.rows.reduce((sum, row) => sum + (row.replicas ?? 1), 0) })}</span>
-              <span className="ms-auto text-muted-foreground tabular-nums">{t("summary", { up, total: group.rows.length })}</span>
+              <span className="ms-auto text-muted-foreground tabular-nums">{t("summary", { up, total })}</span>
             </header>
             <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem] gap-3 px-3 pt-2 text-xs text-muted-foreground md:grid" aria-hidden>
               <span>{w("instance")}</span><span>{w("host")}</span><span>{t("health")}</span>
@@ -94,8 +102,8 @@ export function BlueprintTopology({ workspace, deployment, permissions }: { work
                   <span className="break-all font-medium">{row.instance}</span>
                   {row.replicas !== undefined && <span className="block text-xs text-muted-foreground">{t("replicated", { count: row.replicas })}</span>}
                 </span>
-                <span className="min-w-0 break-all"><span className="text-muted-foreground md:sr-only">{w("host")}: </span>{hostName(row)}</span>
-                <span className="flex items-center gap-2"><span className="text-muted-foreground md:sr-only">{t("health")}: </span><HealthBadge state={row.state} /></span>
+                <span className="min-w-0 break-all"><span className="me-1 text-muted-foreground md:sr-only">{t("label", { label: w("host") })}</span>{hostName(row)}</span>
+                <span className="flex items-center gap-2"><span className="text-muted-foreground md:sr-only">{t("label", { label: t("health") })}</span><HealthBadge state={row.state} /></span>
               </li>)}</ul>
             </div>
           </section>;

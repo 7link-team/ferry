@@ -1,6 +1,6 @@
 import { beforeEach, expect, it } from "vitest";
 import { i18n } from "../../shared/i18n/i18n";
-import { initialSpec, instancesProblem, isBlueprint, readBlueprint, readSpec, stepInstances, writeSpec } from "./blueprint-spec";
+import { initialSpec, instancesProblem, isBlueprint, readBlueprint, readSpec, stepInstances, topologyKey, writeSpec } from "./blueprint-spec";
 
 beforeEach(async () => { await i18n.changeLanguage("en-US"); });
 
@@ -77,4 +77,24 @@ it("recognizes blueprint templates in JSON and YAML", () => {
   expect(isBlueprint("apiVersion: ferry/v1\nkind: Application\n")).toBe(false);
   expect(isBlueprint("kind: Blueprint\nroles:\n  - published: {{ .Values.port }}\n")).toBe(true);
   expect(readBlueprint(json)).toEqual({ name: "mq", roles: [{ name: "nats", instances: { min: 3, max: 9, default: 3, odd: true }, identity: "stable", distinctHosts: false, colocateWith: undefined }], drivers: ["docker"] });
+});
+
+it("topology_key_ignores_values_version_and_placement_addresses", () => {
+  const spec = (patch: string) => readSpec(`apiVersion: ferry/deploy-v1
+template: {id: "42", version: 3}
+driver: stack
+manager: host-a
+values: {client_port: 4222}
+roles: {nats: {instances: 2}}
+${patch}`).spec!;
+  const base = spec("placement: {nats: [{hostId: '1', address: 10.0.0.1}, {hostId: '2', address: 10.0.0.2}]}\n");
+  // Values, the template version and addresses (derived from hosts by the server) may change.
+  const allowed = readSpec(initialSpec({ ...base, template: { id: "42", version: 4 }, values: { client_port: 1 },
+    placement: { nats: [{ hostId: "1", address: "nats-0.internal" }, { hostId: "2", address: "10.9.9.9" }] } })).spec!;
+  expect(topologyKey(allowed)).toBe(topologyKey(base));
+  // Moving an instance to another host, or another manager, changes the topology.
+  const moved = { ...base, placement: { nats: [{ hostId: "1", address: "10.0.0.1" }, { hostId: "3", address: "10.0.0.2" }] } };
+  expect(topologyKey(moved)).not.toBe(topologyKey(base));
+  expect(topologyKey({ ...base, manager: "host-b" })).not.toBe(topologyKey(base));
+  expect(topologyKey({ ...base, template: { id: "43", version: 3 } })).not.toBe(topologyKey(base));
 });

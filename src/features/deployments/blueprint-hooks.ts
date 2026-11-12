@@ -29,7 +29,7 @@ export function useHostNames(workspace: string, enabled: boolean): Map<string, s
 }
 
 /** One entry per compiled instance (a stateless Swarm role is one entry named after the role). */
-export interface InstanceHealth { name: string; role?: string; host_id?: string; host_name?: string; state: string }
+export interface InstanceHealth { name: string; role?: string; host_id?: string; host_name?: string; state: string; healthy?: number; expected?: number }
 export interface HealthState { loading: boolean; error: string; placement?: InstanceHealth[] }
 
 const REFRESH_MS = 10_000;
@@ -56,7 +56,10 @@ export function useInstanceHealth(workspace: string, id: string, enabled: boolea
     setState(previous => ({ ...previous, loading: !previous.placement, error: "" }));
     void load();
     const timer = setInterval(() => void load(), REFRESH_MS);
-    return () => { live = false; clearInterval(timer); request?.abort(); };
+    // A refresh skipped while hidden runs as soon as the page is visible again.
+    const visibility = () => { if (!document.hidden) void load(); };
+    document.addEventListener("visibilitychange", visibility);
+    return () => { live = false; clearInterval(timer); request?.abort(); document.removeEventListener("visibilitychange", visibility); };
   }, [workspace, id, enabled, reload, attempt]);
   return { ...state, retry: () => setAttempt(n => n + 1) };
 }

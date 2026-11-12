@@ -1062,7 +1062,9 @@
     "topology.state.up": "Healthy",
     "topology.state.down": "Unhealthy",
     "topology.state.unknown": "Unknown",
-    "topology.state.loading": "Checking"
+    "topology.state.loading": "Checking",
+    "topology.label": "{{label}}:",
+    "topology.labeled": "{{label}}: {{value}}"
   },
   "zh-CN": {
     "platform.storagePrefix": "S3 路径前缀",
@@ -2127,7 +2129,9 @@
     "topology.state.up": "健康",
     "topology.state.down": "异常",
     "topology.state.unknown": "未知",
-    "topology.state.loading": "检查中"
+    "topology.state.loading": "检查中",
+    "topology.label": "{{label}}：",
+    "topology.labeled": "{{label}}：{{value}}"
   },
   "zh-TW": {
     "platform.storagePrefix": "S3 路徑前綴",
@@ -3192,7 +3196,9 @@
     "topology.state.up": "健康",
     "topology.state.down": "異常",
     "topology.state.unknown": "未知",
-    "topology.state.loading": "檢查中"
+    "topology.state.loading": "檢查中",
+    "topology.label": "{{label}}：",
+    "topology.labeled": "{{label}}：{{value}}"
   },
   "ja-JP": {
     "platform.storagePrefix": "S3 パスプレフィックス",
@@ -4257,7 +4263,9 @@
     "topology.state.up": "正常",
     "topology.state.down": "異常",
     "topology.state.unknown": "不明",
-    "topology.state.loading": "確認中"
+    "topology.state.loading": "確認中",
+    "topology.label": "{{label}}：",
+    "topology.labeled": "{{label}}：{{value}}"
   },
   "ko-KR": {
     "platform.storagePrefix": "S3 경로 접두사",
@@ -5322,7 +5330,9 @@
     "topology.state.up": "정상",
     "topology.state.down": "비정상",
     "topology.state.unknown": "알 수 없음",
-    "topology.state.loading": "확인 중"
+    "topology.state.loading": "확인 중",
+    "topology.label": "{{label}}:",
+    "topology.labeled": "{{label}}: {{value}}"
   },
   "ms-MY": {
     "platform.storagePrefix": "Awalan laluan S3",
@@ -6387,6 +6397,8 @@
     "topology.state.up": "Sihat",
     "topology.state.down": "Tidak sihat",
     "topology.state.unknown": "Tidak diketahui",
-    "topology.state.loading": "Menyemak"
+    "topology.state.loading": "Menyemak",
+    "topology.label": "{{label}}:",
+    "topology.labeled": "{{label}}: {{value}}"
   }
 }

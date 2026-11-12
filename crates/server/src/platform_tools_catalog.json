@@ -1356,10 +1356,10 @@
     "permission_checks": [
       "app-templates.read",
       "deployments.create",
+      "deployments.update",
       "hosts.read"
     ],
-    "documentation": "Renders and schedules a spec for a new deployment without storing anything.",
-    "permission": "deployments.create"
+    "documentation": "Renders and schedules a spec without storing anything: for a new deployment, or for\nediting an undeployed one's spec (so creators and updaters may both preview)."
   },
   {
     "path": "/deployment-revisions",

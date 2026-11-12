@@ -1511,7 +1511,19 @@ async fn placement_endpoint_renders_and_places() {
     assert_eq!(out["warnings"][0]["key"], "blueprint.placementSpreadUnmet");
     assert!(!out["warnings"][0]["message"].as_str().unwrap().is_empty());
 
-    for permission in ["deployments.create", "app-templates.read", "hosts.read"] {
+    // Creators and updaters (editing an undeployed spec) may both preview.
+    let mut updater = admin(1);
+    updater.permissions.remove("deployments.create");
+    assert!(updater.permissions.contains("deployments.update"));
+    place_spec(&s, updater, &spec_doc(1, "2", 2)).await.unwrap();
+    let mut neither = admin(1);
+    neither.permissions.remove("deployments.create");
+    neither.permissions.remove("deployments.update");
+    let error = place_spec(&s, neither, &spec_doc(1, "2", 2))
+        .await
+        .unwrap_err();
+    assert_eq!(error.0, StatusCode::FORBIDDEN);
+    for permission in ["app-templates.read", "hosts.read"] {
         let mut scope = admin(1);
         scope.permissions.remove(permission);
         let error = place_spec(&s, scope, &spec_doc(1, "2", 2))

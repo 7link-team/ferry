@@ -152,13 +152,18 @@ pub struct PlacementBody {
     spec: String,
 }
 
-/// Renders and schedules a spec for a new deployment without storing anything.
+/// Renders and schedules a spec without storing anything: for a new deployment, or for
+/// editing an undeployed one's spec (so creators and updaters may both preview).
 pub async fn placement(
     State(s): State<AppState>,
     scope: Scope,
     Json(body): Json<PlacementBody>,
 ) -> Result<Json<Value>> {
-    scope.require("deployments.create")?;
+    if !scope.permissions.contains("deployments.create")
+        && !scope.permissions.contains("deployments.update")
+    {
+        return Err(ApiError::forbidden());
+    }
     let mut spec = spec::parse(&body.spec)?;
     let (manifest, bp) = render(&s.db, &scope, &spec).await?;
     let placed = schedule(&s.db, &scope, &bp, &mut spec).await?;
