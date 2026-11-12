@@ -231,20 +231,32 @@ fn official_blueprints_compile_for_supported_drivers() {
         }
     }
 
-    // stack: stateless web and lb are one replicated service each with ingress ports; the
+    // stack: stateless web and lb are one replicated service each with ingress ports, one
+    // replica per node and updated stop-first; the
     // balancer reaches web replicas through the `web` service VIP on the container port.
     let nginx_services = services("nginx-ha");
     assert_eq!(nginx_services.keys().collect::<Vec<_>>(), ["lb", "web"]);
     for (name, replicas, published) in [("web", 2, 18080), ("lb", 1, 18000)] {
         let s = &nginx_services[name];
         assert_eq!(s["replicas"], replicas, "{name}");
-        assert!(s.get("placement").is_none(), "{name}");
+        // Both roles want distinct hosts: at most one replica per Swarm node.
+        assert_eq!(s["placement"], json!({"maxReplicasPerNode": 1}), "{name}");
         assert_eq!(
             s["ports"],
             json!([{"name": "http", "container": 80, "published": published,
                     "protocol": "tcp", "mode": "ingress"}]),
             "{name}"
         );
+    }
+    let order = |key: &str, name: &str| {
+        seen[key].stack["overrides"]["stack"]["services"][name]["deploy"]["update_config"]["order"]
+            .clone()
+    };
+    for name in ["web", "lb"] {
+        assert_eq!(order("nginx-ha", name), "stop-first", "{name}");
+    }
+    for i in 0..3 {
+        assert_eq!(order("nats-cluster", &format!("nats-{i}")), "stop-first");
     }
     let stack = &nginx[&("stack".into(), "lb".into())];
     assert_eq!(stack.matches("server web:80 ").count(), 2, "{stack}");

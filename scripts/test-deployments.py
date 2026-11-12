@@ -525,6 +525,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                         check(f'stack nats-{i} service is pinned to Swarm node {node}',constraints==[f'node.id=={swarm_ids[node]}'])
                         endpoint=spec.get('EndpointSpec') or {}
                         check(f'stack nats-{i} uses dnsrr and host-mode ports',endpoint.get('Mode')=='dnsrr' and {p.get('PublishMode') for p in endpoint.get('Ports') or []}=={'host'})
+                        check(f'stack nats-{i} updates stop-first (its host ports are taken until the old task stops)',(spec.get('UpdateConfig') or {}).get('Order')=='stop-first')
                         check(f'stack node {node} runs only nats-{i}',eventually(lambda child=child,i=i:stack_tasks(child,nats_id)==[f'nats-{i}'],120))
                         check(f'stack nats-{i} has routes to the two other members',eventually(lambda ip=ip,i=i:two_routes(ip,18222+i),120))
                         meta=eventually(lambda ip=ip,i=i:meta_cluster(ip,18222+i),120)
@@ -537,6 +538,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     for service,replicas in (('web',2),('lb',1)):
                         spec=service_spec(nginx_id,service)
                         check(f'stack nginx {service} is one service with {replicas} replica(s) on the ingress mesh',spec['Mode'].get('Replicated',{}).get('Replicas')==replicas and {p.get('PublishMode') for p in spec['EndpointSpec']['Ports']}=={'ingress'})
+                        check(f'stack nginx {service} runs at most one replica per node and updates stop-first',spec['TaskTemplate'].get('Placement',{}).get('MaxReplicas')==1 and (spec.get('UpdateConfig') or {}).get('Order')=='stop-first')
                     prefix=f"deployment-{workspace['id']}-{nginx_id}"
                     lb_url=f'http://{fixtures[0][2]}:18000/'
                     def stack_balanced(message):

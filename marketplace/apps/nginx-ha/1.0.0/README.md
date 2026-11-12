@@ -15,7 +15,10 @@ balancers (`lb-0`, …). Every web instance serves `<message> from <instance>`.
 - Drivers: Docker (instances on distinct hosts), Compose (single host; demo only,
   not highly available) and Swarm stack. Native is not offered by this package.
 - Swarm stack: `web` and `lb` are each one replicated service (one replica per bound
-  instance) publishing `web_port` / `lb_port` on the ingress routing mesh. The balancer
+  instance, at most one per Swarm node via `max_replicas_per_node: 1`, updated
+  stop-first) publishing `web_port` / `lb_port` on the ingress routing mesh. Swarm
+  chooses the nodes, not the bound hosts, so the Swarm needs at least as many nodes as
+  instances. The balancer
   reaches web replicas through the `web` service VIP on port `80`, and every web replica
   serves `<message> from web`.
 - Changing `message` is a parameter upgrade: a new revision replaces every web instance.

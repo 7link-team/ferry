@@ -8,7 +8,7 @@ use crate::i18n::Message;
 use crate::snowflake::Id;
 use axum::http::StatusCode;
 use serde_json::{Map, Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// One target host's deployment.
 #[derive(Clone, Debug)]
@@ -358,6 +358,10 @@ struct Target {
     contexts: BTreeMap<String, Context>,
     /// (published, protocol) → (where it is bound, service name) for each claim.
     ports: BTreeMap<(u16, String), Vec<(Bind, String)>>,
+    /// Services that run at most one task per node (pinned with host-mode ports, or capped
+    /// by `maxReplicasPerNode`): a start-first update could never place the new task while
+    /// the old one runs, so they always update stop-first.
+    stop_first: BTreeSet<String>,
 }
 
 /// Where a published port is bound within one target.
@@ -504,20 +508,38 @@ fn compile_with(bp_text: &str, binding: &Binding, nodes: Option<Nodes>) -> Resul
             (Bind::Unresolved, _) => Some(format!("{UNRESOLVED}{name}")),
             _ => None,
         };
-        match (&bind, pin) {
-            // Stable stack instance: pinned to its node, addressed directly (no VIP).
+        // Whether this service can run at most one task per node: its replacement task can
+        // only start once the old one stopped (see `stop_first`).
+        let one_per_node = match (&bind, pin) {
+            // Stable stack instance: pinned to its node (after the author's own
+            // constraints), addressed directly (no VIP).
             (_, Some(node)) => {
                 let placement = service.entry("placement").or_insert_with(|| json!({}));
                 if let Value::Object(placement) = placement {
-                    placement.insert("constraints".into(), json!([format!("node.id=={node}")]));
+                    let constraints = placement.entry("constraints").or_insert_with(|| json!([]));
+                    if let Value::Array(constraints) = constraints {
+                        constraints.push(json!(format!("node.id=={node}")));
+                    }
                 }
                 service.insert("endpointMode".into(), json!("dnsrr"));
+                !role.ports.is_empty()
             }
-            // Stateless stack role: one service with a replica per bound instance.
+            // Stateless stack role: one service with a replica per bound instance, at most
+            // one per node when its instances must be on distinct hosts.
             (Bind::Everywhere, _) => {
                 service.insert("replicas".into(), json!(binding.roles[&role.name].len()));
+                if role.placement.distinct_hosts {
+                    let placement = service.entry("placement").or_insert_with(|| json!({}));
+                    if let Value::Object(placement) = placement {
+                        placement.insert("maxReplicasPerNode".into(), json!(1));
+                    }
+                }
+                role.placement.distinct_hosts
             }
-            (_, None) => {}
+            (_, None) => false,
+        };
+        if one_per_node {
+            target.stop_first.insert(name.clone());
         }
         target.services.push(Value::Object(service));
         target.contexts.insert(name, ctx);
@@ -533,6 +555,17 @@ fn compile_with(bp_text: &str, binding: &Binding, nodes: Option<Nodes>) -> Resul
         });
         if let Some(strategy) = &bp.strategy {
             doc["strategy"] = strategy.clone();
+        }
+        if !target.stop_first.is_empty() {
+            let services: Map<String, Value> = target
+                .stop_first
+                .iter()
+                .map(|name| {
+                    let order = json!({"deploy": {"update_config": {"order": "stop-first"}}});
+                    (name.clone(), order)
+                })
+                .collect();
+            doc["overrides"] = json!({"stack": {"services": services}});
         }
         let manifest = doc.to_string();
         manifest::parse_for(&manifest, driver)?;
@@ -1021,6 +1054,82 @@ mod tests {
         assert_eq!(params["instance"], "proxy");
         assert_eq!(params["other"], "gateway");
         assert_eq!(params["port"], "8080/tcp");
+    }
+
+    /// The Swarm `update_config` each service of a compiled stack plan renders to.
+    fn update_orders(plan: &HostPlan) -> BTreeMap<String, String> {
+        let m = manifest::parse_for(&plan.manifest, "stack").unwrap();
+        let rendered: Value =
+            serde_json::from_str(&manifest::render_for(&m, "stack").unwrap()).unwrap();
+        rendered["services"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(name, s)| {
+                let order = s["deploy"]["update_config"]["order"].as_str().unwrap();
+                (name.clone(), order.to_owned())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stack_one_task_per_node_services_update_stop_first() {
+        // Rolling with maxUnavailable 0 starts the new task first, which a pinned host-port
+        // instance or a one-per-node replica can never place while the old task runs.
+        let mut v: Value = serde_json::from_str(&nats_with_gateway(8080)).unwrap();
+        v["strategy"] = json!({"type": "rolling", "maxUnavailable": 0, "healthTimeout": 60});
+        let plans = compile(&v.to_string(), &stack_hosts(), Some(&stack_nodes())).unwrap();
+        let orders = update_orders(&plans[0]);
+        for i in 0..3 {
+            assert_eq!(orders[&format!("nats-{i}")], "stop-first", "nats-{i}");
+        }
+        // A replicated ingress service without a per-node cap keeps start-first.
+        assert_eq!(orders["gateway"], "start-first");
+        v["roles"][1]["placement"] = json!({"distinctHosts": true});
+        let plans = compile(&v.to_string(), &stack_hosts(), Some(&stack_nodes())).unwrap();
+        assert_eq!(update_orders(&plans[0])["gateway"], "stop-first");
+    }
+
+    #[test]
+    fn stack_stateless_distinct_hosts_caps_one_replica_per_node() {
+        let plans = compile(
+            &nats_with_gateway(8080),
+            &stack_hosts(),
+            Some(&stack_nodes()),
+        )
+        .unwrap();
+        assert!(
+            service(&doc(&plans[0]), "gateway")
+                .get("placement")
+                .is_none()
+        );
+        let mut v: Value = serde_json::from_str(&nats_with_gateway(8080)).unwrap();
+        v["roles"][1]["placement"] = json!({"distinctHosts": true});
+        v["roles"][1]["service"]["placement"] = json!({"constraints": ["node.role==worker"]});
+        let plans = compile(&v.to_string(), &stack_hosts(), Some(&stack_nodes())).unwrap();
+        assert_eq!(
+            service(&doc(&plans[0]), "gateway")["placement"],
+            json!({"constraints": ["node.role==worker"], "maxReplicasPerNode": 1})
+        );
+    }
+
+    #[test]
+    fn stack_stable_pin_keeps_author_constraints() {
+        let mut v: Value = serde_json::from_str(&nats_with_gateway(8080)).unwrap();
+        v["roles"][0]["service"]["placement"] =
+            json!({"constraints": ["node.role==worker", "node.labels.zone==a"]});
+        let plans = compile(&v.to_string(), &stack_hosts(), Some(&stack_nodes())).unwrap();
+        let d = doc(&plans[0]);
+        for i in 0..3 {
+            assert_eq!(
+                service(&d, &format!("nats-{i}"))["placement"]["constraints"],
+                json!([
+                    "node.role==worker",
+                    "node.labels.zone==a",
+                    format!("node.id==n{i}node")
+                ])
+            );
+        }
     }
 
     #[test]

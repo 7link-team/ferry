@@ -17,7 +17,9 @@ Each member is a stable instance `nats-<index>` with its own `nats-<index>-data`
   needs a pipeline-built `nats-server` artifact and is not offered by this package.
 - Swarm stack: deployed through the bound manager; each member is its own service pinned
   to its host's Swarm node (`node.id==…`, `dnsrr`) and publishes its ports in host mode,
-  so members advertise and route to each other exactly as with the Docker driver.
+  so members advertise and route to each other exactly as with the Docker driver. A
+  member's update stops its old task before starting the new one (its host ports are
+  taken until then).
 - No authentication or TLS is configured; keep the ports on a private network or add
   them before exposing the cluster.
 - Topology changes (adding or removing members) are not supported yet; change
