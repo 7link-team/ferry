@@ -20,7 +20,9 @@ async def verify(urls, token, check, stop_member, restore_member):
                 if value:
                     return value
             except Exception as error:
-                last = type(error).__name__
+                # Keep the server's reason (e.g. JetStream 'insufficient resources'), not only
+                # the exception type, so a timeout explains itself in the CI annotation.
+                last = type(error).__name__ + ': ' + str(error)[:300]
             await asyncio.sleep(.5)
         raise AssertionError(label + ': ' + str(last))
 
