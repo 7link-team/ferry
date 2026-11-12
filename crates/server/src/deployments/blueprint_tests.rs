@@ -36,7 +36,7 @@ fn binding(hosts: &[i64]) -> Value {
     json!({"driver": "docker", "roles": {"nats": list}})
 }
 
-fn body(hosts: &[i64]) -> Value {
+pub(super) fn body(hosts: &[i64]) -> Value {
     json!({"name": "mq", "manifest": blueprint("nats:2"), "mode": "docker",
            "target_kind": "blueprint", "target_ref": "0", "workdir": "/srv",
            "blueprint_binding": binding(hosts)})
@@ -46,7 +46,7 @@ fn key(e: ApiError) -> String {
     e.2.map(|m| m.key).unwrap_or_else(|| e.1)
 }
 
-async fn host(s: &AppState, id: i64, group: i64) {
+pub(super) async fn host(s: &AppState, id: i64, group: i64) {
     crate::hosts::fake::register(id);
     hosts::Entity::insert(hosts::ActiveModel {
         id: Set(id),
@@ -100,7 +100,7 @@ async fn template(s: &AppState, content: &str, version: i64) {
 }
 
 /// Workspace 1 with fake hosts and the instance-aware config template.
-async fn fixture(hosts: &[i64]) -> (tempfile::TempDir, AppState) {
+pub(super) async fn fixture(hosts: &[i64]) -> (tempfile::TempDir, AppState) {
     let (dir, s) = setup().await;
     for id in hosts {
         host(&s, *id, 0).await;
@@ -109,7 +109,7 @@ async fn fixture(hosts: &[i64]) -> (tempfile::TempDir, AppState) {
     (dir, s)
 }
 
-async fn create_app(s: &AppState, b: Value) -> Result<String> {
+pub(super) async fn create_app(s: &AppState, b: Value) -> Result<String> {
     let (_, Json(out)) = create(
         State(s.clone()),
         admin(1),

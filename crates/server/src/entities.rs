@@ -1679,6 +1679,48 @@ pub mod deployment_target_states {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+/// Failover timeline of a deployment; `detail` is JSON carrying a stored message.
+pub mod deployment_events {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "deployment_events")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub deployment_id: i64,
+        pub kind: String,
+        pub instance: String,
+        pub host_id: i64,
+        pub detail: String,
+        pub revision_id: i64,
+        pub created_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+/// An instance fenced on a lost host; `cleared_at` 0 while the fence is in force.
+pub mod deployment_fences {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "deployment_fences")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub deployment_id: i64,
+        pub host_id: i64,
+        pub instance: String,
+        pub created_at: i64,
+        pub cleared_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 /// Encrypted, actor-bound pending imports. Consumed rows retain only result IDs.
 pub mod resource_imports {
     use sea_orm::entity::prelude::*;

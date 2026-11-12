@@ -954,6 +954,21 @@ async fn host_is_free(
     Ok(())
 }
 
+/// A deleted host can never return, so its fences have nothing left to stop.
+async fn delete_fences(
+    conn: &impl sea_orm::ConnectionTrait,
+    workspace: Id,
+    host: Id,
+) -> Result<()> {
+    use crate::entities::deployment_fences as fences;
+    fences::Entity::delete_many()
+        .filter(fences::Column::WorkspaceId.eq(workspace))
+        .filter(fences::Column::HostId.eq(host))
+        .exec(conn)
+        .await?;
+    Ok(())
+}
+
 pub async fn delete_host(
     State(s): State<AppState>,
     scope: Scope,
@@ -976,6 +991,7 @@ pub async fn delete_host(
         .filter(host_tags::Column::HostId.eq(id))
         .exec(&tx)
         .await?;
+    delete_fences(&tx, scope.workspace_id, id).await?;
     let holes = crate::holes::delete_for_host(&s, &tx, &scope, id).await?;
     tx.commit().await?;
     crate::holes::close_all(&holes);
@@ -1021,6 +1037,7 @@ pub async fn bulk_delete_hosts(
                 .filter(host_tags::Column::HostId.eq(*id))
                 .exec(&transaction)
                 .await?;
+            delete_fences(&transaction, scope.workspace_id, *id).await?;
             holes.extend(crate::holes::delete_for_host(&s, &transaction, &scope, *id).await?);
         }
         deleted += affected;

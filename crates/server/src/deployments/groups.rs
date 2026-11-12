@@ -852,5 +852,16 @@ pub(super) async fn remove(conn: &impl ConnectionTrait, workspace: Id, app: i64)
         .filter(current::Column::DeploymentId.eq(app))
         .exec(conn)
         .await?;
+    use crate::entities::{deployment_events as events, deployment_fences as fences};
+    events::Entity::delete_many()
+        .filter(events::Column::WorkspaceId.eq(workspace))
+        .filter(events::Column::DeploymentId.eq(app))
+        .exec(conn)
+        .await?;
+    fences::Entity::delete_many()
+        .filter(fences::Column::WorkspaceId.eq(workspace))
+        .filter(fences::Column::DeploymentId.eq(app))
+        .exec(conn)
+        .await?;
     Ok(())
 }

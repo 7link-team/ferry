@@ -5,6 +5,9 @@ pub(crate) mod modes;
 mod specs;
 use crate::i18n::{Message, StoredText};
 pub use specs::placement;
+// Temporary until the failover coordinator (P3 Task 6) records and reads events.
+#[allow(dead_code)]
+pub(crate) mod events;
 mod groups;
 use crate::error::{Json, Path, Query};
 use crate::hosts::channel::HostChannel;
@@ -2368,6 +2371,8 @@ mod variable_snapshot_tests {
 
 #[cfg(test)]
 mod blueprint_tests;
+#[cfg(test)]
+mod failover_tests;
 #[cfg(test)]
 mod blueprint_binding_tests {
     use super::*;

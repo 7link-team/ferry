@@ -911,6 +911,10 @@ fn workspace_routes() -> Router<state::AppState> {
             get(deployments::revisions_for_deployment),
         )
         .route(
+            "/{workspace}/deployments/{id}/events",
+            get(deployments::events::list),
+        )
+        .route(
             "/{workspace}/deployments/{id}/renderings",
             post(deployments::render),
         )

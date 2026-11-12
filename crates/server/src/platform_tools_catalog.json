@@ -1467,6 +1467,19 @@
     "permission": "deployments.apply"
   },
   {
+    "path": "/deployments/{id}/events",
+    "method": "GET",
+    "handler": "deployments::events::list",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, String)>,\n    Query(mut raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "deployments.read"
+    ],
+    "documentation": "Failover timeline of one deployment, newest first; `message` renders in the reader's language.",
+    "permission": "deployments.read"
+  },
+  {
     "path": "/deployments/{id}/executions",
     "method": "POST",
     "handler": "deployments::apply",
