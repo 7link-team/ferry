@@ -5,3 +5,6 @@
 - driver: compose
   ferry: 0.3.0-alpha.18
   evidence: https://github.com/7link-team/ferry/actions/runs/43121357197
+- driver: stack
+  ferry: 0.3.0-alpha.18
+  evidence: https://github.com/7link-team/ferry/actions/runs/43156004068
