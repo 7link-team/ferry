@@ -1,4 +1,5 @@
 //! Deployments use the shared tenant resource and host channel contracts.
+pub(crate) mod candidates;
 pub(crate) mod manifest;
 pub(crate) mod modes;
 use crate::i18n::{Message, StoredText};
