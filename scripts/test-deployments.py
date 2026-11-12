@@ -263,14 +263,11 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             # This CLI reaches an owned nested daemon. Never initialize Swarm on the developer daemon.
             command(['docker','network','create',name+'-swarm'])
             command(['docker','volume','create',name+'-socket'])
-            # Stack blueprints reach every Swarm node as its own Ferry SSH host.
-            node_ssh={node:port() for node in swarm_nodes} if test_blueprint else {}
             for node in swarm_nodes:
                 # A node reboot clears runtime sockets/PIDs but preserves /var/lib/docker.
                 # Reusing /run from the container layer can mistake a reused PID for containerd.
                 args=['docker','run','-d','--privileged','--cgroupns=private','--tmpfs','/run','--name',name+'-'+node,'--network',name+'-swarm','-e','DOCKER_TLS_CERTDIR=']
                 if node=='manager': args+=['-v',name+'-socket:/docker-socket','-p',f'127.0.0.1:{native_port}:18081']
-                if test_blueprint: args+=['-p',f'127.0.0.1:{node_ssh[node]}:22']
                 if node=='manager' and test_nats:
                     for published, internal in zip(nats_host_ports, [18082,18083,18084]):
                         args+=['-p',f'127.0.0.1:{published}:{internal}']

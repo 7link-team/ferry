@@ -372,7 +372,7 @@ enum Bind {
     Node(String),
     /// On every node of the Swarm (ingress routing mesh).
     Everywhere,
-    /// On a Swarm node not resolved yet ([`compile_unresolved`]): it may share a machine
+    /// On a Swarm node not resolved yet ([`compile_unresolved_tagged`]): it may share a machine
     /// with any other instance, so only conflicts with [`Bind::Everywhere`] are certain.
     Unresolved,
 }
@@ -407,7 +407,9 @@ impl Target {
 ///
 /// `stack` compiles to a single Application on `binding.manager` and needs `nodes`
 /// (instance name → Swarm node ID, from `swarm::assign`) to pin stable instances; other
-/// drivers ignore it.
+/// drivers ignore it. Production code compiles specs through [`compile_tagged`]; this untagged
+/// form is kept for tests.
+#[cfg(test)]
 pub fn compile(
     bp_text: &str,
     binding: &Binding,
@@ -421,9 +423,9 @@ pub fn compile(
     )
 }
 
-/// Prefix of the stand-in a stable instance is pinned to by [`compile_unresolved`]: never a
-/// Swarm node ID (those are alphanumeric), so such a manifest cannot be mistaken for one
-/// [`compile`] resolved.
+/// Prefix of the stand-in a stable instance is pinned to by [`compile_unresolved_tagged`]:
+/// never a Swarm node ID (those are alphanumeric), so such a manifest cannot be mistaken for
+/// one [`compile_tagged`] resolved.
 pub const UNRESOLVED: &str = "unresolved:";
 
 /// Compiles without Swarm node IDs, for checks and readers that must not reach hosts (a
@@ -433,6 +435,8 @@ pub const UNRESOLVED: &str = "unresolved:";
 /// that might share a node are not judged (conflicts with ingress ports, which bind on every
 /// node, still are). Node pinning and those conflicts are settled when the deployment is
 /// previewed, by [`compile`] with the nodes `swarm::assign` resolves. Never deploy the result.
+/// Production code uses [`compile_unresolved_tagged`]; this untagged form is kept for tests.
+#[cfg(test)]
 pub fn compile_unresolved(bp_text: &str, binding: &Binding) -> Result<Vec<HostPlan>> {
     compile_with(
         bp_text,
@@ -451,7 +455,7 @@ pub struct RoleTags {
     pub roles: BTreeMap<String, Vec<String>>,
 }
 
-/// [`compile`] for a deployment spec: each stateless `stack` role is also constrained to
+/// Compiles for a deployment spec: like `compile`, and each stateless `stack` role is also constrained to
 /// Swarm nodes labelled with every tag its selector requires (`node.labels.<label>==true`,
 /// labels from [`swarm::tag_label`]). Stable instances are already pinned to their node, and
 /// other drivers place by binding, so they are unchanged; so is everything without `tags`.
@@ -464,7 +468,8 @@ pub fn compile_tagged(
     compile_with(bp_text, binding, nodes.map(Nodes::Resolved), tags)
 }
 
-/// [`compile_unresolved`] with the label constraints of [`compile_tagged`].
+/// `compile_unresolved` with the label constraints of [`compile_tagged`]: compiles without
+/// Swarm node IDs, for checks and readers that must not reach hosts. Never deploy the result.
 pub fn compile_unresolved_tagged(
     bp_text: &str,
     binding: &Binding,

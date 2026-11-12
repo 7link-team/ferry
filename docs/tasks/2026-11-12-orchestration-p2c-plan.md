@@ -15,7 +15,7 @@
 - 部署规格 `apiVersion: ferry/deploy-v1`；本期字段：`template{id,version}`、`driver`、`manager`（仅 stack）、`values`、`roles.<r>.instances`、`roles.<r>.hosts{tags[],names[],group,spread{prefix}}`、`placement`（可选，人工覆盖的放置，形如现有 Binding.roles）。`failover`/`backup`/`storage` **不在本期**（P3/P4 增加，规格解析对未知顶层键报错，后续以新增字段扩展）。
 - 选择器语义：`tags` 为主机必须**同时**具备的标签名（现有主机标签是纯文本名）；`names` 为主机名列表；`group` 为主机组名；三者同时给出时取交集；都不给时候选为全部可用主机。`spread.prefix`（如 `zone:`）：同一角色实例尽量分布到带不同 `<prefix>*` 标签的主机，软约束，不满足只警告。
 - 候选主机必须：属于本工作空间、`state = online`、`os` 为空或 `linux`；Swarm 下还需为管理节点所在 Swarm 的 Ready/Active 节点（沿用 P2b 预览期核对）。
-- 调度结果确定：同输入同输出（排序键：违反 spread 少 → 本部署已有实例少 → 内存余量多 → 主机 ID 升序）。
+- 调度结果确定：同输入同输出（排序键：违反 spread 少 → 本部署已有实例少 → 主机 ID 升序；Compose 单机选择同样按实例少 → 主机 ID）。不使用实时内存/磁盘余量：它们每几秒变化，会让放置预览与创建结果不一致；按资源打分随显式资源请求一起推迟到 P3 协调器。`Candidate.mem_free/disk_free` 保留但不参与排序。
 - 失败时给出可读原因，按角色列出（例：`nats` 需要 3 台满足 `tags=[cache]` 的在线 Linux 主机，当前 2 台：host-a、host-b）。
 - 首次修订后放置冻结（沿用 `blueprint.topologyChangeRequiresPlan`）；规格中的 `values` 改变 = 普通升级（重新渲染、预览、执行）。
 - 页面遵守 AGENTS.md 页面门槛：Desktop ≥1200 / Pad 768–1199 / Phone 320–767 三类布局，禁止整页横向滚动，全状态（默认/空/加载/错误/极端值），全部文案六语（zh-CN/zh-TW/en-US/ms-MY/ja-JP/ko-KR）。

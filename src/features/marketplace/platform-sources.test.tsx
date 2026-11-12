@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../shared/i18n/locale";
 import { platformMarketplaceForm, platformMarketplaceList, type PlatformSource } from "./platform-sources";
-import { marketplaceLists, type MarketEntry } from "./resource-config";
+import { marketplaceForms, marketplaceLists, type MarketEntry } from "./resource-config";
 
 beforeEach(() => setLocale("en-US", false));
 
@@ -46,6 +46,24 @@ describe("workspace market list", () => {
     expect(install.disabled!(row)).toBe(true);
     expect(install.disabledReason!(row)).toBe("Needs a newer Ferry");
     expect(install.disabled!(entry())).toBe(false);
+  });
+  it("offers Deploy on cluster entries only with both install and deployment-create permissions", () => {
+    const cluster = entry({ content: "", meta: { topology: "cluster" } });
+    const deployActions = (permissions: string[]) => {
+      const context = { workspace: "w", permissions: new Set(permissions), navigate: vi.fn() } as never;
+      return [
+        marketplaceLists(context).marketplace!.actions!.find(a => a.labelKey === "resource-domain:wizard.deploy")!,
+        marketplaceForms(context).marketplace!.viewActions!.find(a => a.labelKey === "resource-domain:wizard.deploy")!,
+      ];
+    };
+    for (const action of deployActions(["marketplace.install", "deployments.create"])) {
+      expect(action.permission).toBe("marketplace.install");
+      expect(action.when!(cluster)).toBe(true);
+      expect(action.when!(entry())).toBe(false);
+    }
+    for (const action of deployActions(["marketplace.install"])) {
+      expect(action.when!(cluster)).toBe(false);
+    }
   });
   it("shows a dash instead of the synthetic 0.0.0 for legacy index entries", () => {
     const column = list().columns.find(c => c.key === "package_version")!;

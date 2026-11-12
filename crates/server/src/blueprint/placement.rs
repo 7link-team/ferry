@@ -7,7 +7,6 @@ use crate::error::{ApiError, Result};
 use crate::i18n::Message;
 use crate::snowflake::Id;
 use axum::http::StatusCode;
-use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// At most this many host names are listed in a placement failure.
@@ -155,9 +154,12 @@ pub fn check_manual(bp: &Blueprint, spec: &mut DeploySpec, candidates: &[Candida
 /// `existing` counts THIS deployment's instances already on each host, excluding any instance
 /// listed in `spec.placement`; `place` adds the manual placements to the load itself.
 /// Instances are placed one at a time on the host with, in order: fewest spread violations,
-/// fewest instances of this deployment (existing + placed so far), most free memory
-/// (unknown last), lowest id. The compose driver instead puts every instance on one host
-/// chosen by load, then free memory, then id, ignoring spread.
+/// fewest instances of this deployment (existing + placed so far), lowest id. The compose
+/// driver instead puts every instance on one host chosen by load, then id, ignoring spread.
+/// Live free memory/disk are deliberately not part of the ordering: they change every few
+/// seconds, so using them would let the preview and the create choose different hosts.
+/// Resource-aware scoring is deferred to the P3 reconciler, together with explicit resource
+/// requests.
 pub fn place(
     bp: &Blueprint,
     spec: &DeploySpec,
@@ -283,13 +285,10 @@ impl<'a> Scheduler<'a> {
             .iter()
             .filter(|c| eligible(c) && selectors.iter().all(|s| matches(s, c)))
             .collect();
-        let best = fitting.iter().copied().min_by_key(|c| {
-            (
-                self.load.get(&c.id).copied().unwrap_or(0),
-                Reverse(c.mem_free.unwrap_or(0)),
-                c.id,
-            )
-        });
+        let best = fitting
+            .iter()
+            .copied()
+            .min_by_key(|c| (self.load.get(&c.id).copied().unwrap_or(0), c.id));
         let host = match (pinned.first(), best) {
             (Some(id), _) => match fitting.iter().copied().find(|c| c.id == *id) {
                 Some(c) => c,
@@ -449,14 +448,7 @@ impl<'a> Scheduler<'a> {
                 .iter()
                 .copied()
                 .filter(|c| !distinct || placed.iter().all(|p| p.id != c.id))
-                .min_by_key(|c| {
-                    (
-                        violations(c),
-                        load.get(&c.id).copied().unwrap_or(0),
-                        Reverse(c.mem_free.unwrap_or(0)),
-                        c.id,
-                    )
-                })
+                .min_by_key(|c| (violations(c), load.get(&c.id).copied().unwrap_or(0), c.id))
                 .expect("enough matched hosts were checked above");
             unmet |= violations(best) > 0;
             *load.entry(best.id).or_default() += 1;
@@ -655,9 +647,10 @@ mod tests {
         cands[0].mem_free = Some(1);
         let s = spec("native", &[]);
         let p = place(&bp, &s, &cands, &none()).unwrap();
-        assert_eq!(ids(&p.binding, "nats"), [2, 3, 4]);
-        assert_eq!(ids(&p.binding, "exporter"), [2, 3, 4]);
-        assert_eq!(p.binding.roles["exporter"][0].address, "10.0.0.2");
+        // Free memory is ignored: host 1 is still picked first.
+        assert_eq!(ids(&p.binding, "nats"), [1, 2, 3]);
+        assert_eq!(ids(&p.binding, "exporter"), [1, 2, 3]);
+        assert_eq!(p.binding.roles["exporter"][0].address, "10.0.0.1");
         // Counts must agree.
         let s = spec("native", &[("exporter", 1, Default::default())]);
         assert_eq!(
@@ -960,7 +953,9 @@ mod tests {
     }
 
     #[test]
-    fn prefers_more_free_memory_then_lower_id() {
+    fn ignores_free_memory_and_prefers_lower_id() {
+        // Free memory moves every few seconds; it must not change the result, otherwise the
+        // preview and the create could pick different hosts.
         let bp = blueprint(vec![role(
             "web",
             1,
@@ -969,20 +964,32 @@ mod tests {
             false,
             json!({"distinctHosts": true}),
         )]);
-        let mut cands = hosts(5);
-        cands[0].mem_free = None;
-        cands[1].mem_free = Some(100);
-        cands[2].mem_free = Some(500);
-        cands[3].mem_free = Some(100);
-        cands[4].mem_free = None;
+        let mut low_first = hosts(5);
+        for (c, mem) in low_first
+            .iter_mut()
+            .zip([None, Some(100), Some(500), Some(100), None])
+        {
+            c.mem_free = mem;
+        }
+        let mut high_first = hosts(5);
+        for (c, mem) in high_first
+            .iter_mut()
+            .zip([Some(900), None, Some(1), None, Some(5)])
+        {
+            c.mem_free = mem;
+        }
         let s = spec("native", &[("web", 5, Default::default())]);
-        let p = place(&bp, &s, &cands, &none()).unwrap();
-        assert_eq!(ids(&p.binding, "web"), [3, 2, 4, 1, 5]);
-        // Load outranks memory.
-        let existing = BTreeMap::from([(Id::from(3), 1)]);
+        for cands in [&low_first, &high_first] {
+            let p = place(&bp, &s, cands, &none()).unwrap();
+            assert_eq!(ids(&p.binding, "web"), [1, 2, 3, 4, 5]);
+        }
+        // Load still outranks id.
+        let existing = BTreeMap::from([(Id::from(1), 1)]);
         let s = spec("native", &[("web", 1, Default::default())]);
-        let p = place(&bp, &s, &cands, &existing).unwrap();
-        assert_eq!(ids(&p.binding, "web"), [2]);
+        for cands in [&low_first, &high_first] {
+            let p = place(&bp, &s, cands, &existing).unwrap();
+            assert_eq!(ids(&p.binding, "web"), [2]);
+        }
     }
 
     #[test]
@@ -1031,11 +1038,12 @@ mod tests {
         }
         let s = spec("compose", &[("exporter", 3, tags(&["metrics"]))]);
         let existing = BTreeMap::from([(Id::from(3), 1)]);
-        // Host 2 fails the exporter selector; host 3 carries load; host 4 beats host 1 on memory.
+        // Host 2 fails the exporter selector; host 3 carries load; host 1 beats host 4 on id
+        // even though host 4 has more free memory.
         let p = place(&bp, &s, &cands, &existing).unwrap();
-        assert_eq!(ids(&p.binding, "nats"), [4, 4, 4]);
-        assert_eq!(ids(&p.binding, "exporter"), [4, 4, 4]);
-        assert_eq!(p.binding.roles["nats"][0].address, "10.0.0.4");
+        assert_eq!(ids(&p.binding, "nats"), [1, 1, 1]);
+        assert_eq!(ids(&p.binding, "exporter"), [1, 1, 1]);
+        assert_eq!(p.binding.roles["nats"][0].address, "10.0.0.1");
         assert_eq!(p.binding.manager, None);
         let info: BTreeMap<Id, super::super::binding::HostInfo> = cands
             .iter()

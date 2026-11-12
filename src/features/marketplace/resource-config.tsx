@@ -82,15 +82,20 @@ export const marketInstall = (
 /** Detail rows carry the content; list rows only the package's declared topology. */
 const blueprintEntry = (r: MarketEntry) => r.content ? isBlueprint(r.content) : r.meta?.topology === "cluster";
 
-/** Cluster templates: import into this workspace, then continue in the deployment wizard. */
+/**
+ * Cluster templates: import into this workspace, then continue in the deployment wizard.
+ * Needs `marketplace.install` (the import) and `deployments.create` (the wizard's create).
+ */
 export const marketDeploy = (
   workspace: string,
   navigate: Navigation["navigate"],
+  permissions: Set<string> | undefined,
 ) => ({
   label: "部署",
   labelKey: "resource-domain:wizard.deploy",
   permission: "marketplace.install",
-  when: blueprintEntry,
+  when: (r: MarketEntry) =>
+    blueprintEntry(r) && (!permissions || permissions.has("deployments.create")),
   disabled: (r: MarketEntry) => !r.compatible,
   disabledReason: (r: MarketEntry) => r.incompatible_reason ?? "",
   action: async (r: MarketEntry) => {
@@ -296,7 +301,7 @@ export function marketplaceLists({
           labelKey: "common-domain:common.view",
           to: (r) => ({ id: r.id, mode: "view" }),
         },
-        marketDeploy(workspace, navigate),
+        marketDeploy(workspace, navigate, permissions),
         marketInstall(workspace, navigate),
       ],
       toolbar: { create: false, import: false, export: false },
@@ -306,6 +311,7 @@ export function marketplaceLists({
 
 export function marketplaceForms({
   workspace,
+  permissions,
   navigate,
 }: ResourceConfigContext): Record<string, FormConfig<AnyRow>> {
   return {
@@ -402,7 +408,10 @@ export function marketplaceForms({
       heading: (r) => r.name,
       blank: {},
       readOnly: () => true,
-      viewActions: [marketDeploy(workspace, navigate), marketInstall(workspace, navigate)],
+      viewActions: [
+        marketDeploy(workspace, navigate, permissions),
+        marketInstall(workspace, navigate),
+      ],
       sections: [
         {
           fields: [
