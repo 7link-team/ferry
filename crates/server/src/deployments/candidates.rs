@@ -62,7 +62,9 @@ pub async fn load(conn: &impl ConnectionTrait, workspace: Id) -> Result<Vec<Cand
             let metrics: Option<Value> = serde_json::from_str(&h.metrics).ok();
             let free = |total: &str, used: &str| -> Option<u64> {
                 let m = metrics.as_ref()?;
-                m.get(total)?.as_u64()?.checked_sub(m.get(used)?.as_u64()?)
+                // total == 0 means the probe found no device: no data, not "full".
+                let total = m.get(total)?.as_u64().filter(|t| *t > 0)?;
+                total.checked_sub(m.get(used)?.as_u64()?)
             };
             Candidate {
                 id: h.id.into(),
@@ -227,7 +229,17 @@ mod tests {
             r#"{"mem_used":9,"mem_total":5,"disk_used":1,"disk_total":2}"#,
         )
         .await;
+        host(
+            &s.db,
+            5,
+            1,
+            "online",
+            0,
+            r#"{"mem_used":1,"mem_total":8,"disk_used":0,"disk_total":0}"#,
+        )
+        .await;
         let c = load(&s.db, 1.into()).await.unwrap();
+        assert_eq!((c[3].mem_free, c[3].disk_free), (Some(7), None));
         assert_eq!((c[0].mem_free, c[0].disk_free), (None, None));
         assert_eq!((c[1].mem_free, c[1].disk_free), (None, None));
         assert_eq!((c[2].mem_free, c[2].disk_free), (None, Some(1)));
