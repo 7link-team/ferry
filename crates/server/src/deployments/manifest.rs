@@ -51,6 +51,15 @@ pub struct Service {
     pub depends_on: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<Placement>,
+    /// Swarm service discovery (`vip` or `dnsrr`); stack only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint_mode: Option<String>,
+}
+impl Service {
+    /// Fields that only exist on Docker Swarm / Stack.
+    fn uses_stack_only_fields(&self) -> bool {
+        self.endpoint_mode.is_some() || self.ports.iter().any(|p| p.mode.is_some())
+    }
 }
 /// Swarm placement is explicit and never silently applied to single-host engines.
 #[derive(Debug, Serialize, Deserialize)]
@@ -326,6 +335,30 @@ pub struct Port {
     pub published: Option<u16>,
     #[serde(default = "tcp")]
     pub protocol: String,
+    /// Swarm publish mode (`host` or `ingress`); stack only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+fn valid_publish_mode(mode: &str) -> bool {
+    ["host", "ingress"].contains(&mode)
+}
+fn valid_endpoint_mode(mode: &str) -> bool {
+    ["vip", "dnsrr"].contains(&mode)
+}
+/// `dnsrr` service discovery cannot be combined with ingress-published ports.
+fn validate_endpoint_mode(mode: Option<&str>, port_modes: &[Option<&str>]) -> Result<()> {
+    if let Some(mode) = mode {
+        if !valid_endpoint_mode(mode) {
+            return Err(bad("deployment.portable.endpointModeInvalid"));
+        }
+    }
+    if port_modes.iter().flatten().any(|m| !valid_publish_mode(m)) {
+        return Err(bad("deployment.portable.endpointModeInvalid"));
+    }
+    if mode == Some("dnsrr") && port_modes.iter().any(|m| *m != Some("host")) {
+        return Err(bad("deployment.portable.endpointModeInvalid"));
+    }
+    Ok(())
 }
 fn tcp() -> String {
     "tcp".into()
@@ -443,6 +476,13 @@ pub fn parse_for(input: &str, mode: &str) -> Result<Manifest> {
             }
             validate_placement(&placement.constraints, placement.max_replicas_per_node)?;
         }
+        if s.uses_stack_only_fields() {
+            if m.api_version != "ferry/v2" || mode != "stack" {
+                return Err(bad("deployment.portable.endpointModeInvalid"));
+            }
+            let port_modes: Vec<_> = s.ports.iter().map(|p| p.mode.as_deref()).collect();
+            validate_endpoint_mode(s.endpoint_mode.as_deref(), &port_modes)?;
+        }
         if m.api_version == "ferry/v2" && !s.image.is_empty() && !valid_image(&s.image) {
             return Err(bad("deployment.manifest.059"));
         }
@@ -551,7 +591,10 @@ fn effective_mode<'a>(m: &Manifest, mode: &'a str) -> &'a str {
         && m.services.iter().all(|s| s.image.is_empty())
     {
         "native"
-    } else if m.services.iter().any(|s| s.placement.is_some())
+    } else if m
+        .services
+        .iter()
+        .any(|s| s.placement.is_some() || s.uses_stack_only_fields())
         || !m.overrides.stack.is_empty()
         || m.strategy
             .as_ref()
@@ -569,6 +612,11 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
         && (mode != "stack" || m.api_version != "ferry/v2")
     {
         return Err(bad("deployment.portable.placementMode"));
+    }
+    if m.services.iter().any(Service::uses_stack_only_fields)
+        && (mode != "stack" || m.api_version != "ferry/v2")
+    {
+        return Err(bad("deployment.portable.endpointModeInvalid"));
     }
     if mode == "native" {
         return render_native(m);
@@ -609,6 +657,9 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
                 value["max_replicas_per_node"] = json!(max);
             }
             v["deploy"]["placement"] = value;
+        }
+        if let Some(endpoint) = &s.endpoint_mode {
+            v["deploy"]["endpoint_mode"] = json!(endpoint);
         }
         if mode == "stack" {
             let rolling = m.strategy.as_ref().is_some_and(|s| s.kind == "rolling");
@@ -682,6 +733,9 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
                         let mut v = json!({"target":p.container,"protocol":p.protocol});
                         if let Some(port) = p.published {
                             v["published"] = json!(port.to_string());
+                        }
+                        if let Some(mode) = &p.mode {
+                            v["mode"] = json!(mode);
                         }
                         v
                     })
@@ -1041,9 +1095,18 @@ fn validate_compose(doc: &Value, mode: &str, portable: bool) -> Result<()> {
                 k != "replicas"
                     && k != "resources"
                     && !(mode == "stack"
-                        && (k == "update_config" || (portable && k == "placement")))
+                        && (k == "update_config"
+                            || (portable && (k == "placement" || k == "endpoint_mode"))))
             }) {
                 return Err(bad("deployment.manifest.061"));
+            }
+            if let Some(endpoint) = d.get("endpoint_mode") {
+                let endpoint = endpoint
+                    .as_str()
+                    .ok_or_else(|| bad("deployment.portable.endpointModeInvalid"))?;
+                if !valid_endpoint_mode(endpoint) {
+                    return Err(bad("deployment.portable.endpointModeInvalid"));
+                }
             }
             if let Some(placement) = d.get("placement") {
                 let placement = placement
@@ -1156,10 +1219,16 @@ fn validate_compose(doc: &Value, mode: &str, portable: bool) -> Result<()> {
                 let p = p
                     .as_object()
                     .ok_or_else(|| bad("deployment.manifest.070"))?;
-                if p.keys()
-                    .any(|k| !["target", "published", "protocol"].contains(&k.as_str()))
-                {
+                if p.keys().any(|k| {
+                    !["target", "published", "protocol"].contains(&k.as_str())
+                        && !(mode == "stack" && portable && k == "mode")
+                }) {
                     return Err(bad("deployment.manifest.071"));
+                }
+                if let Some(mode) = p.get("mode") {
+                    if !mode.as_str().is_some_and(valid_publish_mode) {
+                        return Err(bad("deployment.portable.endpointModeInvalid"));
+                    }
                 }
                 if !p
                     .get("target")
@@ -1184,6 +1253,20 @@ fn validate_compose(doc: &Value, mode: &str, portable: bool) -> Result<()> {
                         return Err(bad("deployment.manifest.075"));
                     }
                 }
+            }
+        }
+        if service
+            .get("deploy")
+            .and_then(|d| d.get("endpoint_mode"))
+            .and_then(Value::as_str)
+            == Some("dnsrr")
+        {
+            let all_host = service
+                .get("ports")
+                .and_then(Value::as_array)
+                .is_none_or(|ports| ports.iter().all(|p| p.get("mode") == Some(&json!("host"))));
+            if !all_host {
+                return Err(bad("deployment.portable.endpointModeInvalid"));
             }
         }
         let mut deps = Vec::new();
@@ -1408,6 +1491,104 @@ mod tests {
             .unwrap()
             .remove("artifact");
         assert!(parse_for(&value.to_string(), "stack").is_err());
+    }
+    #[test]
+    fn stack_renders_host_ports_and_dnsrr() {
+        let mut value = portable_sample();
+        value["services"][0]["endpointMode"] = json!("dnsrr");
+        value["services"][0]["ports"] =
+            json!([{"container":80,"published":8080,"mode":"host"},{"container":81,"mode":"host"}]);
+        let manifest = parse_for(&value.to_string(), "stack").unwrap();
+        let doc: Value = serde_json::from_str(&render_for(&manifest, "stack").unwrap()).unwrap();
+        assert_eq!(doc["services"]["web"]["deploy"]["endpoint_mode"], "dnsrr");
+        assert_eq!(doc["services"]["web"]["ports"][0]["mode"], "host");
+        assert_eq!(doc["services"]["web"]["ports"][1]["mode"], "host");
+        let mut ingress = portable_sample();
+        ingress["services"][0]["endpointMode"] = json!("vip");
+        ingress["services"][0]["ports"] =
+            json!([{"container":80,"published":8080,"mode":"ingress"}]);
+        let manifest = parse_for(&ingress.to_string(), "stack").unwrap();
+        let doc: Value = serde_json::from_str(&render_for(&manifest, "stack").unwrap()).unwrap();
+        assert_eq!(doc["services"]["web"]["deploy"]["endpoint_mode"], "vip");
+        assert_eq!(doc["services"]["web"]["ports"][0]["mode"], "ingress");
+        // Unset fields stay absent.
+        let mut plain = portable_sample();
+        plain["services"][0]["ports"] = json!([{"container":80,"published":8080}]);
+        let manifest = parse_for(&plain.to_string(), "stack").unwrap();
+        let doc: Value = serde_json::from_str(&render_for(&manifest, "stack").unwrap()).unwrap();
+        assert!(
+            doc["services"]["web"]["deploy"]
+                .get("endpoint_mode")
+                .is_none()
+        );
+        assert!(doc["services"]["web"]["ports"][0].get("mode").is_none());
+    }
+    #[test]
+    fn stack_only_fields_rejected_elsewhere() {
+        let mut with_mode = portable_sample();
+        with_mode["services"][0]["ports"] = json!([{"container":80,"mode":"host"}]);
+        let mut with_endpoint = portable_sample();
+        with_endpoint["services"][0]["endpointMode"] = json!("vip");
+        for value in [&with_mode, &with_endpoint] {
+            assert!(parse_for(&value.to_string(), "stack").is_ok());
+            for mode in ["native", "docker", "compose"] {
+                assert!(parse_for(&value.to_string(), mode).is_err(), "{mode}");
+            }
+            let manifest = parse_for(&value.to_string(), "stack").unwrap();
+            for mode in ["native", "docker", "compose"] {
+                assert!(render_for(&manifest, mode).is_err(), "{mode}");
+            }
+            let mut v1 = value.clone();
+            v1["apiVersion"] = json!("ferry/v1");
+            v1["services"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("artifact");
+            assert!(parse_for(&v1.to_string(), "stack").is_err());
+        }
+    }
+    #[test]
+    fn dnsrr_requires_host_ports() {
+        let mut value = portable_sample();
+        value["services"][0]["endpointMode"] = json!("dnsrr");
+        for ports in [
+            json!([{"container":80,"published":8080}]),
+            json!([{"container":80,"published":8080,"mode":"ingress"}]),
+            json!([{"container":80,"mode":"host"},{"container":81}]),
+        ] {
+            value["services"][0]["ports"] = ports;
+            let e = parse_for(&value.to_string(), "stack").unwrap_err();
+            assert!(
+                e.render(crate::i18n::Locale::EnUs).contains("endpoint"),
+                "{}",
+                e.render(crate::i18n::Locale::EnUs)
+            );
+        }
+        // A dnsrr service without published ports is fine.
+        value["services"][0]["ports"] = json!([]);
+        assert!(parse_for(&value.to_string(), "stack").is_ok());
+        // Overrides cannot bypass the rule.
+        let mut over = portable_sample();
+        over["services"][0]["ports"] = json!([{"container":80,"published":8080}]);
+        over["overrides"] =
+            json!({"stack":{"services":{"web":{"deploy":{"endpoint_mode":"dnsrr"}}}}});
+        assert!(parse_for(&over.to_string(), "stack").is_err());
+    }
+    #[test]
+    fn invalid_port_mode_rejected() {
+        let mut value = portable_sample();
+        for mode in ["bridge", "", "HOST"] {
+            value["services"][0]["ports"] = json!([{"container":80,"mode":mode}]);
+            assert!(parse_for(&value.to_string(), "stack").is_err(), "{mode}");
+        }
+        value["services"][0]["ports"] = json!([]);
+        for mode in ["rr", "", "DNSRR"] {
+            value["services"][0]["endpointMode"] = json!(mode);
+            assert!(parse_for(&value.to_string(), "stack").is_err(), "{mode}");
+        }
+        let mut over = portable_sample();
+        over["overrides"] = json!({"stack":{"services":{"web":{"deploy":{"endpoint_mode":"rr"},"ports":[{"target":80,"mode":"bridge"}]}}}});
+        assert!(parse_for(&over.to_string(), "stack").is_err());
     }
     fn fails(v: &Value, part: &str) {
         let e = parse(&v.to_string()).unwrap_err();

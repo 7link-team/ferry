@@ -271,6 +271,7 @@ const SERVICE: Kind = Kind::Object(&[
         Kind::List(&Kind::Object(&[("name", Kind::Text), ("path", Kind::Text)])),
     ),
     ("dependsOn", Kind::List(&Kind::Text)),
+    ("endpointMode", Kind::Text),
     (
         "placement",
         Kind::Object(&[
