@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "yaml";
 import { commonText, i18n } from "../../shared/i18n/i18n";
 import { BlueprintSpecEdit } from "./BlueprintSpecEdit";
-import { BlueprintTopology } from "./BlueprintTopology";
+import { BlueprintTarget, BlueprintTopology } from "./BlueprintTopology";
 import type { Deployment } from "./deployment";
 
 vi.mock("../../shared/editor/CodeEditor", () => ({ CodeEditor: ({ value, label, onChange }: { value: string; label: string; onChange: (value: string) => void }) => <textarea aria-label={label} value={value} onChange={event => onChange(event.target.value)} /> }));
@@ -282,4 +282,18 @@ it("a refresh skipped while hidden runs when the page becomes visible", async ()
     await flush();
     expect(count()).toBe(2);
   } finally { vi.useRealTimers(); Object.defineProperty(document, "hidden", { configurable: true, value: false }); }
+});
+
+it("blueprint_target_names_driver_distinct_hosts_and_stack_manager", async () => {
+  // Three distinct hosts across both roles (host 3 runs nats-2 and web-0).
+  await act(async () => root.render(<BlueprintTarget workspace="ops" deployment={deployment()} permissions={all} />));
+  await flush();
+  expect(host.textContent).toBe(`${w("driverDocker")} · ${t("hostCount", { count: 3 })}`);
+  expect(requests.some(r => r.url.includes("/nodes"))).toBe(false);
+  const stack = deployment({ mode: "stack", blueprint_binding: { driver: "stack", manager: "2", roles: { nats: [bind("1"), bind("2")], web: [bind("1")] } } });
+  await act(async () => root.render(<BlueprintTarget workspace="ops" deployment={stack} permissions={all} />));
+  await flush();
+  expect(host.textContent).toBe(`${w("driverStack")} · ${t("hostCount", { count: 2 })} · ${t("manager", { host: "host-b" })}`);
+  await act(async () => root.render(<BlueprintTarget workspace="ops" deployment={deployment({ blueprint_binding: null })} permissions={all} />));
+  expect(host.textContent).toBe("—");
 });

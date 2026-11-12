@@ -213,7 +213,10 @@ try {
     const placement = page.getByRole('region', { name: '放置结果' });
     await placement.waitFor();
     const hostOf = instance => page.getByRole('combobox', { name: `${instance} 的主机`, exact: true });
-    const rowOf = instance => placement.getByRole('row').filter({ has: hostOf(instance) });
+    // A table row on Desktop/Pad, a card on Phone.
+    const rowOf = instance => placement.locator('tr, li').filter({ has: hostOf(instance) });
+    check(width < 768 ? await placement.locator('table').count() === 0 && await placement.locator('[data-placement-instance]').count() === 3
+      : await placement.locator('table').count() === 1, `${width}: placement is ${width < 768 ? 'one card per instance' : 'a table'}`);
     await hostOf('nats-2').waitFor();
     const before = [];
     for (const instance of ['nats-0', 'nats-1', 'nats-2']) before.push(await hostOf(instance).inputValue());
@@ -254,6 +257,8 @@ try {
     check(saved.blueprint_binding.roles.nats.every(item => item.address === hosts.find(h => h.id === item.hostId).address), `${width}: stored addresses come from the hosts`);
 
     // Detail: role → instance → host topology.
+    await page.getByText('目标 · Docker · 3 台主机', { exact: true }).waitFor();
+    check(true, `${width}: the detail header names the driver and the number of bound hosts`);
     const role = page.locator('[data-topology-role="nats"]');
     await role.waitFor();
     for (const [index, hostId] of bound.entries()) {

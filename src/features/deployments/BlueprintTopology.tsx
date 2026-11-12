@@ -4,6 +4,7 @@ import { commonText, useCommonTranslation } from "../../shared/i18n/i18n";
 import { Badge } from "../../shared/ui/badge";
 import { Button } from "../../shared/ui/button";
 import { readBlueprint, type BlueprintSummary } from "./blueprint-spec";
+import { driverLabel } from "./BlueprintWizard";
 import { useHostNames, useInstanceHealth, type InstanceHealth } from "./blueprint-hooks";
 import type { BlueprintBinding, Deployment } from "./deployment";
 
@@ -51,6 +52,17 @@ const STATE_CLASS: Record<InstanceState, string> = {
 
 function HealthBadge({ state }: { state: InstanceState }) {
   return <Badge variant="outline" data-health={state} className={STATE_CLASS[state]}>{t(`state.${state}`)}</Badge>;
+}
+
+/** The detail header's target of a blueprint deployment: driver and distinct bound hosts (and the Swarm manager). */
+export function BlueprintTarget({ workspace, deployment, permissions }: { workspace: string; deployment: Deployment; permissions: Set<string> }) {
+  useCommonTranslation();
+  const binding = deployment.blueprint_binding;
+  const manager = binding?.driver === "stack" ? binding.manager : undefined;
+  const names = useHostNames(workspace, permissions.has("hosts.read") && !!manager);
+  if (!binding) return <>—</>;
+  const hosts = new Set(Object.values(binding.roles).flatMap(list => list.map(item => item.hostId))).size;
+  return <>{[driverLabel(binding.driver), t("hostCount", { count: hosts }), manager && t("manager", { host: named(names.get(manager), manager) })].filter(Boolean).join(" · ")}</>;
 }
 
 /** Where a blueprint deployment's instances run and how healthy each one is. */

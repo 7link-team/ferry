@@ -156,6 +156,25 @@ it("placement_preview_renders_rows_and_warnings", async () => {
   expect(button(w("next")).disabled).toBe(false);
 });
 
+it("phone_placement_renders_cards_with_select_and_readonly_address", async () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(max-width: 767px)", media: query, addEventListener() {}, removeEventListener() {} }));
+  await mount();
+  for (let i = 0; i < 3; i++) await click(w("next"));
+  const region = host.querySelector(`[role="region"][aria-label="${w("placementTitle")}"]`)!;
+  expect(region.querySelector("table")).toBeNull();
+  const cards = [...region.querySelectorAll("[data-placement-instance]")];
+  expect(cards.map(card => card.getAttribute("data-placement-instance"))).toEqual(["nats-0", "nats-1", "nats-2"]);
+  expect(cards[1]!.querySelector<HTMLSelectElement>(`select[aria-label="${w("hostOf", { instance: "nats-1" })}"]`)!.value).toBe("2");
+  expect(cards[1]!.textContent).toContain("10.0.0.2");
+  expect(cards[1]!.querySelector("input, textarea")).toBeNull();
+  placementReply = () => ({ status: 200, body: placed([{ hostId: "1", address: "10.0.0.1" }, { hostId: "3", address: "10.0.0.3" }, { hostId: "2", address: "10.0.0.2" }]) });
+  await chooseHost("nats-1", "3");
+  expect(placementSpecs().at(-1)!.placement).toEqual({ nats: [{ hostId: "1", address: "10.0.0.1" }, { hostId: "3", address: "10.0.0.3" }, { hostId: "2", address: "10.0.0.2" }] });
+  const updated = [...host.querySelectorAll("[data-placement-instance]")];
+  expect(updated[0]!.textContent).toContain(w("manual"));
+  expect(updated[1]!.textContent).toContain("10.0.0.3");
+});
+
 it("roles without distinctHosts may share a host", async () => {
   distinct = false;
   await mount();

@@ -10,7 +10,7 @@ import { Button } from "../../shared/ui/button";
 import { Badge } from "../../shared/ui/badge";
 import { deploymentActive,deploymentState,type Deployment,type Preview,type Revision } from "./deployment";
 import { BlueprintSpecEdit } from "./BlueprintSpecEdit";
-import { BlueprintTopology } from "./BlueprintTopology";
+import { BlueprintTarget, BlueprintTopology } from "./BlueprintTopology";
 
 const CodeEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 
@@ -82,7 +82,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
   return <div className="min-h-0 overflow-auto space-y-5 pb-6">
     <header className="sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b bg-background py-3">
       <h2 className="text-lg font-semibold">{app.name}</h2><Badge variant={["failed", "needs-review"].includes(app.state) ? "destructive" : "secondary"}>{deploymentState(app.state)}</Badge>
-      <span className="text-sm text-muted-foreground">{commonText("resource-domain:resource.target")} · {named(app.target_name, app.target_ref)}</span>
+      <span className="text-sm text-muted-foreground">{commonText("resource-domain:resource.target")} · {app.target_kind === "blueprint" ? <BlueprintTarget workspace={workspace} deployment={app} permissions={permissions} /> : named(app.target_name, app.target_ref)}</span>
     </header>
     <dl className="grid min-w-0 gap-4 rounded-md border p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
       {[

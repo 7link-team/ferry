@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { cn } from "cn";
 import { Minus, Plus } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
@@ -27,7 +27,20 @@ const SpecEditor = lazy(() => import("../../shared/editor/CodeEditor").then(modu
 const w = (key: string, values?: Record<string, unknown>) => commonText(`resource-domain:wizard.${key}`, values);
 const STEPS = ["stepTemplate", "stepValues", "stepRoles", "stepPlacement", "stepConfirm"] as const;
 const DRIVER_KEYS: Record<string, string> = { native: "driverNative", docker: "driverDocker", compose: "driverCompose", stack: "driverStack" };
-const driverLabel = (driver: string) => DRIVER_KEYS[driver] ? w(DRIVER_KEYS[driver]) : driver;
+export const driverLabel = (driver: string) => DRIVER_KEYS[driver] ? w(DRIVER_KEYS[driver]) : driver;
+const PHONE = "(max-width: 767px)";
+/** Phone layout (< 768px, the `md` breakpoint); false where media queries are unavailable. */
+function usePhone(): boolean {
+  return useSyncExternalStore(
+    notify => {
+      if (typeof window.matchMedia !== "function") return () => {};
+      const query = window.matchMedia(PHONE);
+      query.addEventListener("change", notify);
+      return () => query.removeEventListener("change", notify);
+    },
+    () => typeof window.matchMedia === "function" && window.matchMedia(PHONE).matches,
+  );
+}
 const selectClass = "min-h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm lg:min-h-9";
 const touch = "min-h-11 lg:min-h-9";
 
@@ -57,6 +70,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
 }) {
   useCommonTranslation();
   const editorId = useId();
+  const phone = usePhone();
   const editing = !!deployment;
   const frozen = !!deployment && deploymentDeployed(deployment);
   const steps: readonly (typeof STEPS)[number][] = frozen ? ["stepValues"] : STEPS;
@@ -203,6 +217,11 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
     patch([{ path: ["placement", role], value: list }]);
   };
   const automatic = (role: string) => patch(dropPlacement(role));
+  const manualBadge = (row: PlacementRow) => spec?.placement?.[row.role] && row.index === 0 && <Badge variant="outline">{w("manual")}</Badge>;
+  const hostSelect = (row: PlacementRow) => <select aria-label={w("hostOf", { instance: row.instance })} className={selectClass} value={row.hostId} disabled={invalid || !!placement?.busy} onChange={event => choose(row.role, row.index, event.target.value)}>
+    {!hosts?.some(h => h.id === row.hostId) && <option value={row.hostId}>{hostName(row.hostId)}</option>}
+    {hosts?.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+  </select>;
 
   const versionChanged = template.version !== (spec?.template.version ?? version);
   return <div className="flex min-h-0 min-w-0 flex-col">
@@ -333,16 +352,20 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
           {placement?.for !== text && !placement?.busy && <p className="text-sm text-muted-foreground">{w("placementStale")}</p>}
           {placement?.result && <>
             <p className="text-sm text-muted-foreground">{w("addressHelp")}</p>
-            <div role="region" aria-label={w("placementTitle")} className="min-w-0 rounded-md border">
-              <AutoTable<PlacementRow> data={placementRows(blueprint, placement.result)} rowKey={row => row.instance} pagination={false} minWidth={480} layout="auto" columns={[
-                { field: "instance", name: w("instance"), render: (_, row) => <span className="inline-flex min-w-0 flex-wrap items-center gap-2"><span className="break-all">{row.instance}</span>{spec.placement?.[row.role] && row.index === 0 && <Badge variant="outline">{w("manual")}</Badge>}</span> },
-                { field: "hostId", name: w("host"), render: (_, row) => <select aria-label={w("hostOf", { instance: row.instance })} className={selectClass} value={row.hostId} disabled={invalid || placement.busy} onChange={event => choose(row.role, row.index, event.target.value)}>
-                  {!hosts?.some(h => h.id === row.hostId) && <option value={row.hostId}>{hostName(row.hostId)}</option>}
-                  {hosts?.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
-                </select> },
-                { field: "address", name: w("address"), render: (_, row) => <span className="font-mono break-all">{row.address}</span> },
-              ]} />
-            </div>
+            {phone
+              // Phone: one card per instance, like the detail topology; Desktop and Pad keep the table.
+              ? <ul role="region" aria-label={w("placementTitle")} className="min-w-0 divide-y rounded-md border">{placementRows(blueprint, placement.result).map(row => <li key={row.instance} data-placement-instance={row.instance} className="min-w-0 space-y-2 p-3 text-sm">
+                <div className="flex min-w-0 flex-wrap items-center gap-2"><span className="break-all font-medium">{row.instance}</span>{manualBadge(row)}</div>
+                {hostSelect(row)}
+                <p className="min-w-0"><span className="me-1 text-muted-foreground">{commonText("resource-domain:topology.label", { label: w("address") })}</span><span className="font-mono break-all">{row.address}</span></p>
+              </li>)}</ul>
+              : <div role="region" aria-label={w("placementTitle")} className="min-w-0 rounded-md border">
+                <AutoTable<PlacementRow> data={placementRows(blueprint, placement.result)} rowKey={row => row.instance} pagination={false} minWidth={480} layout="auto" columns={[
+                  { field: "instance", name: w("instance"), render: (_, row) => <span className="inline-flex min-w-0 flex-wrap items-center gap-2"><span className="break-all">{row.instance}</span>{manualBadge(row)}</span> },
+                  { field: "hostId", name: w("host"), render: (_, row) => hostSelect(row) },
+                  { field: "address", name: w("address"), render: (_, row) => <span className="font-mono break-all">{row.address}</span> },
+                ]} />
+              </div>}
             {placement.result.warnings.length > 0 && <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
               <h3 className="font-medium">{w("warnings")}</h3>
               <ul className="mt-1 list-disc space-y-1 ps-5">{placement.result.warnings.map((warning, index) => <li key={index} className="break-words">{warning.message}</li>)}</ul>
