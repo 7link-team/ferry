@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { cn } from "cn";
 import { Minus, Plus } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
-import { base, listResource, named } from "../../shared/api/resource";
+import { base, named } from "../../shared/api/resource";
 import { AutoField, FieldControl } from "../../shared/forms/auto-form";
 import { FormActions } from "../../shared/forms/auto-form/form-actions";
 import { commonText, useCommonTranslation } from "../../shared/i18n/i18n";
@@ -17,9 +17,11 @@ import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { tagOptions } from "../tags/resource-config";
 import { templateParameterFields, type TemplateParameter } from "../templates/TemplateParametersEditor";
 import {
-  initialSpec, instancesProblem, readBlueprint, readSpec, stepInstances, writeSpec,
+  initialSpec, instancesProblem, readBlueprint, readSpec, stepInstances, topologyKey, writeSpec,
   type BlueprintSummary, type InstanceBinding, type SpecChange,
 } from "./blueprint-spec";
+import { allHosts, type HostRow } from "./blueprint-hooks";
+import { deploymentDeployed, type Deployment } from "./deployment";
 
 const SpecEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 const w = (key: string, values?: Record<string, unknown>) => commonText(`resource-domain:wizard.${key}`, values);
@@ -30,19 +32,9 @@ const selectClass = "min-h-11 w-full min-w-0 rounded-md border border-input bg-b
 const touch = "min-h-11 lg:min-h-9";
 
 interface Template { id: string; name: string; content: string; parameters: string; version: number }
-interface HostRow { id: string; name: string; address?: string }
 interface Placement { manifest: string; binding: { driver: string; manager?: string; roles: Record<string, InstanceBinding[]> }; warnings: { key: string; message: string }[] }
 interface PlacementRow { instance: string; role: string; index: number; hostId: string; address: string }
 interface Loaded { template: Template; blueprint: BlueprintSummary | undefined; parameters: TemplateParameter[] }
-
-async function allHosts(workspace: string): Promise<HostRow[]> {
-  const rows: HostRow[] = [];
-  for (let page = 1; ; page += 1) {
-    const result = await listResource<HostRow>(workspace, "hosts", { page, page_size: 200 });
-    rows.push(...result.items);
-    if (!result.items.length || page * result.page_size >= result.total) return rows;
-  }
-}
 
 /** Instances in blueprint role order, named like the compiled instances (`<role>-<index>`). */
 const placementRows = (blueprint: BlueprintSummary, result: Placement): PlacementRow[] =>
@@ -53,13 +45,22 @@ function readParameters(text: string): TemplateParameter[] {
   catch { return []; }
 }
 
-/** Multi-step creation of a blueprint deployment; the YAML spec is the single source of truth. */
-export function BlueprintWizard({ workspace, templateId, version, permissions, navigation }: {
+/**
+ * Multi-step creation of a blueprint deployment; the YAML spec is the single source of truth.
+ * With `deployment` it edits that deployment's stored spec instead: every step before its
+ * first deploy, afterwards only the parameters (the server freezes the topology).
+ */
+export function BlueprintWizard({ workspace, templateId, version, permissions, navigation, deployment, onDone, onCancel }: {
   workspace: string; templateId: string; version: number; permissions: Set<string>; navigation: Navigation;
+  /** A snapshot of the deployment being edited; keep it stable while the wizard is open. */
+  deployment?: Deployment; onDone?: () => void; onCancel?: () => void;
 }) {
   useCommonTranslation();
   const editorId = useId();
-  const allowed = permissions.has("deployments.create");
+  const editing = !!deployment;
+  const frozen = !!deployment && deploymentDeployed(deployment);
+  const steps: readonly (typeof STEPS)[number][] = frozen ? ["stepValues"] : STEPS;
+  const allowed = permissions.has(editing ? "deployments.update" : "deployments.create");
   const [loaded, setLoaded] = useState<Loaded>();
   const [loadError, setLoadError] = useState("");
   const [reload, setReload] = useState(0);
@@ -92,6 +93,10 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
       const parameters = readParameters(template.parameters);
       setLoaded({ template, blueprint, parameters });
       if (!blueprint) return;
+      if (deployment) {
+        setName(deployment.name); setWorkdir(deployment.workdir); change(deployment.deploy_spec ?? "");
+        return;
+      }
       setName(blueprint.name || template.name);
       change(initialSpec({
         template: { id: template.id, version },
@@ -101,7 +106,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
       }));
     }).catch(error => { if (!controller.signal.aborted) setLoadError(errorText(error)); });
     return () => controller.abort();
-  }, [workspace, templateId, version, allowed, reload, change]);
+  }, [workspace, templateId, version, allowed, reload, change, deployment]);
 
   useEffect(() => {
     if (!allowed) return;
@@ -122,6 +127,10 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
   const form = useMemo(() => readSpec(lastValid), [lastValid]);
   const spec = form.spec;
   const invalid = current.errors.length > 0;
+  const stored = useMemo(() => frozen ? readSpec(deployment?.deploy_spec ?? "").spec : undefined, [frozen, deployment]);
+  // After the first deploy only `values` and `template.version` may change; caught before submit.
+  const locked = !!stored && !!current.spec && topologyKey(current.spec) !== topologyKey(stored);
+  const key = steps[step] ?? steps[0]!;
   // While the YAML is invalid the form is locked: it never overwrites text the user is fixing.
   const patch = (changes: SpecChange[]) => { if (!invalid && form.doc) change(writeSpec(form.doc, changes)); };
   /** Removes a role's manual placement; the whole key goes when no role is left. */
@@ -139,8 +148,8 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
   }, [workspace]);
   // The form recalculates on every change; YAML typing waits for an explicit recalculation.
   useEffect(() => {
-    if (step === 3 && mode === "form" && !invalid && text && placement?.for !== text) void preview(text);
-  }, [step, mode, invalid, text, placement?.for, preview]);
+    if (key === "stepPlacement" && mode === "form" && !invalid && text && placement?.for !== text) void preview(text);
+  }, [key, mode, invalid, text, placement?.for, preview]);
 
   if (!allowed) return <p role="alert">{w("forbidden")}</p>;
   if (!templateId) return <p role="alert">{w("missingTemplate")}</p>;
@@ -149,25 +158,30 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
   const { template, blueprint, parameters } = loaded;
   if (!blueprint) return <p role="alert">{w("notBlueprint")}</p>;
 
-  const problems = (index: number): string[] => {
+  const problems = (at: string): string[] => {
     if (!spec) return [];
-    if (index === 0) return spec.driver ? [] : [w("noDrivers")];
-    if (index === 1) return parameters.filter(p => p.default === undefined && (spec.values[p.name] === undefined || spec.values[p.name] === ""))
+    if (at === "stepTemplate") return spec.driver ? [] : [w("noDrivers")];
+    if (at === "stepValues") return parameters.filter(p => p.default === undefined && (spec.values[p.name] === undefined || spec.values[p.name] === ""))
       .map(p => commonText("form.required", { name: p.label || p.name }));
-    if (index === 2) return blueprint.roles.flatMap(role => {
+    if (at === "stepRoles") return blueprint.roles.flatMap(role => {
       const count = spec.roles[role.name]?.instances;
       if (count === undefined) return [w("roleMissing", { role: role.name })];
       const problem = instancesProblem(count, role.instances);
       return problem ? [w(problem === "odd" ? "instancesOdd" : "instancesRange", { role: role.name, min: role.instances.min, max: role.instances.max })] : [];
     }).concat(spec.driver === "stack" && !spec.manager ? [commonText("form.required", { name: w("manager") })] : []);
-    if (index === 3) return placement?.for === text && placement.result ? [] : [placement?.error ?? w("placementStale")];
+    if (at === "stepPlacement") return placement?.for === text && placement.result ? [] : [placement?.error ?? w("placementStale")];
     return [!name.trim() && commonText("form.required", { name: commonText("common-domain:common.name") }), !workdir.trim() && commonText("form.required", { name: commonText("resource-domain:deployment.workdir") })].filter((item): item is string => !!item);
   };
-  const blocked = invalid || problems(step).length > 0;
+  const blocked = invalid || locked || problems(key).length > 0;
   const submit = async () => {
     if (blocked || creating) return;
     setCreating(true); setSubmitError("");
     try {
+      if (deployment) {
+        await api(`${base(workspace, "deployments")}/${encodeURIComponent(deployment.id)}`, { method: "PATCH", body: JSON.stringify({ name: name.trim(), category: deployment.category ?? "", description: deployment.description, workdir: deployment.workdir, version: deployment.version, deploy_spec: text }) });
+        onDone?.();
+        return;
+      }
       const created = await api<{ id: string }>(base(workspace, "deployments"), { method: "POST", body: JSON.stringify({ name: name.trim(), category: "", description: "", workdir: workdir.trim(), deploy_spec: text }) });
       navigation.navigate({ group: "deploy", item: "apps", id: created.id, mode: "view" }, {});
     } catch (error) { setSubmitError(errorText(error)); }
@@ -190,21 +204,23 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
   const versionChanged = template.version !== (spec?.template.version ?? version);
   return <div className="flex min-h-0 min-w-0 flex-col">
     <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-      <h2 className="min-w-0 text-lg font-semibold break-words">{w("title")}</h2>
+      <h2 className="min-w-0 text-lg font-semibold break-words">{w(editing ? "editTitle" : "title")}</h2>
       <div role="group" aria-label={w("editMode")} className="flex gap-1">
         <Button type="button" className={touch} variant={mode === "form" ? "secondary" : "outline"} aria-pressed={mode === "form"} onClick={() => setMode("form")}>{w("form")}</Button>
         <Button type="button" className={touch} variant={mode === "yaml" ? "secondary" : "outline"} aria-pressed={mode === "yaml"} onClick={() => setMode("yaml")}>{w("yaml")}</Button>
       </div>
     </div>
     <ol aria-label={w("steps")} className="mt-3 flex min-w-0 flex-wrap gap-x-4 gap-y-2 border-b pb-3">
-      {STEPS.map((key, index) => <li key={key} aria-current={index === step ? "step" : undefined} className={cn("flex min-w-0 items-center gap-2 text-sm", index === step ? "font-medium text-foreground" : "text-muted-foreground")}>
+      {steps.map((label, index) => <li key={label} aria-current={index === step ? "step" : undefined} className={cn("flex min-w-0 items-center gap-2 text-sm", index === step ? "font-medium text-foreground" : "text-muted-foreground")}>
         <span aria-hidden className={cn("grid size-7 shrink-0 place-items-center rounded-full border text-xs", index === step && "border-primary bg-primary text-primary-foreground", index < step && "border-primary text-primary")}>{index + 1}</span>
-        <span className={cn("min-w-0 break-words", index !== step && "sr-only md:not-sr-only")}>{w(key)}</span>
+        <span className={cn("min-w-0 break-words", index !== step && "sr-only md:not-sr-only")}>{w(label)}</span>
       </li>)}
     </ol>
-    <p className="sr-only" aria-live="polite">{w("stepOf", { current: step + 1, total: STEPS.length })}</p>
+    <p className="sr-only" aria-live="polite">{w("stepOf", { current: step + 1, total: steps.length })}</p>
 
     <div className="min-w-0 flex-1 space-y-4 py-4">
+      {frozen && <p className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">{w("frozenHelp")}</p>}
+      {locked && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">{w("topologyLocked")}</p>}
       {invalid && <div role="alert" className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
         {mode === "form" && <p>{w("yamlInvalid")}</p>}
         {current.errors.map((error, index) => <p key={index} className="break-words">{error}</p>)}
@@ -221,7 +237,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
           <Suspense fallback={<LoadingSkeleton variant="editor" />}><SpecEditor value={text} language="yaml" path={`deploy-spec-${editorId}.yaml`} label={w("yamlLabel")} onChange={change} /></Suspense>
         </div>
       </AutoField> : spec && <fieldset disabled={invalid} className="m-0 min-w-0 space-y-4 border-0 p-0">
-        {step === 0 && <section className="space-y-4" aria-label={w("stepTemplate")}>
+        {key === "stepTemplate" && <section className="space-y-4" aria-label={w("stepTemplate")}>
           <dl className="grid min-w-0 gap-3 text-sm sm:grid-cols-2">
             <div className="min-w-0"><dt className="text-muted-foreground">{w("templateName")}</dt><dd className="break-words font-medium">{template.name}</dd></div>
             <div><dt className="text-muted-foreground">{w("templateVersion")}</dt><dd className="font-medium">v{spec.template.version}</dd></div>
@@ -242,7 +258,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
           </div>
         </section>}
 
-        {step === 1 && <section className="space-y-4" aria-label={w("stepValues")}>
+        {key === "stepValues" && <section className="space-y-4" aria-label={w("stepValues")}>
           {!parameters.length && <p className="text-sm text-muted-foreground">{commonText("resource-domain:template.noParameters")}</p>}
           <div className="grid min-w-0 gap-4 md:grid-cols-2">{templateParameterFields(parameters).map((field, index) => {
             const parameter = parameters[index]!;
@@ -256,7 +272,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
           })}</div>
         </section>}
 
-        {step === 2 && <section className="space-y-4" aria-label={w("stepRoles")}>
+        {key === "stepRoles" && <section className="space-y-4" aria-label={w("stepRoles")}>
           {spec.driver === "stack" && <AutoField label={w("manager")} help={w("managerHelp")} required>
             <select className={selectClass} value={spec.manager ?? ""} required disabled={invalid} onChange={event => patch([{ path: ["manager"], value: event.target.value }])}>
               <option value="">{commonText("common.select")}</option>
@@ -304,7 +320,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
           })}
         </section>}
 
-        {step === 3 && <section className="space-y-4" aria-label={w("stepPlacement")}>
+        {key === "stepPlacement" && <section className="space-y-4" aria-label={w("stepPlacement")}>
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" className={touch} disabled={invalid || placement?.busy} onClick={() => void preview(text)}>{w("refreshPlacement")}</Button>
             {placement?.busy && <span role="status" className="text-sm text-muted-foreground">{w("previewing")}</span>}
@@ -331,10 +347,10 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
           </>}
         </section>}
 
-        {step === 4 && <section className="space-y-4" aria-label={w("stepConfirm")}>
+        {key === "stepConfirm" && <section className="space-y-4" aria-label={w("stepConfirm")}>
           <div className="grid min-w-0 gap-4 md:grid-cols-2">
             <AutoField label={commonText("common-domain:common.name")} required><Input name="name" className={touch} required disabled={invalid} maxLength={60} value={name} onChange={event => setName(event.target.value)} /></AutoField>
-            <AutoField label={commonText("resource-domain:deployment.workdir")} help={commonText("resource-domain:deployment.workdirHelp")} required><Input name="workdir" className={touch} required disabled={invalid} value={workdir} onChange={event => setWorkdir(event.target.value)} /></AutoField>
+            <AutoField label={commonText("resource-domain:deployment.workdir")} help={commonText("resource-domain:deployment.workdirHelp")} required><Input name="workdir" className={touch} required disabled={invalid || editing} value={workdir} onChange={event => setWorkdir(event.target.value)} /></AutoField>
           </div>
           <div className="rounded-md border p-3 text-sm">
             <h3 className="font-medium">{w("summary")}</h3>
@@ -343,17 +359,18 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
               {Object.entries(spec.roles).map(([role, entry]) => <li key={role} className="break-all">{w("summaryRole", { role, count: entry.instances })}</li>)}
             </ul>
           </div>
-          {submitError && <p role="alert" className="break-words text-sm text-destructive">{submitError}</p>}
         </section>}
       </fieldset>}
+      {submitError && <p role="alert" className="break-words text-sm text-destructive">{submitError}</p>}
     </div>
 
     <FormActions>
-      <Button type="button" variant="outline" className={touch} disabled={step === 0 || creating} onClick={() => setStep(n => Math.max(0, n - 1))}>{w("back")}</Button>
+      {onCancel && <Button type="button" variant="outline" className={touch} disabled={creating} onClick={onCancel}>{w("cancel")}</Button>}
+      {steps.length > 1 && <Button type="button" variant="outline" className={touch} disabled={step === 0 || creating} onClick={() => setStep(n => Math.max(0, n - 1))}>{w("back")}</Button>}
       <span className="ms-auto" />
-      {step < STEPS.length - 1
-        ? <Button type="button" className={touch} disabled={blocked} title={problems(step)[0]} onClick={() => setStep(n => n + 1)}>{w("next")}</Button>
-        : <Button type="button" className={touch} disabled={blocked || creating} onClick={() => void submit()}>{creating ? w("creating") : w("create")}</Button>}
+      {step < steps.length - 1
+        ? <Button type="button" className={touch} disabled={blocked} title={problems(key)[0]} onClick={() => setStep(n => n + 1)}>{w("next")}</Button>
+        : <Button type="button" className={touch} disabled={blocked || creating} onClick={() => void submit()}>{creating ? w(editing ? "saving" : "creating") : w(editing ? "save" : "create")}</Button>}
     </FormActions>
   </div>;
 }

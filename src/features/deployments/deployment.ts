@@ -5,7 +5,15 @@ export interface Deployment {
   target_name?: string; revision_number?: number; created_at?: number; updated_at?: number;
   version: number; current_revision: string; latest_revision?: Revision;
   current_targets?: { host_id: string; current_revision: string }[];
+  /** Blueprint deployments: where each role's instances run. */
+  blueprint_binding?: BlueprintBinding | null;
+  /** Deployment spec (`ferry/deploy-v1`) the server derives the blueprint deployment from. */
+  deploy_spec?: string | null;
 }
+export interface BlueprintBinding { driver: string; manager?: string; roles: Record<string, { hostId: string; address: string }[]> }
+/** Once any host runs a revision, the server freezes the topology (`blueprint.topologyChangeRequiresPlan`). */
+export const deploymentDeployed = (app: Pick<Deployment, "current_revision" | "current_targets">) =>
+  (!!app.current_revision && app.current_revision !== "0") || !!app.current_targets?.length;
 export interface Revision {
   id: string; deployment_id: string; number: number; action: string; state: string;
   deployment_name?: string; triggered_by?: string; triggered_by_name?: string; created_at?: number;

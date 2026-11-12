@@ -65,3 +65,23 @@ it("historical rendering stays fixed while live application polling restores act
   expect(calls).toHaveLength(count);
   expect(host.textContent).toContain("Linux host");
 });
+
+it("blueprint deployments show topology and the spec editor; others keep the existing page", async () => {
+  let row: Record<string, unknown> = { id: "1", name: "nats", state: "idle", mode: "docker", target_kind: "blueprint", target_ref: "0", version: 2, current_revision: "0", manifest: "",
+    blueprint_binding: { driver: "docker", roles: { nats: [{ hostId: "5", address: "10.0.0.5" }] } }, deploy_spec: "apiVersion: ferry/deploy-v1\n" };
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    const body = url.includes("application-health") ? { placement: [] } : url.includes("/nodes") ? { items: [{ id: "5", name: "host-e" }], total: 1, page: 1, page_size: 200 } : row;
+    return { ok: true, json: async () => body };
+  }));
+  const permissions = new Set(["deployments.update", "deployments.read", "alerts.read", "hosts.read"]);
+  await act(async () => root.render(<DeploymentDetail workspace="ops" deploymentId="1" permissions={permissions} />));
+  for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+  expect(host.querySelector('[data-topology-instance="nats-0"]')?.textContent).toContain("host-e");
+  expect([...host.querySelectorAll("button")].some(b => b.textContent === "编辑部署规格")).toBe(true);
+  await act(async () => root.unmount()); root = createRoot(host);
+  row = { id: "1", name: "web", state: "idle", mode: "native", target_kind: "host", target_ref: "2", version: 1, current_revision: "0", deploy_spec: null };
+  await act(async () => root.render(<DeploymentDetail workspace="ops" deploymentId="1" permissions={permissions} />));
+  for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+  expect(host.querySelector("[data-topology-role]")).toBeNull();
+  expect([...host.querySelectorAll("button")].some(b => b.textContent === "编辑部署规格")).toBe(false);
+});

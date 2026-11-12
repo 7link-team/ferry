@@ -9,6 +9,8 @@ import type { Navigation } from "../../shared/routing/types";
 import { Button } from "../../shared/ui/button";
 import { Badge } from "../../shared/ui/badge";
 import { deploymentActive,deploymentState,type Deployment,type Preview,type Revision } from "./deployment";
+import { BlueprintSpecEdit } from "./BlueprintSpecEdit";
+import { BlueprintTopology } from "./BlueprintTopology";
 
 const CodeEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 
@@ -101,6 +103,8 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
     </div>
     <p className="text-sm text-muted-foreground">{executionText("deployment.applyHelp")}</p>
     {error && <p role="alert" className="text-destructive">{error}</p>}
+    {!revisionId && <BlueprintSpecEdit workspace={workspace} deployment={app} permissions={permissions} navigation={navigation} disabled={blocked} onSaved={() => setReload((n) => n + 1)} />}
+    {!revisionId && app.target_kind === "blueprint" && <BlueprintTopology workspace={workspace} deployment={app} permissions={permissions} />}
     {app.state === "needs-review" && <section className="space-y-3 border-l-2 border-destructive pl-4">
       <h3 className="font-semibold">{executionText("deployment.reviewRequired")}</h3><p>{executionText("deployment.reviewHelp")}</p>
       {permissions.has("deployments.apply") && <><AutoField label={executionText("deployment.reviewNote")}>

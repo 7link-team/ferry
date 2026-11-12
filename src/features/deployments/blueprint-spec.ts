@@ -191,3 +191,14 @@ export function readBlueprint(content: string): BlueprintSummary | undefined {
   const metadata = isRow(value.metadata) ? value.metadata : {};
   return { name: typeof metadata.name === "string" ? metadata.name : "", roles, drivers };
 }
+
+const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+  : isRow(value) ? Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined).map(key => [key, canonical(value[key])])) : value;
+
+/** Everything but `values` and `template.version`, as the server's `same_topology` compares
+ * it: what decides where instances run. Manual placement compares by host (addresses are derived). */
+export function topologyKey(spec: DeploySpec): string {
+  const { values: _values, template, placement, ...rest } = spec;
+  const hosts = placement && Object.fromEntries(Object.entries(placement).map(([role, list]) => [role, list.map(item => item.hostId)]));
+  return JSON.stringify(canonical({ ...rest, template: { id: template.id }, placement: hosts }));
+}
