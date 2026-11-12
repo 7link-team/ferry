@@ -70,13 +70,14 @@ pub fn settings(spec: Option<&DeploySpec>) -> FailoverSpec {
 }
 
 /// `seen_at` (ms) is written by runner heartbeats or successful SSH monitor probes.
+#[derive(Clone, Debug)]
 pub struct HostFacts {
     pub runner: bool,
     pub seen_at: i64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// TCP check of the host's SSH address through a healthy peer of the same deployment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PeerCheck {
     Reachable(Id),
     Unreachable(Id),
@@ -85,6 +86,7 @@ pub enum PeerCheck {
 }
 
 /// Second-opinion probes, gathered only once the host is stale.
+#[derive(Clone, Debug)]
 pub struct Evidence {
     pub server_ok: bool,
     pub peer: Option<PeerCheck>,
@@ -406,5 +408,120 @@ mod tests {
                 "{peer:?}"
             );
         }
+    }
+
+    #[test]
+    fn runner_ignores_peer_evidence() {
+        for peer in [
+            PeerCheck::Unreachable(Id::from(3)),
+            PeerCheck::Reachable(Id::from(3)),
+        ] {
+            let e = ev(false, Some(peer));
+            assert_eq!(
+                judge(&runner(WINDOW + 1), NOW, AFTER, Some(&e)),
+                Verdict::Suspected,
+                "{peer:?}"
+            );
+            assert_eq!(
+                judge(&runner(2 * WINDOW + 1), NOW, AFTER, Some(&e)),
+                Verdict::Down {
+                    single_source: true
+                },
+                "{peer:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn future_seen_at_is_healthy() {
+        let failing = ev(false, Some(PeerCheck::Unreachable(Id::from(3))));
+        let future = [
+            ssh(-1),
+            ssh(-10 * WINDOW),
+            HostFacts {
+                runner: false,
+                seen_at: i64::MAX,
+            },
+        ];
+        for facts in future {
+            assert!(!is_stale(&facts, NOW, AFTER), "{facts:?}");
+            assert_eq!(
+                judge(&facts, NOW, AFTER, None),
+                Verdict::Healthy,
+                "{facts:?}"
+            );
+            assert_eq!(
+                judge(&facts, NOW, AFTER, Some(&failing)),
+                Verdict::Healthy,
+                "{facts:?}"
+            );
+        }
+        // The opposite extreme must not overflow: it is simply very stale.
+        let ancient = HostFacts {
+            runner: true,
+            seen_at: i64::MIN,
+        };
+        assert!(is_stale(&ancient, NOW, AFTER));
+        assert_eq!(
+            judge(&ancient, NOW, AFTER, Some(&ev(false, None))),
+            Verdict::Down {
+                single_source: true
+            }
+        );
+    }
+
+    #[test]
+    fn fresh_host_ignores_failing_evidence() {
+        let e = ev(false, Some(PeerCheck::Unreachable(Id::from(3))));
+        for facts in [ssh(WINDOW), runner(WINDOW), ssh(0)] {
+            assert_eq!(
+                judge(&facts, NOW, AFTER, Some(&e)),
+                Verdict::Healthy,
+                "{facts:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn respond_matches_controller_table() {
+        // Oracle written straight from the plan's driver/mode table.
+        fn oracle(mode: FailoverMode, driver: &str, class: FailoverClass) -> Response {
+            let ferry_scheduled = driver == "native" || driver == "docker";
+            if mode == FailoverMode::Off {
+                Response::Ignore
+            } else if driver == "stack" && class == FailoverClass::Stateless {
+                Response::Ignore
+            } else if !ferry_scheduled {
+                Response::AlertOnly(AlertReason::DriverUnsupported)
+            } else if mode == FailoverMode::Alert {
+                Response::AlertOnly(AlertReason::ModeAlert)
+            } else if class == FailoverClass::Manual {
+                Response::AlertOnly(AlertReason::NeedsBackup)
+            } else {
+                Response::Replace(class)
+            }
+        }
+        let roles = [
+            role("stateless", None),
+            role("stateless", Some("supported")),
+            role("stable", Some("supported")),
+            role("stable", Some("unsupported")),
+            role("stable", None),
+        ];
+        let mut seen = std::collections::BTreeSet::new();
+        for mode in [FailoverMode::Off, FailoverMode::Alert, FailoverMode::Auto] {
+            for driver in ["native", "docker", "stack", "compose", "bogus"] {
+                for role in &roles {
+                    let class = class_of(role);
+                    seen.insert(format!("{class:?}"));
+                    assert_eq!(
+                        respond(mode, driver, role),
+                        oracle(mode, driver, class),
+                        "{mode:?} {driver} {class:?}"
+                    );
+                }
+            }
+        }
+        assert_eq!(seen.len(), 3, "every class is covered");
     }
 }
