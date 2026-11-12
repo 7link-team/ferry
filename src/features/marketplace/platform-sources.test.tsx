@@ -37,7 +37,7 @@ describe("workspace market list", () => {
   const entry = (patch: Partial<MarketEntry> = {}): MarketEntry => ({
     id: "9", source_id: "1", source_name: "Official", trust: "official", entry_key: "web", name: "Website",
     description: "", content: "{}", parameters: "[]", version: 1, package_version: "1.0.0", kind: "app",
-    compatible: true, incompatible_reason: null, readme: "", files: [], ...patch,
+    compatible: true, incompatible_reason: null, readme: "", files: [], verification: "none", verified_drivers: [], ...patch,
   });
   const list = () => marketplaceLists({ workspace: "w", permissions: new Set(["marketplace.install"]), navigate: vi.fn() } as never).marketplace!;
   it("disables import for incompatible versions with the reason", () => {
@@ -49,8 +49,19 @@ describe("workspace market list", () => {
   });
   it("shows a dash instead of the synthetic 0.0.0 for legacy index entries", () => {
     const column = list().columns.find(c => c.key === "package_version")!;
-    expect(column.render!(entry({ package_version: "0.0.0" }))).toBe("—");
-    expect(column.render!(entry({ package_version: "1.2.0" }))).toBe("1.2.0");
+    const legacy = JSON.stringify(column.render!(entry({ package_version: "0.0.0" })));
+    expect(legacy).toContain('"—"');
+    expect(legacy).not.toContain("0.0.0");
+    expect(JSON.stringify(column.render!(entry({ package_version: "1.2.0" })))).toContain('"1.2.0"');
+  });
+  it("marks official verified versions and community declarations next to the version", () => {
+    const column = list().columns.find(c => c.key === "package_version")!;
+    const text = (row: MarketEntry) => JSON.stringify(column.render!(row));
+    const verified = text(entry({ verification: "verified", verified_drivers: ["docker", "compose"] }));
+    expect(verified).toContain("Verified");
+    expect(verified).toContain("docker, compose");
+    expect(text(entry({ trust: "community", verification: "declared", verified_drivers: ["docker"] }))).toContain("Author declared");
+    expect(text(entry())).not.toContain("Verified");
   });
   it("labels each source kind and shows the version", () => {
     const columns = list().columns;

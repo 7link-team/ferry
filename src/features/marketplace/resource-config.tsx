@@ -43,6 +43,9 @@ export interface MarketEntry {
   kind: string;
   compatible: boolean;
   incompatible_reason: string | null;
+  /** Spec §15.2: "verified" only for official sources; other sources' records are declarations. */
+  verification: "verified" | "declared" | "none";
+  verified_drivers: string[];
   readme: string;
   files: string[];
 }
@@ -233,7 +236,21 @@ export function marketplaceLists({
           key: "package_version",
           label: "版本",
           labelKey: "resource-domain:market.packageVersion",
-          render: (r) => (r.package_version === "0.0.0" ? "—" : r.package_version),
+          render: (r) => (
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+              <span>{r.package_version === "0.0.0" ? "—" : r.package_version}</span>
+              {r.verification === "verified" && (
+                <span className="rounded border border-emerald-600/40 px-1.5 py-0.5 text-xs text-emerald-700 dark:text-emerald-400" title={commonText("resource-domain:market.verifiedHelp")}>
+                  {commonText("resource-domain:market.verified")} · {r.verified_drivers.join(", ")}
+                </span>
+              )}
+              {r.verification === "declared" && (
+                <span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground" title={commonText("resource-domain:market.declaredHelp")}>
+                  {commonText("resource-domain:market.declared")} · {r.verified_drivers.join(", ")}
+                </span>
+              )}
+            </span>
+          ),
         },
         {
           key: "entry_key",

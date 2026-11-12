@@ -433,3 +433,34 @@ async fn list_name_follows_request_locale() {
     let zh = with_locale(Locale::ZhCn, items(&s, 1)).await;
     assert_eq!(zh[0]["name"], "网站");
 }
+
+fn verified_bundle(key: &str) -> String {
+    let mut doc: Value = serde_json::from_str(&bundle(key, false, "app")).unwrap();
+    doc["packages"][0]["versions"][0]["verified"] = json!([
+        {"driver":"docker","ferry":"0.3.0","evidence":"https://example.invalid/run/1"},
+        {"driver":"compose","ferry":"0.3.0","evidence":"https://example.invalid/run/1"}
+    ]);
+    doc.to_string()
+}
+
+#[tokio::test]
+async fn verification_shown_only_for_official_sources() {
+    let (_dir, s) = crate::agents::tests::setup().await;
+    source(&s, 0, "official", true, &verified_bundle("official-app")).await;
+    source(&s, 0, "community", true, &verified_bundle("community-app")).await;
+    source(&s, 1, "workspace", true, &bundle("plain-app", false, "app")).await;
+    let rows = items(&s, 1).await;
+    let row = |key: &str| rows.iter().find(|r| r["entry_key"] == key).unwrap().clone();
+    assert_eq!(row("official-app")["verification"], "verified");
+    assert_eq!(
+        row("official-app")["verified_drivers"],
+        json!(["docker", "compose"])
+    );
+    assert_eq!(row("community-app")["verification"], "declared");
+    assert_eq!(
+        row("community-app")["verified_drivers"],
+        json!(["docker", "compose"])
+    );
+    assert_eq!(row("plain-app")["verification"], "none");
+    assert_eq!(row("plain-app")["verified_drivers"], json!([]));
+}

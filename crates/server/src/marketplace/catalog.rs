@@ -105,6 +105,21 @@ fn entry_json(
             &crate::i18n::Message::new(key),
         )
     });
+    // Spec §15.2: only official sources may claim "verified"; other sources' records are the author's declaration.
+    let verified_drivers: Vec<Value> = meta["verified"]
+        .as_array()
+        .map(|records| {
+            records
+                .iter()
+                .filter_map(|r| r.get("driver").cloned())
+                .collect()
+        })
+        .unwrap_or_default();
+    let verification = match (verified_drivers.is_empty(), trust.as_str()) {
+        (true, _) => "none",
+        (false, "official") => "verified",
+        (false, _) => "declared",
+    };
     if !detail {
         if let Some(object) = meta.as_object_mut() {
             object.remove("icon");
@@ -115,6 +130,7 @@ fn entry_json(
         "entry_key": row.entry_key, "name": name, "description": description, "version": row.version,
         "updated_at": row.updated_at, "package_version": row.package_version, "kind": row.kind,
         "compatible": row.compatible != 0, "incompatible_reason": reason, "meta": meta, "files": file_names,
+        "verification": verification, "verified_drivers": verified_drivers,
     });
     if detail {
         value["content"] = json!(row.content);

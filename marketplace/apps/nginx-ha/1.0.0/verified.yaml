@@ -1,0 +1,7 @@
+# Real-driver acceptance (scripts/test-deployments.py, FERRY_TEST_BLUEPRINT=1) on GitHub Actions Linux runners.
+- driver: docker
+  ferry: 0.3.0-alpha.18
+  evidence: https://github.com/7link-team/ferry/actions/runs/43121357197
+- driver: compose
+  ferry: 0.3.0-alpha.18
+  evidence: https://github.com/7link-team/ferry/actions/runs/43121357197
