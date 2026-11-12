@@ -261,7 +261,7 @@
   "blueprint.hostOsUnsupported": "인스턴스 {instance}: 호스트 OS가 {os}입니다. Linux 호스트만 지원됩니다.",
   "blueprint.bindingAddressInvalid": "인스턴스 {instance}: 광고 주소는 루프백이 아닌 IP 주소 또는 호스트 이름(최대 253자)이어야 합니다. 비어 있음, 0.0.0.0, ::, 127.0.0.0/8, ::1, localhost는 허용되지 않습니다.",
   "blueprint.bindingDistinctHosts": "역할 {role}: 인스턴스는 서로 다른 호스트에서 실행되어야 합니다.",
-  "blueprint.swarmManagerRequired": "매니저 호스트는 활성 Docker Swarm 매니저여야 합니다(docker info의 Swarm.ControlAvailable이 true).",
+  "blueprint.swarmManagerRequired": "매니저 호스트 {host}은(는) 활성 Docker Swarm 매니저여야 합니다(docker info의 Swarm.ControlAvailable이 true).",
   "blueprint.swarmNodeUnavailable": "호스트 {host}은(는) 매니저의 Docker Swarm에서 사용 가능한 노드가 아닙니다. 해당 Swarm에 참여하고 Ready 및 Active 상태여야 합니다.",
   "blueprint.swarmNodesRequired": "stack 블루프린트는 바인딩된 모든 호스트를 매니저의 Docker Swarm 노드로 확인한 후에만 컴파일할 수 있습니다.",
   "blueprint.stableReplicasInvalid": "역할 {role}은(는) 안정 ID이므로 각 인스턴스가 하나의 서비스입니다. replicas는 1이거나 생략해야 합니다.",

@@ -261,7 +261,7 @@
   "blueprint.hostOsUnsupported": "Instance {instance}: the host runs {os}; only Linux hosts are supported.",
   "blueprint.bindingAddressInvalid": "Instance {instance}: the advertised address must be a non-loopback IP address or host name (at most 253 characters); empty, 0.0.0.0, ::, 127.0.0.0/8, ::1 and localhost are rejected.",
   "blueprint.bindingDistinctHosts": "Role {role}: instances must run on different hosts.",
-  "blueprint.swarmManagerRequired": "The manager host must be an active Docker Swarm manager (docker info reports Swarm.ControlAvailable=true).",
+  "blueprint.swarmManagerRequired": "Manager host {host} must be an active Docker Swarm manager (docker info reports Swarm.ControlAvailable=true).",
   "blueprint.swarmNodeUnavailable": "Host {host} is not an available node of the manager's Docker Swarm; it must have joined that Swarm and be Ready and Active.",
   "blueprint.swarmNodesRequired": "Stack blueprints compile only after every bound host has been resolved to a node of the manager's Docker Swarm.",
   "blueprint.stableReplicasInvalid": "Role {role} has a stable identity, so each instance is one service: replicas must be 1 or omitted.",

@@ -164,9 +164,10 @@ struct Probe {
     nodes: Vec<swarm::Node>,
     node: String,
 }
-/// Asks `host` for the Swarm's node list (`manager`) or its own node ID. A host that cannot
-/// be reached reports the same blueprint error as one outside the Swarm, naming the host;
-/// internal (database) errors pass through.
+/// Asks `host` for the Swarm's node list (`manager`) or its own node ID. The probe's own
+/// Swarm findings (not a manager, not joined, unreadable node list) name the host; errors
+/// reaching it (unreachable, credentials, offline runner, missing host) pass through
+/// unchanged with their own messages.
 async fn probe(s: &AppState, workspace: Id, host: Id, name: &str, manager: bool) -> Result<Probe> {
     let result: Result<Probe> = async {
         let channel = remote::open(s, &workspace, &host).await?;
@@ -183,23 +184,11 @@ async fn probe(s: &AppState, workspace: Id, host: Id, name: &str, manager: bool)
         })
     }
     .await;
-    result.map_err(|e| {
-        if e.0 == axum::http::StatusCode::INTERNAL_SERVER_ERROR {
-            return e;
+    result.map_err(|e| match e.2.as_ref() {
+        Some(m) if m.key.starts_with("blueprint.") => {
+            ApiError::localized(e.0, m.clone().with("host", name))
         }
-        // Swarm errors from the probe itself only see the channel; name the host in each.
-        if let Some(m) = e.2.as_ref().filter(|m| m.key.starts_with("blueprint.")) {
-            return ApiError::localized(e.0, m.clone().with("host", name));
-        }
-        let key = if manager {
-            "blueprint.swarmManagerRequired"
-        } else {
-            "blueprint.swarmNodeUnavailable"
-        };
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new(key).with("host", name),
-        )
+        _ => e,
     })
 }
 fn blueprint_targets(app: &apps::Model, plans: Vec<HostPlan>) -> Vec<HostTarget> {

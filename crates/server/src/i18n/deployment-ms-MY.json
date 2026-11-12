@@ -261,7 +261,7 @@
   "blueprint.hostOsUnsupported": "Instans {instance}: hos menjalankan {os}; hanya hos Linux disokong.",
   "blueprint.bindingAddressInvalid": "Instans {instance}: alamat iklan mesti alamat IP atau nama hos bukan loopback (maksimum 253 aksara); kosong, 0.0.0.0, ::, 127.0.0.0/8, ::1 dan localhost ditolak.",
   "blueprint.bindingDistinctHosts": "Peranan {role}: instans mesti berjalan pada hos yang berbeza.",
-  "blueprint.swarmManagerRequired": "Hos pengurus mestilah pengurus Docker Swarm yang aktif (docker info melaporkan Swarm.ControlAvailable=true).",
+  "blueprint.swarmManagerRequired": "Hos pengurus {host} mestilah pengurus Docker Swarm yang aktif (docker info melaporkan Swarm.ControlAvailable=true).",
   "blueprint.swarmNodeUnavailable": "Hos {host} bukan nod tersedia dalam Docker Swarm pengurus; ia mesti menyertai Swarm tersebut dan berstatus Ready serta Active.",
   "blueprint.swarmNodesRequired": "Pelan tindakan stack hanya boleh dikompil selepas setiap hos terikat dipadankan dengan nod dalam Docker Swarm pengurus.",
   "blueprint.stableReplicasInvalid": "Peranan {role} mempunyai identiti stabil, jadi setiap instans ialah satu perkhidmatan: replicas mesti 1 atau ditinggalkan.",

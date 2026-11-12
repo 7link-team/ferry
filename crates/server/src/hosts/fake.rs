@@ -50,7 +50,15 @@ pub(crate) fn open(host: &Host) -> Result<Box<dyn HostChannel>> {
         .unwrap()
         .get(&i64::from(host.id))
         .cloned()
-        .ok_or_else(|| ApiError::bad("fake host not registered"))?;
+        // An unregistered host is unreachable, as a real SSH host that refuses connections.
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_GATEWAY,
+                crate::i18n::Message::new("ssh.unreachable")
+                    .with("address", &host.address)
+                    .with("detail", "fake host not registered"),
+            )
+        })?;
     Ok(Box::new(Channel(fake)))
 }
 

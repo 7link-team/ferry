@@ -1022,16 +1022,20 @@ async fn stack_blueprint_rejects_host_outside_swarm_at_preview() {
     assert_eq!(message.key, "blueprint.swarmNodeUnavailable");
     assert_eq!(message.params["host"], format!("Host {}", base + 3));
     assert_eq!(row(&s, &id).await.preview_artifact, "");
-    // An unreachable host is reported the same way, by name.
+    // An unreachable host keeps its own connection error rather than a Swarm one.
     crate::hosts::fake::unregister(base + 3);
-    let message = preview_of(&s, &id, None).await.unwrap_err().2.unwrap();
-    assert_eq!(message.key, "blueprint.swarmNodeUnavailable");
-    assert_eq!(message.params["host"], format!("Host {}", base + 3));
-    // A manager host that is not a Swarm manager.
+    let e = preview_of(&s, &id, None).await.unwrap_err();
+    assert_eq!(e.0, axum::http::StatusCode::BAD_GATEWAY);
+    assert_eq!(e.2.unwrap().key, "ssh.unreachable");
+    // A manager host that is not a Swarm manager, named in every locale's message.
     crate::hosts::fake::register(base);
     let message = preview_of(&s, &id, None).await.unwrap_err().2.unwrap();
     assert_eq!(message.key, "blueprint.swarmManagerRequired");
     assert_eq!(message.params["host"], format!("Host {base}"));
+    for locale in crate::i18n::Locale::ALL {
+        let text = crate::i18n::render(locale, &message);
+        assert!(text.contains(&format!("Host {base}")), "{locale:?}: {text}");
+    }
 }
 
 #[tokio::test]
@@ -1070,7 +1074,11 @@ async fn stack_blueprint_create_offline_then_preview_validates_nodes() {
     // Edits stay offline too.
     update_body(&s, &id, stack_body(base)).await.unwrap();
 
-    // Preview needs the Swarm.
+    // Preview needs the hosts: an offline manager reports why it cannot be reached.
+    let message = preview_of(&s, &id, None).await.unwrap_err().2.unwrap();
+    assert_eq!(message.key, "ssh.unreachable");
+    // A reachable manager outside any Swarm is a Swarm error naming the host.
+    crate::hosts::fake::register(base);
     let message = preview_of(&s, &id, None).await.unwrap_err().2.unwrap();
     assert_eq!(message.key, "blueprint.swarmManagerRequired");
     assert_eq!(message.params["host"], format!("Host {base}"));
