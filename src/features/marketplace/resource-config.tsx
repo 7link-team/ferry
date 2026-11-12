@@ -10,6 +10,7 @@ import {
 } from "../../shared/resources/config";
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import type { Navigation } from "../../shared/routing/types";
+import { isBlueprint } from "../deployments/blueprint-spec";
 import { marketProviders, trustLabel } from "./labels";
 
 export interface MarketSource {
@@ -48,6 +49,8 @@ export interface MarketEntry {
   verified_drivers: string[];
   readme: string;
   files: string[];
+  /** Package metadata; list rows carry it instead of `content`. */
+  meta?: { topology?: string };
 }
 
 export { marketProviders } from "./labels";
@@ -72,6 +75,35 @@ export const marketInstall = (
     navigate(
       { group: "deploy", item: "app-templates", id: created.id, mode: "view" },
       {},
+    );
+  },
+});
+
+/** Detail rows carry the content; list rows only the package's declared topology. */
+const blueprintEntry = (r: MarketEntry) => r.content ? isBlueprint(r.content) : r.meta?.topology === "cluster";
+
+/** Cluster templates: import into this workspace, then continue in the deployment wizard. */
+export const marketDeploy = (
+  workspace: string,
+  navigate: Navigation["navigate"],
+) => ({
+  label: "部署",
+  labelKey: "resource-domain:wizard.deploy",
+  permission: "marketplace.install",
+  when: blueprintEntry,
+  disabled: (r: MarketEntry) => !r.compatible,
+  disabledReason: (r: MarketEntry) => r.incompatible_reason ?? "",
+  action: async (r: MarketEntry) => {
+    const created = await runItemAction<{ id: string; version: number }>(
+      workspace,
+      "marketplace",
+      r.id,
+      "install",
+      { version: r.version },
+    );
+    navigate(
+      { group: "deploy", item: "apps", mode: "new" },
+      { wizard: "blueprint", template: created.id, version: String(created.version) },
     );
   },
 });
@@ -264,6 +296,7 @@ export function marketplaceLists({
           labelKey: "common-domain:common.view",
           to: (r) => ({ id: r.id, mode: "view" }),
         },
+        marketDeploy(workspace, navigate),
         marketInstall(workspace, navigate),
       ],
       toolbar: { create: false, import: false, export: false },
@@ -369,7 +402,7 @@ export function marketplaceForms({
       heading: (r) => r.name,
       blank: {},
       readOnly: () => true,
-      viewActions: [marketInstall(workspace, navigate)],
+      viewActions: [marketDeploy(workspace, navigate), marketInstall(workspace, navigate)],
       sections: [
         {
           fields: [

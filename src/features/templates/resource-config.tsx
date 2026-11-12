@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { stringify } from "yaml";
 import { ManifestEditor } from "../deployments/ManifestEditor";
+import { isBlueprint } from "../deployments/blueprint-spec";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { TemplateParametersEditor, templateParameterFields, type TemplateParameter } from "./TemplateParametersEditor";
 import { api } from "../../shared/api/api";
@@ -110,6 +111,15 @@ export const templateForm = (resource: string, application: boolean, workspace =
     resource,
     width: "full",
     ...(application ? { sectionNavigation: "scroll" as const } : {}),
+    // A cluster blueprint is deployed through the wizard at this exact template version.
+    ...(application ? { viewActions: [{
+      label: "部署",
+      labelKey: "resource-domain:wizard.deploy",
+      permission: "deployments.create",
+      when: (r: Template) => isBlueprint(r.content ?? ""),
+      to: () => ({ group: "deploy", item: "apps", mode: "new" as const }),
+      query: (r: Template) => ({ wizard: "blueprint", template: r.id, version: String(r.version) }),
+    }] } : {}),
     heading: (r) => r.name,
     blank: {
       name: "",
