@@ -1,7 +1,7 @@
 //! Ordered multi-host snapshots (host groups and cluster blueprints) and per-host outcomes;
 //! mode execution is shared.
 use super::*;
-use crate::blueprint::{binding, compile::HostPlan, template::Context};
+use crate::blueprint::{binding, compile::HostPlan, swarm, template::Context};
 use crate::entities::{
     deployment_revision_targets as targets, deployment_target_states as current, host_groups,
 };
@@ -55,50 +55,205 @@ fn host_app(app: &apps::Model, host: Id, manifest: String) -> apps::Model {
 }
 /// Compiles a blueprint deployment without consulting hosts: the binding was validated when
 /// it was stored, so readers that only need the compiled services never fail on a host change.
+/// A stack is compiled unresolved (stand-in Swarm nodes), which is enough for readers.
 pub(crate) fn compiled(app: &apps::Model) -> Result<Vec<HostPlan>> {
     let binding = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
-    crate::blueprint::compile::compile(&app.manifest, &binding, None)
+    crate::blueprint::compile::compile_unresolved(&app.manifest, &binding)
 }
-/// Validates a binding against this workspace's current hosts, then compiles every host's plan.
-pub(super) async fn compile(
+/// Validates a binding against this workspace's current hosts and returns them by id.
+async fn known_hosts(
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+    bp: &crate::blueprint::model::Blueprint,
+    b: &binding::Binding,
+) -> Result<BTreeMap<Id, hosts::Model>> {
+    let rows: BTreeMap<Id, hosts::Model> = hosts::Entity::find()
+        .filter(hosts::Column::WorkspaceId.eq(workspace))
+        .all(conn)
+        .await?
+        .into_iter()
+        .map(|h| (Id::from(h.id), h))
+        .collect();
+    let known = rows
+        .iter()
+        .map(|(id, h)| {
+            (
+                *id,
+                binding::HostInfo {
+                    id: *id,
+                    os: h.os.clone(),
+                },
+            )
+        })
+        .collect();
+    binding::validate(bp, b, &known)?;
+    Ok(rows)
+}
+/// Validates a binding against this workspace's current hosts, then compiles every host's
+/// plan without reaching any host: a stack is compiled unresolved, its Swarm node checks
+/// deferred to [`targets`] (preview and apply), since hosts may be offline when a deployment
+/// is created or edited.
+pub(super) async fn compile_offline(
     conn: &impl ConnectionTrait,
     workspace: Id,
     manifest: &str,
     b: &binding::Binding,
 ) -> Result<Vec<HostPlan>> {
     let bp = crate::blueprint::model::parse(manifest)?;
-    let known = hosts::Entity::find()
-        .filter(hosts::Column::WorkspaceId.eq(workspace))
-        .all(conn)
+    known_hosts(conn, workspace, &bp, b).await?;
+    crate::blueprint::compile::compile_unresolved(manifest, b)
+}
+/// A stack blueprint's Swarm node per instance, looked up through its hosts for one
+/// manifest and binding. Looked up before any transaction opens: reaching hosts can take
+/// long, and opening a channel reads the database.
+pub(super) struct SwarmNodes {
+    manifest: String,
+    binding: Option<String>,
+    nodes: BTreeMap<String, String>,
+}
+/// Looks up a stack blueprint deployment's Swarm nodes: the manager lists the Swarm's nodes
+/// and each distinct bound host reports its own node ID, each host asked once. `None` for
+/// any other deployment.
+pub(super) async fn swarm_nodes(
+    s: &AppState,
+    workspace: Id,
+    app: &apps::Model,
+) -> Result<Option<SwarmNodes>> {
+    if app.target_kind != "blueprint" || app.mode != "stack" {
+        return Ok(None);
+    }
+    let b = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
+    let bp = crate::blueprint::model::parse(&app.manifest)?;
+    let rows = known_hosts(&s.db, workspace, &bp, &b).await?;
+    let names: BTreeMap<Id, String> = rows.iter().map(|(id, h)| (*id, h.name.clone())).collect();
+    // `validate` checked that a stack names its manager and every host exists here.
+    let Some(manager) = b.manager.filter(|id| names.contains_key(id)) else {
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("blueprint.bindingInvalid"),
+        ));
+    };
+    let nodes = probe(s, workspace, manager, &names[&manager], true)
         .await?
-        .into_iter()
-        .map(|h| {
-            let id = Id::from(h.id);
-            (id, binding::HostInfo { id, os: h.os })
+        .nodes;
+    let mut host_nodes = BTreeMap::new();
+    for host in b.roles.values().flatten().map(|inst| inst.host_id) {
+        if let std::collections::btree_map::Entry::Vacant(entry) = host_nodes.entry(host) {
+            entry.insert(probe(s, workspace, host, &names[&host], false).await?.node);
+        }
+    }
+    Ok(Some(SwarmNodes {
+        manifest: app.manifest.clone(),
+        binding: app.blueprint_binding.clone(),
+        nodes: swarm::assign(&bp, &b, &nodes, &host_nodes, &names)?,
+    }))
+}
+/// What one Swarm probe found: the manager's node list, or one host's own node ID.
+#[derive(Default)]
+struct Probe {
+    nodes: Vec<swarm::Node>,
+    node: String,
+}
+/// Asks `host` for the Swarm's node list (`manager`) or its own node ID. A host that cannot
+/// be reached reports the same blueprint error as one outside the Swarm, naming the host;
+/// internal (database) errors pass through.
+async fn probe(s: &AppState, workspace: Id, host: Id, name: &str, manager: bool) -> Result<Probe> {
+    let result: Result<Probe> = async {
+        let channel = remote::open(s, &workspace, &host).await?;
+        Ok(if manager {
+            Probe {
+                nodes: swarm::manager_nodes(channel.as_ref()).await?,
+                ..Probe::default()
+            }
+        } else {
+            Probe {
+                node: swarm::node_id(channel.as_ref()).await?,
+                ..Probe::default()
+            }
         })
-        .collect();
-    binding::validate(&bp, b, &known)?;
-    crate::blueprint::compile::compile(manifest, b, None)
+    }
+    .await;
+    result.map_err(|e| {
+        if e.0 == axum::http::StatusCode::INTERNAL_SERVER_ERROR {
+            return e;
+        }
+        if e.2
+            .as_ref()
+            .is_some_and(|m| m.key.starts_with("blueprint."))
+        {
+            return swarm::on_host(e, name);
+        }
+        let key = if manager {
+            "blueprint.swarmManagerRequired"
+        } else {
+            "blueprint.swarmNodeUnavailable"
+        };
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new(key).with("host", name),
+        )
+    })
+}
+fn blueprint_targets(app: &apps::Model, plans: Vec<HostPlan>) -> Vec<HostTarget> {
+    plans
+        .into_iter()
+        .map(|plan| HostTarget {
+            host_id: plan.host_id,
+            app: host_app(app, plan.host_id, plan.manifest),
+            contexts: Some(plan.contexts),
+        })
+        .collect()
 }
 /// Every host a new revision of `app` deploys to, in target order: host-group members share
-/// the deployment manifest; a blueprint compiles one application per bound host.
+/// the deployment manifest; a blueprint compiles one application per bound host, a stack one
+/// on its manager with stable instances pinned to the `nodes` [`swarm_nodes`] looked up for
+/// this very manifest and binding (otherwise the record changed since: preview again).
 pub(super) async fn targets(
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+    app: &apps::Model,
+    nodes: Option<&SwarmNodes>,
+) -> Result<Vec<HostTarget>> {
+    if app.target_kind == "blueprint" {
+        let b = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
+        let bp = crate::blueprint::model::parse(&app.manifest)?;
+        known_hosts(conn, workspace, &bp, &b).await?;
+        let nodes = match nodes {
+            Some(n) if n.manifest == app.manifest && n.binding == app.blueprint_binding => {
+                Some(&n.nodes)
+            }
+            Some(_) => {
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::CONFLICT,
+                    crate::i18n::Message::new("deployment.error.030"),
+                ));
+            }
+            None => None,
+        };
+        let plans = crate::blueprint::compile::compile(&app.manifest, &b, nodes)?;
+        return Ok(blueprint_targets(app, plans));
+    }
+    member_targets(conn, workspace, app).await
+}
+/// [`targets`] without reaching any host, for checks made while a deployment is stored: a
+/// stack's single target is compiled unresolved (see [`compile_offline`]).
+pub(super) async fn offline_targets(
     conn: &impl ConnectionTrait,
     workspace: Id,
     app: &apps::Model,
 ) -> Result<Vec<HostTarget>> {
     if app.target_kind == "blueprint" {
         let b = binding::parse(app.blueprint_binding.as_deref().unwrap_or_default())?;
-        return Ok(compile(conn, workspace, &app.manifest, &b)
-            .await?
-            .into_iter()
-            .map(|plan| HostTarget {
-                host_id: plan.host_id,
-                app: host_app(app, plan.host_id, plan.manifest),
-                contexts: Some(plan.contexts),
-            })
-            .collect());
+        let plans = compile_offline(conn, workspace, &app.manifest, &b).await?;
+        return Ok(blueprint_targets(app, plans));
     }
+    member_targets(conn, workspace, app).await
+}
+async fn member_targets(
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+    app: &apps::Model,
+) -> Result<Vec<HostTarget>> {
     Ok(members(conn, workspace, app.target_ref)
         .await?
         .into_iter()
@@ -187,7 +342,8 @@ pub(super) async fn preview(
         let old = old_revision(&s.db, scope, app.id, &id).await?;
         (old.artifact, old.id)
     } else {
-        let hosts = targets(&s.db, scope.workspace_id, app).await?;
+        let nodes = swarm_nodes(s, scope.workspace_id, app).await?;
+        let hosts = targets(&s.db, scope.workspace_id, app, nodes.as_ref()).await?;
         if hosts.is_empty() {
             return Err(ApiError::localized(
                 axum::http::StatusCode::BAD_REQUEST,
@@ -228,7 +384,7 @@ pub(super) async fn preview(
             )
         })?;
         let tx = crate::variables::transaction(s, scope.workspace_id).await?;
-        let again = targets(&tx, scope.workspace_id, app).await?;
+        let again = targets(&tx, scope.workspace_id, app, nodes.as_ref()).await?;
         let mut changed = again.len() != hosts.len();
         for (target, (before, bound)) in again.iter().zip(hosts.iter().zip(&metadata)) {
             changed |= target.host_id != before.host_id
@@ -281,6 +437,7 @@ pub(super) async fn preview(
         json!({"desired":desired,"current":serde_json::to_string_pretty(&json!({"targets":existing})).unwrap(),"expected_hash":expected,"target_hashes":hashes,"preview_token":preview_token(&desired,&expected,app.version,source),"version":app.version,"changed":changed,"variables":artifact_bindings(&desired)?,"notice":crate::i18n::message("deployment.notice.group")}),
     ))
 }
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn enqueue(
     s: &AppState,
     conn: &impl ConnectionTrait,
@@ -289,10 +446,11 @@ pub(super) async fn enqueue(
     artifact: &str,
     body: &RunBody,
     source: i64,
+    nodes: Option<&SwarmNodes>,
 ) -> Result<()> {
     let plans = plans(artifact)?;
     if source == 0
-        && targets(conn, app.workspace_id.into(), app)
+        && targets(conn, app.workspace_id.into(), app, nodes)
             .await?
             .iter()
             .map(|t| t.host_id)

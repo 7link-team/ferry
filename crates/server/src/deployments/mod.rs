@@ -246,7 +246,7 @@ async fn check_blueprint(
         )
     })?;
     let name = b.name.trim().to_owned();
-    for plan in groups::compile(conn, scope.workspace_id, &manifest, &binding).await? {
+    for plan in groups::compile_offline(conn, scope.workspace_id, &manifest, &binding).await? {
         if manifest::parse_for(&plan.manifest, &b.mode)?
             .services
             .iter()
@@ -261,7 +261,7 @@ async fn check_blueprint(
 /// Every config template, variable and artifact each target host would deploy must resolve.
 async fn validate_bindings(conn: &impl sea_orm::ConnectionTrait, app: &apps::Model) -> Result<()> {
     if app.target_kind == "blueprint" {
-        for target in groups::targets(conn, app.workspace_id.into(), app).await? {
+        for target in groups::offline_targets(conn, app.workspace_id.into(), app).await? {
             bindings(
                 conn,
                 &target.app,
@@ -1354,6 +1354,13 @@ async fn trigger(
     } else {
         "deployments.apply"
     })?;
+    // A new stack blueprint revision pins instances to Swarm nodes looked up through its
+    // hosts, before the transaction opens; `targets` rejects them if the record changed since.
+    let nodes = if rollback || restart {
+        None
+    } else {
+        groups::swarm_nodes(s, scope.workspace_id, &scoped(&s.db, scope, id).await?).await?
+    };
     let tx = crate::variables::transaction(s, scope.workspace_id).await?;
     let r = scoped(&tx, scope, id).await?;
     if restart && r.state != "succeeded" {
@@ -1401,7 +1408,7 @@ async fn trigger(
         // Host-group members share one manifest, so one computation stands for all of them;
         // a blueprint binds each host's own compiled application.
         let hosts = if r.target_kind == "blueprint" {
-            groups::targets(&tx, scope.workspace_id, &r).await?
+            groups::targets(&tx, scope.workspace_id, &r, nodes.as_ref()).await?
         } else {
             vec![groups::HostTarget {
                 host_id: r.target_ref.into(),
@@ -1482,7 +1489,7 @@ async fn trigger(
     }
     let (id, now) = (s.next_id()?, db::now());
     if groups::is_multi(&r.target_kind) {
-        groups::enqueue(s, &tx, &r, id, &artifact, &b, source).await?;
+        groups::enqueue(s, &tx, &r, id, &artifact, &b, source, nodes.as_ref()).await?;
     } else {
         hosts::Entity::find_by_id(r.target_ref)
             .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))

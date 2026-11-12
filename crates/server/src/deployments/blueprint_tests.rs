@@ -897,3 +897,234 @@ async fn blueprint_execution_rejects_damaged_targets_before_running() {
             .is_empty()
     );
 }
+
+// ---------------------------------------------------------------- stack (Docker Swarm)
+
+/// Offsets of a Swarm's manager (`base`) and its three workers from a test's `base` host id;
+/// each host's Swarm node ID is `node-<host>`.
+const SWARM: [i64; 4] = [0, 1, 2, 3];
+
+fn stack_blueprint() -> String {
+    json!({
+        "apiVersion": "ferry/blueprint-v1",
+        "kind": "Blueprint",
+        "metadata": {"name": "nats"},
+        "roles": [{
+            "name": "nats",
+            "instances": {"min": 1, "max": 5, "default": 3},
+            "placement": {"distinctHosts": true},
+            "identity": "stable",
+            "ports": [{"name": "client", "container": 4222, "published": 4222},
+                      {"name": "cluster", "container": 6222, "published": 6222}],
+            "service": {"image": "nats:2",
+                        "files": [{"path": "/etc/nats.conf", "fromTemplate": "nats-conf"}]}
+        }],
+        "drivers": {"stack": {"supported": true}}
+    })
+    .to_string()
+}
+
+/// NATS on the three workers, managed by `base`.
+fn stack_body(base: i64) -> Value {
+    let mut binding = binding(&[base + 1, base + 2, base + 3]);
+    binding["driver"] = json!("stack");
+    binding["manager"] = json!(base.to_string());
+    json!({"name": "mq", "manifest": stack_blueprint(), "mode": "stack",
+           "target_kind": "blueprint", "target_ref": "0", "workdir": "/srv",
+           "blueprint_binding": binding})
+}
+
+fn node_line(host: i64) -> String {
+    json!({"ID": format!("node-{host}"), "Hostname": format!("h{host}"),
+           "Status": "Ready", "Availability": "Active"})
+    .to_string()
+}
+
+/// Canned `docker` answers: the manager lists every node; each host reports its own ID.
+fn join_swarm(base: i64) {
+    let list: Vec<String> = SWARM.iter().map(|i| node_line(base + i)).collect();
+    let manager = crate::hosts::fake::get(base);
+    manager.respond("Swarm.ControlAvailable", "true\n");
+    manager.respond("docker node ls", &(list.join("\n") + "\n"));
+    for i in SWARM {
+        crate::hosts::fake::get(base + i).respond("Swarm.NodeID", &format!("node-{}\n", base + i));
+    }
+}
+
+async fn stack_fixture(base: i64) -> (tempfile::TempDir, AppState) {
+    let hosts: Vec<i64> = SWARM.iter().map(|i| base + i).collect();
+    fixture(&hosts).await
+}
+
+fn commands(host: i64, pattern: &str) -> usize {
+    crate::hosts::fake::get(host)
+        .commands
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|c| c.contains(pattern))
+        .count()
+}
+
+#[tokio::test]
+async fn stack_blueprint_preview_single_manager_target() {
+    let base = 910;
+    let (_dir, s) = stack_fixture(base).await;
+    join_swarm(base);
+    let id = create_app(&s, stack_body(base)).await.unwrap();
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let desired: Value = serde_json::from_str(preview["desired"].as_str().unwrap()).unwrap();
+    let rows = desired["targets"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["host_id"], base.to_string());
+    let artifact = rows[0]["artifact"].as_str().unwrap();
+    assert_eq!(services(artifact), ["nats-0", "nats-1", "nats-2"]);
+    // Each stable instance is pinned to its bound host's Swarm node.
+    for host in [base + 1, base + 2, base + 3] {
+        assert!(
+            artifact.contains(&format!("node.id==node-{host}")),
+            "{artifact}"
+        );
+    }
+    assert_eq!(preview["target_hashes"].as_object().unwrap().len(), 1);
+    // A preview asks each host once; its in-transaction recheck reuses the answers.
+    assert_eq!(commands(base, "docker node ls"), 1);
+    for host in [base + 1, base + 2, base + 3] {
+        assert_eq!(commands(host, "Swarm.NodeID"), 1);
+    }
+
+    let rev = apply_preview(&s, &id, &preview).await.unwrap();
+    // Applying looks the nodes up once more, outside its transaction.
+    assert_eq!(commands(base, "docker node ls"), 2);
+    let stored = target_rows(&s, &rev).await;
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].host_id, base);
+    assert_eq!(stored[0].artifact, artifact);
+    let (ok, output) = execute(&s, &revision(&s, &rev).await).await.unwrap();
+    assert!(ok, "{output}");
+    // The stack is deployed through the manager only.
+    assert_eq!(commands(base, "docker stack deploy"), 1);
+    for host in [base + 1, base + 2, base + 3] {
+        assert_eq!(commands(host, "docker stack deploy"), 0);
+    }
+}
+
+#[tokio::test]
+async fn stack_blueprint_rejects_host_outside_swarm_at_preview() {
+    let base = 920;
+    let (_dir, s) = stack_fixture(base).await;
+    join_swarm(base);
+    // The third worker reports a node the manager does not list.
+    let outsider = crate::hosts::fake::register(base + 3);
+    outsider.respond("Swarm.NodeID", "node-elsewhere\n");
+    let id = create_app(&s, stack_body(base)).await.unwrap();
+    let message = preview_of(&s, &id, None).await.unwrap_err().2.unwrap();
+    assert_eq!(message.key, "blueprint.swarmNodeUnavailable");
+    assert_eq!(message.params["host"], format!("Host {}", base + 3));
+    assert_eq!(row(&s, &id).await.preview_artifact, "");
+    // An unreachable host is reported the same way, by name.
+    crate::hosts::fake::unregister(base + 3);
+    let message = preview_of(&s, &id, None).await.unwrap_err().2.unwrap();
+    assert_eq!(message.key, "blueprint.swarmNodeUnavailable");
+    assert_eq!(message.params["host"], format!("Host {}", base + 3));
+    // A manager host that is not a Swarm manager.
+    crate::hosts::fake::register(base);
+    let message = preview_of(&s, &id, None).await.unwrap_err().2.unwrap();
+    assert_eq!(message.key, "blueprint.swarmManagerRequired");
+}
+
+#[tokio::test]
+async fn stack_blueprint_create_offline_then_preview_validates_nodes() {
+    let base = 930;
+    let (_dir, s) = stack_fixture(base).await;
+    // Every host is offline: creation checks only what needs no host.
+    for i in SWARM {
+        crate::hosts::fake::unregister(base + i);
+    }
+    let id = create_app(&s, stack_body(base)).await.unwrap();
+    let r = row(&s, &id).await;
+    assert_eq!(
+        (r.target_kind.as_str(), r.mode.as_str()),
+        ("blueprint", "stack")
+    );
+    // Offline readers see the manager's single application.
+    assert_eq!(groups::compiled(&r).unwrap().len(), 1);
+    assert_eq!(applications(&r).unwrap()[0].services.len(), 3);
+    // Faults that need no host are still rejected when stored.
+    let mut b = stack_body(base);
+    b["blueprint_binding"]
+        .as_object_mut()
+        .unwrap()
+        .remove("manager");
+    assert_eq!(
+        key(create_app(&s, b).await.unwrap_err()),
+        "blueprint.bindingInvalid"
+    );
+    let mut b = stack_body(base);
+    b["blueprint_binding"]["manager"] = json!("999");
+    assert_eq!(
+        key(create_app(&s, b).await.unwrap_err()),
+        "blueprint.bindingHostUnknown"
+    );
+    // Edits stay offline too.
+    update_body(&s, &id, stack_body(base)).await.unwrap();
+
+    // Preview needs the Swarm.
+    let message = preview_of(&s, &id, None).await.unwrap_err().2.unwrap();
+    assert_eq!(message.key, "blueprint.swarmManagerRequired");
+    assert_eq!(message.params["host"], format!("Host {base}"));
+    for i in SWARM {
+        crate::hosts::fake::register(base + i);
+    }
+    join_swarm(base);
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let desired: Value = serde_json::from_str(preview["desired"].as_str().unwrap()).unwrap();
+    assert_eq!(desired["targets"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn stack_blueprint_rollback_replays_without_node_lookup() {
+    let base = 940;
+    let (_dir, s) = stack_fixture(base).await;
+    join_swarm(base);
+    let id = create_app(&s, stack_body(base)).await.unwrap();
+    let preview = preview_of(&s, &id, None).await.unwrap();
+    let first = apply_preview(&s, &id, &preview).await.unwrap();
+    succeed(&s, &id, &first).await;
+    let old = revision(&s, &first).await;
+    let old_targets = target_rows(&s, &first).await;
+
+    // The workers leave the Swarm: a replay must not need node lookups.
+    for i in SWARM {
+        let fake = crate::hosts::fake::get(base + i);
+        fake.commands.lock().unwrap().clear();
+        fake.responses
+            .lock()
+            .unwrap()
+            .retain(|(pattern, _)| pattern != "Swarm.NodeID");
+    }
+    let preview = preview_of(&s, &id, Some(first.clone())).await.unwrap();
+    assert_eq!(preview["desired"].as_str().unwrap(), old.artifact);
+    let (_, Json(out)) = rollback(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id.clone())),
+        Json(run_body(&preview, &first)),
+    )
+    .await
+    .unwrap();
+    let back = out["id"].as_str().unwrap().to_owned();
+    let replay = revision(&s, &back).await;
+    assert_eq!(replay.rendered, old.rendered);
+    let replayed = target_rows(&s, &back).await;
+    assert_eq!(replayed.len(), 1);
+    assert_eq!(replayed[0].host_id, base);
+    assert_eq!(replayed[0].artifact, old_targets[0].artifact);
+    let (ok, output) = execute(&s, &replay).await.unwrap();
+    assert!(ok, "{output}");
+    assert_eq!(commands(base, "docker stack deploy"), 1);
+    for i in SWARM {
+        assert_eq!(commands(base + i, "docker node ls"), 0);
+        assert_eq!(commands(base + i, "Swarm.NodeID"), 0);
+    }
+}

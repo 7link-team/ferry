@@ -148,3 +148,8 @@ impl HostChannel for Channel {
 pub(crate) fn get(id: i64) -> Arc<FakeHost> {
     HOSTS.lock().unwrap()[&id].clone()
 }
+
+/// Removes the fake behind host `id`, so opening a channel to it fails as for an offline host.
+pub(crate) fn unregister(id: i64) {
+    HOSTS.lock().unwrap().remove(&id);
+}

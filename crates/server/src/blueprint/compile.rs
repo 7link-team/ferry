@@ -367,6 +367,9 @@ enum Bind {
     Node(String),
     /// On every node of the Swarm (ingress routing mesh).
     Everywhere,
+    /// On a Swarm node not resolved yet ([`compile_unresolved`]): it may share a machine
+    /// with any other instance, so only conflicts with [`Bind::Everywhere`] are certain.
+    Unresolved,
 }
 
 impl Target {
@@ -375,7 +378,9 @@ impl Target {
     fn claim(&mut self, name: &str, bind: Bind, number: u16, protocol: &str) -> Result<()> {
         let claims = self.ports.entry((number, protocol.to_owned())).or_default();
         let clash = claims.iter().find(|(other, _)| {
-            *other == bind || *other == Bind::Everywhere || bind == Bind::Everywhere
+            (*other == bind && bind != Bind::Unresolved)
+                || *other == Bind::Everywhere
+                || bind == Bind::Everywhere
         });
         if let Some((_, other)) = clash {
             return fail(
@@ -403,6 +408,32 @@ pub fn compile(
     binding: &Binding,
     nodes: Option<&BTreeMap<String, String>>,
 ) -> Result<Vec<HostPlan>> {
+    compile_with(bp_text, binding, nodes.map(Nodes::Resolved))
+}
+
+/// Prefix of the stand-in a stable instance is pinned to by [`compile_unresolved`]: never a
+/// Swarm node ID (those are alphanumeric), so such a manifest cannot be mistaken for one
+/// [`compile`] resolved.
+pub const UNRESOLVED: &str = "unresolved:";
+
+/// Compiles without Swarm node IDs, for checks and readers that must not reach hosts (a
+/// deployment's hosts may be offline when it is created). Identical to [`compile`] for
+/// non-stack drivers. For `stack`, each stable instance is pinned to its own
+/// `node.id==unresolved:<instance>` stand-in, so host-mode port conflicts between instances
+/// that might share a node are not judged (conflicts with ingress ports, which bind on every
+/// node, still are). Node pinning and those conflicts are settled when the deployment is
+/// previewed, by [`compile`] with the nodes `swarm::assign` resolves. Never deploy the result.
+pub fn compile_unresolved(bp_text: &str, binding: &Binding) -> Result<Vec<HostPlan>> {
+    compile_with(bp_text, binding, Some(Nodes::Unresolved))
+}
+
+/// Instance name → Swarm node ID, or deliberately unknown.
+enum Nodes<'a> {
+    Resolved(&'a BTreeMap<String, String>),
+    Unresolved,
+}
+
+fn compile_with(bp_text: &str, binding: &Binding, nodes: Option<Nodes>) -> Result<Vec<HostPlan>> {
     let bp = model::parse(bp_text)?;
     let adapter = adapter(&binding.driver)?;
     let driver = adapter.id();
@@ -411,7 +442,7 @@ pub fn compile(
     let nodes = match nodes {
         Some(nodes) => nodes,
         None if stack => return fail(Message::new("blueprint.swarmNodesRequired")),
-        None => &no_nodes,
+        None => Nodes::Resolved(&no_nodes),
     };
     let values = BTreeMap::new();
     let topo = adapter.resolve(&bp, binding, &values)?;
@@ -426,15 +457,18 @@ pub fn compile(
         // node and ingress ports on every node.
         let (bind, mode) = match (stack, role.identity) {
             (false, _) => (Bind::Node(String::new()), None),
-            (true, Identity::Stable) => {
-                let Some(node) = nodes.get(&name) else {
-                    return fail(
-                        Message::new("blueprint.swarmNodeUnavailable")
-                            .with("host", bound_at.host_id.to_string()),
-                    );
-                };
-                (Bind::Node(node.clone()), Some("host"))
-            }
+            (true, Identity::Stable) => match &nodes {
+                Nodes::Resolved(nodes) => {
+                    let Some(node) = nodes.get(&name) else {
+                        return fail(
+                            Message::new("blueprint.swarmNodeUnavailable")
+                                .with("host", bound_at.host_id.to_string()),
+                        );
+                    };
+                    (Bind::Node(node.clone()), Some("host"))
+                }
+                Nodes::Unresolved => (Bind::Unresolved, Some("host")),
+            },
             (true, Identity::Stateless) => (Bind::Everywhere, Some("ingress")),
         };
         let published =
@@ -465,9 +499,14 @@ pub fn compile(
         }
         service.insert("name".into(), json!(name));
         service.insert("ports".into(), json!(ports));
-        match (&bind, mode) {
+        let pin = match (&bind, mode) {
+            (Bind::Node(node), Some(_)) => Some(node.clone()),
+            (Bind::Unresolved, _) => Some(format!("{UNRESOLVED}{name}")),
+            _ => None,
+        };
+        match (&bind, pin) {
             // Stable stack instance: pinned to its node, addressed directly (no VIP).
-            (Bind::Node(node), Some(_)) => {
+            (_, Some(node)) => {
                 let placement = service.entry("placement").or_insert_with(|| json!({}));
                 if let Value::Object(placement) = placement {
                     placement.insert("constraints".into(), json!([format!("node.id=={node}")]));
@@ -478,7 +517,7 @@ pub fn compile(
             (Bind::Everywhere, _) => {
                 service.insert("replicas".into(), json!(binding.roles[&role.name].len()));
             }
-            (Bind::Node(_), None) => {}
+            (_, None) => {}
         }
         target.services.push(Value::Object(service));
         target.contexts.insert(name, ctx);
@@ -1027,6 +1066,34 @@ mod tests {
         assert_eq!(
             err_key(compile(&text, &b, Some(&stack_nodes()))).0,
             "blueprint.bindingInvalid"
+        );
+    }
+
+    #[test]
+    fn unresolved_stack_compiles_without_pinning() {
+        let plans = compile_unresolved(&nats_with_gateway(8080), &stack_hosts()).unwrap();
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].host_id, Id::from(MANAGER));
+        let d = doc(&plans[0]);
+        let nats = service(&d, "nats-1");
+        assert_eq!(
+            nats["placement"]["constraints"],
+            json!(["node.id==unresolved:nats-1"])
+        );
+        assert_eq!(nats["endpointMode"], "dnsrr");
+        assert_eq!(nats["ports"][0]["mode"], "host");
+        assert_eq!(service(&d, "gateway")["replicas"], 2);
+        // Stable instances share client port 4222; whether they share a node is unknown.
+        // An ingress port is on every node, so its conflict is certain even unresolved.
+        let (key, _) = err_key(compile_unresolved(&nats_with_gateway(4222), &stack_hosts()));
+        assert_eq!(key, "blueprint.portConflict");
+        // Other drivers compile exactly as with `compile`.
+        let b = binding("native", &[three_hosts("nats")]);
+        let a = compile_unresolved(&nats_native(), &b).unwrap();
+        let c = compile(&nats_native(), &b, None).unwrap();
+        assert_eq!(
+            a.iter().map(|p| &p.manifest).collect::<Vec<_>>(),
+            c.iter().map(|p| &p.manifest).collect::<Vec<_>>()
         );
     }
 
