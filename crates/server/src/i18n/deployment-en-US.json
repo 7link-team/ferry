@@ -279,5 +279,6 @@
   "blueprint.specListTooLong": "{field} in the deployment spec can have at most {max} items.",
   "blueprint.specItemLength": "Each item of {field} in the deployment spec must be 1 to {max} characters long.",
   "blueprint.specPrefixLength": "The spread prefix must be 1 to {max} characters long.",
-  "blueprint.specManagerOnlyStack": "Only the stack driver can specify a manager."
+  "blueprint.specManagerOnlyStack": "Only the stack driver can specify a manager.",
+  "blueprint.specDuplicate": "{field} in the deployment spec must not contain duplicates."
 }

@@ -279,5 +279,6 @@
   "blueprint.specListTooLong": "배포 사양의 {field}에는 최대 {max}개 항목만 둘 수 있습니다.",
   "blueprint.specItemLength": "배포 사양의 {field} 각 항목은 1자에서 {max}자여야 합니다.",
   "blueprint.specPrefixLength": "분산 접두사는 1자에서 {max}자여야 합니다.",
-  "blueprint.specManagerOnlyStack": "manager는 stack 드라이버에서만 지정할 수 있습니다."
+  "blueprint.specManagerOnlyStack": "manager는 stack 드라이버에서만 지정할 수 있습니다.",
+  "blueprint.specDuplicate": "배포 사양의 {field}에는 중복 항목을 둘 수 없습니다."
 }

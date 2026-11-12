@@ -22,7 +22,7 @@ pub struct DeploySpec {
     /// Swarm manager host (name or id); only for `stack`. Resolved when the spec is planned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manager: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub values: BTreeMap<String, Value>,
     pub roles: BTreeMap<String, RoleSpec>,
     /// Manual placement override, shaped like `Binding.roles`.
@@ -41,16 +41,24 @@ pub struct TemplateRef {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RoleSpec {
     pub instances: u32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub hosts: HostSelector,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HostSelector {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub tags: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub names: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
@@ -62,6 +70,15 @@ pub struct HostSelector {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Spread {
     pub prefix: String,
+}
+
+/// An explicit YAML null (`hosts:` with no value) means the default, like a missing key.
+fn null_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 fn fail<T>(message: Message) -> Result<T> {
@@ -116,8 +133,12 @@ fn check_list(field: &str, items: &[String]) -> Result<()> {
                 .with("max", MAX_LIST.to_string()),
         );
     }
+    let mut seen = std::collections::BTreeSet::new();
     for item in items {
         check_item(field, item)?;
+        if !seen.insert(item.as_str()) {
+            return fail(Message::new("blueprint.specDuplicate").with("field", field));
+        }
     }
     Ok(())
 }
@@ -280,6 +301,39 @@ placement:
         assert!(err(parse(&prefix(String::new()))).contains("specPrefixLength"));
         assert!(err(parse(&prefix("p".repeat(31)))).contains("specPrefixLength"));
         assert!(parse(&prefix("p".repeat(30))).is_ok());
+    }
+
+    #[test]
+    fn explicit_nulls_mean_defaults() {
+        let spec = parse(
+            "apiVersion: ferry/deploy-v1
+template: {id: \"1\", version: 1}
+driver: native
+values:
+roles:
+  web:
+    instances: 1
+    hosts:
+  db:
+    instances: 2
+    hosts:
+      tags:
+      names:
+      group:
+",
+        )
+        .unwrap();
+        assert!(spec.values.is_empty());
+        assert_eq!(spec.roles["web"].hosts, HostSelector::default());
+        assert_eq!(spec.roles["db"].hosts, HostSelector::default());
+    }
+
+    #[test]
+    fn duplicate_selector_entries_rejected() {
+        let hosts = |h: Value| json_with(|v| v["roles"]["web"]["hosts"] = h);
+        assert!(err(parse(&hosts(json!({"tags": ["a", "b", "a"]})))).contains("specDuplicate"));
+        assert!(err(parse(&hosts(json!({"names": ["n", "n"]})))).contains("specDuplicate"));
+        assert!(parse(&hosts(json!({"tags": ["a", "b"], "names": ["a"]}))).is_ok());
     }
 
     #[test]

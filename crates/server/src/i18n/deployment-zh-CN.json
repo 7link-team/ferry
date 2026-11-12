@@ -279,5 +279,6 @@
   "blueprint.specListTooLong": "部署规格中的 {field} 最多只能有 {max} 项。",
   "blueprint.specItemLength": "部署规格中的 {field} 每项长度必须为 1 到 {max} 个字符。",
   "blueprint.specPrefixLength": "分散前缀长度必须为 1 到 {max} 个字符。",
-  "blueprint.specManagerOnlyStack": "只有 stack 驱动可以指定 manager。"
+  "blueprint.specManagerOnlyStack": "只有 stack 驱动可以指定 manager。",
+  "blueprint.specDuplicate": "部署规格中的 {field} 不能包含重复项。"
 }

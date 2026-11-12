@@ -279,5 +279,6 @@
   "blueprint.specListTooLong": "デプロイ仕様の {field} は最大 {max} 件までです。",
   "blueprint.specItemLength": "デプロイ仕様の {field} の各項目は 1 から {max} 文字にしてください。",
   "blueprint.specPrefixLength": "分散プレフィックスは 1 から {max} 文字にしてください。",
-  "blueprint.specManagerOnlyStack": "manager を指定できるのは stack ドライバーのみです。"
+  "blueprint.specManagerOnlyStack": "manager を指定できるのは stack ドライバーのみです。",
+  "blueprint.specDuplicate": "デプロイ仕様の {field} に重複した項目を含めることはできません。"
 }

@@ -279,5 +279,6 @@
   "blueprint.specListTooLong": "{field} dalam spesifikasi penggunaan boleh mempunyai paling banyak {max} item.",
   "blueprint.specItemLength": "Setiap item {field} dalam spesifikasi penggunaan mestilah 1 hingga {max} aksara.",
   "blueprint.specPrefixLength": "Awalan sebaran mestilah 1 hingga {max} aksara.",
-  "blueprint.specManagerOnlyStack": "Hanya pemacu stack boleh menentukan manager."
+  "blueprint.specManagerOnlyStack": "Hanya pemacu stack boleh menentukan manager.",
+  "blueprint.specDuplicate": "{field} dalam spesifikasi penggunaan tidak boleh mengandungi pendua."
 }
