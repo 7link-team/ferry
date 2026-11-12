@@ -286,5 +286,6 @@
   "blueprint.placementSpreadUnmet": "角色 {role}：实例未能全部分布到不同的 {prefix} 标签上。",
   "blueprint.placementManagerUnavailable": "Swarm 管理节点 {manager} 必须是本工作空间中的在线 Linux 主机。",
   "blueprint.placementManualInvalid": "角色 {role} 的实例 {instance} 被指定到主机 {host}，但该主机不是本工作空间内满足该角色主机选择条件的在线 Linux 主机。",
+  "blueprint.placementManualCount": "角色 {role} 的人工放置列出了 {count} 个实例，但该角色指定了 {instances} 个。",
   "deployments.specManaged": "此部署由部署规格管理；请修改部署规格，而不是直接修改清单或绑定。"
 }

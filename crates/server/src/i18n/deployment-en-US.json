@@ -286,5 +286,6 @@
   "blueprint.placementSpreadUnmet": "Role {role}: instances could not all be spread across different {prefix} tags.",
   "blueprint.placementManagerUnavailable": "Swarm manager {manager} must be an online Linux host in this workspace.",
   "blueprint.placementManualInvalid": "Instance {instance} of role {role} is placed on {host}, which is not an online Linux host in this workspace matching the role's host selector.",
+  "blueprint.placementManualCount": "The manual placement of role {role} lists {count} instances, but the role specifies {instances}.",
   "deployments.specManaged": "This deployment is managed by its deployment spec; change the spec instead of the manifest or binding."
 }

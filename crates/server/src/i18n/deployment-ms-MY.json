@@ -286,5 +286,6 @@
   "blueprint.placementSpreadUnmet": "Peranan {role}: tidak semua instans dapat disebarkan merentasi tag {prefix} yang berbeza.",
   "blueprint.placementManagerUnavailable": "Pengurus Swarm {manager} mestilah hos Linux dalam talian dalam ruang kerja ini.",
   "blueprint.placementManualInvalid": "Instans {instance} bagi peranan {role} diletakkan pada {host}, yang bukan hos Linux dalam talian di ruang kerja ini yang sepadan dengan pemilih hos peranan tersebut.",
+  "blueprint.placementManualCount": "Peletakan manual peranan {role} menyenaraikan {count} instans, tetapi peranan itu menetapkan {instances}.",
   "deployments.specManaged": "Pengerahan ini diurus oleh spesifikasi pengerahannya; ubah spesifikasi itu dan bukannya manifest atau pengikatan."
 }

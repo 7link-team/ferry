@@ -100,30 +100,51 @@ fn zones<'a>(c: &'a Candidate, prefix: &str) -> BTreeSet<Option<&'a str>> {
     }
 }
 
-/// Every manually placed instance (`spec.placement`) must run on a candidate host that is
-/// online, Linux (or unknown OS) and matches its role's selector. A violating entry is refused,
-/// never rewritten.
-pub fn check_manual(spec: &DeploySpec, candidates: &[Candidate]) -> Result<()> {
-    for (role, list) in spec.placement.iter().flatten() {
-        let selector = spec
-            .roles
-            .get(role)
-            .map(|r| r.hosts.clone())
-            .unwrap_or_default();
-        for (index, inst) in list.iter().enumerate() {
-            let host = candidates.iter().find(|c| c.id == inst.host_id);
-            if host.is_some_and(|c| eligible(c) && matches(&selector, c)) {
-                continue;
-            }
+/// Checks the manual placement (`spec.placement`) and normalizes it in place.
+///
+/// Each entry must name a blueprint role. When the spec gives that role an instance count,
+/// the list must have exactly that many instances. Every instance must run on a candidate
+/// host that is online, Linux (or unknown OS) and matches the role's selector. A violating
+/// entry is refused, never rescheduled. Users choose hosts, not addresses: each instance's
+/// `address` is overwritten with its host's address.
+pub fn check_manual(bp: &Blueprint, spec: &mut DeploySpec, candidates: &[Candidate]) -> Result<()> {
+    let Some(placement) = spec.placement.as_mut() else {
+        return Ok(());
+    };
+    for (role, list) in placement.iter_mut() {
+        if !bp.roles.iter().any(|r| &r.name == role) {
+            return fail(Message::new("blueprint.bindingRoleUnknown").with("role", role));
+        }
+        let role_spec = spec.roles.get(role);
+        if let Some(wanted) = role_spec.map(|r| r.instances)
+            && list.len() != wanted as usize
+        {
             return fail(
-                Message::new("blueprint.placementManualInvalid")
+                Message::new("blueprint.placementManualCount")
                     .with("role", role)
-                    .with("instance", format!("{role}-{index}"))
-                    .with(
-                        "host",
-                        host.map_or_else(|| inst.host_id.to_string(), |c| c.name.clone()),
-                    ),
+                    .with("instances", wanted.to_string())
+                    .with("count", list.len().to_string()),
             );
+        }
+        let selector = role_spec.map(|r| r.hosts.clone()).unwrap_or_default();
+        for (index, inst) in list.iter_mut().enumerate() {
+            let host = candidates.iter().find(|c| c.id == inst.host_id);
+            match host {
+                Some(c) if eligible(c) && matches(&selector, c) => {
+                    inst.address = c.address.clone();
+                }
+                _ => {
+                    return fail(
+                        Message::new("blueprint.placementManualInvalid")
+                            .with("role", role)
+                            .with("instance", format!("{role}-{index}"))
+                            .with(
+                                "host",
+                                host.map_or_else(|| inst.host_id.to_string(), |c| c.name.clone()),
+                            ),
+                    );
+                }
+            }
         }
     }
     Ok(())

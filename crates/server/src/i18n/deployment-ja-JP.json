@@ -286,5 +286,6 @@
   "blueprint.placementSpreadUnmet": "ロール {role}：すべてのインスタンスを異なる {prefix} タグに分散できませんでした。",
   "blueprint.placementManagerUnavailable": "Swarm マネージャー {manager} は、このワークスペースのオンラインの Linux ホストである必要があります。",
   "blueprint.placementManualInvalid": "ロール {role} のインスタンス {instance} はホスト {host} に配置されていますが、このホストはこのワークスペース内でロールのホスト条件を満たすオンラインの Linux ホストではありません。",
+  "blueprint.placementManualCount": "ロール {role} の手動配置には {count} 個のインスタンスがありますが、ロールの指定は {instances} 個です。",
   "deployments.specManaged": "このデプロイはデプロイ仕様で管理されています。マニフェストやバインディングではなく、デプロイ仕様を変更してください。"
 }

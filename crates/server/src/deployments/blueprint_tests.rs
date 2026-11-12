@@ -1484,14 +1484,53 @@ async fn manual_placement_must_satisfy_selector() {
         }
     }
     assert_eq!(deployment_count(&s).await, before);
-    // A valid manual placement is kept exactly as written, never rescheduled.
+    // Entries must match the blueprint's roles and the spec's instance count.
+    let mut ghost = manual(1536);
+    ghost["placement"]["ghost"] = json!([{"hostId": "1531", "address": "10.0.0.1"}]);
+    let mut extra = manual(1536);
+    extra["placement"]["nats"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"hostId": "1533", "address": "10.0.0.3"}));
+    for (spec, expected) in [
+        (ghost, "blueprint.bindingRoleUnknown"),
+        (extra, "blueprint.placementManualCount"),
+    ] {
+        for error in [
+            place_spec(&s, admin(1), &spec).await.unwrap_err(),
+            create_app(&s, spec_body(&spec)).await.unwrap_err(),
+        ] {
+            let message = error.2.expect("localized");
+            assert_eq!(message.key, expected);
+            if expected == "blueprint.bindingRoleUnknown" {
+                assert_eq!(message.params["role"], "ghost");
+            } else {
+                assert_eq!(message.params["role"], "nats");
+                assert_eq!(message.params["instances"], "2");
+                assert_eq!(message.params["count"], "3");
+            }
+        }
+    }
+    assert_eq!(deployment_count(&s).await, before);
+    // A valid manual placement keeps its hosts, never rescheduled; addresses come from them.
+    hosts::Entity::update_many()
+        .col_expr(hosts::Column::Address, Expr::value("198.51.100.36"))
+        .filter(hosts::Column::Id.eq(1536))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let expected = json!([{"hostId": "1531", "address": "192.0.2.1"},
+                          {"hostId": "1536", "address": "198.51.100.36"}]);
+    let planned = place_spec(&s, admin(1), &manual(1536)).await.unwrap();
+    assert_eq!(planned["binding"]["roles"]["nats"], expected);
     let id = create_app(&s, spec_body(&manual(1536))).await.unwrap();
     let r = row(&s, &id).await;
     let stored: Value = serde_json::from_str(r.blueprint_binding.as_deref().unwrap()).unwrap();
+    assert_eq!(stored["roles"]["nats"], expected);
+    let spec = crate::blueprint::spec::parse(r.deploy_spec.as_deref().unwrap()).unwrap();
     assert_eq!(
-        stored["roles"]["nats"],
-        json!([{"hostId": "1531", "address": "10.0.0.1"},
-               {"hostId": "1536", "address": "10.0.0.2"}])
+        serde_json::to_value(&spec.placement.unwrap()["nats"]).unwrap(),
+        expected
     );
 }
 
@@ -1553,12 +1592,18 @@ async fn topology_change_after_deploy_rejected() {
     let id = create_app(&s, spec_body(&spec_doc(1, "2", 2)))
         .await
         .unwrap();
-    // Before anything is deployed the spec may resize; the stored binding counts as load.
+    // Before anything is deployed the spec may resize; it is scheduled afresh, exactly as
+    // the placement endpoint previews it.
     update_spec(&s, &id, &spec_doc(1, "2", 3)).await.unwrap();
+    let stored = row(&s, &id).await.blueprint_binding.unwrap();
+    let planned = place_spec(&s, admin(1), &spec_doc(1, "2", 3))
+        .await
+        .unwrap();
     assert_eq!(
-        bound_hosts(row(&s, &id).await.blueprint_binding.as_deref().unwrap()),
-        ["1563", "1564", "1561"]
+        serde_json::from_str::<Value>(&stored).unwrap(),
+        planned["binding"]
     );
+    assert_eq!(bound_hosts(&stored), ["1561", "1562", "1563"]);
     assert!(run_first(&s, &id, &[]).await);
     let binding_before = row(&s, &id).await.blueprint_binding;
     let mut names = spec_doc(1, "2", 3);
