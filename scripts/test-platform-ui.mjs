@@ -153,7 +153,11 @@ try {
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByText('当前密码不正确。修改邮箱或密码需要填写当前密码。').waitFor();
   await currentPassword.fill('temporary-admin-password');
-  await page.getByRole('button', { name: '保存', exact: true }).click();
+  // The earlier save toast may still be visible, so wait for this save's response.
+  await Promise.all([
+    page.waitForResponse(r => new URL(r.url()).pathname.startsWith('/api/profile') && r.request().method() !== 'GET' && r.ok()),
+    page.getByRole('button', { name: '保存', exact: true }).click(),
+  ]);
   await page.getByText('个人资料已保存。').last().waitFor();
   assert.equal((await (await context.request.get(`${origin}/api/me`)).json()).user.email, 'renamed@example.invalid', 'email changed with the current password; this session stays signed in');
   await openGroup('账号安全', emailField);
