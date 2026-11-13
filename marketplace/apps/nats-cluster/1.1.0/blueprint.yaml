@@ -1,0 +1,80 @@
+apiVersion: ferry/blueprint-v1
+kind: Blueprint
+metadata:
+  name: nats-cluster
+allowSingleHost: true
+roles:
+  - name: nats
+    instances:
+      min: 3
+      max: 9
+      default: 3
+      odd: true
+    placement:
+      distinctHosts: true
+    identity: stable
+    failover:
+      replace: supported
+    hooks:
+      healthy: ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8222/healthz?js-enabled-only=true"]
+    ports:
+      - name: client
+        container: 4222
+        published: "{{ add .Values.client_port .Instance.Index }}"
+      - name: cluster
+        container: 6222
+        published: "{{ add .Values.cluster_port .Instance.Index }}"
+      - name: monitor
+        container: 8222
+        published: "{{ add .Values.monitor_port .Instance.Index }}"
+    service:
+      image: nats:2.10-alpine
+      command:
+        - nats-server
+        - --config
+        - /etc/nats/nats.conf
+      files:
+        - path: /etc/nats/nats.conf
+          fromTemplate: nats.conf
+      volumes:
+        - name: "{{ .Instance.Name }}-data"
+          path: /data
+      health:
+        readiness:
+          httpGet:
+            path: /healthz?js-enabled-only=true
+            port: 8222
+          periodSeconds: 2
+        liveness:
+          httpGet:
+            path: /healthz?js-enabled-only=true
+            port: 8222
+          periodSeconds: 5
+      resources:
+        limits:
+          cpu: "1"
+          memory: 256Mi
+        requests:
+          memory: 32Mi
+endpoints:
+  - name: client
+    role: nats
+    port: client
+    kind: discovery
+drivers:
+  docker:
+    supported: true
+  compose:
+    supported: true
+  stack:
+    supported: true
+  native:
+    supported: false
+update:
+  maxParallel: 1
+  minHealthySeconds: 10
+  healthTimeout: 180
+  autoRevert: true
+strategy:
+  type: recreate
+  healthTimeout: 180

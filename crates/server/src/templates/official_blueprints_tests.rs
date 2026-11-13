@@ -3,6 +3,49 @@ use super::*;
 use crate::blueprint::{binding, compile, model, template};
 use crate::snowflake::Id;
 
+#[test]
+fn official_nats_declares_replicated_failover() {
+    let index: Value =
+        serde_json::from_str(include_str!("../../../../marketplace/index.json")).unwrap();
+    let package = index["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["key"] == "nats-cluster")
+        .unwrap();
+    // The index generator sorts versions in ascending semantic-version order.
+    let latest = package["versions"].as_array().unwrap().last().unwrap();
+    let stored = render_content(
+        &latest["blueprint"].to_string(),
+        &latest["parameters"].to_string(),
+        &BTreeMap::new(),
+        Kind::App,
+    )
+    .unwrap();
+    let bp = model::parse(&stored).unwrap();
+    let role = bp.roles.iter().find(|r| r.name == "nats").unwrap();
+    assert_eq!(
+        crate::blueprint::failover::class_of(role),
+        crate::blueprint::failover::FailoverClass::Replicated
+    );
+    assert_eq!(
+        role.hooks.healthy.as_deref(),
+        Some(
+            [
+                "wget",
+                "-q",
+                "-O",
+                "/dev/null",
+                "http://127.0.0.1:8222/healthz?js-enabled-only=true"
+            ]
+            .map(String::from)
+            .as_slice()
+        )
+    );
+    assert!(role.hooks.leave.is_none());
+    assert!(role.hooks.join.is_none());
+}
+
 /// Binds each role's default instance count. Docker and stack spread instances over hosts
 /// 1–3 in role order (stack manager: host 1); compose puts every instance on host 1.
 fn sample_binding(bp: &model::Blueprint, driver: &str) -> binding::Binding {

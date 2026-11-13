@@ -306,13 +306,16 @@ hooks:
 - README（1.1.0，六语中的现有语言段落）补一段「故障自愈」：A/B 类说明、`failover.mode` 与 `hostDownAfter`。
 
 - [ ] Step 1 确认镜像工具（本地或 CI 均可，结果写进 1.1.0 README 的说明）：`docker run --rm nats:2.10-alpine sh -c 'command -v wget; command -v nats || echo no-nats-cli'` → 输出含 `/usr/bin/wget` 与 `no-nats-cli`。无法运行 Docker 时在本任务报告中标注「待 CI 核实」，Task 10 的 CI 步骤会在新主机上执行该钩子。
-- [ ] Step 2 失败测试：在 `crates/server/src/blueprint/model.rs` 测试模块增加 `official_nats_declares_replicated_failover`（从 `marketplace/index.json` 取 nats-cluster 最新版本：`class_of(nats) == Replicated`、`hooks.healthy` 首项为 `wget`、`hooks.leave` 为 None）。
-- [ ] Step 3 `cargo test -p ferry-server official_` → FAIL。
-- [ ] Step 4 建 1.1.0 目录；`node scripts/build-marketplace-index.mjs`。
-- [ ] Step 5 `node scripts/build-marketplace-index.mjs --check`；`cargo test -p ferry-server official_` PASS。
-- [ ] Step 6 Commit `feat(marketplace): nats-cluster 1.1.0 declares member replacement`
+- [x] Step 2 失败测试：在 `crates/server/src/blueprint/model.rs` 测试模块增加 `official_nats_declares_replicated_failover`（从 `marketplace/index.json` 取 nats-cluster 最新版本：`class_of(nats) == Replicated`、`hooks.healthy` 首项为 `wget`、`hooks.leave` 为 None）。
+- [x] Step 3 `cargo test -p ferry-server official_` → FAIL。
+- [x] Step 4 建 1.1.0 目录；`node scripts/build-marketplace-index.mjs`。
+- [x] Step 5 `node scripts/build-marketplace-index.mjs --check`；`cargo test -p ferry-server official_` PASS。
+- [x] Step 6 Commit `feat(marketplace): nats-cluster 1.1.0 declares member replacement`
 
-### Task 8: 前端规格 failover 与向导
+#
+> Task7 local acceptance (2026-11-13): reused templates/official_blueprints_tests.rs, where the real official compiler lives. RED4PASS/1FAIL (old NATS Manual); final official5PASS and marketplace42PASS, index/fmt/diff checks PASS. Docker is not installed locally; Step1 image tools and real healthy hook execution remain pending Task10 Linux CI, explicitly stated in1.1.0README. Comment-only verified.yaml emits no verified metadata. Version1.0.0 and nginx-ha unchanged.
+
+## Task 8: 前端规格 failover 与向导
 
 **Files:**
 - Modify: `src/features/deployments/blueprint-spec.ts`、`src/features/deployments/blueprint-spec.test.ts`、`src/features/deployments/BlueprintWizard.tsx`、`src/features/deployments/BlueprintWizard.test.tsx`、`src/shared/i18n/locales/resource-domain.json`（`wizard.failover*` 六语）
