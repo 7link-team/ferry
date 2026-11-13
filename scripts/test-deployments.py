@@ -748,8 +748,13 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                         member_ip=fixture_of[item['hostId']][1]
                         check(f'after failover nats-{i} sees three metadata members',eventually(lambda member_ip=member_ip,i=i:meta_cluster(member_ip,18222+i),300)['cluster_size']==3)
                     def caught_up():
-                        state=replicated_stream(fixtures[3][2],14223,'FERRY_FAILOVER')
-                        return state if state and state.get('state',{}).get('messages')==20 and all(r.get('current') is True for r in state['cluster']['replicas']) else None
+                        # CREATE can reply from a follower with its local peer view;
+                        # INFO reports the stream leader's current replication state.
+                        try: state=nats_request(fixtures[3][2],14223,'$JS.API.STREAM.INFO.FERRY_FAILOVER',{})
+                        except OSError: return None
+                        report['blueprint']['failover_stream']=state
+                        replicas=state.get('cluster',{}).get('replicas') or []
+                        return state if not state.get('error') and state.get('config',{}).get('num_replicas')==3 and state.get('state',{}).get('messages')==20 and len(replicas)==2 and all(r.get('current') is True for r in replicas) else None
                     recovered=eventually(caught_up,300)
                     check('replacement member retains twenty messages and both replicas are current',recovered['state']['messages']==20)
                     nats_events=timeline(nats_id)
