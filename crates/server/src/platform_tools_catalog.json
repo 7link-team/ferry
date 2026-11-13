@@ -428,8 +428,7 @@
     "definitions": [],
     "permission_checks": [
       "alerts.read",
-      "deployments.read",
-      "hosts.read"
+      "deployments.read"
     ]
   },
   {
@@ -1369,6 +1368,7 @@
     "signature": "async fn revision_list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
     "definitions": [],
     "permission_checks": [
+      "alerts.read",
       "deployments.read"
     ],
     "permission": "deployments.read"
@@ -1394,6 +1394,7 @@
     "signature": "async fn list(\n    State(s): State<AppState>,\n    scope: Scope,\n    Query(raw): Query<HashMap<String, String>>,\n) -> Result<Json<Value>>",
     "definitions": [],
     "permission_checks": [
+      "alerts.read",
       "deployments.read"
     ],
     "permission": "deployments.read"

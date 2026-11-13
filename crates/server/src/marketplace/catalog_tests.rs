@@ -380,6 +380,7 @@ async fn list_rows_omit_heavy_fields_detail_keeps_them() {
         row.get("content").is_none()
             && row.get("readme").is_none()
             && row.get("parameters").is_none()
+            && row.get("package_files").is_none()
     );
     assert!(row["meta"].get("icon").is_none());
     assert_eq!(row["files"], json!(["redis-start"]));
@@ -395,6 +396,8 @@ async fn list_rows_omit_heavy_fields_detail_keeps_them() {
             && detail.get("readme").is_some()
             && detail["meta"].get("icon").is_some()
     );
+    assert_eq!(detail["package_files"][0]["name"], "redis-start");
+    assert_eq!(detail["package_files"][0]["content"], "echo start");
 }
 
 #[tokio::test]

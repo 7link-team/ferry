@@ -156,11 +156,12 @@ fn command_with(request: &Request, environment: &provision::Environment) -> Comm
             }
             c
         }
-        Runtime::Gemini | Runtime::Qwen | Runtime::Opencode | Runtime::Dsh => {
+        Runtime::Gemini | Runtime::Qwen | Runtime::Opencode | Runtime::Dsh | Runtime::Kimi => {
             let name = match request.runtime {
                 Runtime::Gemini => "gemini",
                 Runtime::Qwen => "qwen",
                 Runtime::Dsh => "dsh",
+                Runtime::Kimi => "kimi",
                 _ => "opencode",
             };
             let mut c = native_command(executable.as_deref().unwrap_or(std::path::Path::new(name)));

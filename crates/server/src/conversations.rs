@@ -156,6 +156,7 @@ impl Configuration {
                         | ferry_protocol::agent::Runtime::Opencode
                         | ferry_protocol::agent::Runtime::Pi
                         | ferry_protocol::agent::Runtime::Dsh
+                        | ferry_protocol::agent::Runtime::Kimi
                 ))
     }
     fn for_conversation(a: &ai_agents::Model, body: &Create) -> Result<Self> {
@@ -166,8 +167,10 @@ impl Configuration {
         if let Some(permission) = body.permission {
             config.permission = permission;
         }
-        if config.runtime == ferry_protocol::agent::Runtime::Pi
-            && config.permission != ferry_protocol::agent::Permission::ReadOnly
+        if (config.runtime == ferry_protocol::agent::Runtime::Pi
+            && config.permission != ferry_protocol::agent::Permission::ReadOnly)
+            || (config.runtime == ferry_protocol::agent::Runtime::Kimi
+                && config.permission == ferry_protocol::agent::Permission::ReadOnly)
         {
             return Err(error(
                 StatusCode::BAD_REQUEST,

@@ -437,7 +437,8 @@ export function RunnerUpdateStatus({ workspace, hostId, canUpdate = false }: { w
 export function HostConnectionCommand({ workspace, hostId, compact = false }: { workspace: string; hostId: string; compact?: boolean }) {
   useTranslation("resource-domain");
   const [platform, setPlatform] = useState<Platform>("linux");
-  const [scope, setScope] = useState<InstallScope | "">("");
+  const [scope, setScope] = useState<InstallScope>("system");
+  const [scopeChosen, setScopeChosen] = useState(false);
   const [installationScope, setInstallationScope] = useState("");
   const [server, setServer] = useState(window.location.origin);
   const [token, setToken] = useState("");
@@ -449,7 +450,7 @@ export function HostConnectionCommand({ workspace, hostId, compact = false }: { 
   const path = `/workspaces/${encodeURIComponent(workspace)}/nodes/${encodeURIComponent(hostId)}/connection-credentials`;
   useEffect(() => {
     const controller = new AbortController();
-    setToken(""); setScope(""); setInstallationScope(""); setPlatform("linux"); setError("");
+    setToken(""); setScope("system"); setScopeChosen(false); setInstallationScope(""); setPlatform("linux"); setError("");
     void api<{ token: string; server: string; state: string; os?: string; installation_scope?: string }>(path, { signal: controller.signal })
       .then(value => { if (!controller.signal.aborted) {
         setToken(value.token); setServer(value.server); setState(value.state);
@@ -458,7 +459,7 @@ export function HostConnectionCommand({ workspace, hostId, compact = false }: { 
         else if (os === "darwin") setPlatform("macos");
         const reported=value.installation_scope;
         if (reported === "system" || reported === "user") setScope(reported);
-        setInstallationScope(reported === "foreground" ? reported : "");
+        setInstallationScope(reported ?? "");
       } })
       .catch(cause => { if (!controller.signal.aborted) setError(errorText(cause)); });
     return () => controller.abort();
@@ -486,13 +487,14 @@ export function HostConnectionCommand({ workspace, hostId, compact = false }: { 
     <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">{commonText("resource-domain:runner.currentCommand")}</h2><span className={state === "online" ? "text-primary" : "text-muted-foreground"}>{state === "online" ? commonText("resource-domain:runner.connected") : state === "offline" ? commonText("resource-domain:runner.disconnected") : commonText("resource-domain:runner.waiting")}</span></div>
     <Tabs value={platform} onValueChange={value => { setPlatform(value as Platform); setCopied(false); }}><TabsList aria-label={commonText("resource-domain:runner.hostSystem")}><TabsTrigger value="linux">Linux</TabsTrigger><TabsTrigger value="macos">macOS</TabsTrigger><TabsTrigger value="windows">Windows</TabsTrigger></TabsList></Tabs>
     {installationScope === "foreground" && <p className="text-xs text-muted-foreground">{commonText("resource-domain:runner.foregroundMode")}</p>}
-    <InstallScopeChoice platform={platform} scope={scope} onChange={value => { setScope(value); setCopied(false); }}/>
+    {token && !["system", "user"].includes(installationScope) && <p className="text-xs text-muted-foreground">{commonText("resource-domain:runner.scopeFallback")}</p>}
+    <InstallScopeChoice platform={platform} scope={scope} onChange={value => { setScope(value); setScopeChosen(true); setCopied(false); }}/>
     <AutoField label={<span>{commonText("resource-domain:runner.serverAddress")}</span>} className="block space-y-1"><Input value={server} onChange={event => { setServer(event.target.value); setCopied(false); }} aria-label={commonText("resource-domain:runner.serverAddress")} /></AutoField>
     {serverError && <p role="alert" className="text-destructive">{serverError}</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
     <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground">{commonText("resource-domain:runner.tokenHelp")}</span><Button type="button" size="sm" variant="outline" disabled={!command} onClick={async () => { try { await navigator.clipboard.writeText(command); setCopied(true); } catch { setError(commonText("resource-domain:runner.copyFailed")); } }}><Copy className="size-4" />{copied ? commonText("resource-domain:runner.copied") : commonText("resource-domain:runner.copyCommand")}</Button></div>
     <textarea aria-label={commonText("resource-domain:runner.currentCommand")} readOnly spellCheck={false} value={command} className="min-h-36 w-full resize-y rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed" onFocus={event => event.currentTarget.select()} />
-    {scope && <UninstallCommand platform={platform} scope={scope}/>}
+    {(scopeChosen || ["system", "user"].includes(installationScope)) && <UninstallCommand platform={platform} scope={scope}/>}
     <div className="flex items-center justify-end gap-1"><span title={commonText("resource-domain:runner.resetHelp")} aria-label={commonText("resource-domain:runner.resetExplanation")}><HelpCircle className="size-4 text-muted-foreground" /></span><Button type="button" variant="outline" size="sm" disabled={busy || !token} onClick={() => setConfirmReset(true)}><RotateCcw className="size-4" />{commonText("resource-domain:runner.resetConnection")}</Button></div>
     {confirmReset && <DeleteConfirmDialog action={commonText("resource-domain:runner.reset")} target={commonText("resource-domain:runner.currentAgent")} description={commonText("resource-domain:runner.resetConfirm")} onClose={() => setConfirmReset(false)} onConfirm={reset} />}
   </section>;

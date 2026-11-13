@@ -213,7 +213,7 @@ const mountEdit = async (app: Deployment, onSaved = vi.fn()) => {
   await flush();
   return onSaved;
 };
-const steps = () => [...host.querySelectorAll(`[aria-label="${w("steps")}"] li`)];
+const sections = () => [...host.querySelectorAll<HTMLElement>('[data-form-section]')].map(node => node.dataset.formSection);
 
 it("failover_editable_after_deploy_without_unlocking_topology", async () => {
   const onSaved = await mountEdit(deployment({ current_revision: "11" }));
@@ -231,9 +231,10 @@ it("failover_editable_after_deploy_without_unlocking_topology", async () => {
 it("spec_edit_limited_to_values_after_deploy", async () => {
   const onSaved = await mountEdit(deployment({ current_revision: "11" }));
   await click(w("editSpec"));
-  // Only the parameters step: roles and placement are frozen after the first deployment.
-  expect(steps()).toHaveLength(1);
-  expect(steps()[0]!.textContent).toContain(w("stepValues"));
+  // Shared readonly definition stays visible; topology controls stay absent after deployment.
+  expect(sections()).toEqual(['basics', 'definition', 'parameters']);
+  expect(host.querySelector('input[name="name"]')!.hasAttribute('disabled')).toBe(true);
+  expect(host.querySelector('[data-form-section="definition"] [data-definition-mode="view"]')).not.toBeNull();
   expect(host.textContent).toContain(w("frozenHelp"));
   await click(w("yaml"));
   const stored = yaml().value;
@@ -268,11 +269,9 @@ it("spec_edit_limited_to_values_after_deploy", async () => {
 it("before the first deploy the whole wizard edits the stored spec", async () => {
   const onSaved = await mountEdit(deployment({ deploy_spec: stringify({ ...spec, roles: { nats: { instances: 5 }, web: { instances: 1 } } }) }));
   await click(w("editSpec"));
-  expect(steps()).toHaveLength(5);
-  await click(w("next")); await click(w("next"));
+  expect(sections()).toEqual(['basics', 'target', 'definition', 'parameters']);
   // Prefilled from the stored spec, not the template defaults.
   expect(host.querySelector<HTMLOutputElement>(`output[aria-label="${w("instances")}"]`)!.textContent).toBe("5");
-  await click(w("next")); await click(w("next"));
   // The working directory cannot change on update.
   expect(host.querySelector<HTMLInputElement>('input[name="workdir"]')!.disabled).toBe(true);
   expect(host.querySelector<HTMLInputElement>('input[name="name"]')!.value).toBe("nats-prod");
@@ -286,9 +285,9 @@ it("before the first deploy the whole wizard edits the stored spec", async () =>
 it("cancel closes the spec editor without saving", async () => {
   await mountEdit(deployment());
   await click(w("editSpec"));
-  expect(steps()).toHaveLength(5);
+  expect(sections()).toEqual(['basics', 'target', 'definition', 'parameters']);
   await click(w("cancel"));
-  expect(steps()).toHaveLength(0);
+  expect(sections()).toHaveLength(0);
   expect(requests.some(r => r.method === "PATCH")).toBe(false);
 });
 

@@ -133,6 +133,7 @@ fn entry_json(
         "verification": verification, "verified_drivers": verified_drivers,
     });
     if detail {
+        value["package_files"] = files;
         value["content"] = json!(row.content);
         value["parameters"] = json!(row.parameters);
         value["readme"] = json!(row.readme.unwrap_or_default());

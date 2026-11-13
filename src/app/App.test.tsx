@@ -3,7 +3,7 @@ import { createRoot,type Root } from "react-dom/client";
 import { afterEach,beforeEach,expect,it,vi } from "vitest";
 import { parseActions } from "../features/pipelines/actions-workflow";
 import integrationCatalog from "../shared/workflow-contracts/workflow-integration-nodes.json";
-import { i18n, executionText } from "../shared/i18n/i18n";
+import { i18n, executionText, commonText } from "../shared/i18n/i18n";
 import { setLocale } from "../shared/i18n/locale";
 import { App } from "./App";
 import { defaultSiteSettings, SiteSettingsContext } from "../shared/site/settings";
@@ -40,6 +40,62 @@ beforeEach(() => {
   } })));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+it("keeps shared branding and space selection before account actions in platform chrome", async () => {
+  required = false;
+  const previous = fetch;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => url === "/api/me"
+    ? { ok: true, status: 200, json: async () => ({ user: {id:"1",name:"Admin",email:"admin@example.invalid",is_superadmin:true},workspaces:[{id:"2",name:"Project",permissions:[]}] }) }
+    : previous(url, options)));
+  history.replaceState({}, "", "/zh-CN/platform/workspaces");
+  await act(async () => root.render(<SiteSettingsContext.Provider value={{...defaultSiteSettings,site_name:"Example Console"}}><App /></SiteSettingsContext.Provider>));
+  const header = host.querySelector("[data-app-header]")!;
+  expect(header.textContent).toContain("Example Console");
+  const buttons = [...header.querySelectorAll("button")];
+  const switcher = buttons.findIndex(button => button.getAttribute("aria-label") === "切换空间");
+  expect(switcher).toBeGreaterThanOrEqual(0);
+  expect(switcher).toBeLessThan(buttons.findIndex(button => button.textContent?.includes("Admin")));
+});
+it("uses one account title and preserves profile fields with shared chrome", async () => {
+  required = false;
+  const previous = fetch;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => url === "/api/profile/1"
+    ? { ok:true,status:200,json:async()=>({id:"1",name:"Existing owner",email:"owner@example.invalid"}) }
+    : previous(url, options)));
+  history.replaceState({}, "", "/zh-CN/account");
+  await act(async () => root.render(<App />));
+  expect(host.querySelector("[data-app-header]")).not.toBeNull();
+  expect(host.querySelectorAll("h1")).toHaveLength(1);
+  expect(host.querySelector("[data-resource-heading]")).toBeNull();
+  expect(host.querySelector<HTMLInputElement>('input[name="name"]')?.value).toBe("Existing owner");
+  const header = host.querySelector("[data-app-header]")!;
+  expect(header.querySelector('button[aria-label="切换空间"]')).not.toBeNull();
+  expect([...header.querySelectorAll("button")].some(button => button.textContent?.includes("Existing owner"))).toBe(true);
+  expect(header.textContent).not.toContain("owner@example.invalid");
+  expect(host.querySelector('input[name="email"]')).toBeNull();
+  expect(host.querySelector('main button[aria-label="主题"]')?.getAttribute("type")).toBe("button");
+  const name = host.querySelector<HTMLInputElement>('input[name="name"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(name, "Unsaved name");
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const security = [...host.querySelectorAll<HTMLButtonElement>('main nav button')].find(button => button.textContent === "账号安全")!;
+  expect(security).toBeTruthy();
+  await act(async () => security.click());
+  expect(new URLSearchParams(location.search).get("section")).toBe("security");
+  expect(host.querySelector<HTMLInputElement>('input[name="email"]')?.value).toBe("owner@example.invalid");
+  expect(host.querySelector('input[name="new_password"]')).not.toBeNull();
+  expect(host.querySelector('input[name="current_password"]')).not.toBeNull();
+  expect(host.querySelector("[data-avatar-editor]")).toBeNull();
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('main nav button')].find(button => button.textContent === "基础资料")!.click());
+  expect(host.querySelector<HTMLInputElement>('input[name="name"]')?.value).toBe("Unsaved name");
+  expect(host.textContent).toContain("主题和语言立即生效并自动保存");
+  const back = [...header.querySelectorAll("button")].find(button => button.textContent === commonText("account.back"))!;
+  expect(back).toBeTruthy();
+  expect(back.parentElement).toBe(header);
+  expect(header.firstElementChild?.nextElementSibling).toBe(back);
+  await act(async () => back.click());
+  expect(location.pathname).toBe("/zh-CN/workspaces/2/dashboard");
+});
 it("keeps notification templates and deliveries in tabs under one grouped maintenance menu", async () => {
   required = false;
   permissions = ["notifications.read", "members.read", "roles.read", "ai-agents.read", "ai-models.read", "settings.read"];

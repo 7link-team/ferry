@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ScrollFormSections } from "./ScrollFormSections";
+import { ScrollFormSections } from "../../shared/ui/scroll-form-sections";
 
 let host: HTMLDivElement, root: Root;
 beforeEach(() => {

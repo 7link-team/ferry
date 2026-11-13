@@ -3,7 +3,7 @@ import { installIntegrationCatalog, type IntegrationManifest } from "../features
 import { TypedValueList } from "./pages/TypedValueList";
 import { ConversationsWorkspace } from "./pages/ConversationsWorkspace";
 import { cn } from "cn";
-import { BrandIcon } from "../shared/site/BrandIcon";
+import { AppHeader } from "./AppHeader";
 import { MobileNavigation } from "./MobileNavigation";
 import { ChevronDown, ChevronRight, LogOut } from "lucide-react";
 import { LoadingSkeleton } from "../shared/ui/loading-skeleton";
@@ -32,7 +32,7 @@ import { Entry } from "./Entry";
 import { findGroup,findItem,nav,type NavGroup,type NavItem } from "./nav";
 import { CodeInsightDetail } from "./pages/CodeInsight";
 import { DeploymentDetail } from "./pages/DeploymentDetail";
-import { BlueprintWizard } from "../features/deployments/BlueprintWizard";
+import { ApplicationCreate } from "./pages/ApplicationCreate";
 import { HostDetail } from "./pages/HostDetailPage";
 import { HostList } from "./pages/HostListPage";
 import { HostWorkspace } from "./pages/HostWorkspace";
@@ -45,7 +45,6 @@ import { ResourceForm } from "./resources/ResourceForm";
 import { ResourceTable } from "./resources/ResourceTable";
 import { href,isLoginPath,isPublicEntryPath,navigate,navigateToLogin,replacePath,safeLoginRedirect,useRoute } from "./router";
 import { useDocumentTitle } from "./document-title";
-import { useSiteSettings } from "../shared/site/settings";
 
 export function App() {
   useCommonTranslation();
@@ -134,7 +133,7 @@ export function App() {
   if (setupRequired && !deferredSetup)
     return <><AppearanceActions floating /><Entry signedIn initialize onReady={() => { setDeferredSetup(true); reload(); }} error={error} /></>;
   if (route.workspace === "_workspaces") return <div className="h-full overflow-auto"><AppearanceActions floating />{(identity.workspaces.length > 0 || identity.user.is_superadmin) && <Button className="absolute top-4 left-4" variant="outline" onClick={() => navigate(identity.workspaces.length ? {workspace:identity.workspaces[0]!.id,group:"host",item:"hosts",mode:"list"} : {workspace:"_platform",group:"platform",item:"workspaces",mode:"list"}, {})}>{commonText("shell.backWorkspace")}</Button>}<Entry signedIn onReady={reload} error={error} /></div>;
-  if (route.workspace === "_account") return <Account identity={identity} reload={reload} headerActions={<AppearanceActions />} />;
+  if (route.workspace === "_account") return <Account identity={identity} reload={reload} headerActions={<WorkspaceHeaderActions identity={identity} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={signedOut} />} />;
   if (route.workspace === "_platform" || (identity.user.is_superadmin && !route.workspace))
     return <Platform identity={identity} reload={reload} onSignedOut={signedOut} headerActions={<WorkspaceHeaderActions identity={identity} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={signedOut} />} />;
   if (route.group === "host" && route.item === "hosts" && route.mode === "workspace" && route.id) {
@@ -148,7 +147,6 @@ export function App() {
 function Workspace({ identity, reload, onSignedOut }: { identity: Identity; reload: () => void; onSignedOut: () => void }) {
   useCommonTranslation();
   const { t } = useTranslation();
-  const site = useSiteSettings();
   const route = useRoute();
 
   const current =
@@ -255,10 +253,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
 
   return (
     <div className="grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] md:grid-rows-[auto_minmax(0,1fr)]">
-      <header className="flex min-h-12 min-w-0 flex-wrap items-center gap-x-5 gap-y-1 border-b border-border bg-background px-4 py-1">
-        <a className="flex min-w-0 max-w-full items-center gap-2 font-semibold tracking-tight sm:max-w-xs" {...to(nav[0]!.key, nav[0]!.items[0]!.key)}>
-          <BrandIcon /><span className="min-w-0 break-words [overflow-wrap:anywhere]">{site.site_name || t("app.title")}</span>
-        </a>
+      <AppHeader home={to(nav[0]!.key, nav[0]!.items[0]!.key)} navigation={
         <nav className="hidden min-w-0 max-w-full gap-1 overflow-x-auto md:flex" aria-label={t("app.modules")}>
           {groups.map((g) => (
             <a
@@ -274,13 +269,13 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
             </a>
           ))}
         </nav>
-        <span className="flex-1" />
+      } actions={<>
         <div className="flex min-w-0 max-w-full items-center gap-1">
           <WorkspaceSwitcher identity={identity} current={current} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} />
           {identity.user.is_superadmin && <Button variant="ghost" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
         </div>
         <WorkspaceHeaderActions identity={identity} onSignedOut={onSignedOut} />
-      </header>
+      </>} />
 
       {item.resource === "conversations" ? <ConversationsWorkspace key={current.id} workspace={current.id} permissions={permissions} form={formConfig} /> : <div className="grid min-h-0 min-w-0 grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)]">
         <nav
@@ -393,10 +388,9 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
             <CodeInsightDetail key={`${current.id}/${route.id}`} workspace={current.id} insightId={route.id} permissions={permissions} />
           ) : (route.mode === "view" || (route.mode === "edit" && new URLSearchParams(location.search).get("tab") === "monitoring")) && item.resource === "code-connections" && route.id && formConfig ? (
             <RepositoryConnectionDetail key={`${current.id}/${route.id}`} workspace={current.id} connectionId={route.id} permissions={permissions} form={formConfig} />
-          ) : route.mode === "new" && item.resource === "deployments" && new URLSearchParams(location.search).get("wizard") === "blueprint" ? (
-            // Its own scroll area, like the shared form: the sticky actions stay above the phone navigation.
+          ) : route.mode === "new" && item.resource === "deployments" && formConfig ? (
             <div className="min-h-0 overflow-auto">
-              <BlueprintWizard key={`${current.id}/${location.search}`} workspace={current.id} templateId={new URLSearchParams(location.search).get("template") ?? ""} version={Number(new URLSearchParams(location.search).get("version")) || 0} permissions={permissions} navigation={{ href, navigate }} />
+              <ApplicationCreate key={current.id} workspace={current.id} permissions={permissions} config={formConfig} navigation={{ href, navigate }} />
             </div>
           ) : route.mode === "view" && (item.resource === "deployments" || item.resource === "deployment-revisions") && route.id ? (
             <DeploymentDetail key={`${current.id}/${item.resource}/${route.id}`} workspace={current.id} {...(item.resource === "deployments" ? { deploymentId: route.id } : { revisionId: route.id })} permissions={permissions} />
@@ -448,14 +442,15 @@ function AppearanceActions({ floating = false }: { floating?: boolean }) {
 
 function WorkspaceHeaderActions({ identity, onWorkspaces, onSignedOut }: { identity: Identity; onWorkspaces?: () => void; onSignedOut: () => void }) {
   const { t } = useTranslation();
-  return <>
+  return <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+        {onWorkspaces && <WorkspaceSwitcher identity={identity} onWorkspaces={onWorkspaces} />}
         <AppearanceActions />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" className="min-h-11 min-w-0 max-w-[min(16rem,calc(100vw-2rem))]">
               <IdentityAvatar id={identity.user.id} name={identity.user.name} kind="user" value={identity.user.avatar} className="size-7" />
-              {identity.user.name}
+              <span className="truncate">{identity.user.name}</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -467,8 +462,7 @@ function WorkspaceHeaderActions({ identity, onWorkspaces, onSignedOut }: { ident
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        {onWorkspaces && <WorkspaceSwitcher identity={identity} onWorkspaces={onWorkspaces} />}
-  </>;
+  </div>;
 }
 
 function WorkspaceSwitcher({ identity, current, onWorkspaces }: { identity: Identity; current?: Identity["workspaces"][number]; onWorkspaces: () => void }) {
@@ -477,7 +471,7 @@ function WorkspaceSwitcher({ identity, current, onWorkspaces }: { identity: Iden
   return (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="min-w-0 max-w-[min(18rem,calc(100vw-2rem))] shrink gap-1.5" aria-label={workflowText("switchWorkspace")}>
+            <Button variant="ghost" size="sm" className="min-h-11 min-w-0 max-w-[min(18rem,calc(100vw-2rem))] shrink gap-1.5" aria-label={workflowText("switchWorkspace")}>
               <span className="truncate">{current?.name ?? workflowText("switchWorkspace")}</span>
               <ChevronDown className="size-4 shrink-0" />
             </Button>

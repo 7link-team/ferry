@@ -1,6 +1,6 @@
 import { useQueryValue, useScrollSync } from "../router";
 import { ResourceHeading } from "../../shared/ui/resource-heading";
-import { ScrollFormSections } from "./ScrollFormSections";
+import { ConfigurationSection, ScrollFormSections } from "../../shared/ui/scroll-form-sections";
 import { TemplateChooserDialog } from "./TemplateChooserDialog";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { AutoField,AutoFields,AutoForm,FieldControl,selectDisplay } from "../../shared/forms/auto-form";
@@ -24,7 +24,7 @@ import { ArrowLeft,Copy,Download,Loader2,Play,Save,SlidersHorizontal,Upload } fr
 import { Dialog } from "radix-ui";
 import { useCallback,useEffect,useId,useRef,useState,type ReactNode } from "react";
 import { toast } from "sonner";
-import { ManifestEditor } from "../../features/deployments/ManifestEditor";
+import { ApplicationTemplateEditor } from "../../features/templates/ApplicationTemplateEditor";
 import { ActionNotification } from "../../features/notifications/ActionNotification";
 import { ActionsEditor } from "../../features/pipelines/ActionsEditor";
 import { findItem } from "../nav";
@@ -100,6 +100,9 @@ export function ResourceForm<T extends Record<string, unknown>>({
   groupLinks,
   groupContent,
   onGroupChange,
+  templatePresentation = "dialog",
+  onSelectTemplate,
+  record,
 }: {
   config: FormConfig<T>;
   workspace: string;
@@ -116,6 +119,10 @@ export function ResourceForm<T extends Record<string, unknown>>({
   groupLinks?: ReactNode;
   groupContent?: ReactNode;
   onGroupChange?: () => void;
+  templatePresentation?: "dialog" | "page";
+  onSelectTemplate?: (id: string) => Promise<boolean>;
+  /** An owner that already loads/polls a detail record can reuse this view without a second data source. Always readonly. */
+  record?: T;
 }) {
   useCommonTranslation();
   const pageRoute = useRoute();
@@ -140,14 +147,15 @@ export function ResourceForm<T extends Record<string, unknown>>({
   const presetBlankDraft = { ...baseBlankDraft, ...queryPresets } as Partial<T>;
   const blankDraft = creating && ["workflows", "pipelines"].includes(config.resource)
     ? { ...presetBlankDraft, name: defaultWorkflowName } as Partial<T> : presetBlankDraft;
-  const [draft, setDraft] = useState<Partial<T>>(blankDraft);
+  const [localDraft, setDraft] = useState<Partial<T>>(blankDraft);
+  const draft: Partial<T> = record ?? localDraft;
   const [draftAssets] = useState(createWorkflowDraftAssets);
   const [pendingWorkflow, setPendingWorkflow] = useState<T | null>(null);
   useEffect(() => () => draftAssets.clear(), [draftAssets]);
   const protectedRow = !creating && !!config.readOnly?.(draft);
-  const readOnly = route.mode === "view" || protectedRow;
-  const [loading, setLoading] = useState(!creating || !!copyId);
-  const scrollRef = useScrollSync<HTMLFormElement>(!loading);
+  const readOnly = !!record || route.mode === "view" || protectedRow;
+  const [loading, setLoading] = useState(!record && (!creating || !!copyId));
+  const scrollRef = useScrollSync<HTMLFormElement | HTMLDivElement>(!loading);
   const [saving, setSaving] = useState(false);
   const editorForm = useRef<HTMLFormElement>(null);
   const [pendingAction, setPendingAction] = useState<RowAction<T>>();
@@ -171,6 +179,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (record) { setLoading(false); return; }
     const id = creating ? (config.copy ? copyId : null) : route.id;
     if (!id) { setDraft(blankDraft); setLoading(false); return; }
     let live = true;
@@ -185,9 +194,10 @@ export function ResourceForm<T extends Record<string, unknown>>({
     return () => {
       live = false;
     };
-  }, [creating, copyId, route.id, route.mode, workspace, config]);
+  }, [creating, copyId, route.id, route.mode, workspace, config, record]);
 
   useEffect(() => {
+    if (record) return;
     const delay=route.mode === "view" ? config.pollMs?.(draft) : 0;
     if (!delay || !route.id) return;
     let live=true;
@@ -199,7 +209,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
     };
     timer=setTimeout(load,delay);
     return ()=>{live=false;clearTimeout(timer);};
-  },[route.mode,route.id,workspace,config,draft]);
+  },[route.mode,route.id,workspace,config,draft,record]);
   const returnPath = ["host-groups", "pipeline-groups", "alert-rules", "code-connection-monitors", "code-insights", "holes"].includes(config.resource)
     ? safeLoginRedirect(new URLSearchParams(location.search).get("return_to")) : undefined;
   const returnUrl = returnPath ? new URL(returnPath, location.origin) : undefined;
@@ -223,6 +233,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
       permissions={permissions}
       readOnly={readOnly || (!creating && !!field.immutable) || (creating && field.key in queryPresets) || !!field.disabled?.(draft)}
       asText={readOnly}
+      framedReadOnly={config.sectionAppearance === "configuration"}
       fillHeight={workspaceEditor && (["actions-editor", "actions-template-editor"].includes(field.type) || config.editor?.field === field.key)}
       {...(workspaceEditor ? { editorMode, onEditorModeChange: setEditorMode } : {})}
       onChange={(value) => setDraft((d) => ({
@@ -334,12 +345,14 @@ export function ResourceForm<T extends Record<string, unknown>>({
 
   const templateChooser = config.generator && (templateDialog === "start" || templateDialog === "import") && <TemplateChooserDialog
     config={config.generator} allowBlank={templateDialog === "start"}
+    presentation={templatePresentation} {...(onSelectTemplate ? { onSelectTemplate } : {})}
     onBlank={() => setTemplateDialog(null)}
     onCancel={() => { const initial = templateDialog === "start"; setTemplateDialog(null); if (initial) { if (onCancel) onCancel(); else replacePath(backToList); } }}
     onGenerated={value => { setDraft(d => ({ ...d, ...value })); setTemplateDialog(null); }}
     validate={(fields, values) => !incompleteFields(fields, values)}
     renderParameter={(field, value, onChange, busy) => <Field field={field} value={value} readOnly={busy} asText={false} stored={false} creating draft={{ [field.key]: value }} permissions={new Set<string>()} reportOptions={() => {}} onChange={onChange} />}
   />;
+  if (templatePresentation === "page" && templateChooser) return <div className="min-w-0 pb-6">{templateChooser}</div>;
   if (workspaceEditor) {
     const fields = config.sections.flatMap(section => section.fields).filter(field => !field.when || field.when(draft));
     const editor = fields.find(field => config.editor ? field.key === config.editor.field : ["actions-editor", "actions-template-editor"].includes(field.type));
@@ -423,8 +436,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
             </Button>
       </FormActions>}
   </>;
-  return (
-    <AutoForm ref={scrollRef} className={cn("min-w-0 w-full pb-8", readOnly ? "resource-detail" : "space-y-4")} onSubmit={submit}>
+  const formContent = <>
       {showHeading && config.sectionNavigation !== "scroll" && !createInPlace && <ResourceHeading name={recordName} />}
       {hostConnectionTabs}
       {!readOnly && config.description && <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{configText(config.description, config.descriptionKey)}</p>}
@@ -449,6 +461,12 @@ export function ResourceForm<T extends Record<string, unknown>>({
       const renderSection = (section: FormConfig<T>["sections"][number], index: number) => {
         const fields = section.fields.filter((field) => !(creating && config.resource === "hosts" && field.key === "connection") && (!field.when || field.when(draft)));
         if (!fields.length) return null;
+        if (config.sectionAppearance === "configuration") return <ConfigurationSection key={section.group ?? index}
+          title={configText(section.title, section.titleKey) || commonText("common.basic")}
+          actions={readOnly && visibleViewActions.filter(action => action.section ? action.section === section.title : index === primarySection).map(renderViewAction)}>
+          <AutoFields fields={Object.fromEntries(fields.map(field => [field.key, { name: configText(field.label, field.labelKey), type: "custom" as const, col: field.span ?? 1, framed: false, render: () => renderField(field) }]))}
+            values={draft} onChange={values => setDraft(values as Partial<T>)} readonly={readOnly} />
+        </ConfigurationSection>;
         return (
           <section key={section.title ?? index} aria-label={configText(section.title, section.titleKey) || (readOnly ? index === 0 ? commonText("common.basic") : commonText("common.other") : undefined)} className={readOnly ? "detail-section" : "min-w-0 w-full space-y-4 rounded-xl border bg-card p-4 text-card-foreground"}>
             {(section.title || readOnly) && (
@@ -462,7 +480,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
           </section>
         );
       };
-      const groups = [...new Set(config.sections.map(section => section.group).filter((group): group is string => !!group))];
+      const groups = [...new Set(config.sections.filter(section => section.fields.some(field => !field.when || field.when(draft))).map(section => section.group).filter((group): group is string => !!group))];
       if (!groups.length) return config.sections.map(renderSection);
       if (config.sectionNavigation === "scroll") return <ScrollFormSections name={recordName} sections={groups.map(name => ({ key: name, label: configText(name, config.sections.find(section => section.group === name)?.groupKey), content: config.sections.map((section, index) => ({ section, index })).filter(({ section }) => (section.group ?? groups[0]) === name).map(({ section, index }) => renderSection(section, index)) }))} footer={formActions} />;
       const active = groups.includes(group) ? group : groups[0]!;
@@ -489,8 +507,10 @@ export function ResourceForm<T extends Record<string, unknown>>({
       })()}
 
       {!hasSectionGroups && formActions}
-    </AutoForm>
-  );
+    </>;
+  const formClass = cn("min-w-0 w-full pb-8", readOnly ? "resource-detail" : "space-y-4");
+  return record ? <div ref={node => { scrollRef.current = node; }} className={formClass}>{formContent}</div>
+    : <AutoForm ref={node => { scrollRef.current = node; }} className={formClass} onSubmit={submit}>{formContent}</AutoForm>;
 }
 
 function SecretField<T>({ field, value, stored, creating, asText, readOnly, draft, permissions, onChange }: {
@@ -538,6 +558,7 @@ function Field<T>({
   value,
   readOnly,
   asText,
+  framedReadOnly = false,
   stored,
   creating,
   draft,
@@ -553,6 +574,7 @@ function Field<T>({
   value: unknown;
   readOnly: boolean;
   asText: boolean;
+  framedReadOnly?: boolean;
   stored: boolean;
   creating: boolean;
   draft: Partial<T>;
@@ -633,7 +655,7 @@ function Field<T>({
   if (field.type === "author-aliases") return <CodeInsightAliases value={value} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} />;
   if (field.type === "repository-source") return <div className="min-w-0 sm:col-span-2"><RepositorySource workspace={workspace} draft={draft} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 
-  if (field.type === "manifest") return <Wrapper field={field}><ManifestEditor value={text} mode={String((draft as Record<string, unknown>).mode ?? "compose")} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} workspace={workspace} /></Wrapper>;
+  if (field.type === "manifest") return <Wrapper field={field}><ApplicationTemplateEditor value={text} mode={String((draft as Record<string, unknown>).mode ?? "compose")} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} workspace={workspace} /></Wrapper>;
   if (field.type === "cron" && asText) return <Wrapper field={field}>{label}<p className="break-words font-mono text-sm">{text || "—"}</p></Wrapper>;
   if (field.type === "cron") return <Wrapper field={field}><CronEditor value={text} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} />{field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}</Wrapper>;
 
@@ -700,7 +722,7 @@ function Field<T>({
     return (
       <Wrapper field={field}>
         {label}
-        <div className="flex min-w-0 items-start gap-2"><p className={cn("min-h-5 min-w-0 flex-1 text-sm break-words", (field.type === "code" || field.type === "textarea") && "whitespace-pre-wrap", field.type === "code" && "font-mono")}>
+        <div className="flex min-w-0 items-start gap-2"><p data-readonly-field={framedReadOnly ? "" : undefined} className={cn("min-h-5 min-w-0 flex-1 text-sm break-words", framedReadOnly && "min-h-9 rounded-md border border-input bg-background px-3 py-2", framedReadOnly && field.type === "textarea" && "min-h-24", (field.type === "code" || field.type === "textarea") && "whitespace-pre-wrap", field.type === "code" && "font-mono")}>
           {href ? (
             <a className="text-primary underline underline-offset-4" href={href} target="_blank" rel="noopener noreferrer">{href}</a>
           ) : field.type === "switch" ? (

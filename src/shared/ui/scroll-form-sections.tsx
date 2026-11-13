@@ -1,8 +1,18 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { commonText } from "../../shared/i18n/i18n";
-import { ResourceHeading } from "../../shared/ui/resource-heading";
+import { commonText } from "../i18n/i18n";
+import { ResourceHeading } from "./resource-heading";
 
 type Section = { key: string; label: string; content: ReactNode };
+
+export function ConfigurationSection({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
+  return <section aria-label={title} data-configuration-section className="min-w-0 w-full space-y-4 rounded-xl border bg-card p-4 text-card-foreground sm:p-5">
+    <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+      <h2 className="min-w-0 break-words text-sm font-semibold">{title}</h2>
+      {actions && <div className="flex min-w-0 flex-wrap items-center gap-2">{actions}</div>}
+    </div>
+    {children}
+  </section>;
+}
 
 /** A table of contents for one continuous form, using its existing scroll container. */
 export function ScrollFormSections({ name, sections, footer }: { name: string; sections: Section[]; footer: ReactNode }) {

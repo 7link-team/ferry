@@ -2,15 +2,30 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
-import { AvatarEditor, IdentityAvatar, avatarHash } from "./identity-avatar";
+import { AvatarEditor, IdentityAvatar, avatarHash, illustrationSource } from "./identity-avatar";
 
 it("generates stable distinct human and robot avatars without network requests", () => {
   const human = renderToStaticMarkup(<IdentityAvatar id="1" name="User" kind="user" />);
   expect(renderToStaticMarkup(<IdentityAvatar id="1" name="User" kind="user" />)).toBe(human);
   expect(renderToStaticMarkup(<IdentityAvatar id="1" name="Agent" kind="agent" />)).not.toBe(human);
   expect(renderToStaticMarkup(<IdentityAvatar id="2" name="User" kind="user" />)).not.toBe(human);
-  expect(human).not.toContain("<img");
+  expect(human).toContain("data:image/svg+xml");
+  expect(human).not.toContain('src="https:');
   expect(avatarHash("user:1")).toBe(avatarHash("user:1"));
+});
+it("renders distinct offline illustration families and stable seed variations", () => {
+  const styles = ["portrait", "adventurer", "notionists", "lorelei", "pixel-art"] as const;
+  const sources = styles.map(style => illustrationSource(style, "same-seed"));
+  expect(new Set(sources).size).toBe(styles.length);
+  for (const [index, style] of styles.entries()) {
+    expect(illustrationSource(style, "same-seed")).toBe(sources[index]);
+    expect(illustrationSource(style, "another-seed")).not.toBe(sources[index]);
+    const svg = decodeURIComponent(sources[index]!.split(",").slice(1).join(","));
+    expect(svg).toContain("<svg");
+    expect(svg).not.toMatch(/<script|<foreignObject|<image\b/);
+  }
+  const robot = renderToStaticMarkup(<IdentityAvatar id="1" name="Robot" kind="agent" value={{style:"pixel"}} />);
+  expect(robot).toContain('shape-rendering="crispEdges"');
 });
 it("renders emoji as text and never executable markup", () => {
   expect(renderToStaticMarkup(<IdentityAvatar id="1" name="User" kind="user" value={{ style: "emoji", emoji: "<script>" }} />)).toContain("&lt;script&gt;");

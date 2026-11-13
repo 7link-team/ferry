@@ -1,7 +1,7 @@
 import { lazy, Suspense } from "react";
 import { stringify } from "yaml";
 import { isBlueprint } from "../deployments/blueprint-spec";
-import { ApplicationTemplateEditor } from "./ApplicationTemplateEditor";
+import { applicationSections } from "../deployments/application-sections";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { TemplateParametersEditor, templateParameterFields, type TemplateParameter } from "./TemplateParametersEditor";
 import { api } from "../../shared/api/api";
@@ -113,7 +113,7 @@ export const templateForm = (resource: string, application: boolean, workspace =
   form<Template>({
     resource,
     width: "full",
-    ...(application ? { sectionNavigation: "scroll" as const } : {}),
+    ...(application ? { sectionNavigation: "scroll" as const, sectionAppearance: "configuration" as const } : {}),
     // A cluster blueprint is deployed through the wizard at this exact template version.
     ...(application ? { viewActions: [{
       label: "部署",
@@ -189,7 +189,7 @@ export const templateForm = (resource: string, application: boolean, workspace =
       content: r.content,
       parameters: r.parameters,
     }),
-    sections: templateSections(application, [
+    sections: templateSections(application, workspace, [
       {
         fields: [
           {
@@ -205,6 +205,7 @@ export const templateForm = (resource: string, application: boolean, workspace =
             labelKey: "common-domain:common.description",
             type: "textarea",
           },
+          ...(application ? [{ key: "files", label: "Files", labelKey: "resource-domain:market.files", type: "custom" as const, span: 2 as const }] : []),
           {
             key: "parameters",
             when: () => resource !== "pipeline-templates",
@@ -230,7 +231,7 @@ export const templateForm = (resource: string, application: boolean, workspace =
                   ? "resource-domain:template.appContent"
                   : "resource-domain:template.pipelineContent",
             type: resource === "pipeline-templates" ? "actions-template-editor" : "custom",
-            ...(resource === "pipeline-templates" ? {} : { render: ({ draft, readOnly, onPatch, onValidityChange }) => application ? <ApplicationTemplateEditor value={String(draft.content ?? "")} workspace={workspace} templateParameters={readTemplateParameters(String(draft.parameters ?? "[]"))} readOnly={readOnly} onChange={content => onPatch({ content })} onValidityChange={onValidityChange} /> : <div className="h-[28rem] min-w-0 overflow-hidden rounded-md border"><Suspense fallback={<LoadingSkeleton variant="editor" />}><TemplateCodeEditor value={String(draft.content ?? "")} language={application ? "yaml" : "plaintext"} path={`${workspace}/${resource}/${draft.id ?? "new"}/content.${application ? "yaml" : "txt"}`} label={commonText("resource-domain:deployment.config")} readOnly={readOnly} onChange={content => onPatch({ content })} /></Suspense></div> }),
+            ...(resource === "pipeline-templates" ? {} : { render: ({ draft, readOnly, onPatch }) => <div className="h-[28rem] min-w-0 overflow-hidden rounded-md border"><Suspense fallback={<LoadingSkeleton variant="editor" />}><TemplateCodeEditor value={String(draft.content ?? "")} language={application ? "yaml" : "plaintext"} path={`${workspace}/${resource}/${draft.id ?? "new"}/content.${application ? "yaml" : "txt"}`} label={commonText("resource-domain:deployment.config")} readOnly={readOnly} onChange={content => onPatch({ content })} /></Suspense></div> }),
             ...(resource === "pipeline-templates" ? { options: pipelineExecutorOptions(workspace, permissions) } : {}),
             span: 2,
             required: true,
@@ -252,18 +253,11 @@ export const templateForm = (resource: string, application: boolean, workspace =
     ]),
   });
 
-function templateSections(application: boolean, sections: FormConfig<Template>["sections"]): FormConfig<Template>["sections"] {
-  return sections.flatMap(section => application ? [
-      { group: "basics", groupKey: "common-domain:common.basic", title: "basics", titleKey: "common-domain:common.basic", fields: section.fields.filter(field => ["name", "description"].includes(field.key)) },
-      { group: "definition", groupKey: "resource-domain:template.definition", title: "definition", titleKey: "resource-domain:template.definition", fields: section.fields.filter(field => field.key === "content") },
-      { group: "parameters", groupKey: "resource-domain:template.parameters", title: "parameters", titleKey: "resource-domain:template.parameters", fields: section.fields.filter(field => field.key === "parameters") },
-    ] : [section]);
+function templateSections(application: boolean, workspace: string, sections: FormConfig<Template>["sections"]): FormConfig<Template>["sections"] {
+  return application ? applicationSections(sections, workspace) : sections;
 }
 
-function readTemplateParameters(value: string): TemplateParameter[] {
-  try { const rows: unknown = JSON.parse(value); return Array.isArray(rows) ? rows.filter(row => row && typeof row.name === "string" && typeof row.type === "string") : []; }
-  catch { return []; }
-}
+
 
 export const templateGenerator = (
   workspace: string,

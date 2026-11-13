@@ -5,7 +5,6 @@ export const PALETTES = [
   { value: "modern", label: "现代简约" },
   { value: "business", label: "商务渐变" },
   { value: "eyeCare", label: "护眼模式" },
-  { value: "pinkKawaii", label: "粉色可爱" },
   { value: "neoBrutalism", label: "新粗野主义" },
   { value: "custom", label: "自定义" },
 ] as const;

@@ -1,4 +1,7 @@
 {
+  "nativeCatalogAtExecution": ["CLI runs on an execution node. Add model IDs manually here, or leave the default empty to use the CLI configuration. Native model discovery belongs to the execution context; this page does not select a host.", "CLI 在执行节点上运行。此处手动填写模型标识，或留空默认模型以使用 CLI 自身配置；原生模型清单在确定执行节点后获取，本页不选择主机。", "CLI 在執行節點上運行。此處手動填寫模型識別碼，或留空預設模型以使用 CLI 自身設定；原生模型清單在確定執行節點後取得，本頁不選擇主機。", "CLI は実行ノードで動作します。ここではモデル ID を入力するか、既定値を空欄にして CLI の設定を使用します。ネイティブモデルの取得は実行時に行い、このページでホストは選択しません。", "CLI는 실행 노드에서 작동합니다. 모델 ID를 직접 입력하거나 기본 모델을 비워 CLI 설정을 사용합니다. 기본 모델 검색은 실행 환경에서 수행하며 이 페이지에서 호스트를 선택하지 않습니다.", "CLI berjalan pada nod pelaksanaan. Masukkan ID model secara manual atau biarkan model lalai kosong untuk menggunakan konfigurasi CLI. Penemuan model asli dilakukan dalam konteks pelaksanaan; halaman ini tidak memilih hos."],
+  "qpsHelp": ["Maximum API requests started per second: an integer from 1 to 1000. Applies to API requests sent by the platform, not requests made internally by a CLI.", "每秒最多发起的 API 请求数：1–1000 的整数。限制平台直接发起的 API 请求，不限制 CLI 内部请求。", "每秒最多發起的 API 請求數：1–1000 的整數。限制平台直接發起的 API 請求，不限制 CLI 內部請求。", "1 秒あたりに開始する API リクエスト数。1～1000 の整数です。プラットフォームが送信する API リクエストに適用され、CLI 内部のリクエストには適用されません。", "초당 시작할 최대 API 요청 수로 1~1000의 정수입니다. 플랫폼이 직접 보내는 API 요청에 적용되며 CLI 내부 요청에는 적용되지 않습니다.", "Maksimum permintaan API dimulakan sesaat: integer 1 hingga 1000. Terpakai pada permintaan API oleh platform, bukan permintaan dalaman CLI."],
+  "concurrencyHelp": ["Maximum simultaneous API requests: an integer from 1 to 100. Applies to API requests sent by the platform, not the number of CLI processes or internal CLI requests.", "同时进行的 API 请求数上限：1–100 的整数。限制平台直接发起的 API 请求，不代表 CLI 进程数，也不限制 CLI 内部请求。", "同時進行的 API 請求數上限：1–100 的整數。限制平台直接發起的 API 請求，不代表 CLI 程序數，也不限制 CLI 內部請求。", "同時 API リクエスト数の上限。1～100 の整数です。プラットフォームの API リクエストに適用され、CLI プロセス数や内部リクエストには適用されません。", "동시 API 요청 수 상한으로 1~100의 정수입니다. 플랫폼 API 요청에 적용되며 CLI 프로세스 수나 내부 요청에는 적용되지 않습니다.", "Maksimum permintaan API serentak: integer 1 hingga 100. Terpakai pada API oleh platform, bukan bilangan proses atau permintaan dalaman CLI."],
   "catalogRunner": ["Catalog Runner", "获取模型清单的主机", "取得模型清單的主機", "モデル一覧のホスト", "모델 목록 호스트", "Hos katalog model"],
   "nativeCatalogHelp": ["Read the selected Runner user's native CLI catalog. Availability depends on that host's login and provider; unavailable catalogs can be entered manually, one model per row.", "读取所选主机执行用户的原生CLI模型清单，可用模型取决于该主机的登录与服务商；无法获取时按行手动添加。", "讀取所選主機執行使用者的原生CLI模型清單，可用模型取決於該主機的登入與服務商；無法取得時按行手動新增。", "選択したホストのCLIモデル一覧を取得します。取得できない場合は行ごとに追加できます。", "선택한 호스트 사용자의 CLI 모델 목록을 읽습니다. 가져올 수 없으면 행별로 추가하세요.", "Baca katalog CLI pengguna hos yang dipilih. Ketersediaan bergantung pada log masuk dan pembekal hos; tambah model setiap baris jika katalog tidak tersedia."],
   "nativeCatalogUnavailable": ["This Runner did not provide a native model catalog. Check its CLI login, or add model identifiers manually.", "该主机未提供原生模型清单，请检查CLI登录状态，或按行手动添加模型。", "該主機未提供原生模型清單，請檢查CLI登入狀態，或按行手動新增模型。", "モデル一覧を取得できません。CLIのログインを確認するか、手動で追加してください。", "모델 목록을 가져올 수 없습니다. CLI 로그인을 확인하거나 모델을 직접 추가하세요.", "Runner ini tidak menyediakan katalog model asli. Semak log masuk CLI atau tambah ID model secara manual."],
@@ -141,5 +144,22 @@
     "一覧は一部です。他のモデルIDは手動で追加できます。",
     "일부 목록입니다. 다른 모델 ID를 직접 추가할 수 있습니다.",
     "Senarai separa. ID model lain boleh ditambah secara manual."
-  ]
+  ],
+  "presets": ["Provider preset", "供应商预设", "供應商預設", "プロバイダープリセット", "공급자 프리셋", "Pratetap pembekal"],
+  "presetCustom": ["Custom", "自定义", "自訂", "カスタム", "사용자 지정", "Tersuai"],
+  "presetSearch": ["Search providers", "搜索供应商", "搜尋供應商", "プロバイダーを検索", "공급자 검색", "Cari pembekal"],
+  "presetHelp": ["Choosing a preset fills the protocol, endpoint and suggested models; you still enter your own API Key. Presets come from CC Switch.", "选择预设后自动填入协议、请求地址和推荐模型，API Key 仍需自行填写。预设来自 CC Switch。", "選擇預設後自動填入協定、請求位址和推薦模型，API Key 仍需自行填寫。預設來自 CC Switch。", "プリセットを選ぶとプロトコル、エンドポイント、推奨モデルが入力されます。API Key はご自身で入力してください。プリセットは CC Switch 由来です。", "프리셋을 선택하면 프로토콜, 엔드포인트, 추천 모델이 채워집니다. API Key는 직접 입력하세요. 프리셋 출처는 CC Switch입니다.", "Memilih pratetap mengisi protokol, titik akhir dan model dicadangkan; anda masih perlu memasukkan API Key sendiri. Pratetap daripada CC Switch."],
+  "presetNone": ["No matching provider", "没有匹配的供应商", "沒有相符的供應商", "一致するプロバイダーはありません", "일치하는 공급자가 없습니다", "Tiada pembekal sepadan"],
+  "presetWebsite": ["Website", "官网", "官網", "公式サイト", "웹사이트", "Laman web"],
+  "presetApiKey": ["Get API Key", "获取 API Key", "取得 API Key", "API Key を取得", "API Key 받기", "Dapatkan API Key"],
+  "category.all": ["All", "全部", "全部", "すべて", "전체", "Semua"],
+  "category.official": ["Official", "官方", "官方", "公式", "공식", "Rasmi"],
+  "category.cn_official": ["China official", "国产官方", "國產官方", "中国公式", "중국 공식", "Rasmi China"],
+  "category.aggregator": ["Aggregators", "聚合平台", "聚合平台", "アグリゲーター", "집계 플랫폼", "Pengagregat"],
+  "category.third_party": ["Third-party", "第三方", "第三方", "サードパーティ", "서드파티", "Pihak ketiga"],
+  "apiModelSource": ["API model", "API 模型", "API 模型", "API モデル", "API 모델", "Model API"],
+  "apiModelSourceHelp": ["A CLI with a custom API can only use an existing API model's connection. Create the API model first if it is not listed.", "CLI 使用自定义 API 时只能选择已有的 API 模型连接；列表中没有时请先新建 API 模型。", "CLI 使用自訂 API 時只能選擇已有的 API 模型連線；清單中沒有時請先新增 API 模型。", "カスタム API を使う CLI は既存の API モデルの接続のみ選択できます。一覧にない場合は先に API モデルを作成してください。", "사용자 지정 API를 쓰는 CLI는 기존 API 모델 연결만 선택할 수 있습니다. 목록에 없으면 먼저 API 모델을 만드세요.", "CLI dengan API tersuai hanya boleh menggunakan sambungan model API sedia ada. Cipta model API dahulu jika tiada dalam senarai."],
+  "apiModelNone": ["No API models yet. Create an API model first.", "暂无 API 模型，请先新建 API 模型。", "尚無 API 模型，請先新增 API 模型。", "API モデルがありません。先に作成してください。", "API 모델이 없습니다. 먼저 만드세요.", "Tiada model API. Cipta model API dahulu."],
+  "apiModelPlaceholder": ["Select an API model", "选择 API 模型", "選擇 API 模型", "API モデルを選択", "API 모델 선택", "Pilih model API"],
+  "apiModelMissing": ["The linked API model is no longer available", "关联的 API 模型已不可用", "關聯的 API 模型已不可用", "関連付けた API モデルは利用できません", "연결된 API 모델을 사용할 수 없습니다", "Model API yang dipautkan tidak lagi tersedia"]
 }

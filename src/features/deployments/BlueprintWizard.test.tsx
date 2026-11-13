@@ -1,3 +1,5 @@
+import { ApplicationCreate } from "../../app/pages/ApplicationCreate";
+import { deploymentsForms } from "./resource-config";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -37,6 +39,7 @@ beforeEach(async () => {
     const body = init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
     requests.push({ url, method, ...(body ? { body } : {}) });
     const reply = (status: number, data: unknown) => ({ ok: status < 400, status, headers: new Headers({ "content-type": "application/json" }), json: async () => data });
+    if (/\/app-templates\?/.test(url)) return reply(200, { items: [template()], total: 1, page: 1, page_size: 12 });
     if (url.includes("/app-templates/42")) return reply(200, template());
     if (url.includes("/nodes")) return reply(200, { items: hosts, total: 3, page: 1, page_size: 200 });
     if (url.includes("/tags")) return reply(200, { items: [{ id: "t1", name: "cache", color: "" }], total: 1, page: 1, page_size: 200 });
@@ -76,7 +79,7 @@ const restore = () => [...host.querySelectorAll("button")].find(b => b.textConte
 const placementSpecs = () => requests.filter(r => r.url.includes("deployment-placements")).map(r => parse(String(r.body?.spec)) as Record<string, unknown>);
 
 it("failover_select_writes_spec_and_explains_manual_class", async () => {
-  await mount(); await click(w("next")); await click(w("next"));
+  await mount();
   const select = host.querySelector<HTMLSelectElement>(`select[aria-label="${w("failoverMode")}"]`)!;
   expect(select.value).toBe("auto");
   expect(host.textContent).toContain(w("failoverNeedsBackup", { role: "nats" }));
@@ -89,14 +92,14 @@ it("failover_select_writes_spec_and_explains_manual_class", async () => {
 it("stack_driver_explains_alert_only", async () => {
   await mount(); await click(w("yaml"));
   await typeYaml(yaml().value.replace("driver: docker", "driver: stack"));
-  await click(w("form")); await click(w("next")); await click(w("next"));
+  await click(w("form"));
   expect(host.textContent).toContain(w("failoverDriverAlertOnly"));
 });
 
 it("instances_stepper_respects_odd_and_bounds", async () => {
   await mount();
   expect(host.textContent).toContain("NATS cluster");
-  await click(w("next")); await click(w("next"));
+
   const count = () => host.querySelector<HTMLOutputElement>(`output[aria-label="${w("instances")}"]`)!.textContent;
   expect(count()).toBe("3");
   expect(host.textContent).toContain(w("instancesHintOdd", { min: 3, max: 9 }));
@@ -111,21 +114,23 @@ it("instances_stepper_respects_odd_and_bounds", async () => {
 
 it("yaml_errors_block_submit_and_keep_form", async () => {
   await mount();
-  await click(w("next")); await click(w("next"));
+
   await click(w("increase", { role: "nats" }));
   await click(w("yaml"));
   const valid = yaml().value;
+  const previewsBeforeInvalid = requests.filter(r => r.url.includes("deployment-placements")).length;
   await typeYaml(`${valid}failover: {mode: sometimes}\n`);
   expect(alertWith("failover")).toBeDefined();
-  expect(button(w("next")).disabled).toBe(true);
+  expect(button(w("create")).disabled).toBe(true);
   await typeYaml("roles: [");
-  expect(button(w("next")).disabled).toBe(true);
+  expect(button(w("create")).disabled).toBe(true);
   await click(w("form"));
   // The form shows the last valid spec, locked, and explains why the wizard is blocked.
   expect(host.querySelector<HTMLOutputElement>(`output[aria-label="${w("instances")}"]`)!.textContent).toBe("5");
   expect(alertWith(w("yamlInvalid"))).toBeDefined();
-  expect(button(w("next")).disabled).toBe(true);
+  expect(button(w("create")).disabled).toBe(true);
   expect(button(w("increase", { role: "nats" })).disabled).toBe(true);
+  expect(requests.filter(r => r.url.includes("deployment-placements"))).toHaveLength(previewsBeforeInvalid);
   expect([...host.querySelectorAll<HTMLSelectElement>("select")].every(select => select.disabled)).toBe(true);
   await act(async () => button(w("increase", { role: "nats" })).click());
   // Returning to YAML shows the user's text unchanged: the locked form never overwrote it.
@@ -133,22 +138,22 @@ it("yaml_errors_block_submit_and_keep_form", async () => {
   expect(yaml().value).toBe("roles: [");
   // Fixing the YAML unblocks the wizard.
   await typeYaml(valid);
-  expect(button(w("next")).disabled).toBe(false);
+  expect(button(w("create")).disabled).toBe(false);
   // Discarding restores the last valid spec and unlocks the form.
   await typeYaml(`${valid}failover: {mode: sometimes}\n`);
   await click(w("form"));
   await click(w("discardYaml"));
   expect(alertWith(w("yamlInvalid"))).toBeUndefined();
   expect(button(w("increase", { role: "nats" })).disabled).toBe(false);
-  expect(button(w("next")).disabled).toBe(false);
+  expect(button(w("create")).disabled).toBe(false);
   await click(w("yaml"));
   expect(yaml().value).toBe(valid);
-  expect(requests.some(r => r.url.includes("deployment-placements") || (r.url.endsWith("/deployments") && r.method === "POST"))).toBe(false);
+  expect(requests.some(r => r.url.endsWith("/deployments") && r.method === "POST")).toBe(false);
 });
 
 it("placement_preview_renders_rows_and_warnings", async () => {
   await mount();
-  for (let i = 0; i < 3; i++) await click(w("next"));
+  await flush();
   expect(placementSpecs()).toHaveLength(1);
   const table = host.querySelector(`[role="region"][aria-label="${w("placementTitle")}"]`)!;
   const rows = [...table.querySelectorAll("tbody tr")].map(row => row.textContent);
@@ -165,19 +170,19 @@ it("placement_preview_renders_rows_and_warnings", async () => {
   placementReply = () => ({ status: 400, body: { error: "nats needs 3 hosts with tags [cache]; 2 matched: host-a, host-b" } });
   await click(w("refreshPlacement"));
   expect(alertWith("nats needs 3 hosts")).toBeDefined();
-  expect(button(w("next")).disabled).toBe(true);
+  expect(button(w("create")).disabled).toBe(true);
   // A manual placement can be dropped even while the preview fails.
   placementReply = () => ({ status: 200, body: placed([{ hostId: "1", address: "10.0.0.1" }, { hostId: "2", address: "10.0.0.2" }, { hostId: "3", address: "10.0.0.3" }]) });
   await act(async () => restore()!.click()); await flush();
   expect(placementSpecs().at(-1)!).not.toHaveProperty("placement");
   expect(restore()).toBeUndefined();
-  expect(button(w("next")).disabled).toBe(false);
+  expect(button(w("create")).disabled).toBe(false);
 });
 
 it("phone_placement_renders_cards_with_select_and_readonly_address", async () => {
   vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(max-width: 767px)", media: query, addEventListener() {}, removeEventListener() {} }));
   await mount();
-  for (let i = 0; i < 3; i++) await click(w("next"));
+  await flush();
   const region = host.querySelector(`[role="region"][aria-label="${w("placementTitle")}"]`)!;
   expect(region.querySelector("table")).toBeNull();
   const cards = [...region.querySelectorAll("[data-placement-instance]")];
@@ -196,27 +201,27 @@ it("phone_placement_renders_cards_with_select_and_readonly_address", async () =>
 it("roles without distinctHosts may share a host", async () => {
   distinct = false;
   await mount();
-  for (let i = 0; i < 3; i++) await click(w("next"));
+  await flush();
   await chooseHost("nats-1", "3");
   expect(placementSpecs().at(-1)!.placement).toEqual({ nats: [{ hostId: "1", address: "10.0.0.1" }, { hostId: "3", address: "10.0.0.3" }, { hostId: "3", address: "10.0.0.3" }] });
 });
 
 it("changing instances or selectors drops the role's stale manual placement", async () => {
   await mount();
-  for (let i = 0; i < 3; i++) await click(w("next"));
+  await flush();
   await chooseHost("nats-1", "3");
   expect(placementSpecs().at(-1)!.placement).toBeDefined();
-  await click(w("back"));
+
   await click(w("increase", { role: "nats" }));
   let spec = parse(await specOf()) as Record<string, unknown>;
   expect(spec).not.toHaveProperty("placement");
   expect(spec.roles).toEqual({ nats: { instances: 5 } });
-  await click(w("next"));
+
   expect(placementSpecs().at(-1)!).not.toHaveProperty("placement");
   expect((placementSpecs().at(-1)!.roles as { nats: { instances: number } }).nats.instances).toBe(5);
   // The same holds for the role's host selector.
   await chooseHost("nats-1", "3");
-  await click(w("back"));
+
   const tags = host.querySelector<HTMLSelectElement>('select[name="nats-tags"]')!;
   await act(async () => { tags.options[0]!.selected = true; tags.dispatchEvent(new Event("change", { bubbles: true })); });
   await flush();
@@ -229,7 +234,7 @@ it("shows the latest placement when an earlier reply arrives last", async () => 
   let release!: (value: { status: number; body: unknown }) => void;
   placementReply = () => new Promise(resolve => { release = resolve; });
   await mount();
-  for (let i = 0; i < 3; i++) await click(w("next"));
+  await flush();
   const first = release;
   // While the first request is pending, a YAML edit changes the spec and the form recalculates.
   placementReply = () => ({ status: 200, body: placed([{ hostId: "1", address: "fresh-0" }, { hostId: "2", address: "fresh-1" }, { hostId: "3", address: "fresh-2" }]) });
@@ -241,7 +246,7 @@ it("shows the latest placement when an earlier reply arrives last", async () => 
   await flush();
   expect(host.textContent).toContain("fresh-0");
   expect(host.textContent).not.toContain("stale-0");
-  expect(button(w("next")).disabled).toBe(false);
+  expect(button(w("create")).disabled).toBe(false);
 });
 
 it("offers the Swarm manager only for stack and drops it when the driver changes", async () => {
@@ -249,17 +254,17 @@ it("offers the Swarm manager only for stack and drops it when the driver changes
   const driver = () => host.querySelector<HTMLSelectElement>("section select")!;
   expect([...driver().options].map(option => option.textContent)).toEqual([w("driverDocker"), w("driverStack")]);
   const pick = async (select: HTMLSelectElement, value: string) => { await act(async () => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); }); await flush(); };
-  await click(w("next")); await click(w("next"));
+
   expect(host.textContent).not.toContain(w("manager"));
-  await click(w("back")); await click(w("back"));
+
   await pick(driver(), "stack");
-  await click(w("next")); await click(w("next"));
+
   expect(host.textContent).toContain(w("manager"));
-  expect(button(w("next")).disabled).toBe(true);
+  expect(button(w("create")).disabled).toBe(true);
   await pick(host.querySelector<HTMLSelectElement>(`select[aria-label="${w("manager")}"]`)!, "host-a");
-  expect(button(w("next")).disabled).toBe(false);
+  expect(button(w("create")).disabled).toBe(false);
   expect(parse(await specOf())).toMatchObject({ driver: "stack", manager: "host-a" });
-  await click(w("back")); await click(w("back"));
+
   await pick(driver(), "docker");
   const spec = parse(await specOf()) as Record<string, unknown>;
   expect(spec.driver).toBe("docker");
@@ -268,7 +273,7 @@ it("offers the Swarm manager only for stack and drops it when the driver changes
 
 it("submits_deploy_spec", async () => {
   await mount();
-  for (let i = 0; i < 4; i++) await click(w("next"));
+  await flush();
   const name = host.querySelector<HTMLInputElement>('input[name="name"]')!;
   expect(name.value).toBe("nats-cluster");
   await act(async () => {
@@ -310,4 +315,55 @@ it("market_blueprint_entry_opens_wizard", async () => {
   await deploy.action!(entry);
   expect(requests.find(r => r.url.includes("/marketplace/m1/installations"))?.body).toEqual({ version: 7 });
   expect(marketNavigate).toHaveBeenCalledWith({ group: "deploy", item: "apps", mode: "new" }, { wizard: "blueprint", template: "42", version: "1" });
+});
+
+it("creates NATS from a generic template URL through the shared sections without Application renderings", async () => {
+  history.replaceState({}, "", "/en-US/workspaces/ops/deployments/new?template=42");
+  await act(async () => root.render(<ApplicationCreate workspace="ops" permissions={new Set(["deployments.create", "app-templates.read", "hosts.read"])}
+    config={deploymentsForms({ workspace: "ops", navigate, permissions: new Set(["app-templates.read"]) }).deployments!} navigation={{ navigate, href: () => "#" }} />));
+  await flush();
+  expect(host.querySelector('[data-scroll-form-sections]')).not.toBeNull();
+  expect(host.querySelector('[data-form-section="parameters"]')).not.toBeNull();
+  expect(host.querySelector('[data-form-section="target"]')).not.toBeNull();
+  expect(host.querySelector('[data-form-section="definition"] [data-application-editor]')).not.toBeNull();
+  expect(host.querySelector('input[name="name"]')).not.toBeNull();
+  expect(button(w("next"))).toBeUndefined();
+  expect(requests.some(request => request.url.includes("renderings"))).toBe(false);
+  expect(button(w("create")).disabled).toBe(false);
+  await click(w("create"));
+  const created = requests.find(request => request.method === "POST" && request.url.endsWith("/deployments"))!;
+  expect(created.body?.manifest).toBeUndefined();
+  expect(parse(String(created.body?.deploy_spec)).template).toEqual({ id: "42", version: 3 });
+  expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ id: "99", mode: "view" }), {});
+});
+
+it("keeps unified creation blocked on failed placement and retries without losing values", async () => {
+  placementReply = () => ({ status: 400, body: { error: "Need three eligible hosts" } });
+  await act(async () => root.render(<BlueprintWizard workspace="ops" templateId="42" version={3}
+    permissions={new Set(["deployments.create", "app-templates.read", "hosts.read"])} navigation={{ navigate, href: () => "#" }} />));
+  await flush();
+  expect(host.textContent).toContain("Need three eligible hosts");
+  expect(button(w("create")).disabled).toBe(true);
+  await act(async () => button(w("create")).click());
+  expect(requests.some(request => request.method === "POST" && request.url.endsWith("/deployments"))).toBe(false);
+  placementReply = () => ({ status: 200, body: placed(hosts.map(({ id, address }) => ({ hostId: id, address }))) });
+  await click(w("refreshPlacement"));
+  expect(button(w("create")).disabled).toBe(false);
+  expect(host.querySelector<HTMLInputElement>('input[name="name"]')!.value).toBe("nats-cluster");
+  await click(w("yaml")); await typeYaml("invalid: [");
+  expect(button(w("create")).disabled).toBe(true);
+});
+
+it("classifies a NATS catalog selection before generating ordinary service configuration", async () => {
+  await act(async () => root.render(<ApplicationCreate workspace="ops" permissions={new Set(["deployments.create", "app-templates.read", "hosts.read"])}
+    config={deploymentsForms({ workspace: "ops", navigate, permissions: new Set(["app-templates.read"]) }).deployments!} navigation={{ navigate, href: () => "#" }} />));
+  await flush();
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(host.querySelector('[data-template-selection]')).not.toBeNull();
+  const radio = host.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1]!;
+  await act(async () => radio.click()); await flush();
+  await click(commonText("form.configureTemplate"));
+  expect(host.querySelector('[data-form-section="target"]')).not.toBeNull();
+  expect(requests.some(request => request.url.includes("renderings"))).toBe(false);
+  expect(button(w("create")).disabled).toBe(false);
 });

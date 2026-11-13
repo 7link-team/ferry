@@ -11,6 +11,7 @@ pub(super) fn executable(runtime: Runtime) -> Option<std::path::PathBuf> {
         Runtime::Opencode => "opencode",
         Runtime::Pi => "pi",
         Runtime::Dsh => "dsh",
+        Runtime::Kimi => "kimi",
     };
     let path = std::env::var_os("PATH")?;
     for directory in std::env::split_paths(&path) {

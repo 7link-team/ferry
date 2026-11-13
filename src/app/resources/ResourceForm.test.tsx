@@ -293,7 +293,7 @@ it("shows semantic empty labels for zero host references and resolves real group
   expect(host.textContent).toContain("Production group");
   expect(host.textContent).toContain("Jump server");
 });
-it("shows a repository event's commits, links and times, and omits an unknown operator", async () => {
+it("shows a repository event's commits, links and times, and labels the committer when polling has no operator", async () => {
   history.replaceState({}, "", "/ops/build/repository-events/8");
   stored = {
     id: "8", connection_id: "3", event: "push", repository: "team/app", reference: "main", actor: "", action: "轮询检测：分支提交发生变化",
@@ -308,7 +308,8 @@ it("shows a repository event's commits, links and times, and omits an unknown op
   await act(async () => root.render(<ResourceForm config={formConfigs("ops", permissions)["repository-events"]!} workspace="ops" permissions={permissions} />));
   expect(requests[0]!.url).toBe("/api/workspaces/ops/repository-events/8");
   expect(formConfigs("ops", permissions)["repository-events"]!.heading(stored)).toBe("代码推送 · team/app");
-  expect(host.textContent).not.toContain("操作人");
+  expect(host.textContent).toContain("操作人");
+  expect(host.textContent).toContain("Ann（提交者）");
   expect(host.textContent).not.toContain("未知");
   expect(host.textContent).toContain(new Date(Number(stored.created_at)).toLocaleString("zh-CN"));
   const list = host.querySelector('ol[aria-label="提交列表"]')!;

@@ -1,5 +1,5 @@
+import { ConfigurationSection, ScrollFormSections } from "../../shared/ui/scroll-form-sections";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { cn } from "cn";
 import { Minus, Plus } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
 import { base, named } from "../../shared/api/resource";
@@ -9,8 +9,8 @@ import { commonText, useCommonTranslation } from "../../shared/i18n/i18n";
 import { namedOptions } from "../../shared/resources/config";
 import type { Option } from "../../shared/resources/types";
 import type { Navigation } from "../../shared/routing/types";
-import { Badge } from "../../shared/ui/badge";
 import { Button } from "../../shared/ui/button";
+import { Badge } from "../../shared/ui/badge";
 import { AutoTable } from "../../shared/tables/auto-table";
 import { Input } from "../../shared/ui/input";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
@@ -22,6 +22,8 @@ import {
 } from "./blueprint-spec";
 import { allHosts, type HostRow } from "./blueprint-hooks";
 import { deploymentDeployed, type Deployment } from "./deployment";
+import { ApplicationTemplateEditor } from "../templates/ApplicationTemplateEditor";
+import { ApplicationFiles, applicationHasFiles } from "../templates/ApplicationConfigurationFields";
 
 const SpecEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 const w = (key: string, values?: Record<string, unknown>) => commonText(`resource-domain:wizard.${key}`, values);
@@ -59,7 +61,7 @@ function readParameters(text: string): TemplateParameter[] {
 }
 
 /**
- * Multi-step creation of a blueprint deployment; the YAML spec is the single source of truth.
+ * Continuous shared configuration form; the YAML spec is the single source of truth.
  * With `deployment` it edits that deployment's stored spec instead: every step before its
  * first deploy, afterwards only the parameters (the server freezes the topology).
  */
@@ -81,7 +83,6 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
   const [text, setText] = useState("");
   const [lastValid, setLastValid] = useState("");
   const [mode, setMode] = useState<"form" | "yaml">("form");
-  const [step, setStep] = useState(0);
   const [hosts, setHosts] = useState<HostRow[]>();
   const [tags, setTags] = useState<Option[]>([]);
   const [groups, setGroups] = useState<Option[]>([]);
@@ -144,7 +145,6 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
   const stored = useMemo(() => frozen ? readSpec(deployment?.deploy_spec ?? "").spec : undefined, [frozen, deployment]);
   // Values, failover policy and template.version remain editable after deployment.
   const locked = !!stored && !!current.spec && topologyKey(current.spec) !== topologyKey(stored);
-  const key = steps[step] ?? steps[0]!;
   // While the YAML is invalid the form is locked: it never overwrites text the user is fixing.
   const patch = (changes: SpecChange[]) => { if (!invalid && form.doc) change(writeSpec(form.doc, changes)); };
   /** Removes a role's manual placement; the whole key goes when no role is left. */
@@ -162,8 +162,8 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
   }, [workspace]);
   // The form recalculates on every change; YAML typing waits for an explicit recalculation.
   useEffect(() => {
-    if (key === "stepPlacement" && mode === "form" && !invalid && text && placement?.for !== text) void preview(text);
-  }, [key, mode, invalid, text, placement?.for, preview]);
+    if (!frozen && mode === "form" && !invalid && text && placement?.for !== text) void preview(text);
+  }, [mode, invalid, text, placement?.for, preview, frozen]);
 
   // Editing is embedded in the detail page: every early state keeps a way back.
   const cancel = onCancel && <Button type="button" variant="outline" className={touch} onClick={onCancel}>{w("cancel")}</Button>;
@@ -198,7 +198,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
     {(spec.driver === "stack" || spec.driver === "compose") && <p className="break-words text-sm text-muted-foreground">{w("failoverDriverAlertOnly")}</p>}
     {(spec.failover?.mode ?? "auto") === "auto" && blueprint.roles.filter(role => failoverClass(role) === "manual").map(role => <p key={role.name} className="break-words text-sm text-muted-foreground">{w("failoverNeedsBackup", { role: role.name })}</p>)}
   </div>);
-  const blocked = invalid || locked || problems(key).length > 0;
+  const blocked = invalid || locked || steps.flatMap(problems).length > 0;
   const submit = async () => {
     if (blocked || creating) return;
     setCreating(true); setSubmitError("");
@@ -232,47 +232,8 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
     {hosts?.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
   </select>;
 
-  const versionChanged = template.version !== (spec?.template.version ?? version);
-  return <div className="flex min-h-0 min-w-0 flex-col">
-    <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-      <h2 className="min-w-0 text-lg font-semibold break-words">{w(editing ? "editTitle" : "title")}</h2>
-      <div role="group" aria-label={w("editMode")} className="flex gap-1">
-        <Button type="button" className={touch} variant={mode === "form" ? "secondary" : "outline"} aria-pressed={mode === "form"} onClick={() => setMode("form")}>{w("form")}</Button>
-        <Button type="button" className={touch} variant={mode === "yaml" ? "secondary" : "outline"} aria-pressed={mode === "yaml"} onClick={() => setMode("yaml")}>{w("yaml")}</Button>
-      </div>
-    </div>
-    <ol aria-label={w("steps")} className="mt-3 flex min-w-0 flex-wrap gap-x-4 gap-y-2 border-b pb-3">
-      {steps.map((label, index) => <li key={label} aria-current={index === step ? "step" : undefined} className={cn("flex min-w-0 items-center gap-2 text-sm", index === step ? "font-medium text-foreground" : "text-muted-foreground")}>
-        <span aria-hidden className={cn("grid size-7 shrink-0 place-items-center rounded-full border text-xs", index === step && "border-primary bg-primary text-primary-foreground", index < step && "border-primary text-primary")}>{index + 1}</span>
-        <span className={cn("min-w-0 break-words", index !== step && "sr-only md:not-sr-only")}>{w(label)}</span>
-      </li>)}
-    </ol>
-    <p className="sr-only" aria-live="polite">{w("stepOf", { current: step + 1, total: steps.length })}</p>
-
-    <div className="min-w-0 flex-1 space-y-4 py-4">
-      {frozen && <p className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">{w("frozenHelp")}</p>}
-      {locked && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">{w("topologyLocked")}</p>}
-      {invalid && <div role="alert" className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-        {mode === "form" && <p>{w("yamlInvalid")}</p>}
-        {current.errors.map((error, index) => <p key={index} className="break-words">{error}</p>)}
-        {lastValid && <Button type="button" size="sm" variant="outline" className={touch} onClick={() => setText(lastValid)}>{w("discardYaml")}</Button>}
-      </div>}
-      {versionChanged && spec && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-        <span>{w("versionChanged", { current: template.version, requested: spec.template.version })}</span>
-        <Button type="button" size="sm" variant="outline" className={touch} disabled={invalid} onClick={() => patch([{ path: ["template", "version"], value: template.version }])}>{w("useLatest", { current: template.version })}</Button>
-      </div>}
-      {optionsError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive"><span>{w("optionsFailed", { detail: optionsError })}</span><Button type="button" variant="outline" size="sm" className={touch} onClick={() => setReload(n => n + 1)}>{commonText("common-domain:common.retry")}</Button></div>}
-
-      {mode === "yaml" ? <AutoField label={w("yamlLabel")} help={w("yamlHelp")}>
-        <div className="h-[60vh] min-h-72 min-w-0 overflow-hidden rounded-md border lg:h-[28rem]">
-          <Suspense fallback={<LoadingSkeleton variant="editor" />}><SpecEditor value={text} language="yaml" path={`deploy-spec-${editorId}.yaml`} label={w("yamlLabel")} onChange={change} /></Suspense>
-        </div>
-      </AutoField> : spec && <fieldset disabled={invalid} className="m-0 min-w-0 space-y-4 border-0 p-0">
+  const renderStep = (key: typeof STEPS[number]) => spec && <fieldset disabled={invalid} className="m-0 min-w-0 space-y-4 border-0 p-0">
         {key === "stepTemplate" && <section className="space-y-4" aria-label={w("stepTemplate")}>
-          <dl className="grid min-w-0 gap-3 text-sm sm:grid-cols-2">
-            <div className="min-w-0"><dt className="text-muted-foreground">{w("templateName")}</dt><dd className="break-words font-medium">{template.name}</dd></div>
-            <div><dt className="text-muted-foreground">{w("templateVersion")}</dt><dd className="font-medium">v{spec.template.version}</dd></div>
-          </dl>
           <AutoField label={w("driver")} required help={blueprint.drivers.length ? undefined : w("noDrivers")}>
             <select className={selectClass} value={spec.driver} required disabled={invalid} onChange={event => patch([{ path: ["driver"], value: event.target.value }, ...(event.target.value === "stack" ? [] : [{ path: ["manager"], value: undefined }])])}>
               {!blueprint.drivers.includes(spec.driver) && <option value={spec.driver} disabled>{spec.driver || commonText("common.select")}</option>}
@@ -384,31 +345,46 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
           </>}
         </section>}
 
-        {key === "stepConfirm" && <section className="space-y-4" aria-label={w("stepConfirm")}>
-          <div className="grid min-w-0 gap-4 md:grid-cols-2">
-            <AutoField label={commonText("common-domain:common.name")} required><Input name="name" className={touch} required disabled={invalid} maxLength={60} value={name} onChange={event => setName(event.target.value)} /></AutoField>
-            <AutoField label={commonText("resource-domain:deployment.workdir")} help={commonText("resource-domain:deployment.workdirHelp")} required><Input name="workdir" className={touch} required disabled={invalid || editing} value={workdir} onChange={event => setWorkdir(event.target.value)} /></AutoField>
-          </div>
-          <div className="rounded-md border p-3 text-sm">
-            <h3 className="font-medium">{w("summary")}</h3>
-            <ul className="mt-1 space-y-1 text-muted-foreground">
-              <li className="break-words">{template.name} · v{spec.template.version} · {driverLabel(spec.driver)}</li>
-              {Object.entries(spec.roles).map(([role, entry]) => <li key={role} className="break-all">{w("summaryRole", { role, count: entry.instances })}</li>)}
-            </ul>
-          </div>
-        </section>}
-      </fieldset>}
-      {submitError && <p role="alert" className="break-words text-sm text-destructive">{submitError}</p>}
-    </div>
+      </fieldset>;
 
-    <FormActions>
-      {onCancel && <Button type="button" variant="outline" className={touch} disabled={creating} onClick={onCancel}>{w("cancel")}</Button>}
-      {steps.length > 1 && <Button type="button" variant="outline" className={touch} disabled={step === 0 || creating} onClick={() => setStep(n => Math.max(0, n - 1))}>{w("back")}</Button>}
-      <span className="ms-auto" />
-      {step < steps.length - 1
-        ? <Button type="button" className={touch} disabled={blocked} title={problems(key)[0]} onClick={() => setStep(n => n + 1)}>{w("next")}</Button>
-        : <Button type="button" className={touch} disabled={blocked || creating} onClick={() => void submit()}>{creating ? w(editing ? "saving" : "creating") : w(editing ? "save" : "create")}</Button>}
-    </FormActions>
-  </div>;
+  const versionChanged = template.version !== (spec?.template.version ?? version);
+  const notices = <>      {frozen && <p className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">{w("frozenHelp")}</p>}
+      {locked && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">{w("topologyLocked")}</p>}
+      {invalid && <div role="alert" className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+        {mode === "form" && <p>{w("yamlInvalid")}</p>}
+        {current.errors.map((error, index) => <p key={index} className="break-words">{error}</p>)}
+        {lastValid && <Button type="button" size="sm" variant="outline" className={touch} onClick={() => setText(lastValid)}>{w("discardYaml")}</Button>}
+      </div>}
+      {versionChanged && spec && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+        <span>{w("versionChanged", { current: template.version, requested: spec.template.version })}</span>
+        <Button type="button" size="sm" variant="outline" className={touch} disabled={invalid} onClick={() => patch([{ path: ["template", "version"], value: template.version }])}>{w("useLatest", { current: template.version })}</Button>
+      </div>}
+      {optionsError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive"><span>{w("optionsFailed", { detail: optionsError })}</span><Button type="button" variant="outline" size="sm" className={touch} onClick={() => setReload(n => n + 1)}>{commonText("common-domain:common.retry")}</Button></div>}
+</>;
+  const sourceEditor = <AutoField label={w("yamlLabel")} help={w("yamlHelp")}>
+        <div className="h-[60vh] min-h-72 min-w-0 overflow-hidden rounded-md border lg:h-[28rem]">
+          <Suspense fallback={<LoadingSkeleton variant="editor" />}><SpecEditor value={text} language="yaml" path={`deploy-spec-${editorId}.yaml`} label={w("yamlLabel")} onChange={change} /></Suspense>
+        </div>
+      </AutoField>;
+  const modeControl = <Button type="button" variant="outline" className={touch} onClick={() => setMode(current => current === "form" ? "yaml" : "form")}>{w(mode === "form" ? "yaml" : "form")}</Button>;
+  const section = (key: string, label: string, content: ReactNode) => ({ key, label, content: <ConfigurationSection title={label}>{content}</ConfigurationSection> });
+  const definition = deployment ? deployment.manifest : template.content;
+  return <ScrollFormSections name={name || template.name} sections={[
+    section("basics", commonText("common.basic"), <>{notices}
+      <AutoField label={commonText("common.name")} required><Input name="name" className="min-h-11" required disabled={creating || frozen} maxLength={60} value={name} onChange={event => setName(event.target.value)} /></AutoField>
+      <dl className="grid min-w-0 gap-4 sm:grid-cols-2"><div><dt className="text-xs text-muted-foreground">{w("template")}</dt><dd className="mt-1 break-words text-sm">{template.name}</dd></div>
+        <div><dt className="text-xs text-muted-foreground">{w("templateVersion")}</dt><dd className="mt-1 text-sm">v{spec?.template.version ?? version}</dd></div></dl>
+    </>),
+    ...(!frozen ? [section("target", commonText("resource-domain:deployment.targetSection"), <>
+      <AutoField label={commonText("resource-domain:deployment.workdir")} help={commonText("resource-domain:deployment.workdirHelp")} required><Input name="workdir" className="min-h-11" required disabled={invalid || editing || creating} value={workdir} onChange={event => setWorkdir(event.target.value)} /></AutoField>
+      {renderStep("stepTemplate")}{renderStep("stepRoles")}
+      <h3 className="text-sm font-medium">{w("stepPlacement")}</h3>{renderStep("stepPlacement")}
+    </>)] : []),
+    section("definition", commonText("resource-domain:template.definition"), <ApplicationTemplateEditor value={definition} readOnly workspace={workspace} templateParameters={parameters} onChange={() => {}} onValidityChange={() => {}} />),
+    section("parameters", commonText("resource-domain:template.parameters"), <>{modeControl}{mode === "form" ? renderStep("stepValues") : sourceEditor}</>),
+    ...(applicationHasFiles({ content: definition }) ? [section("files", commonText("resource-domain:market.files"), <ApplicationFiles draft={{ content: definition }} />)] : []),
+  ]} footer={<><div aria-live="polite">{submitError && <p role="alert" className="break-words text-sm text-destructive">{submitError}</p>}</div><FormActions>
+    {onCancel && <Button type="button" variant="outline" className={touch} disabled={creating} onClick={onCancel}>{w("cancel")}</Button>}
+    <Button type="button" className={touch} disabled={blocked || creating} title={steps.flatMap(problems)[0]} onClick={() => void submit()}>{creating ? w(editing ? "saving" : "creating") : w(editing ? "save" : "create")}</Button>
+  </FormActions></>} />;
 }
-

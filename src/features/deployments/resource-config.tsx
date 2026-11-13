@@ -1,3 +1,4 @@
+import { applicationSections } from "./application-sections";
 import { deleteResource, named } from "../../shared/api/resource";
 import { currentLocale } from "../../shared/i18n/locale";
 import type { ResourceConfigContext } from "../../shared/resources/config";
@@ -170,6 +171,7 @@ export function deploymentsForms({
       width: "full",
       presentation: "sections",
       sectionNavigation: "scroll",
+      sectionAppearance: "configuration",
       heading: (r: Deployment) => r.name,
       viewActions: [{ label: "", labelKey: "monitoring:overview", permission: "alerts.read", to: row => ({ group: "deploy", item: "apps", id: row.id, mode: "view" }), query: () => ({ tab: "health" }) }],
       blank: {
@@ -183,7 +185,7 @@ export function deploymentsForms({
         manifest:
           "apiVersion: ferry/v1\nkind: Application\nmetadata:\n  name: web\nservices:\n  - name: web\n    image: nginx:alpine\n    ports:\n      - container: 80\n        published: 8080\n",
       },
-      sections: [
+      sections: applicationSections<AnyRow>([
         {
           group: "basics", groupKey: "resource-domain:deployment.basics",
           title: "基本信息", titleKey: "resource-domain:deployment.basics",
@@ -285,7 +287,7 @@ export function deploymentsForms({
             },
           ],
         },
-      ],
+      ], workspace),
     }),
   };
 }

@@ -10,6 +10,8 @@ pub(crate) struct Avatar {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gender: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emoji: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
@@ -22,7 +24,22 @@ impl Avatar {
                 crate::i18n::Message::new("request.jsonData"),
             )
         };
-        if !["portrait", "pixel", "initials", "emoji", "image"].contains(&self.style.as_str())
+        if self
+            .gender
+            .as_deref()
+            .is_some_and(|gender| !["neutral", "male", "female"].contains(&gender))
+            || ![
+                "portrait",
+                "adventurer",
+                "notionists",
+                "lorelei",
+                "pixel-art",
+                "pixel",
+                "initials",
+                "emoji",
+                "image",
+            ]
+            .contains(&self.style.as_str())
             || self
                 .seed
                 .as_ref()
@@ -65,6 +82,26 @@ impl Avatar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn illustration_families_roundtrip_without_changing_legacy_styles() {
+        for style in [
+            "portrait",
+            "adventurer",
+            "notionists",
+            "lorelei",
+            "pixel-art",
+            "pixel",
+            "initials",
+        ] {
+            let avatar: Avatar =
+                serde_json::from_value(serde_json::json!({"style":style,"seed":"stable-seed"}))
+                    .unwrap();
+            avatar.validate().unwrap();
+            let stored = serde_json::to_value(&avatar).unwrap();
+            assert_eq!(stored["style"], style);
+            assert_eq!(stored["seed"], "stable-seed");
+        }
+    }
     #[test]
     fn accepts_a_real_128_png_and_rejects_wrong_dimensions() {
         let input = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAABUUlEQVR4nO3SMQHAIADAsDE/aMIaTkEGRxMFPTrm2ucj638dwFsGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxF13XAMryrFmNAAAAABJRU5ErkJggg==";

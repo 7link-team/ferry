@@ -12,13 +12,7 @@ import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import type { Navigation } from "../../shared/routing/types";
 import { isBlueprint } from "../deployments/blueprint-spec";
 import { marketProviders, trustLabel } from "./labels";
-import { lazy, Suspense } from "react";
-import { ManifestEditor } from "../deployments/ManifestEditor";
-import { TemplateParametersEditor } from "../templates/TemplateParametersEditor";
-import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
-
-const MarkdownValuePreview = lazy(() => import("../maintenance/MarkdownValuePreview"));
-const ignoreReadOnlyChange = () => {};
+import { applicationSections } from "../deployments/application-sections";
 
 export interface MarketSource {
   id: string;
@@ -56,6 +50,7 @@ export interface MarketEntry {
   verified_drivers: string[];
   readme: string;
   files: string[];
+  package_files?: { name: string; content: string; parameters: unknown }[];
   /** Package metadata; list rows carry it instead of `content`. */
   meta?: { topology?: string };
 }
@@ -412,6 +407,9 @@ export function marketplaceForms({
     }),
     marketplace: form<MarketEntry>({
       resource: "marketplace",
+      width: "full",
+      sectionNavigation: "scroll",
+      sectionAppearance: "configuration",
       heading: (r) => r.name,
       blank: {},
       readOnly: () => true,
@@ -419,9 +417,7 @@ export function marketplaceForms({
         marketDeploy(workspace, navigate, permissions),
         marketInstall(workspace, navigate),
       ],
-      sections: [
-        {
-          fields: [
+      sections: applicationSections([{ fields: [
             {
               key: "name",
               label: "名称",
@@ -448,9 +444,15 @@ export function marketplaceForms({
               type: "custom",
               span: 2,
               when: (d) => !!d.readme,
-              render: ({ draft }) => <Suspense fallback={<LoadingSkeleton variant="inline" />}>
-                <MarkdownValuePreview value={String(draft.readme ?? "")} label={commonText("resource-domain:market.readme")} />
-              </Suspense>,
+
+            },
+            {
+              key: "content",
+              label: "应用配置",
+              labelKey: "resource-domain:market.definition",
+              type: "custom",
+              span: 2,
+
             },
             {
               key: "files",
@@ -459,16 +461,6 @@ export function marketplaceForms({
               type: "custom",
               span: 2,
               when: (d) => Array.isArray(d.files) && d.files.length > 0,
-              render: ({ draft }) => <ul className="list-disc space-y-1 pl-5 text-sm">{(draft.files as string[]).map((f) => <li key={f} className="break-all">{f}</li>)}</ul>,
-            },
-            {
-              key: "content",
-              label: "应用配置",
-              labelKey: "resource-domain:deployment.config",
-              type: "custom",
-              span: 2,
-              render: ({ draft }) => <ManifestEditor value={String(draft.content ?? "")} mode="" workspace={workspace}
-                templateParameters={[]} readOnly onChange={ignoreReadOnlyChange} onValidityChange={ignoreReadOnlyChange} />,
             },
             {
               key: "parameters",
@@ -476,12 +468,9 @@ export function marketplaceForms({
               labelKey: "resource-domain:template.parameters",
               type: "custom",
               span: 2,
-              render: ({ draft }) => <TemplateParametersEditor value={String(draft.parameters ?? "[]")} readOnly
-                onChange={ignoreReadOnlyChange} onValidityChange={ignoreReadOnlyChange} />,
+
             },
-          ],
-        },
-      ],
+      ] }], workspace),
     }),
   };
 }

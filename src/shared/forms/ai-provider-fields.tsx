@@ -151,7 +151,9 @@ export function ProviderFields({
                         timezone:
                           Intl.DateTimeFormat().resolvedOptions().timeZone,
                       })
-                    : key === "api_key" ? commonText("resource-domain:credential.secretHelp") : undefined
+                    : key === "api_key" ? commonText("resource-domain:credential.secretHelp")
+                    : key === "qps" ? commonText("models:qpsHelp")
+                    : key === "concurrency" ? commonText("models:concurrencyHelp") : undefined
                 }
                 label={
                   <>{key === "name" ? commonText("common.name") : key === "api_key" ? "API Key" : t(label)}</>
@@ -195,7 +197,9 @@ export function ProviderFields({
                 type={key === "api_key" ? "password" : typeof draft[key] === "number" ? "number" : "text"}
                 autoComplete={key === "api_key" ? "new-password" : undefined}
                 required={key !== "api_key" || !draft.id}
-                min={0}
+                min={key === "qps" || key === "concurrency" ? 1 : typeof draft[key] === "number" ? 0 : undefined}
+                max={key === "qps" ? 1000 : key === "concurrency" ? 100 : key === "monthly_limit_micros" ? 1_000_000_000_000 : undefined}
+                step={typeof draft[key] === "number" ? 1 : undefined}
                 value={draft[key] ?? ""}
                 onChange={(e) =>
                   onChange({

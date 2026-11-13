@@ -1,6 +1,6 @@
 {
   "name": "ferry",
-  "version": "0.3.0-alpha.18",
+  "version": "0.4.0-alpha",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,6 +13,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@dicebear/adventurer": "9.4.2",
+    "@dicebear/core": "9.4.2",
+    "@dicebear/lorelei": "9.4.2",
+    "@dicebear/micah": "9.4.2",
+    "@dicebear/notionists": "9.4.2",
+    "@dicebear/pixel-art": "9.4.2",
     "@monaco-editor/react": "^4.7.0",
     "@wangeditor-next/editor": "^6.5.1",
     "@xterm/addon-fit": "^0.11.0",

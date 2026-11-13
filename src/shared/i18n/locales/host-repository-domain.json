@@ -1,5 +1,9 @@
 {
   "zh-CN": {
+    "repository.actorPollingUnavailable": "轮询未提供",
+    "repository.actorUnavailable": "事件未提供",
+    "repository.actorCommitter": "{{name}}（提交者）",
+    "repository.actorSourceHelp": "操作人以仓库平台事件提供的身份为准。轮询无法确认实际推送人，此时显示最新提交的提交者并标注“提交者”；配置 Webhook 可记录真实操作人。",
     "repository.presets.title": "场景预设（可选）",
     "repository.presets.help": "选择场景后填写自己的授权信息；切换会清空旧授权、地址和组织，保留名称与备注。监控和通知需创建后单独启用。",
     "repository.presets.github": "GitHub 团队构建",
@@ -361,6 +365,8 @@
     "manifest.017": "编辑方式",
     "manifest.018": "表单编辑",
     "manifest.019": "源码编辑",
+    "manifest.formPreview": "表单预览",
+    "manifest.sourcePreview": "源码预览",
     "manifest.020": "应用配置源码（YAML / JSON）",
     "manifest.021": "切换不会覆盖源码。表单修改会输出 YAML 并保留未修改字段；保存时校验当前部署模式支持的配置，并统一为 JSON（不保留注释）。",
     "manifest.022": "应用标识",
@@ -498,6 +504,10 @@
     "host-files.permission.others": "其他用户"
   },
   "en-US": {
+    "repository.actorPollingUnavailable": "Not provided by polling",
+    "repository.actorUnavailable": "Not provided by event",
+    "repository.actorCommitter": "{{name}} (committer)",
+    "repository.actorSourceHelp": "The actor comes from the repository event. Polling cannot identify who pushed, so the newest commit's committer is shown, marked “committer”. Configure a webhook to record the actual actor.",
     "repository.presets.title": "Scenario presets (optional)",
     "repository.presets.help": "Choose a scenario and supply your authorization. Switching clears credentials, endpoints and organization while retaining the name and notes. Enable monitoring and notifications separately after creation.",
     "repository.presets.github": "GitHub team builds",
@@ -859,6 +869,8 @@
     "manifest.017": "Editing mode",
     "manifest.018": "Form editor",
     "manifest.019": "Source editor",
+    "manifest.formPreview": "Form preview",
+    "manifest.sourcePreview": "Source preview",
     "manifest.020": "Application configuration source (YAML / JSON)",
     "manifest.021": "Switching modes does not overwrite the source. Form edits produce YAML and preserve unchanged fields. Saving validates the current deployment mode and normalizes to JSON without comments.",
     "manifest.022": "Application ID",
@@ -996,6 +1008,10 @@
     "host-files.permission.others": "Others"
   },
   "zh-TW": {
+    "repository.actorPollingUnavailable": "輪詢未提供",
+    "repository.actorUnavailable": "事件未提供",
+    "repository.actorCommitter": "{{name}}（提交者）",
+    "repository.actorSourceHelp": "操作人以儲存庫平台事件提供的身分為準。輪詢無法確認實際推送人，此時顯示最新提交的提交者並標註「提交者」；設定 Webhook 可記錄真實操作人。",
     "repository.presets.title": "情境預設（選填）",
     "repository.presets.help": "選擇情境後填寫自己的授權；切換會清空舊憑證、位址與組織，保留名稱及備註。監控與通知需建立後個別啟用。",
     "repository.presets.github": "GitHub 團隊建置",
@@ -1357,6 +1373,8 @@
     "manifest.017": "編輯方式",
     "manifest.018": "表單編輯",
     "manifest.019": "原始碼編輯",
+    "manifest.formPreview": "表單預覽",
+    "manifest.sourcePreview": "原始碼預覽",
     "manifest.020": "應用程式設定原始碼（YAML / JSON）",
     "manifest.021": "切換不會覆寫原始碼。表單修改會輸出 YAML 並保留未修改欄位；儲存時驗證目前部署模式支援的設定，並統一為 JSON（不保留註解）。",
     "manifest.022": "應用程式識別碼",
@@ -1494,6 +1512,10 @@
     "host-files.permission.others": "其他使用者"
   },
   "ja-JP": {
+    "repository.actorPollingUnavailable": "ポーリングでは取得不可",
+    "repository.actorUnavailable": "イベントに情報なし",
+    "repository.actorCommitter": "{{name}}（コミッター）",
+    "repository.actorSourceHelp": "操作者はリポジトリのイベントが提供する情報に基づきます。ポーリングでは実際のプッシュ実行者を特定できないため、最新コミットのコミッターを「コミッター」と明記して表示します。Webhook を設定すると実際の操作者を記録できます。",
     "repository.presets.title": "シナリオプリセット（任意）",
     "repository.presets.help": "シナリオを選び、ご自身の認証情報を設定してください。切り替えると認証、接続先、組織がクリアされ、名前とメモは保持されます。監視と通知は作成後に個別に有効化します。",
     "repository.presets.github": "GitHub チームビルド",
@@ -1855,6 +1877,8 @@
     "manifest.017": "編集モード",
     "manifest.018": "フォーム編集",
     "manifest.019": "ソース編集",
+    "manifest.formPreview": "フォームプレビュー",
+    "manifest.sourcePreview": "ソースプレビュー",
     "manifest.020": "アプリケーション設定ソース（YAML / JSON）",
     "manifest.021": "モード切り替えではソースを上書きしません。フォーム編集では変更していない項目を保持して YAML を出力します。保存時に現在のデプロイ方式に対応する設定を検証し、コメントなしの JSON に変換します。",
     "manifest.022": "アプリケーション ID",
@@ -1992,6 +2016,10 @@
     "host-files.permission.others": "その他"
   },
   "ko-KR": {
+    "repository.actorPollingUnavailable": "폴링에서 제공되지 않음",
+    "repository.actorUnavailable": "이벤트에서 제공되지 않음",
+    "repository.actorCommitter": "{{name}} (커미터)",
+    "repository.actorSourceHelp": "작업자는 저장소 이벤트가 제공한 정보를 사용합니다. 폴링은 실제 푸시한 사람을 확인할 수 없으므로 최신 커밋의 커미터를 “커미터”로 표시합니다. Webhook을 구성하면 실제 작업자를 기록할 수 있습니다.",
     "repository.presets.title": "시나리오 프리셋(선택)",
     "repository.presets.help": "시나리오를 선택하고 본인의 인증 정보를 입력하세요. 전환하면 인증 정보, 주소, 조직이 초기화되며 이름과 메모는 유지됩니다. 모니터링과 알림은 생성 후 별도로 활성화합니다.",
     "repository.presets.github": "GitHub 팀 빌드",
@@ -2353,6 +2381,8 @@
     "manifest.017": "편집 방식",
     "manifest.018": "양식 편집",
     "manifest.019": "소스 편집",
+    "manifest.formPreview": "양식 미리보기",
+    "manifest.sourcePreview": "소스 미리보기",
     "manifest.020": "애플리케이션 설정 소스 (YAML / JSON)",
     "manifest.021": "방식을 전환해도 소스를 덮어쓰지 않습니다. 양식 편집은 변경하지 않은 필드를 유지하며 YAML을 출력합니다. 저장 시 현재 배포 방식의 설정을 검증하고 주석 없는 JSON으로 변환합니다.",
     "manifest.022": "애플리케이션 ID",
@@ -2490,6 +2520,10 @@
     "host-files.permission.others": "기타 사용자"
   },
   "ms-MY": {
+    "repository.actorPollingUnavailable": "Tidak diberikan oleh tinjauan",
+    "repository.actorUnavailable": "Tidak diberikan oleh peristiwa",
+    "repository.actorCommitter": "{{name}} (pengkomit)",
+    "repository.actorSourceHelp": "Pelaku berdasarkan identiti dalam peristiwa repositori. Tinjauan tidak dapat mengenal pasti pelaku push, jadi pengkomit bagi komit terbaharu dipaparkan dengan tanda “pengkomit”. Konfigurasikan webhook untuk merekod pelaku sebenar.",
     "repository.presets.title": "Pratetap senario (pilihan)",
     "repository.presets.help": "Pilih senario dan masukkan kebenaran anda sendiri. Pertukaran mengosongkan kelayakan, alamat dan organisasi tetapi mengekalkan nama serta nota. Aktifkan pemantauan dan pemberitahuan secara berasingan selepas penciptaan.",
     "repository.presets.github": "Binaan pasukan GitHub",
@@ -2851,6 +2885,8 @@
     "manifest.017": "Mod penyuntingan",
     "manifest.018": "Penyunting borang",
     "manifest.019": "Penyunting sumber",
+    "manifest.formPreview": "Pratonton borang",
+    "manifest.sourcePreview": "Pratonton sumber",
     "manifest.020": "Sumber konfigurasi aplikasi (YAML / JSON)",
     "manifest.021": "Pertukaran mod tidak menulis ganti sumber. Suntingan borang menghasilkan YAML dan mengekalkan medan yang tidak diubah. Simpanan mengesahkan mod pelaksanaan semasa dan menukarnya kepada JSON tanpa komen.",
     "manifest.022": "ID aplikasi",

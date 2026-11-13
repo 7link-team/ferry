@@ -140,3 +140,21 @@ it("blueprint deployments show topology and the spec editor; others keep the exi
   expect(host.querySelector("[data-topology-role]")).toBeNull();
   expect([...host.querySelectorAll("button")].some(b => b.textContent === "编辑部署规格")).toBe(false);
 });
+
+it("uses the shared resource form for configuration and isolates runtime without duplicate loading", async () => {
+  const manifest = JSON.stringify({ apiVersion: "ferry/blueprint-v1", kind: "Blueprint", metadata: { name: "saved" },
+    roles: [{ name: "web", service: { image: "nginx:saved", files: [{ fromTemplate: "config-7", path: "/etc/config" }] } }] });
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => { calls.push(url); return { ok: true, json: async () => ({ id: "1", name: "saved", description: "saved config", state: "idle", mode: "docker", target_kind: "host", target_ref: "2", version: 4, manifest }) }; }));
+  await mount();
+  expect(calls.filter(url => url.endsWith('/deployments/1'))).toHaveLength(1);
+  expect(host.querySelectorAll('[data-scroll-form-sections]')).toHaveLength(1);
+  const sections = [...host.querySelectorAll<HTMLElement>('[data-form-section]')];
+  expect(sections.map(section => section.dataset.formSection)).toEqual(['basics', 'target', 'definition', 'files', 'runtime']);
+  expect(host.querySelector('[data-form-section="basics"]')?.textContent).not.toContain(commonText('resource-domain:deployment.apply'));
+  expect(host.querySelector('[data-form-section="definition"]')?.textContent).toContain('nginx:saved');
+  expect(host.querySelector('[data-form-section="files"]')?.textContent).toContain('/etc/config');
+  expect(host.querySelector('[data-form-section="files"] button')).toBeNull();
+  expect(host.querySelector('[data-form-section="runtime"] button')).not.toBeNull();
+  expect(host.querySelector('form form')).toBeNull();
+  expect(calls.some(url => url.includes('/app-templates/') || url.includes('/config-templates/'))).toBe(false);
+});

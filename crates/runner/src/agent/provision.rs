@@ -56,6 +56,7 @@ fn name(runtime: Runtime) -> &'static str {
         Runtime::Opencode => "opencode",
         Runtime::Pi => "pi",
         Runtime::Dsh => "dsh",
+        Runtime::Kimi => "kimi",
     }
 }
 fn package(runtime: Runtime) -> &'static str {
@@ -67,6 +68,8 @@ fn package(runtime: Runtime) -> &'static str {
         Runtime::Opencode => "opencode-ai",
         Runtime::Pi => "@mariozechner/pi-coding-agent",
         Runtime::Dsh => "@deepseek-ai/dsh",
+        // Kimi is a Python CLI and never enters the npm installation path.
+        Runtime::Kimi => "kimi-cli",
     }
 }
 
@@ -495,6 +498,13 @@ async fn selected(
     policy: &Policy,
     prepare: bool,
 ) -> Result<Option<PathBuf>> {
+    if runtime == Runtime::Kimi {
+        ensure!(
+            !policy.versions.contains_key("kimi"),
+            "Kimi versions are managed by its native Python installer"
+        );
+        return Ok(None);
+    }
     let mut record = installed(root)?;
     if prepare
         && ((record.is_none() && policy.auto_install) || (record.is_some() && policy.auto_upgrade))

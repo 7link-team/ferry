@@ -57,6 +57,29 @@ export const time = (value: unknown) => {
 export const has = (key: string) => (row: Record<string, unknown>) =>
   row[key] !== undefined && row[key] !== null && row[key] !== "";
 
+function eventSource(row: Record<string, unknown>) {
+  const detail = row.detail && typeof row.detail === "object" ? row.detail as Record<string, unknown> : {};
+  return String(row.source || detail.source || "");
+}
+
+function committerOf(commit: unknown) {
+  const item = Array.isArray(commit) ? commit[0] : commit;
+  if (!item || typeof item !== "object") return "";
+  const { committer, author } = item as Record<string, unknown>;
+  return String(committer || author || "").trim();
+}
+
+/** Polling cannot see the pusher, so it falls back to the newest commit's committer, labeled as such. */
+export function repositoryEventActor(row: Record<string, unknown>) {
+  const actor = typeof row.actor === "string" ? row.actor.trim() : "";
+  if (actor) return actor;
+  const detail = row.detail && typeof row.detail === "object" ? row.detail as Record<string, unknown> : row;
+  const commits = Array.isArray(detail.commits) ? detail.commits : [];
+  const committer = committerOf(detail.head_commit) || committerOf(commits[0]) || committerOf(detail.commit);
+  if (committer) return hostRepositoryText("repository.actorCommitter", { name: committer });
+  return hostRepositoryText(eventSource(row) === "polling" ? "repository.actorPollingUnavailable" : "repository.actorUnavailable");
+}
+
 export const commitRecord = {
   title: (item: Record<string, unknown>) =>
     String(item.short_id ?? item.id ?? ""),
@@ -127,7 +150,9 @@ export function repositoryEventForm(): FormConfig<Record<string, unknown>> {
           text("repository", hostRepositoryText("repository.004")),
           text("reference", hostRepositoryText("repository-monitor.015")),
           text("actor", hostRepositoryText("repository-monitor.016"), {
-            when: has("actor"),
+            when: () => true,
+            display: repositoryEventActor,
+            help: hostRepositoryText("repository.actorSourceHelp"),
           }),
           text("action", hostRepositoryText("repository-monitor.017")),
           text("created_at", hostRepositoryText("repository-monitor.018"), {
@@ -147,7 +172,8 @@ export function repositoryEventForm(): FormConfig<Record<string, unknown>> {
                 label: hostRepositoryText("repository-monitor.021"),
               },
             ],
-            when: has("source"),
+            when: row => !!eventSource(row),
+            display: row => eventSource(row) === "polling" ? hostRepositoryText("repository-monitor.021") : eventSource(row) === "webhook" ? hostRepositoryText("repository-monitor.020") : eventSource(row),
           },
           text("delivery", hostRepositoryText("repository-monitor.022")),
         ],
@@ -362,7 +388,7 @@ export function repositoryEventList(
       },
       { key: "reference", label: hostRepositoryText("repository-monitor.015") },
       { key: "summary", label: hostRepositoryText("repository-monitor.094") },
-      { key: "actor", label: hostRepositoryText("repository-monitor.016"), render: row => <span title={row.source === "polling" ? hostRepositoryText("repository-monitor.021") : undefined}>{String(row.actor || commonText("dashboard.unknown"))}</span> },
+      { key: "actor", label: hostRepositoryText("repository-monitor.016"), render: row => <span title={hostRepositoryText("repository.actorSourceHelp")}>{repositoryEventActor(row)}</span> },
       { key: "action", label: hostRepositoryText("repository-monitor.017") },
       { key: "delivery", label: hostRepositoryText("repository-monitor.022") },
     ],

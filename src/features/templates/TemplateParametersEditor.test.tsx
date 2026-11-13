@@ -64,8 +64,10 @@ it("keeps the complete definition when switching between form and source", async
 
 it("shows typed values in read-only mode without mutation controls", async () => {
   await act(async () => root.render(<Harness source='[{"name":"enabled","type":"boolean","default":false}]' readOnly />));
-  expect(host.querySelector("input, select, textarea, [role=checkbox], [role=switch]")).toBeNull();
-  expect(host.querySelector("dl")?.textContent).toContain("否");
+  const controls=[...host.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input, select, textarea, [role=checkbox], [role=switch]")];
+  expect(controls.length).toBeGreaterThan(0);
+  expect(controls.every(control=>control.disabled)).toBe(true);
+  expect(host.querySelectorAll('select')[1]?.value).toBe('false');
   expect(button("添加参数")).toBeUndefined();
   expect(latest).toContain('"default":false');
 });

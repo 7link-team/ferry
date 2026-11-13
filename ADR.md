@@ -1,3 +1,10 @@
+## Application readonly visual parity (2026-11-14)
+- Decision: user selected actual app-template edit page 112966795178020864 as visual baseline. Marketplace, templates and deployments retain the same configuration section/field frames and responsive layout in view mode; readonly does not mean replacing fields with unframed prose. Blueprint uses the same renderer, with schema-specific fields only. YAML remains the source representation.
+- Reason: user rejected divergent detail layouts and identified the desired existing editor. Preserve that editor's styling rather than impose another historical screenshot design.
+- Alternatives considered: historical A/B layouts; rejected as authority once the actual editor URL was selected.
+- Tradeoffs: readonly hides editing actions/bindings; values remain copyable/selectable. Template parameter controls keep their positions but are disabled; semantic display conversions and secrets remain intact.
+- Scope: frontend visual parity only, no API/schema/data changes or real deployments. Status: user-confirmed design; implemented, tested and updated locally on4291; visual acceptance pending.
+
 ## P3 Task 6 coordinator safety (2026-11-13)
 - Decision: reuse the Task5 replacement sequence for automatic actions; tick only gathers evidence/records observations and proposes at most one job per deployment. Existing versioned binding claim reserves fences before any destructive stop. Recovery clears a fence and appends unfenced atomically only after a successful ownership-checked stop.
 - Reason: reuse existing lifecycle/quorum/lease semantics and prevent duplicate destructive paths or false recovery.
@@ -28,6 +35,14 @@
 - Status: scoped naming acceptance PASS (Runner/CLI/MCP/native Windows services/Actions/UI/build). Legacy live-service renaming explicitly excluded and disclosed. No schema/data migration.
 
 # Architecture Decision Records
+
+## Application configuration convergence across modes (2026-11-14)
+- Decision: one ApplicationTemplateEditor/ApplicationDefinitionFields tree serves ordinary Application and Blueprint definitions in view/edit/create; ConfigurationSection is the shared surface for ResourceForm and BlueprintWizard. ResourceForm remains the resource-page owner. BlueprintWizard retains spec orchestration but has no alternate step-page layout.
+- Reason: readonly-only convergence did not satisfy the user's requirement; editable ordinary definitions, YAML-only Blueprint editing and numbered creation steps still differed. User explicitly requested finishing the shared experience.
+- Alternatives considered: share only navigation or readonly inspector; rejected because authoring and creation would remain separate implementations. Replacing deployment orchestration was rejected as out of scope.
+- Tradeoffs: actual schema differences remain services versus roles/drivers/endpoints; template parameters define a schema, deployment parameters contain instance values. One field tree handles permissions and YAML mutations while the existing backend remains authoritative. YAML aliases stay source-only. Existing unknown fields, comments and historical saved manifests are preserved.
+- Scope: frontend component convergence and regression tests. No new schema, API, migrations, runtime driver, publication, graph or distributed execution. Frozen topology, authorization, version selection and existing confirmation/save endpoints remain in force. Legacy ManifestEditor UI and its private field components are removed; behavioral regressions move to ApplicationDefinitionRegression tests against the actual shared implementation.
+- Status: engineering acceptance PASS; frontend752PASS/1existing skip plus finalguard30PASS, final production/embedded builds, isolated295 and actual4291 readonly137/editcreate245 checks,4asset hashes and guarded localupdate PASS. User visual acceptance remains pending; evidence and current PID/backup in MEMORY.md.
 
 ## 会话内容与背景（2026-11-10）
 
@@ -896,3 +911,52 @@ Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-a
 - Tradeoffs: feature breadth alone is not acceptance evidence; real project/task coordination and discoverable outcomes must justify further investment.
 - Scope: product direction and existing-capability acceptance only. No navigation redesign, new IM/cloud-drive/memory module or retention/permission change.
 - Status: direction confirmed; current work validates native conversation-to-execution-to-acceptance delivery.
+## Market / template / deployment roundtrip (user clarification, 2026-11-13)
+- Decision: model the three entry points as a connected configuration lifecycle: market package imports to workspace templates or deployment setup; templates feed deployments; template/deployment configurations can be exported as market repository packages. This is the requested target, not a claim of implementation.
+- Reason: definitions, parameters and included files belong together; a bare filename and unrelated-looking YAML do not communicate a complete deployable package.
+- Reuse: current schemaVersion2 packages already contain blueprint, parameters, files, metadata and README. Existing installation transaction copies config files and rewrites references; preserve this behavior and package version compatibility.
+- Alternatives considered: independent incompatible forms per entry point; exporting raw list/resource JSON. Rejected because these lose semantics and dependencies.
+- Tradeoffs: market remains read-only; source/form representations must preserve types and references. Native included config formats such as nats.conf remain native; they are not renamed to YAML. A deployment export must distinguish reusable source definition from host bindings, execution status and supplied parameters; exact parameterization and secret-reference export rules require design review before implementation.
+- Scope/status: user-confirmed lifecycle requirement; current authorized bug fixes cover shared account header and truthful package detail/preview presentation. Reverse export, lossless structural visual authoring and publication UI are pending design; no automatic remote repository writes or schema migrations authorized by this record.
+
+## Unified deployment layers (user-confirmed direction, 2026-11-13)
+- Decision: use one declarative YAML deployment specification, a schema-driven form layer, and a topology visualization layer. They operate on the same configuration model; form/YAML switching must retain hierarchy, types, comments where supported, unknown untouched fields and file references. No independent copies of configuration per page.
+- Reason: user requests Helm/Nomad-like structure spanning marketplace, templates and deployments, including multi-host HA/distributed topology.
+- Data boundaries: reusable package defines services/roles/ports/dependencies, typed parameters, file contents/references and secret references. Deployment adds target host bindings and supplied values while retaining package/version provenance. Runtime observations are separate from desired configuration and never exported as reusable desired state by default. Existing ferry/v1/v2, blueprint-v1 and deploy-v1 compatibility cannot be discarded without migration design and approval.
+- Form semantics: ordinary scalars, secret references and file values can have distinct controls; a file also has destination/mount metadata and associated parameters, so treating all three as unrestricted string values loses semantics. Full field/schema contract is pending review; this decision does not invent a new YAML API.
+- Visualization: desired host→service placement, service→service dependency/port edges, deployment state and actual observed health overlay. Green requires successful observation, red cross requires failed observation, gray denotes absent/stale observations; process/container up does not prove a network edge healthy. Existing InstanceHealth has per-instance health but no directional source→target port observations/timestamps, so active edge health collection is not implemented or claimed.
+- Alternatives/tradeoffs: relation-graph requested as reference; project already uses @xyflow/react. Compare layout/custom edges/React integration and resource cost before adding a second graph engine. No dependency added at this stage.
+- Scope/status: architecture direction confirmed by user; shared structural editor, reverse-export semantics and edge probes need complete design review/acceptance cases. Current bug-fix batch remains account header reuse and marketplace package detail. No historical schema replacement, migrations, external publication or invented health status.
+
+## Unified application creation and detail layout (2026-11-13)
+- Decision: all new application routes, including legacy wizard links, use one app-layer creation owner. Classify the selected template before configuring it. Reuse the existing template chooser in page mode and shared section navigation for market/template/deployment configuration and blueprint creation.
+- Reason: generating a Blueprint into the ordinary Application manifest form caused a misleading missing-services error; a modal ordinary flow and a separate blueprint wizard also contradicted the requested consistent product structure.
+- Alternatives considered: hide the validation error, require users to edit generated YAML, or keep two creation layouts with renamed buttons. Rejected because the template type and execution contract remain different and must be dispatched correctly.
+- Tradeoffs: ordinary applications retain manifest generation; blueprints retain deploy_spec, role/placement validation and server version checks. Existing embedded blueprint editing retains its validated step interaction. Shared navigation moves into shared/ui; orchestration stays in app/pages so feature modules never import the app layer.
+- Scope/status: authorized frontend convergence only. No new deployment protocol, database schema, automatic execution, package-version history, repository publication or active network probing. Full architecture D01–D05 remain pending as documented in the PRD.
+## Hierarchical read-only blueprint definition preview (2026-11-13)
+- Decision: replace flattened indexed path inputs in the existing shared application template viewer with semantic, translated read-only groups. Keep role/service nesting, command argument boundaries, empty values, unknown fields and complete source access. Reuse shared i18n/tokens and manifest labels; preserve source authoring unchanged.
+- Reason: the exact reported NATS template is structurally complete but unreadable as raw path controls. Completeness alone was insufficient acceptance.
+- Alternatives considered: full service editor reuse (exposes invalid blueprint fields such as service.name/service.ports); building full visual blueprint authoring (outside this correction).
+- Tradeoffs: this is a definition inspector, not visual authoring. Unknown schema extensions retain literal names; zh-CN/en-US/ms-MY receive translated schema labels.
+- Scope/status: UI-only correction within existing shared preview. No DB/API/permissions/runtime/retention change. Implemented and deployed locally on4291; full frontend745PASS/1existing skip, actual browser174checks and preserved-data/assets checks PASS. No commit or push.
+## One resource form for application market, template and deployment (2026-11-14)
+- Decision: all three configuration views use ResourceForm and the same applicationSections field/section factory. Canonical definition, parameter, documentation and attached-file controls live in ApplicationConfigurationFields; remove page-local copies. Deployment supplies its already-polled record and runtime section through an app-layer render callback, preserving dependency direction.
+- Reason: sharing a navigation shell and a definition viewer did not unify full resource views. User explicitly authorized full reuse and best user experience.
+- Alternatives considered: a separate hand-rendered application form (rejects existing shared-form contract); importing app ResourceForm from a feature (rejects dependency direction); replacing saved deployment data with latest template (rejects truth/history).
+- Tradeoffs: runtime-only fields and target section exist only on instances; missing historical package content stays explicitly unavailable. No schema/model/API changes or invented parameters. Reuse existing save, authorization, deployment and review actions.
+- Scope/status: approved UI convergence; implemented and deployed locally on4291. Frontend748PASS/1existing skip, actual111checks and isolated77realAPI/UIchecks PASS; data/assets preserved. No commit/push. Existing deferred architecture/version snapshot/export work remains separate.
+
+## Shared readonly definition presentation across schema families (2026-11-14)
+- Decision: ordinary ferry/v1/v2 and blueprint definitions use ApplicationDefinitionPreview inside ApplicationTemplateEditor in readonly mode. Existing editable ManifestEditor remains for ordinary authoring.
+- Reason: exact user links compare NATS Blueprint marketplace/114683567128186880 with Native HTTP application template/112966795178020864. The former used textual groups and the latter disabled editor controls; sharing ResourceForm alone did not fix that difference.
+- Alternatives considered: force all definitions into blueprint data (incorrect); style disabled controls to resemble text (retains divergent structure); rewrite authoring and creation (outside this precise correction).
+- Tradeoffs: shared typography, grouping, nested objects, scalar and list renderer and source toggle; roles/services remain actual schema-specific content. Readonly schema inspector preserves unknown fields without inventing configuration.
+- Scope/status: frontend readonly presentation correction; no API, persisted content, authorization, migration or execution changes. Verification tracked in MEMORY.md.
+
+## 2026-11-14 — Repository event operator fallback and AI model provider presets
+- Decision: when a repository event has no actor (polling cannot see the pusher), the operator column and detail show the newest commit's committer marked "(committer)", with help text explaining the limitation. Webhook actors are shown unchanged; stored events are not rewritten.
+- Decision: API models offer CC Switch provider presets (Anthropic-format entries from claudeProviderPresets.ts plus official OpenAI/Anthropic, referral parameters removed, MIT attribution in src/features/models/provider-presets.json). A CLI with a custom API can only reference an existing API model's provider; the edit form drops the inline connection so a CLI never resaves a shared connection.
+- Reason: user feedback (all operators "未知"; reuse CC Switch for API setup; CLI custom API limited to existing API models).
+- Alternatives considered: keep "not provided by polling" (no useful identity); inline connection for CLI (duplicates and overwrites shared providers).
+- Scope/status: frontend only; no API, schema or migration change. Released in v0.4.0-alpha; verification tracked in MEMORY.md.

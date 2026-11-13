@@ -36,13 +36,6 @@
   .conversation-diagram .node :is(rect, circle, ellipse, polygon, path) { filter: none !important; }
 }
 
-@layer base {
-  :where(h1, h2, h3, h4, h5, h6) {
-    background-color: color-mix(in oklab, var(--muted) 70%, var(--background));
-    border-radius: var(--radius-sm);
-  }
-}
-
 :root {
   --contribution-additions: #047857;
   --contribution-deletions: #b91c1c;

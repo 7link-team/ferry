@@ -18,8 +18,9 @@ import { FailoverAttention, FailoverTimeline } from "./FailoverTimeline";
 
 const CodeEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 
-export function DeploymentDetail({ navigation, workspace, deploymentId, revisionId, permissions, healthContent }: { navigation: Navigation;
+export function DeploymentDetail({ navigation, workspace, deploymentId, revisionId, permissions, healthContent, renderConfiguration }: { navigation: Navigation;
   workspace: string; deploymentId?: string; revisionId?: string; permissions: Set<string>; healthContent?: ReactNode;
+  renderConfiguration?: (deployment: Deployment, runtime: ReactNode) => ReactNode;
 }) {
   useCommonTranslation();
   const editorId = useId();
@@ -88,9 +89,9 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
   if (!app && !error) return <LoadingSkeleton variant="page" label={executionText("deployment.loading")} />;
   if (!app) return <div role={error ? "alert" : "status"}>{error || executionText("deployment.loading")}{error && <Button onClick={() => setReload((n) => n + 1)}>{executionText("shared.common.common.retry")}</Button>}</div>;
   const blocked = busy || deploymentActive(app.state) || app.state === "needs-review";
-  return <div className="min-h-0 overflow-auto space-y-5 pb-6">
-    <header className="sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b bg-background py-3">
-      <h2 className="text-lg font-semibold">{app.name}</h2><Badge variant={["failed", "needs-review"].includes(app.state) ? "destructive" : "secondary"}>{deploymentState(app.state)}</Badge>
+  const body = <div className="min-h-0 min-w-0 space-y-5 pb-6">
+    <header className="flex min-w-0 flex-wrap items-center gap-3 border-b bg-background py-3">
+      {revisionId && <h2 className="break-words text-lg font-semibold">{app.name}</h2>}<Badge variant={["failed", "needs-review"].includes(app.state) ? "destructive" : "secondary"}>{deploymentState(app.state)}</Badge>
       <span className="text-sm text-muted-foreground">{commonText("resource-domain:resource.target")} · {app.target_kind === "blueprint" ? <BlueprintTarget workspace={workspace} deployment={app} permissions={permissions} /> : named(app.target_name, app.target_ref)}</span>
     </header>
     <Tabs.Root value={activeTab} onValueChange={setTab} className="min-w-0 space-y-4">
@@ -100,14 +101,6 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
       <Tabs.Content value="health" className="min-w-0">{healthAvailable && healthContent}</Tabs.Content>
       <Tabs.Content value="info" forceMount className="space-y-5 data-[state=inactive]:hidden">
     {!revisionId && app.target_kind === "blueprint" && <FailoverAttention workspace={workspace} deployment={app} permissions={permissions} onDone={() => setReload(n => n + 1)} />}
-    <dl className="grid min-w-0 gap-4 rounded-md border p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-      {[
-        [commonText("resource-domain:deployment.mode"), ({ native: "Native (systemd)", docker: "Docker", compose: "Docker Compose", stack: "Docker Swarm / Stack" })[app.mode] ?? app.mode],
-        [commonText("resource-domain:deployment.workdir"), app.workdir],
-        [commonText("common.version"), revision ? `v${revision.number}` : "—"],
-        [commonText("resource-domain:platform.workspaceUpdated"), app.updated_at ? new Date(app.updated_at).toLocaleString(currentLocale()) : "—"],
-      ].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-all font-medium">{value || "—"}</dd></div>)}
-    </dl>
     <div className="flex flex-wrap gap-2" aria-busy={busy}>
       <Button variant="outline" disabled={busy} onClick={() => revisionId ? setRendered(revision?.rendered ?? "") : void action("render")}>{executionText("deployment.viewRendered")}</Button>
       <Button variant="outline" disabled={blocked} onClick={() => void action("preview", revisionId ? { revision_id: revisionId } : {})}>{executionText("deployment.previewDiff")}</Button>
@@ -115,7 +108,6 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
       {revisionId && permissions.has("deployments.rollback") && revision?.state === "succeeded" && <Button variant="outline" disabled={blocked || !preview || preview.version !== app.version} onClick={() => execute(true)}>{executionText("deployment.rollbackNumber", { number: revision.number })}</Button>}
       <Button variant="outline" disabled={busy} onClick={() => setReload((n) => n + 1)}>{executionText("deployment.refresh")}</Button>
       <Button variant="outline" onClick={() => navigation.navigate({ item: "revisions", mode: "list" }, { deployment_id: app.id })}>{executionText("shared.common.nav.deploymentHistory")}</Button>
-      {permissions.has("deployments.update") && <Button variant="outline" disabled={blocked} onClick={() => navigation.navigate({ item: "apps", id: app.id, mode: "edit" }, {})}>{executionText("deployment.editApp")}</Button>}
     </div>
     <p className="text-sm text-muted-foreground">{executionText("deployment.applyHelp")}</p>
     {error && <p role="alert" className="text-destructive">{error}</p>}
@@ -156,4 +148,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
       </Tabs.Content>
     </Tabs.Root>
   </div>;
+  if (revisionId) return body;
+  return renderConfiguration ? renderConfiguration(app, body) : body;
+
 }

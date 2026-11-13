@@ -24,14 +24,14 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 it("migrates saved legacy palettes to modern while preserving the display mode", () => {
-  for (const palette of ["erp", "shadcn", "unknown"]) {
+  for (const palette of ["erp", "shadcn", "unknown", "pinkKawaii"]) {
     localStorage.setItem("ferry.theme", JSON.stringify({ palette, mode: "dark" }));
     initTheme();
     expect(document.documentElement.dataset.theme).toBe("modern");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(document.documentElement.hasAttribute("data-palette")).toBe(false);
   }
-  expect(PALETTES.map(p => p.value)).toEqual(["modern", "business", "eyeCare", "pinkKawaii", "neoBrutalism", "custom"]);
+  expect(PALETTES.map(p => p.value)).toEqual(["modern", "business", "eyeCare", "neoBrutalism", "custom"]);
 });
 
 it("provides complete theme catalogs and reactively translates without changing the selected palette", () => {

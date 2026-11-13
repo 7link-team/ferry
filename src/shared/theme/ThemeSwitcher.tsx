@@ -11,20 +11,20 @@ import { PALETTES,useTheme } from "./theme";
 // Same palette previews as the reference theme picker.
 const previews = {
   modern: ["#fafafa", "#171717"], business: ["#fafaf9", "#6366f1"],
-  eyeCare: ["#f5f0e6", "#5a7c5a"], pinkKawaii: ["#fff0f6", "#e8388a"],
+  eyeCare: ["#f5f0e6", "#5a7c5a"],
   // Official Raft layer.frame and attention.400 from raft/tokens.json.
   neoBrutalism: ["oklch(0.8829 0.1623 91.9)", "oklch(0.7999 0.1308 354.26)"], custom: ["#fafafa", "#6366f1"],
 } as const;
 const modeIcons = { system: Monitor, light: Sun, dark: Moon } as const;
 
-export function ThemeSwitcher() {
+export function ThemeSwitcher({ showLabel = false }: { showLabel?: boolean }) {
   const { t } = useTranslation("theme", { keyPrefix: "" });
   const label = (key: string) => t(key, { keySeparator: false });
   const theme = useTheme();
   const [editing, setEditing] = useState(false);
   return <>
     <DropdownMenu>
-      <DropdownMenuTrigger asChild><Button variant="ghost" size="sm" aria-label={label("label")} className="h-8 gap-1.5 rounded-md px-2 has-[>svg]:px-2 text-foreground transition-colors hover:bg-accent hover:text-accent-foreground max-sm:size-8 max-sm:p-0 max-sm:has-[>svg]:px-0"><Palette aria-hidden="true" className="size-4 shrink-0" /><span className="hidden max-w-[90px] truncate text-sm font-medium sm:inline">{label(theme.palette)}</span></Button></DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="sm" aria-label={label("label")} className={`h-11 gap-1.5 rounded-md px-2 has-[>svg]:px-2 text-foreground transition-colors hover:bg-accent hover:text-accent-foreground ${showLabel ? "max-w-full" : "max-sm:size-11 max-sm:p-0 max-sm:has-[>svg]:px-0"}`}><Palette aria-hidden="true" className="size-4 shrink-0" /><span className={`${showLabel ? "inline" : "hidden sm:inline"} max-w-[90px] truncate text-sm font-medium`}>{label(theme.palette)}</span></Button></DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={8} collisionPadding={8} className="w-64 p-1">
         <div className="mb-1 px-2 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label("appearance")}</div>
         <div className="mb-2 flex gap-1" role="group" aria-label={label("appearance")}>

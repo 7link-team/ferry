@@ -1,6 +1,6 @@
 import { ChevronDown, LogIn } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../shared/ui/dropdown-menu";
-import { BrandIcon } from "../shared/site/BrandIcon";
+import { AppHeader } from "./AppHeader";
 import { useEffect,type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -209,16 +209,13 @@ export function Platform({ identity, reload, headerActions }: { identity: Identi
     return {key,label:commonText(label),href:href(target,{}),onClick:(event:React.MouseEvent<HTMLAnchorElement>)=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate(target,{});}};
   });
   return <div className="flex h-full min-h-0 min-w-0 flex-col">
-    <header className="flex flex-wrap items-center gap-4 border-b px-5 py-3">
-      <h1 className="flex items-center gap-2 font-semibold"><BrandIcon />{commonText("resource-domain:platform.management")}</h1>
+    <AppHeader navigation={
       <nav aria-label={commonText("resource-domain:platform.management")} className="hidden flex-wrap gap-2 md:flex">
         {Object.entries(labels).map(([key, label]) => <a key={key} href={href({ workspace: "_platform", item: key, mode: key === "settings" ? "edit" : key === "monitor" ? "view" : "list", ...(key === "settings" ? { id: "1" } : key === "monitor" ? { id: "server-nodes" } : {}) }, {})}
           aria-current={key === item ? "page" : undefined} className={`rounded px-3 py-2 text-sm ${key === item ? "bg-accent" : "text-muted-foreground"}`}
           onClick={event => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigate({ workspace: "_platform", item: key, mode: key === "settings" ? "edit" : key === "monitor" ? "view" : "list", ...(key === "settings" ? { id: "1" } : key === "monitor" ? { id: "server-nodes" } : {}) }, {}); }}>{commonText(label)}</a>)}
       </nav>
-      <span className="flex-1" />
-      {headerActions}
-    </header>
+    } actions={headerActions} />
     <div className="flex shrink-0 items-center justify-between gap-3 border-b px-5 py-3">
       <nav aria-label={commonText("common-domain:shell.breadcrumbs")}><ol className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         <li>{commonText("resource-domain:platform.management")}</li><li aria-hidden="true">/</li>

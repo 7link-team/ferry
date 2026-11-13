@@ -3,8 +3,9 @@ import { localeHeaders } from "../i18n/locale";
 import { beginActivity } from "./progress";
 
 export interface AvatarValue {
-  style: "portrait" | "pixel" | "initials" | "emoji" | "image";
+  style: "portrait" | "adventurer" | "notionists" | "lorelei" | "pixel-art" | "pixel" | "initials" | "emoji" | "image";
   seed?: string | undefined;
+  gender?: "neutral" | "male" | "female" | undefined;
   emoji?: string;
   image?: string;
 }

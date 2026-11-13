@@ -75,7 +75,7 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
           {!readOnly && <Button type="button" size="sm" variant="ghost" aria-label={`${commonText("common.delete")} ${row.label || row.name || index + 1}`} onClick={() => onChange(JSON.stringify(parsed.filter((_, i) => i !== index), null, 2))}><Trash2 className="size-4" />{commonText("common.delete")}</Button>}
         </div>
         <div className="min-w-0 space-y-3 p-3">
-        {readOnly ? <ParameterDefinition row={row} /> : <>
+        <>
         <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <AutoField label={t("parameterName")} required help={t("parameterNameHelp")}><Input value={row.name} required maxLength={100} disabled={readOnly} onChange={event => update(index, { name: event.target.value })} /></AutoField>
           <AutoField label={t("parameterLabel")}><Input value={row.label ?? ""} maxLength={100} disabled={readOnly} onChange={event => update(index, { label: event.target.value })} /></AutoField>
@@ -101,7 +101,7 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
             {row.type === "string" && <AutoField label={t("enumChoices")} help={t("enumChoicesHelp")} className="sm:col-span-2"><textarea className="min-h-24 w-full rounded-md border bg-background p-3 text-sm" value={row.enum?.join("\n") ?? ""} disabled={readOnly} onChange={event => update(index, { enum: event.target.value === "" ? undefined : event.target.value.split("\n") })} /></AutoField>}
           </div>
         </details>}
-       </>}
+       </>
         <code className="block min-w-0 break-all border-t border-border/70 pt-2 text-xs text-muted-foreground">{`{{ .Values.${row.name} }}`}</code>
         </div>
       </fieldset>)}
@@ -113,18 +113,6 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
    </>}
     {invalid && <p role="alert" className="text-sm text-destructive">{t("parameterNamesInvalid")}</p>}
   </section>;
-}
-
-function ParameterDefinition({ row }: { row: TemplateParameter }) {
-  const fields: [string, string][] = [
-    [t("parameterName"), row.name],
-    [t("parameterType"), t(row.type === "integer" ? "typeInteger" : row.type === "boolean" ? "typeBoolean" : "typeString")],
-    [t("defaultValue"), row.default === undefined ? commonText("common.notSet") : row.type === "boolean" ? commonText(row.default ? "common.yes" : "common.no") : String(row.default)],
-    ...(row.secret ? [[t("secretReference"), commonText("common.yes")] as [string, string]] : []),
-    ...(["min", "max", "min_length", "max_length"] as const).filter(key => row[key] !== undefined).map(key => [t(key), String(row[key])] as [string, string]),
-    ...(row.enum ? [[t("enumChoices"), row.enum.join(" · ")] as [string, string]] : []),
-  ];
-  return <dl className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-2 text-sm">{fields.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words [overflow-wrap:anywhere]">{value}</dd></div>)}</dl>;
 }
 
 export function templateParameterFields(parameters: TemplateParameter[]): FormField<Record<string, unknown>>[] {

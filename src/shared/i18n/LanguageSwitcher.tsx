@@ -17,7 +17,7 @@ import {
   type Locale,
 } from "./locale";
 
-export function LanguageSwitcher({ floating = false }: { floating?: boolean }) {
+export function LanguageSwitcher({ floating = false, showLabel = false }: { floating?: boolean; showLabel?: boolean }) {
   const { t } = useTranslation();
   const locale = currentLocale();
   return (
@@ -35,10 +35,10 @@ export function LanguageSwitcher({ floating = false }: { floating?: boolean }) {
             aria-label={t("language.label")}
             aria-description={localeNames[locale]}
             title={`${t("language.label")}: ${localeNames[locale]}`}
-            className="h-8 gap-1.5 rounded-md px-2 has-[>svg]:px-2 text-foreground transition-colors hover:bg-accent hover:text-accent-foreground max-sm:size-8 max-sm:p-0 max-sm:has-[>svg]:px-0"
+            className={`h-11 gap-1.5 rounded-md px-2 has-[>svg]:px-2 text-foreground transition-colors hover:bg-accent hover:text-accent-foreground ${showLabel ? "max-w-full" : "max-sm:size-11 max-sm:p-0 max-sm:has-[>svg]:px-0"}`}
           >
             <Globe aria-hidden="true" className="size-4 shrink-0" />
-            <span className="hidden max-w-[100px] truncate text-sm font-medium sm:inline" lang={locale}>
+            <span className={`${showLabel ? "inline" : "hidden sm:inline"} max-w-[100px] truncate text-sm font-medium`} lang={locale}>
               {localeNames[locale]}
             </span>
           </Button>
@@ -47,16 +47,16 @@ export function LanguageSwitcher({ floating = false }: { floating?: boolean }) {
           align="end"
           collisionPadding={8}
           sideOffset={8}
-          className="max-h-80 w-56 p-0"
+          className="language-menu max-h-96 w-60 p-2"
         >
-          <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="mb-1 px-3 py-2 text-xs font-semibold text-popover-foreground">
             {t("language.label")}
           </div>
           <DropdownMenuRadioGroup
             value={locale}
             onValueChange={(value) => setLocale(value as Locale)}
             aria-label={t("language.label")}
-            className="p-1"
+            className="space-y-1"
           >
             {supportedLocales.map((value) => (
               <DropdownMenuRadioItem
@@ -64,9 +64,9 @@ export function LanguageSwitcher({ floating = false }: { floating?: boolean }) {
                 value={value}
                 lang={value}
                 textValue={localeNames[value]}
-                className="w-full gap-2 rounded-md px-2 py-1.5 text-popover-foreground transition-colors data-[state=checked]:bg-primary data-[state=checked]:font-medium data-[state=checked]:text-primary-foreground data-[state=checked]:focus:bg-primary data-[state=checked]:focus:text-primary-foreground [&>span:first-child]:hidden"
+                className="min-h-11 w-full gap-3 rounded-md border border-transparent px-3 py-2 text-popover-foreground transition-colors data-[state=checked]:border-primary/25 data-[state=checked]:bg-primary/10 data-[state=checked]:font-semibold data-[state=checked]:text-popover-foreground data-[state=checked]:focus:bg-primary/15 [&>span:first-child]:hidden"
               >
-                <span aria-hidden="true" className={`inline-flex w-7 shrink-0 items-center justify-center rounded text-[10px] font-semibold leading-5 ${value === locale ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                <span aria-hidden="true" className="inline-flex w-8 shrink-0 items-center justify-center rounded border border-current/20 text-[10px] font-semibold leading-6">
                   {value.split("-")[0]!.toUpperCase()}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-left">{localeNames[value]}</span>

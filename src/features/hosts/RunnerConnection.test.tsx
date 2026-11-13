@@ -613,10 +613,11 @@ it("defaults a known host to its reported OS and service scope without browser d
  expect(host.querySelector('[role="tab"][data-state="active"]')?.textContent).toBe('Windows');
  expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="卸载命令"]')?.value).toBe(runnerUninstallCommand('windows','user'));
 });
-it("does not invent a system service scope for a foreground or older agent",async()=>{
+it("offers a default install command without misrepresenting a foreground agent or offering an unconfirmed uninstall",async()=>{
  vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,status:200,json:async()=>({token:'host-token',server:'https://example.com',state:'online',os:'windows',installation_scope:'foreground'})})));
  await act(async()=>root.render(<HostConnectionCommand workspace="ops" hostId="h1"/>));
- expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前连接命令"]')?.value).toBe('');
+ expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前连接命令"]')?.value).toBe(runnerInstallCommand('windows','https://example.com','host-token','system'));
+ expect([...host.querySelectorAll('[role="tab"][data-state="active"]')].some(tab => tab.textContent === '系统服务')).toBe(true);
  expect(host.textContent).toContain('当前代理为直接启动');
  expect(host.querySelector('textarea[aria-label="卸载命令"]')).toBeNull();
 });

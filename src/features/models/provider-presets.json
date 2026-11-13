@@ -1,0 +1,1311 @@
+{
+ "source": "Provider presets adapted from CC Switch (https://github.com/farion1231/cc-switch, MIT License, Copyright (c) 2025 Jason Young): src/config/claudeProviderPresets.ts, Anthropic-format entries only; referral query parameters removed.",
+ "presets": [
+  {
+   "name": "OpenAI",
+   "category": "official",
+   "protocol": "openai",
+   "base_url": "https://api.openai.com/v1",
+   "models": [],
+   "website": "https://platform.openai.com",
+   "api_key_url": "https://platform.openai.com/api-keys"
+  },
+  {
+   "name": "Anthropic",
+   "category": "official",
+   "protocol": "anthropic",
+   "base_url": "https://api.anthropic.com/v1",
+   "models": [],
+   "website": "https://www.anthropic.com",
+   "api_key_url": "https://console.anthropic.com/settings/keys"
+  },
+  {
+   "name": "TokenPlus",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.tokenplus.cn/v1",
+   "models": [
+    "deepseek/deepseek-v4.1-flash-1017",
+    "moonshot-ai/kimi-k3.1-pro",
+    "z-ai/glm-5.3-flash",
+    "minimax/m3.1-flash"
+   ],
+   "website": "https://www.tokenplus.cn",
+   "api_key_url": "https://www.tokenplus.cn/workspace"
+  },
+  {
+   "name": "Kimi",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.moonshot.cn/anthropic/v1",
+   "models": [
+    "kimi-k3.1-pro"
+   ],
+   "website": "https://platform.kimi.com"
+  },
+  {
+   "name": "Kimi Global",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.moonshot.ai/anthropic/v1",
+   "models": [
+    "kimi-k3.1-pro"
+   ],
+   "website": "https://platform.kimi.ai"
+  },
+  {
+   "name": "Kimi For Coding",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.kimi.com/coding/v1",
+   "models": [
+    "kimi-for-coding"
+   ],
+   "website": "https://www.kimi.com/code"
+  },
+  {
+   "name": "Kimi For Coding Global",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.kimi.ai/coding/v1",
+   "models": [
+    "kimi-for-coding"
+   ],
+   "website": "https://www.kimi.ai/code"
+  },
+  {
+   "name": "PackyCode",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://www.packyapi.ai/v1",
+   "models": [],
+   "website": "https://www.packyapi.ai",
+   "api_key_url": "https://www.packyapi.ai/register"
+  },
+  {
+   "name": "APINebula",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://apinebula.ai/v1",
+   "models": [],
+   "website": "https://apinebula.ai",
+   "api_key_url": "https://apinebula.ai/VjM74M"
+  },
+  {
+   "name": "AICodeMirror",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://api.aicodemirror.ai/api/claudecode/v1",
+   "models": [],
+   "website": "https://www.aicodemirror.ai",
+   "api_key_url": "https://www.aicodemirror.ai/register"
+  },
+  {
+   "name": "PatewayAI",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://api.pateway.ai/v1",
+   "models": [],
+   "website": "https://pateway.ai",
+   "api_key_url": "https://pateway.ai"
+  },
+  {
+   "name": "hao.ai",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.hao.ai/anthropic/v1",
+   "models": [],
+   "website": "https://hao.ai",
+   "api_key_url": "https://hao.ai/invite/DTBZS3OR"
+  },
+  {
+   "name": "FennoAI",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.fenno.ai/v1",
+   "models": [],
+   "website": "https://api.fenno.ai",
+   "api_key_url": "https://api.fenno.ai/register"
+  },
+  {
+   "name": "RunAPI",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://runapi.host/v1",
+   "models": [],
+   "website": "https://runapi.host",
+   "api_key_url": "https://runapi.host/register"
+  },
+  {
+   "name": "OpenModel",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.openmodel.ai/v1",
+   "models": [],
+   "website": "https://www.openmodel.ai",
+   "api_key_url": "https://www.openmodel.ai"
+  },
+  {
+   "name": "GrooRoute Pro",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://grooroute.pro/v1",
+   "models": [
+    "claude-sonnet-5-5"
+   ],
+   "website": "https://grooroute.pro",
+   "api_key_url": "https://grooroute.pro/sign-up"
+  },
+  {
+   "name": "BuyToken",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.buytoken.work/v1",
+   "models": [
+    "claude-haiku-4-5-20251001"
+   ],
+   "website": "https://buytoken.work",
+   "api_key_url": "https://buytoken.work/sign-up"
+  },
+  {
+   "name": "V-API",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.gpt.ge/v1",
+   "models": [],
+   "website": "https://gpt.ge",
+   "api_key_url": "https://gpt.ge/signup"
+  },
+  {
+   "name": "TokenFactory",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.tokenfactory.cn/anthropic/v1",
+   "models": [
+    "glm-5.3",
+    "kimi-k3",
+    "deepseek-v4.1-flash"
+   ],
+   "website": "https://tokenfactory.cn",
+   "api_key_url": "https://console.tokenfactory.cn/login"
+  },
+  {
+   "name": "FluxA Token Plan",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.baiduqianfan.ai/anthropic/tokenplan/team/v1",
+   "models": [
+    "deepseek-v4.1-flash"
+   ],
+   "website": "https://agentmarket.fluxapay.xyz",
+   "api_key_url": "https://agentmarket.fluxapay.xyz/marketplace/tokenplans"
+  },
+  {
+   "name": "AIGoCode",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://api.aigocode.dev/v1",
+   "models": [],
+   "website": "https://aigocode.net",
+   "api_key_url": "https://aigocode.net/invite/CC-SWITCH"
+  },
+  {
+   "name": "Qiniu",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.qnaigc.com/v1",
+   "models": [],
+   "website": "https://s.qiniu.com/nMvAvy",
+   "api_key_url": "https://s.qiniu.com/nMvAvy"
+  },
+  {
+   "name": "AICoding",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://api.aicoding.inc/v1",
+   "models": [],
+   "website": "https://aicoding.inc",
+   "api_key_url": "https://aicoding.inc/i/CCSWITCH"
+  },
+  {
+   "name": "SubRouter",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://subrouter.ai/v1",
+   "models": [],
+   "website": "https://subrouter.ai",
+   "api_key_url": "https://subrouter.ai/register"
+  },
+  {
+   "name": "OspreyAI",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://open.ospreyai.cn/v1",
+   "models": [
+    "claude-haiku-4-5"
+   ],
+   "website": "https://open.ospreyai.cn",
+   "api_key_url": "https://open.ospreyai.cn"
+  },
+  {
+   "name": "Shengsuanyun",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://router.shengsuanyun.com/api/v1",
+   "models": [
+    "anthropic/claude-sonnet-5.5",
+    "anthropic/claude-opus-5.5",
+    "anthropic/claude-haiku-5.5"
+   ],
+   "website": "https://www.shengsuanyun.com",
+   "api_key_url": "https://www.shengsuanyun.com"
+  },
+  {
+   "name": "88API",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.88api.ai/v1",
+   "models": [],
+   "website": "https://88api.ai",
+   "api_key_url": "https://88api.ai/sign-up"
+  },
+  {
+   "name": "APIKEY.FUN",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://api.apikey.fan/v1",
+   "models": [],
+   "website": "https://apikey.fan",
+   "api_key_url": "https://apikey.fan/register"
+  },
+  {
+   "name": "9527CODE",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://9527.codes/v1",
+   "models": [],
+   "website": "https://9527.codes",
+   "api_key_url": "https://9527.codes/register"
+  },
+  {
+   "name": "ClaudeAPI",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://gw.apito.ai/v1",
+   "models": [],
+   "website": "https://www.apito.ai",
+   "api_key_url": "https://console.apito.ai/agent/register/pQBql2buaqiX3dDS"
+  },
+  {
+   "name": "Code0",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://code0.ai/v1",
+   "models": [],
+   "website": "https://code0.ai",
+   "api_key_url": "https://code0.ai/agent/register/B2XHxGjGmRvqgznY"
+  },
+  {
+   "name": "TeamoRouter",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.teamorouter.com/v1",
+   "models": [],
+   "website": "https://teamorouter.com",
+   "api_key_url": "https://teamorouter.com"
+  },
+  {
+   "name": "PPIO",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.ppio.com/anthropic/v1",
+   "models": [
+    "deepseek/deepseek-v4.1-flash"
+   ],
+   "website": "https://ppio.com",
+   "api_key_url": "https://ppio.com/activity/ccswitch"
+  },
+  {
+   "name": "ClaudeCN",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://claudecn.top/v1",
+   "models": [],
+   "website": "https://claudecn.top",
+   "api_key_url": "https://claudecn.ai/register"
+  },
+  {
+   "name": "火山 Agent Plan",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://ark.cn-beijing.volces.com/api/plan/v1",
+   "models": [
+    "ark-code-latest"
+   ],
+   "website": "https://www.volcengine.com/activity/agentplan",
+   "api_key_url": "https://www.volcengine.com/activity/agentplan"
+  },
+  {
+   "name": "火山 Coding Plan",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://ark.cn-beijing.volces.com/api/coding/v1",
+   "models": [
+    "ark-code-latest"
+   ],
+   "website": "https://www.volcengine.com/activity/codingplan",
+   "api_key_url": "https://www.volcengine.com/activity/codingplan"
+  },
+  {
+   "name": "BytePlus",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://ark.ap-southeast.bytepluses.com/api/coding/v1",
+   "models": [
+    "ark-code-latest"
+   ],
+   "website": "https://www.byteplus.com/en/product/modelark",
+   "api_key_url": "https://www.byteplus.com/en/product/modelark"
+  },
+  {
+   "name": "Volcengine Doubao",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://ark.cn-beijing.volces.com/api/compatible/v1",
+   "models": [
+    "doubao-seed-2-1-pro-260915"
+   ],
+   "website": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+   "api_key_url": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey"
+  },
+  {
+   "name": "SiliconFlow",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.siliconflow.cn/v1",
+   "models": [
+    "deepseek-ai/DeepSeek-V4-Flash"
+   ],
+   "website": "https://siliconflow.cn",
+   "api_key_url": "https://cloud.siliconflow.cn/i/YflgU2Ve"
+  },
+  {
+   "name": "SiliconFlow en",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.siliconflow.com/v1",
+   "models": [
+    "MiniMaxAI/MiniMax-M3"
+   ],
+   "website": "https://siliconflow.com",
+   "api_key_url": "https://cloud.siliconflow.cn/i/YflgU2Ve"
+  },
+  {
+   "name": "A6API",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.a6api.vip/v1",
+   "models": [],
+   "website": "https://www.a6api.vip",
+   "api_key_url": "https://a6api.vip/register"
+  },
+  {
+   "name": "Compshare",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.modelverse.cn/v1",
+   "models": [],
+   "website": "https://www.compshare.cn",
+   "api_key_url": "https://www.compshare.cn/coding-plan"
+  },
+  {
+   "name": "Compshare Coding Plan",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://cp.compshare.cn/v1",
+   "models": [],
+   "website": "https://www.compshare.cn",
+   "api_key_url": "https://www.compshare.cn/coding-plan"
+  },
+  {
+   "name": "CCSub",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://www.ccsub.net/v1",
+   "models": [],
+   "website": "https://www.ccsub.net",
+   "api_key_url": "https://www.ccsub.net/register"
+  },
+  {
+   "name": "SSSAiCode",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://node-hk.sssaicodeapi.com/api/v1",
+   "models": [],
+   "website": "https://sssaicodeapi.com",
+   "api_key_url": "https://sssaicodeapi.com/register"
+  },
+  {
+   "name": "SoleAPI",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://soleapi.com/v1",
+   "models": [],
+   "website": "https://soleapi.com",
+   "api_key_url": "https://soleapi.com/r/ccswitch"
+  },
+  {
+   "name": "Micu",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://www.micuapi.ai/v1",
+   "models": [],
+   "website": "https://www.micuapi.ai",
+   "api_key_url": "https://www.micuapi.ai/register"
+  },
+  {
+   "name": "RightCode",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://www.rightapi.ai/claude/v1",
+   "models": [],
+   "website": "https://www.rightapi.ai",
+   "api_key_url": "https://www.rightapi.ai/register"
+  },
+  {
+   "name": "Cubence",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://api.cubence.com/v1",
+   "models": [],
+   "website": "https://cubence.com",
+   "api_key_url": "https://cubence.com/signup"
+  },
+  {
+   "name": "CrazyRouter",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://cn.crazyrouter.com/v1",
+   "models": [],
+   "website": "https://www.crazyrouter.com",
+   "api_key_url": "https://www.crazyrouter.com/register"
+  },
+  {
+   "name": "DMXAPI",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://www.dmxapi.cn/v1",
+   "models": [],
+   "website": "https://www.dmxapi.cn",
+   "api_key_url": "https://www.dmxapi.cn"
+  },
+  {
+   "name": "SudoCode.chat",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://api.sudocode.chat/v1",
+   "models": [],
+   "website": "https://sudocode.chat",
+   "api_key_url": "https://sudocode.chat/sign-up"
+  },
+  {
+   "name": "SudoCode.us",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://sudocode.us/v1",
+   "models": [],
+   "website": "https://sudocode.us",
+   "api_key_url": "https://sudocode.us"
+  },
+  {
+   "name": "XycAi",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://apicdn.xycai.us/v1",
+   "models": [],
+   "website": "https://xycai.us",
+   "api_key_url": "https://xycai.us/register"
+  },
+  {
+   "name": "Modelflare",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://modelflare.dev/v1",
+   "models": [
+    "claude-sonnet-5-5"
+   ],
+   "website": "https://modelflare.dev",
+   "api_key_url": "https://modelflare.dev/sign-up"
+  },
+  {
+   "name": "AllTokens",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://alltokens.cc/v1",
+   "models": [],
+   "website": "https://alltokens.cc",
+   "api_key_url": "https://alltokens.cc/register"
+  },
+  {
+   "name": "AllTokens SI",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://alltokens.si/v1",
+   "models": [
+    "claude-sonnet-5.5",
+    "claude-opus-5.5"
+   ],
+   "website": "https://alltokens.si",
+   "api_key_url": "https://alltokens.si/enterprise-register"
+  },
+  {
+   "name": "Tu-zi",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.tu-zi.com/v1",
+   "models": [],
+   "website": "https://api.tu-zi.com",
+   "api_key_url": "https://api.tu-zi.com/token"
+  },
+  {
+   "name": "Amux",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.amux.ai/v1",
+   "models": [],
+   "website": "https://amux.ai",
+   "api_key_url": "https://amux.ai"
+  },
+  {
+   "name": "AtlasCloud",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.atlascloud.ai/v1",
+   "models": [
+    "zai-org/glm-5.3",
+    "zai-org/glm-5.3-flash"
+   ],
+   "website": "https://www.atlascloud.ai/console/coding-plan",
+   "api_key_url": "https://www.atlascloud.ai/console/coding-plan"
+  },
+  {
+   "name": "Soshow",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://maas.so-show.com/v1",
+   "models": [
+    "claude-sonnet-5"
+   ],
+   "website": "https://aimarket.so-show.com",
+   "api_key_url": "https://aimarket.so-show.com/workbench/access-key"
+  },
+  {
+   "name": "DeepSeek",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.deepseek.com/anthropic/v1",
+   "models": [
+    "deepseek-flash"
+   ],
+   "website": "https://platform.deepseek.com"
+  },
+  {
+   "name": "OpenCode Go",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://opencode.ai/zen/go/v1",
+   "models": [
+    "deepseek-v4.1-flash"
+   ],
+   "website": "https://opencode.ai/go",
+   "api_key_url": "https://opencode.ai/go"
+  },
+  {
+   "name": "OpenCode Zen",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://opencode.ai/zen/v1",
+   "models": [
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+    "claude-haiku-5-5"
+   ],
+   "website": "https://opencode.ai/zen",
+   "api_key_url": "https://opencode.ai/auth"
+  },
+  {
+   "name": "Tencent Token Plan",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.lkeap.cloud.tencent.com/plan/anthropic/v1",
+   "models": [
+    "tc-code-latest"
+   ],
+   "website": "https://cloud.tencent.com/product/tokenhub",
+   "api_key_url": "https://console.cloud.tencent.com/tokenhub/tokenplan"
+  },
+  {
+   "name": "Tencent Token Plan (Intl)",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://tokenhub-intl.tencentcloudmaas.com/plan/anthropic/v1",
+   "models": [
+    "auto"
+   ],
+   "website": "https://www.tencentcloud.com/products/tokenhub",
+   "api_key_url": "https://console.tencentcloud.com/tokenhub/tokenplan"
+  },
+  {
+   "name": "Tencent Token Plan Enterprise Pro",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://tokenhub.tencentmaas.com/plan/anthropic/v1",
+   "models": [
+    "auto"
+   ],
+   "website": "https://cloud.tencent.com/product/tokenhub",
+   "api_key_url": "https://console.cloud.tencent.com/tokenhub/tokenplan-e"
+  },
+  {
+   "name": "Tencent Token Plan Enterprise Pro (Intl)",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://tokenhub-intl.tencentcloudmaas.com/plan/anthropic/v1",
+   "models": [
+    "auto"
+   ],
+   "website": "https://www.tencentcloud.com/products/tokenhub",
+   "api_key_url": "https://console.tencentcloud.com/tokenhub/tokenplan-e"
+  },
+  {
+   "name": "Tencent Token Plan Enterprise Lite",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://tokenhub.tencentmaas.com/plan/anthropic/v1",
+   "models": [
+    "auto"
+   ],
+   "website": "https://cloud.tencent.com/product/tokenhub",
+   "api_key_url": "https://console.cloud.tencent.com/tokenhub/tokenplan-e"
+  },
+  {
+   "name": "Tencent Token Plan Enterprise Lite (Intl)",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://tokenhub-intl.tencentcloudmaas.com/plan/anthropic/v1",
+   "models": [
+    "auto"
+   ],
+   "website": "https://www.tencentcloud.com/products/tokenhub",
+   "api_key_url": "https://console.tencentcloud.com/tokenhub/tokenplan-e"
+  },
+  {
+   "name": "Zhipu GLM",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://open.bigmodel.cn/api/anthropic/v1",
+   "models": [
+    "glm-5.3"
+   ],
+   "website": "https://open.bigmodel.cn",
+   "api_key_url": "https://www.bigmodel.cn/claude-code"
+  },
+  {
+   "name": "Zhipu GLM en",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.z.ai/api/anthropic/v1",
+   "models": [
+    "glm-5.3"
+   ],
+   "website": "https://z.ai",
+   "api_key_url": "https://z.ai/subscribe"
+  },
+  {
+   "name": "Baidu Qianfan Coding Plan",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://qianfan.baidubce.com/anthropic/coding/v1",
+   "models": [
+    "qianfan-code-latest"
+   ],
+   "website": "https://cloud.baidu.com/product/qianfan_modelbuilder",
+   "api_key_url": "https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application"
+  },
+  {
+   "name": "Baidu Qianfan Token Plan",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://qianfan.baidubce.com/anthropic/tokenplan/personal/v1",
+   "models": [
+    "deepseek-v4-flash"
+   ],
+   "website": "https://cloud.baidu.com/product/codingplan.html",
+   "api_key_url": "https://console.bce.baidu.com/qianfan/resource/token-plan"
+  },
+  {
+   "name": "Astron MaaS",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://maas-api.cn-huabei-1.xf-yun.com/anthropic/v1",
+   "models": [
+    "spark-x2.6"
+   ],
+   "website": "https://maas.xfyun.cn"
+  },
+  {
+   "name": "Astron Coding Plan",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://maas-coding-api.cn-huabei-1.xf-yun.com/anthropic/v1",
+   "models": [
+    "astron-code-latest"
+   ],
+   "website": "https://maas.xfyun.cn/packageSubscription",
+   "api_key_url": "https://maas.xfyun.cn/packageSubscription"
+  },
+  {
+   "name": "千问AI平台",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://maas.qianwenaiapi.com/apps/anthropic/v1",
+   "models": [
+    "qwen3.8-max",
+    "qwen3.7-plus",
+    "qwen3.8-flash"
+   ],
+   "website": "https://platform.qianwenai.com",
+   "api_key_url": "https://platform.qianwenai.com/home/api-keys"
+  },
+  {
+   "name": "千问AI平台 Coding Plan",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1",
+   "models": [],
+   "website": "https://bailian.console.aliyun.com"
+  },
+  {
+   "name": "千问AI平台 Token Plan",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://token-plan.maas.qianwenaiapi.com/apps/anthropic/v1",
+   "models": [
+    "qwen3.8-max",
+    "qwen3.7-plus",
+    "qwen3.8-flash"
+   ],
+   "website": "https://platform.qianwenai.com/pricing/token-plan",
+   "api_key_url": "https://platform.qianwenai.com/home/api-keys"
+  },
+  {
+   "name": "QwenCloud",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://ap-southeast-1.maas.qwencloudapi.com/apps/anthropic/v1",
+   "models": [
+    "qwen3.8-max",
+    "qwen3.7-plus",
+    "qwen3.8-flash"
+   ],
+   "website": "https://home.qwencloud.com",
+   "api_key_url": "https://home.qwencloud.com/api-keys"
+  },
+  {
+   "name": "QwenCloud For Coding",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1",
+   "models": [
+    "qwen3.7-plus"
+   ],
+   "website": "https://www.qwencloud.com",
+   "api_key_url": "https://home.qwencloud.com/api-keys"
+  },
+  {
+   "name": "QwenCloud Token Plan",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://token-plan.maas.qwencloudapi.com/apps/anthropic/v1",
+   "models": [
+    "qwen3.8-max",
+    "qwen3.7-plus",
+    "qwen3.8-flash"
+   ],
+   "website": "https://www.qwencloud.com/pricing/token-plan",
+   "api_key_url": "https://home.qwencloud.com/api-keys"
+  },
+  {
+   "name": "StepFun",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.stepfun.com/step_plan/v1",
+   "models": [
+    "step-5-preview"
+   ],
+   "website": "https://platform.stepfun.com/step-plan",
+   "api_key_url": "https://platform.stepfun.com/interface-key"
+  },
+  {
+   "name": "StepFun en",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.stepfun.ai/step_plan/v1",
+   "models": [
+    "step-3.5-flash-2603"
+   ],
+   "website": "https://platform.stepfun.ai/step-plan",
+   "api_key_url": "https://platform.stepfun.ai/interface-key"
+  },
+  {
+   "name": "ModelScope",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api-inference.modelscope.cn/v1",
+   "models": [
+    "ZhipuAI/GLM-5.2"
+   ],
+   "website": "https://modelscope.cn"
+  },
+  {
+   "name": "StreamLake",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://wanqing.streamlakeapi.com/api/gateway/v1/endpoints/kat-coder-pro-v2.5/claude-code-proxy/v1",
+   "models": [
+    "kat-coder-pro-v2.5"
+   ],
+   "website": "https://www.streamlake.com",
+   "api_key_url": "https://console.streamlake.com/console/wanqing/api-key"
+  },
+  {
+   "name": "StreamLake en",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://vanchin.streamlake.ai/api/gateway/v1/endpoints/kat-coder-pro-v2.5/claude-code-proxy/v1",
+   "models": [
+    "kat-coder-pro-v2.5"
+   ],
+   "website": "https://console.streamlake.ai",
+   "api_key_url": "https://console.streamlake.ai/console/api-key"
+  },
+  {
+   "name": "Longcat",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.longcat.chat/anthropic/v1",
+   "models": [
+    "LongCat-2.0"
+   ],
+   "website": "https://longcat.chat/platform",
+   "api_key_url": "https://longcat.chat/platform/api_keys"
+  },
+  {
+   "name": "MiniMax",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.minimax.cn/anthropic/v1",
+   "models": [
+    "MiniMax-M3.1-Flash",
+    "MiniMax-M3"
+   ],
+   "website": "https://platform.minimax.cn",
+   "api_key_url": "https://platform.minimax.cn/subscribe/token-plan"
+  },
+  {
+   "name": "MiniMax en",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.minimax.io/anthropic/v1",
+   "models": [
+    "MiniMax-M3.1-Flash",
+    "MiniMax-M3"
+   ],
+   "website": "https://platform.minimax.io",
+   "api_key_url": "https://platform.minimax.io/subscribe/coding-plan"
+  },
+  {
+   "name": "BaiLing",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.ant-ling.com/anthropic/v1",
+   "models": [
+    "Ling-2.6-1T"
+   ],
+   "website": "https://developer.ant-ling.com/zh-CN/docs",
+   "api_key_url": "https://chat.ant-ling.com/open"
+  },
+  {
+   "name": "AiHubMix",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://aihubmix.com/v1",
+   "models": [],
+   "website": "https://aihubmix.com",
+   "api_key_url": "https://aihubmix.com"
+  },
+  {
+   "name": "CherryIN",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://open.cherryin.net/v1",
+   "models": [
+    "anthropic/claude-sonnet-5.5",
+    "anthropic/claude-opus-5.5",
+    "anthropic/claude-haiku-5.5"
+   ],
+   "website": "https://open.cherryin.ai",
+   "api_key_url": "https://open.cherryin.ai/console/token"
+  },
+  {
+   "name": "RelaxyCode",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://www.relaxycode.com/v1",
+   "models": [],
+   "website": "https://www.relaxycode.com",
+   "api_key_url": "https://www.relaxycode.com/register"
+  },
+  {
+   "name": "E-FlowCode",
+   "category": "third_party",
+   "protocol": "anthropic",
+   "base_url": "https://e-flowcode.cc/v1",
+   "models": [],
+   "website": "https://e-flowcode.cc",
+   "api_key_url": "https://e-flowcode.cc"
+  },
+  {
+   "name": "OpenRouter",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://openrouter.ai/api/v1",
+   "models": [
+    "anthropic/claude-sonnet-5.5",
+    "anthropic/claude-opus-5.5",
+    "anthropic/claude-haiku-5.5"
+   ],
+   "website": "https://openrouter.ai",
+   "api_key_url": "https://openrouter.ai/keys"
+  },
+  {
+   "name": "TheRouter",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.therouter.ai/v1",
+   "models": [
+    "anthropic/claude-sonnet-5-5",
+    "anthropic/claude-opus-5-5",
+    "anthropic/claude-haiku-5-5"
+   ],
+   "website": "https://therouter.ai",
+   "api_key_url": "https://dashboard.therouter.ai"
+  },
+  {
+   "name": "Baseten",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://inference.baseten.co/v1",
+   "models": [
+    "zai-org/GLM-5.3",
+    "moonshotai/Kimi-K3",
+    "zai-org/GLM-5.3-Flash"
+   ],
+   "website": "https://www.baseten.co",
+   "api_key_url": "https://app.baseten.co/settings/api_keys"
+  },
+  {
+   "name": "Novita AI",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.novita.ai/anthropic/v1",
+   "models": [
+    "zai-org/glm-5.3",
+    "zai-org/glm-5.3-flash"
+   ],
+   "website": "https://novita.ai",
+   "api_key_url": "https://novita.ai"
+  },
+  {
+   "name": "Ollama Cloud",
+   "category": "cloud_provider",
+   "protocol": "anthropic",
+   "base_url": "https://ollama.com/v1",
+   "models": [
+    "glm-5.3",
+    "kimi-k3",
+    "glm-5.3-flash"
+   ],
+   "website": "https://ollama.com",
+   "api_key_url": "https://ollama.com/settings/keys"
+  },
+  {
+   "name": "Ollama",
+   "category": "local",
+   "protocol": "anthropic",
+   "base_url": "http://localhost:11434/v1",
+   "models": [
+    "qwen3.5"
+   ],
+   "website": "https://ollama.com"
+  },
+  {
+   "name": "LM Studio",
+   "category": "local",
+   "protocol": "anthropic",
+   "base_url": "http://localhost:1234/v1",
+   "models": [
+    "openai/gpt-oss-20b"
+   ],
+   "website": "https://lmstudio.ai"
+  },
+  {
+   "name": "llama.cpp",
+   "category": "local",
+   "protocol": "anthropic",
+   "base_url": "http://127.0.0.1:9931/v1",
+   "models": [
+    "ggml-org/Qwen3-Coder-30B-A3B-Instruct-Q8_0-GGUF"
+   ],
+   "website": "https://github.com/ggml-org/llama.cpp"
+  },
+  {
+   "name": "vLLM",
+   "category": "local",
+   "protocol": "anthropic",
+   "base_url": "http://localhost:8000/v1",
+   "models": [
+    "Qwen/Qwen3.6-27B"
+   ],
+   "website": "https://vllm.ai"
+  },
+  {
+   "name": "Meta Model API",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.meta.ai/v1",
+   "models": [
+    "muse-wonder-1.0",
+    "muse-spark-1.3"
+   ],
+   "website": "https://dev.meta.ai",
+   "api_key_url": "https://dev.meta.ai"
+  },
+  {
+   "name": "DeepInfra",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.deepinfra.com/anthropic/v1",
+   "models": [
+    "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+    "inclusionAI/Ling-3.0-flash"
+   ],
+   "website": "https://deepinfra.com",
+   "api_key_url": "https://deepinfra.com/dash/api_keys"
+  },
+  {
+   "name": "Vercel AI Gateway",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://ai-gateway.vercel.sh/claude-code/v1",
+   "models": [
+    "anthropic/claude-sonnet-5.5",
+    "anthropic/claude-opus-5.5",
+    "anthropic/claude-haiku-5.5"
+   ],
+   "website": "https://vercel.com/ai-gateway",
+   "api_key_url": "https://vercel.com/d"
+  },
+  {
+   "name": "SambaNova",
+   "category": "cloud_provider",
+   "protocol": "anthropic",
+   "base_url": "https://api.sambanova.ai/v1",
+   "models": [
+    "MiniMax-M3"
+   ],
+   "website": "https://sambanova.ai",
+   "api_key_url": "https://cloud.sambanova.ai/apis"
+  },
+  {
+   "name": "DigitalOcean",
+   "category": "cloud_provider",
+   "protocol": "anthropic",
+   "base_url": "https://inference.do-ai.run/v1",
+   "models": [],
+   "website": "https://www.digitalocean.com/products/ai-platform",
+   "api_key_url": "https://cloud.digitalocean.com/model-studio/manage-keys"
+  },
+  {
+   "name": "Hugging Face",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://router.huggingface.co/v1",
+   "models": [
+    "zai-org/GLM-5.3:baseten",
+    "zai-org/GLM-5.3-Flash:baseten"
+   ],
+   "website": "https://huggingface.co/inference/models",
+   "api_key_url": "https://huggingface.co/settings/tokens/new"
+  },
+  {
+   "name": "Fireworks AI",
+   "category": "cloud_provider",
+   "protocol": "anthropic",
+   "base_url": "https://api.fireworks.ai/inference/v1",
+   "models": [
+    "accounts/fireworks/models/glm-5p3",
+    "accounts/fireworks/models/kimi-k3",
+    "accounts/fireworks/models/deepseek-v4p1-flash"
+   ],
+   "website": "https://fireworks.ai",
+   "api_key_url": "https://app.fireworks.ai/settings/users/api-keys"
+  },
+  {
+   "name": "PIPELLM",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://cc-api.pipellm.ai/v1",
+   "models": [
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "claude-haiku-5-5"
+   ],
+   "website": "https://code.pipellm.ai",
+   "api_key_url": "https://code.pipellm.ai/login"
+  },
+  {
+   "name": "Xiaomi MiMo",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://api.xiaomimimo.com/anthropic/v1",
+   "models": [
+    "mimo-v2.6-pro"
+   ],
+   "website": "https://platform.xiaomimimo.com",
+   "api_key_url": "https://platform.xiaomimimo.com"
+  },
+  {
+   "name": "Xiaomi MiMo Token Plan (China)",
+   "category": "cn_official",
+   "protocol": "anthropic",
+   "base_url": "https://token-plan-cn.xiaomimimo.com/anthropic/v1",
+   "models": [
+    "mimo-v2.6-pro"
+   ],
+   "website": "https://platform.xiaomimimo.com",
+   "api_key_url": "https://platform.xiaomimimo.com"
+  },
+  {
+   "name": "JieKou AI",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.jiekou.ai/anthropic/v1",
+   "models": [
+    "claude-fable-5-1"
+   ],
+   "website": "https://jiekou.ai",
+   "api_key_url": "https://jiekou.ai/settings/key-management"
+  },
+  {
+   "name": "AICodeWith",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.aicodewith.ai/v1",
+   "models": [],
+   "website": "https://aicodewith.ai",
+   "api_key_url": "https://aicodewith.ai/login"
+  },
+  {
+   "name": "模力方舟",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://moark.com/anthropic/v1",
+   "models": [
+    "deepseek-v4.1-flash"
+   ],
+   "website": "https://moark.com",
+   "api_key_url": "https://moark.com/dashboard/tokens"
+  },
+  {
+   "name": "SoruxGPT",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://ai.soruxgpt.com/v1",
+   "models": [],
+   "website": "https://ai.soruxgpt.com",
+   "api_key_url": "https://ai.soruxgpt.com/console/token"
+  },
+  {
+   "name": "SoruxGPT Coding Plan",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://app.soruxgpt.com/api/cc/v1",
+   "models": [],
+   "website": "https://app.soruxgpt.com"
+  },
+  {
+   "name": "IKunCode",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.ikuncode.ai/v1",
+   "models": [],
+   "website": "https://api.ikuncode.ai",
+   "api_key_url": "https://api.ikuncode.ai/console/token"
+  },
+  {
+   "name": "RunToken",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://www.runtoken.ai/v1",
+   "models": [],
+   "website": "https://www.runtoken.ai",
+   "api_key_url": "https://www.runtoken.ai/console/token"
+  },
+  {
+   "name": "BotCF",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://botcf.com/v1",
+   "models": [],
+   "website": "https://botcf.com",
+   "api_key_url": "https://botcf.com/console/token"
+  },
+  {
+   "name": "YYLX",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://app.yylx.io/v1",
+   "models": [],
+   "website": "https://yylx.io",
+   "api_key_url": "https://app.yylx.io/keys"
+  },
+  {
+   "name": "TokenFlux",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://tokenflux.com/v1",
+   "models": [],
+   "website": "https://tokenflux.com",
+   "api_key_url": "https://tokenflux.com/keys"
+  },
+  {
+   "name": "NekoCode",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://nekoapi.ai/v1",
+   "models": [],
+   "website": "https://nekoapi.ai",
+   "api_key_url": "https://nekoapi.ai/token"
+  },
+  {
+   "name": "AIComing",
+   "category": "aggregator",
+   "protocol": "anthropic",
+   "base_url": "https://api.aicoming.top/v1",
+   "models": [],
+   "website": "https://aicoming.top",
+   "api_key_url": "https://aicoming.top/console"
+  }
+ ]
+}

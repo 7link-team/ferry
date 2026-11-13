@@ -17,6 +17,7 @@ import {
   ProviderFields,
   type Provider,
 } from "../../shared/forms/ai-provider-fields";
+import { matchPreset, ProviderPresetPicker, type ProviderPreset } from "./ProviderPresets";
 
 const key = (s: string) => `models:${s}`;
 const t = (s: string) => commonText(key(s));
@@ -41,7 +42,79 @@ const newConnection = (): Omit<Provider, "id"> => ({
   ],
   version: 0,
 });
+type ApiModel = { id: string; name: string; provider_id: string; models: string[]; default_model: string };
+/** A CLI with a custom API may only reuse the connection of an existing API model. */
+function ApiModelSource({
+  workspace,
+  draft,
+  readOnly,
+  onPatch,
+}: {
+  workspace: string;
+  draft: Partial<AnyRow>;
+  readOnly: boolean;
+  onPatch: (p: Partial<AnyRow>) => void;
+}) {
+  const [items, setItems] = useState<ApiModel[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    api<{ items: ApiModel[] }>(`/workspaces/${encodeURIComponent(workspace)}/ai-models?kind=api&page_size=100`)
+      .then((r) => alive && setItems(r.items))
+      .catch((e) => alive && setError(errorText(e)));
+    return () => {
+      alive = false;
+    };
+  }, [workspace]);
+  const provider = String(draft.provider_id ?? "0");
+  const current = items?.find((m) => m.provider_id === provider);
+  if (readOnly)
+    return (
+      <AutoField label={t("apiModelSource")}>
+        <p className="break-words text-sm">
+          {items ? current?.name ?? t("apiModelMissing") : t("loadingConnection")}
+        </p>
+      </AutoField>
+    );
+  return (
+    <AutoField label={t("apiModelSource")} required help={t("apiModelSourceHelp")}>
+      <div className="space-y-2">
+        <FieldControl
+          name="api-model-source"
+          field={{
+            type: "select",
+            name: t("apiModelSource"),
+            width: "full",
+            config: {
+              placeholder: t("apiModelPlaceholder"),
+              options: (items ?? []).map((m) => ({ value: m.id, label: m.name })),
+            },
+          }}
+          value={current?.id ?? ""}
+          required
+          onChange={(id) => {
+            const picked = items?.find((m) => m.id === id);
+            if (picked)
+              onPatch({
+                provider_id: picked.provider_id,
+                connection: null,
+                models: [...picked.models],
+                default_model: picked.default_model,
+              });
+          }}
+        />
+        {items && !items.length && <p className="text-sm text-muted-foreground">{t("apiModelNone")}</p>}
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+      </div>
+    </AutoField>
+  );
+}
 function ModelConnection({
+  workspace,
   draft,
   readOnly,
   onPatch,
@@ -55,34 +128,56 @@ function ModelConnection({
     if (!draft.connection && draft.kind === "api" && !readOnly)
       onPatch({ connection: newConnection() });
   }, [draft.connection, draft.kind, readOnly, onPatch]);
+  const [preset, setPreset] = useState<ProviderPreset | undefined>(() =>
+    matchPreset(draft.connection?.protocol, draft.connection?.base_url),
+  );
+  const custom = draft.kind === "cli" && (!!draft.provider_id && draft.provider_id !== "0" || draft.customApi === true);
+  if (draft.kind === "cli")
+    return (
+      <div className="space-y-4">
+        {!readOnly && (
+          <AutoField label={t("customApi")}>
+            <Switch
+              checked={custom}
+              onCheckedChange={(checked) =>
+                onPatch({ customApi: checked, connection: null, provider_id: "0", models: [], default_model: "" })
+              }
+            />
+          </AutoField>
+        )}
+        {custom ? (
+          <ApiModelSource workspace={workspace} draft={draft} readOnly={readOnly} onPatch={onPatch} />
+        ) : (
+          readOnly && <p className="text-sm">{t("nativeDefault")}</p>
+        )}
+      </div>
+    );
+  if (!draft.connection) return null;
   return (
     <div className="space-y-4">
-      {draft.kind === "cli" && !readOnly && (
-        <AutoField label={t("customApi")}>
-          <Switch
-            checked={!!draft.connection}
-            onCheckedChange={(checked) =>
-              onPatch({
-                connection: checked ? newConnection() : null,
-                provider_id: "0",
-              })
-            }
-          />
-        </AutoField>
-      )}
-      {draft.connection ? (
-        <ProviderFields
-          draft={{
-            ...draft.connection,
-            id: draft.provider_id === "0" ? "" : draft.provider_id,
+      {!readOnly && (
+        <ProviderPresetPicker
+          selected={preset}
+          onSelect={(next) => {
+            setPreset(next ?? undefined);
+            if (!next) return;
+            onPatch({
+              connection: { ...draft.connection, protocol: next.protocol, base_url: next.base_url },
+              ...(next.models.length ? { models: [...next.models], default_model: next.models[0] } : {}),
+              ...(!String(draft.name ?? "").trim() ? { name: next.name } : {}),
+            });
           }}
-          onChange={({ id: _, ...connection }) => onPatch({ connection })}
-          readOnly={readOnly}
-          hideName
         />
-      ) : (
-        readOnly && <p className="text-sm">{t("nativeDefault")}</p>
       )}
+      <ProviderFields
+        draft={{
+          ...draft.connection,
+          id: draft.provider_id === "0" ? "" : draft.provider_id,
+        }}
+        onChange={({ id: _, ...connection }) => onPatch({ connection })}
+        readOnly={readOnly}
+        hideName
+      />
     </div>
   );
 }
@@ -97,43 +192,11 @@ function Catalog({
   readOnly: boolean;
   onPatch: (p: Partial<AnyRow>) => void;
 }) {
-  const [hosts, setHosts] = useState<{ id: string; name: string }[]>([]);
-  const [hostId, setHostId] = useState("");
-  const native = draft.kind === "cli" && !draft.connection;
-  useEffect(() => {
-    if (!native || readOnly) return;
-    let active = true;
-    (async () => {
-      const items: { id: string; name: string }[] = [];
-      for (let page = 1; ; page++) {
-        const result = await api<{
-          items: { id: string; name: string }[];
-          total: number;
-        }>(
-          `/workspaces/${workspace}/nodes?connection=runner&page=${page}&page_size=200`,
-        );
-        items.push(...result.items);
-        if (page * 200 >= result.total) break;
-      }
-      if (active) {
-        setHosts(items);
-        setHostId((current) =>
-          items.some((h) => h.id === current) ? current : (items[0]?.id ?? ""),
-        );
-      }
-    })().catch((e) => {
-      if (active) setError(errorText(e));
-    });
-    return () => {
-      active = false;
-    };
-  }, [native, readOnly, workspace]);
+  const native = draft.kind === "cli" && !draft.connection && (!draft.provider_id || draft.provider_id === "0");
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const latest = useRef(draft),
     alive = useRef(true);
-  const latestHost = useRef(hostId);
-  latestHost.current = hostId;
   latest.current = draft;
   useEffect(() => {
     alive.current = true;
@@ -142,6 +205,7 @@ function Catalog({
     };
   }, []);
   async function discover() {
+    if (native) return;
     const provider = draft.provider_id;
     const connection = draft.connection;
     const runtime = draft.runtime;
@@ -154,7 +218,6 @@ function Catalog({
           method: "POST",
           body: JSON.stringify({
             provider_id: provider || "0",
-            ...(native ? { runtime, host_id: hostId } : {}),
             ...(connection
               ? { connection: { ...connection, name: draft.name || t("name") } }
               : {}),
@@ -163,7 +226,6 @@ function Catalog({
       );
       if (
         !alive.current ||
-        latestHost.current !== hostId ||
         latest.current.provider_id !== provider ||
         latest.current.connection !== connection ||
         latest.current.runtime !== runtime
@@ -177,7 +239,6 @@ function Catalog({
     } catch (e) {
       if (
         alive.current &&
-        latestHost.current === hostId &&
         latest.current.provider_id === provider &&
         latest.current.connection === connection &&
         latest.current.runtime === runtime
@@ -240,33 +301,14 @@ function Catalog({
             </Button>
           </div>
         )}
-        {!readOnly && native && (
-          <AutoField label={t("catalogRunner")} help={t("nativeCatalogHelp")}>
-            <FieldControl
-              name="catalog_runner"
-              field={{
-                type: "select",
-                name: t("catalogRunner"),
-                width: "full",
-                config: {
-                  options: hosts.map((h) => ({ value: h.id, label: h.name })),
-                },
-              }}
-              value={hostId}
-              onChange={(value) => setHostId(String(value))}
-            />
-          </AutoField>
-        )}
-        {!readOnly && (
+        {!readOnly && native && <p className="text-sm text-muted-foreground">{t("nativeCatalogAtExecution")}</p>}
+        {!readOnly && !native && (
           <Button
             type="button"
             variant="outline"
             disabled={
               busy ||
-              (native
-                ? !hostId
-                : !draft.connection &&
-                  (!draft.provider_id || draft.provider_id === "0"))
+              (!draft.connection && (!draft.provider_id || draft.provider_id === "0"))
             }
             onClick={() => void discover()}
           >
@@ -402,6 +444,8 @@ export function modelsForms({
       resource: "ai-models",
       width: "full",
       heading: (r) => r.name,
+      // A CLI reuses an API model's connection by reference and must never resave it.
+      editValues: (r) => (r.kind === "cli" ? { ...r, connection: null } : r),
       blank: {
         name: "",
         kind: "api",
@@ -479,6 +523,7 @@ export function modelsForms({
                 { value: "opencode", label: "OpenCode" },
                 { value: "pi", label: "Pi" },
                 { value: "dsh", label: "DeepSeek Harness" },
+                { value: "kimi", label: "Kimi CLI" },
               ],
             },
             {
