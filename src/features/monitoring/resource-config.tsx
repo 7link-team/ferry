@@ -65,8 +65,8 @@ export function monitoringLists({ workspace }: ResourceConfigContext): Record<st
         { key: "deployment_state", label: "", labelKey: "monitoring:deployment_state", render: row => deploymentState(String(row.deployment_state)) },
       ], actions: [
         { label: "View", icon: <Eye />, labelKey: "common-domain:common.view", to: row => ({ id: String(row.id), mode: "view" }) },
-        { label: "Configure", icon: <Settings2 />, labelKey: "monitoring:configure", to: () => ({ group: "monitoring", item: "health-checks", mode: "list" }), query: row => ({ deployment_id: String(row.id) }) },
-        { label: "Create alert policy", icon: <BellPlus />, labelKey: "monitoring:createPolicy", permission: "alerts.create", to: () => ({ group: "monitoring", item: "alerts", mode: "new" }), query: row => ({ target_kind: "application-health", target_ref: String(row.id), metric: "health-failed" }) },
+        { label: "Configure", icon: <Settings2 />, labelKey: "monitoring:configure", to: () => ({ group: "deploy", item: "health-checks", mode: "list" }), query: row => ({ deployment_id: String(row.id) }) },
+        { label: "Create alert policy", icon: <BellPlus />, labelKey: "monitoring:createPolicy", permission: "alerts.create", to: () => ({ group: "deploy", item: "alerts", mode: "new" }), query: row => ({ target_kind: "application-health", target_ref: String(row.id), metric: "health-failed" }) },
       ], toolbar: { create: false },
     }),
   };
@@ -110,8 +110,8 @@ export function monitoringForms(context: ResourceConfigContext): Record<string, 
           { ...instanceField, when: row => !!row.id && row.kind === "runtime", span: 2 },
         ] },
       ], viewActions: [
-        { label: "History", icon: <History />, labelKey: "monitoring:history", to: () => ({ group: "monitoring", item: "health-observations", mode: "list" }), query: row => ({ check_id: String(row.id) }) },
-        { label: "Create alert policy", icon: <BellPlus />, labelKey: "monitoring:createPolicy", permission: "alerts.create", to: () => ({ group: "monitoring", item: "alerts", mode: "new" }), query: row => ({ target_kind: "health-check", target_ref: String(row.id), metric: "health-failed" }) },
+        { label: "History", icon: <History />, labelKey: "monitoring:history", to: () => ({ group: "deploy", item: "health-observations", mode: "list" }), query: row => ({ check_id: String(row.id) }) },
+        { label: "Create alert policy", icon: <BellPlus />, labelKey: "monitoring:createPolicy", permission: "alerts.create", to: () => ({ group: "deploy", item: "alerts", mode: "new" }), query: row => ({ target_kind: "health-check", target_ref: String(row.id), metric: "health-failed" }) },
       ],
     }),
     "application-health": form<AnyRow>({
@@ -123,8 +123,11 @@ export function monitoringForms(context: ResourceConfigContext): Record<string, 
         field("unknown_instances", "number"), field("unmonitored_hosts", "number"),
         field("services", "records", { labelKey: "monitoring:service", span: 2, record: { title: item => String(item.name), meta: item => `${item.healthy} / ${item.expected} · ${text("unknown")}: ${item.unknown}` } }),
         { ...instanceField, span: 2 },
-        field("checks", "records", { labelKey: "monitoring:checks", span: 2, record: { title: item => String(item.name), meta: item => <span>{healthState(item.state)} · {date(item.checked_at)}</span>, href: item => context.href?.({ workspace, group: "monitoring", item: "health-checks", id: String(item.id), mode: "view" }) ?? "#" } }),
-      ] }], viewActions: [{ label: "Configure", icon: <Settings2 />, labelKey: "monitoring:configure", to: () => ({ group: "monitoring", item: "health-checks", mode: "list" }), query: row => ({ deployment_id: String(row.id) }) }],
+        field("checks", "records", { labelKey: "monitoring:checks", span: 2, record: { title: item => String(item.name), meta: item => <span>{healthState(item.state)} · {date(item.checked_at)}</span>, href: item => context.href?.({ workspace, group: "deploy", item: "health-checks", id: String(item.id), mode: "view" }) ?? "#" } }),
+      ] }], viewActions: [
+        { label: "Add health check", labelKey: "monitoring:addCheck", permission: "alerts.create", to: () => ({ group: "deploy", item: "health-checks", mode: "new" }), query: row => ({ deployment_id: String(row.id) }) },
+        { label: "Create alert policy", labelKey: "monitoring:createPolicy", permission: "alerts.create", to: () => ({ group: "deploy", item: "alerts", mode: "new" }), query: row => ({ target_kind: "application-health", target_ref: String(row.id), metric: "health-failed" }) },
+        { label: "Configure", icon: <Settings2 />, labelKey: "monitoring:configure", to: () => ({ group: "deploy", item: "health-checks", mode: "list" }), query: row => ({ deployment_id: String(row.id) }) }],
     }),
   };
 }

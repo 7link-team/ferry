@@ -43,17 +43,6 @@ export const nav: NavGroup[] = [
     items: [{key:"conversations",get label(){return commonText("conversations:nav");},resource:"conversations",permission:"conversations.read"}],
   },
   {
-    key: "monitoring",
-    get label() { return commonText("monitoring:nav"); },
-    items: [
-      { key: "overview", get label() { return commonText("monitoring:overview"); }, resource: "application-health", permission: "deployments.read", requires: ["alerts.read"] },
-      { key: "health-checks", get label() { return commonText("monitoring:checks"); }, resource: "health-checks", permission: "alerts.read" },
-      { key: "health-observations", get label() { return commonText("monitoring:history"); }, resource: "health-observations", hidden: true, parent: "health-checks", permission: "alerts.read" },
-      { key: "alerts", get label() { return commonText("monitoring:policies"); }, resource: "alert-rules", permission: "alerts.read" },
-      { key: "alert-events", get label() { return commonText("common-domain:nav.alertEvents"); }, resource: "alert-events", permission: "alerts.read" },
-    ],
-  },
-  {
     key: "deploy",
     get label() { return commonText("nav.applications"); },
     items: [
@@ -65,8 +54,10 @@ export const nav: NavGroup[] = [
       { key: "marketplace-sources", get label() { return commonText("nav.marketplaceSources"); }, resource: "marketplace-sources", permission: "marketplace-sources.read" },
       { key: "credentials", get label() { return commonText("nav.credentials"); }, resource: "credentials", params: { scope: "deploy" }, permission: "credentials.read" },
       { key: "variables", get label() { return commonText("nav.variables"); }, resource: "variables", params: { scope: "deploy" }, permission: "variables.read" },
-      { key: "alerts", get label() { return commonText("nav.alertRules"); }, resource: "alert-rules", hidden: true, permission: "alerts.read" },
-      { key: "alert-events", get label() { return commonText("nav.alertEvents"); }, resource: "alert-events", hidden: true, permission: "alerts.read" },
+      { key: "health-checks", get label() { return commonText("monitoring:checks"); }, resource: "health-checks", permission: "alerts.read" },
+      { key: "health-observations", get label() { return commonText("monitoring:history"); }, resource: "health-observations", hidden: true, parent: "health-checks", permission: "alerts.read" },
+      { key: "alerts", get label() { return commonText("monitoring:policies"); }, resource: "alert-rules", permission: "alerts.read" },
+      { key: "alert-events", get label() { return commonText("common-domain:nav.alertEvents"); }, resource: "alert-events", permission: "alerts.read" },
       { key: "cron-jobs", get label() { return commonText("nav.cronJobs"); }, resource: "cron-jobs", params: { scope: "deploy" }, permission: "cron-jobs.read" },
       { key: "cron-runs", get label() { return commonText("nav.cronRuns"); }, resource: "cron-runs", params: {scope:"deploy"}, permission:"cron-jobs.read", hidden:true },
     ],

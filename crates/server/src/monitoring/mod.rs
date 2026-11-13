@@ -837,6 +837,24 @@ pub async fn applications(
         &query,
     )
     .await?;
+    let items = application_summaries(&s, &scope, apps).await?;
+    Ok(Json(
+        json!({"items":items,"total":total,"page":query.page,"page_size":query.page_size}),
+    ))
+}
+
+/// Shared current-health calculation for the application list and health detail.
+/// The caller supplies only its already-scoped, paginated deployment rows.
+pub(crate) async fn application_summaries(
+    s: &AppState,
+    scope: &Scope,
+    apps: Vec<deployments::Model>,
+) -> Result<Vec<Value>> {
+    scope.require("deployments.read")?;
+    scope.require("alerts.read")?;
+    if apps.is_empty() {
+        return Ok(Vec::new());
+    }
     let app_ids: Vec<i64> = apps.iter().map(|app| app.id).collect();
     let rows = checks::Entity::find()
         .filter(checks::Column::WorkspaceId.eq(scope.workspace_id))
@@ -1035,7 +1053,5 @@ pub async fn applications(
             .collect();
         items.push(json!({"id":Id::from(app.id),"name":app.name,"deployment_state":app.state,"health":if matches!(app.state.as_str(),"running"|"queued"|"applying") {"updating"} else {summary.state.as_str()},"entry_state":summary.entry_state,"healthy_instances":summary.healthy,"expected_instances":summary.expected,"unknown_instances":summary.unknown,"unmonitored_hosts":missing_hosts,"services":summary.services,"placement":placement,"instances":instances,"checks":checks}));
     }
-    Ok(Json(
-        json!({"items":items,"total":total,"page":query.page,"page_size":query.page_size}),
-    ))
+    Ok(items)
 }

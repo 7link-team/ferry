@@ -4,11 +4,13 @@ import { afterEach,beforeEach,expect,it,vi } from "vitest";
 import { DeploymentDetail } from "../../app/pages/DeploymentDetail";
 import { commonText, i18n } from "../../shared/i18n/i18n";
 import { artifactDiff, revisionActionLabel } from "./deployment";
+import { deploymentsLists } from "./resource-config";
 vi.mock("../../shared/editor/CodeEditor", () => ({ CodeEditor: ({ value }: { value: string }) => <pre data-editor-value>{value}</pre> }));
 let root: Root, host: HTMLDivElement, state: string, calls: string[];
 const mount = async () => { await act(async () => root.render(<DeploymentDetail workspace="ops" deploymentId="1" permissions={new Set(["deployments.apply"])} />)); };
 const tick = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 beforeEach(() => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/deployments/1");
   localStorage.setItem("ui.locale", "zh-CN");
   void i18n.changeLanguage("zh-CN");
   vi.useFakeTimers(); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -16,6 +18,46 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   state = "running"; calls = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string) => { calls.push(url); return { ok: true, json: async () => ({ id: "1", name: "web", state, target_ref: "2", version: 1 }) }; }));
+});
+
+it("loads current health only on the authorized health tab and keeps the application title", async () => {
+  state = "idle";
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    calls.push(url);
+    return { ok: true, json: async () => url.includes("application-health")
+      ? { id: "1", name: "web", health: "unknown", entry_state: "unknown", healthy_instances: 0, expected_instances: 0, unknown_instances: 0, unmonitored_hosts: 1, services: [], instances: [], checks: [] }
+      : { id: "1", name: "web", state, target_ref: "2", version: 1 } };
+  }));
+  await act(async () => root.render(<DeploymentDetail workspace="ops" deploymentId="1" permissions={new Set(["deployments.read", "alerts.read", "alerts.create"])} />));
+  expect(calls.some(url => url.includes("application-health"))).toBe(false);
+  const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab => tab.textContent === commonText("monitoring:healthTab"))!;
+  expect(tab).toBeDefined();
+  await act(async () => tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+  expect(location.search).toContain("tab=health");
+  expect(calls.some(url => url.includes("application-health/1"))).toBe(true);
+  expect(host.querySelector("h2")?.textContent).toBe("web");
+  const add = [...host.querySelectorAll<HTMLAnchorElement>("a")].find(link => link.textContent === "添加健康检查")!;
+  expect(add.href).toContain("/health-checks/new?deployment_id=1");
+  const policy = [...host.querySelectorAll<HTMLAnchorElement>("a")].find(link => link.textContent === commonText("monitoring:createPolicy"))!;
+  expect(policy.href).toContain("target_kind=application-health");
+  expect(policy.href).toContain("target_ref=1");
+  await tick(5000);
+  expect(calls.filter(url => url.includes("application-health/1")).length).toBeGreaterThan(1);
+});
+
+it("does not expose health controls or make health requests without alerts.read", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/deployments/1?tab=health");
+  state = "idle"; await mount();
+  expect(host.querySelector('[role="tablist"]')).toBeNull();
+  expect(calls.some(url => url.includes("application-health"))).toBe(false);
+});
+
+it("shows health list columns only with permission and preserves zero replica counts", () => {
+  const config = (permissions: string[]) => deploymentsLists({ workspace: "ops", permissions: new Set(permissions) } as never).deployments!;
+  expect(config([]).columns.some(column => column.key === "health")).toBe(false);
+  const columns = config(["alerts.read"]).columns;
+  expect(columns.some(column => column.key === "health")).toBe(true);
+  expect(columns.find(column => column.key === "health_replicas")!.render!({ healthy_instances: 0, expected_instances: 0 })).toBe("0 / 0");
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 it.each(["auto-replace", "manual-replace", "restart", "rollback", "apply"])("revision_title_labels_%s", async action => {

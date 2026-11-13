@@ -1,7 +1,7 @@
 import { lazy, Suspense } from "react";
 import { stringify } from "yaml";
-import { ManifestEditor } from "../deployments/ManifestEditor";
 import { isBlueprint } from "../deployments/blueprint-spec";
+import { ApplicationTemplateEditor } from "./ApplicationTemplateEditor";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { TemplateParametersEditor, templateParameterFields, type TemplateParameter } from "./TemplateParametersEditor";
 import { api } from "../../shared/api/api";
@@ -230,7 +230,7 @@ export const templateForm = (resource: string, application: boolean, workspace =
                   ? "resource-domain:template.appContent"
                   : "resource-domain:template.pipelineContent",
             type: resource === "pipeline-templates" ? "actions-template-editor" : "custom",
-            ...(resource === "pipeline-templates" ? {} : { render: ({ draft, readOnly, onPatch, onValidityChange }) => application ? <ManifestEditor value={String(draft.content ?? "")} mode="" workspace={workspace} templateParameters={readTemplateParameters(String(draft.parameters ?? "[]"))} readOnly={readOnly} onChange={content => onPatch({ content })} onValidityChange={onValidityChange} /> : <div className="h-[28rem] min-w-0 overflow-hidden rounded-md border"><Suspense fallback={<LoadingSkeleton variant="editor" />}><TemplateCodeEditor value={String(draft.content ?? "")} language={application ? "yaml" : "plaintext"} path={`${workspace}/${resource}/${draft.id ?? "new"}/content.${application ? "yaml" : "txt"}`} label={commonText("resource-domain:deployment.config")} readOnly={readOnly} onChange={content => onPatch({ content })} /></Suspense></div> }),
+            ...(resource === "pipeline-templates" ? {} : { render: ({ draft, readOnly, onPatch, onValidityChange }) => application ? <ApplicationTemplateEditor value={String(draft.content ?? "")} workspace={workspace} templateParameters={readTemplateParameters(String(draft.parameters ?? "[]"))} readOnly={readOnly} onChange={content => onPatch({ content })} onValidityChange={onValidityChange} /> : <div className="h-[28rem] min-w-0 overflow-hidden rounded-md border"><Suspense fallback={<LoadingSkeleton variant="editor" />}><TemplateCodeEditor value={String(draft.content ?? "")} language={application ? "yaml" : "plaintext"} path={`${workspace}/${resource}/${draft.id ?? "new"}/content.${application ? "yaml" : "txt"}`} label={commonText("resource-domain:deployment.config")} readOnly={readOnly} onChange={content => onPatch({ content })} /></Suspense></div> }),
             ...(resource === "pipeline-templates" ? { options: pipelineExecutorOptions(workspace, permissions) } : {}),
             span: 2,
             required: true,

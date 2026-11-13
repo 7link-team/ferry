@@ -622,5 +622,21 @@
     "Unmonitored deployment hosts",
     "Unmonitored deployment hosts",
     "Hos pengerahan tanpa pemantauan"
+  ],
+  "healthTab": [
+    "Health monitoring",
+    "健康监控",
+    "健康監控",
+    "ヘルスモニタリング",
+    "상태 모니터링",
+    "Pemantauan kesihatan"
+  ],
+  "addCheck": [
+    "Add health check",
+    "添加健康检查",
+    "新增健康檢查",
+    "ヘルスチェックを追加",
+    "상태 검사 추가",
+    "Tambah pemeriksaan kesihatan"
   ]
 }

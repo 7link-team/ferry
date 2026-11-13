@@ -10,6 +10,7 @@ import {
   type AnyRow,
 } from "../../shared/resources/config";
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
+import { healthState } from "../monitoring/resource-config";
 import { TARGETS } from "../hosts/resource-config";
 import { templateGenerator } from "../templates/resource-config";
 import { deploymentState, revisionActionLabel, type Deployment, type Revision } from "./deployment";
@@ -17,6 +18,7 @@ import { deploymentState, revisionActionLabel, type Deployment, type Revision } 
 export function deploymentsLists({
   workspace,
   dictionaries,
+  permissions,
 }: ResourceConfigContext): Record<string, ListConfig<AnyRow>> {
   return {
     deployments: list({
@@ -46,6 +48,10 @@ export function deploymentsLists({
           labelKey: "resource-domain:status.title",
           render: (r) => deploymentState(r.state),
         },
+        ...(permissions?.has("alerts.read") ? [
+          { key: "health", label: "", labelKey: "monitoring:state", render: (row: AnyRow) => healthState(row.health) },
+          { key: "health_replicas", label: "", labelKey: "monitoring:replicas", render: (row: AnyRow) => row.expected_instances == null ? "—" : `${row.healthy_instances} / ${row.expected_instances}` },
+        ] : []),
         {
           key: "target_name",
           label: "目标",
@@ -165,7 +171,7 @@ export function deploymentsForms({
       presentation: "sections",
       sectionNavigation: "scroll",
       heading: (r: Deployment) => r.name,
-      viewActions: [{ label: "", labelKey: "monitoring:overview", permission: "alerts.read", to: row => ({ group: "monitoring", item: "overview", id: row.id, mode: "view" }) }],
+      viewActions: [{ label: "", labelKey: "monitoring:overview", permission: "alerts.read", to: row => ({ group: "deploy", item: "apps", id: row.id, mode: "view" }), query: () => ({ tab: "health" }) }],
       blank: {
         name: "",
         category: "",

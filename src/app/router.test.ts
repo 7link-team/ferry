@@ -125,3 +125,33 @@ it("round trips explicit locale deep links and account routes", () => {
   expect(href(parse("/ko-KR/account"), {})).toBe("/ko-KR/account");
   expect(href(parse("/zh-TW/platform/settings/1/edit"), {})).toBe("/zh-TW/platform/settings/1/edit");
 });
+
+it("keeps application health and alert navigation inside Applications with compatible deep links", () => {
+  expect(nav.some(group => group.key === "monitoring")).toBe(false);
+  const applications = nav.find(group => group.key === "deploy")!;
+  for (const [item, resource] of [["health-checks", "health-checks"], ["health-observations", "health-observations"], ["alerts", "alert-rules"], ["alert-events", "alert-events"]]) {
+    const entry = applications.items.filter(entry => entry.key === item);
+    expect(entry).toHaveLength(1);
+    expect(entry[0]!.permission).toBe(item === "overview" ? "deployments.read" : "alerts.read");
+    expect(entry[0]!.hidden).toBe(item === "health-observations" ? true : undefined);
+    for (const suffix of ["", "/new", "/123", "/123/edit"]) {
+      const path = `/en-US/workspaces/${workspace}/${resource}${suffix}`;
+      expect(parse(path, "?page=2")).toMatchObject({ group: "deploy", item, workspace });
+      expect(href(parse(path, ""), { page: "2" })).toBe(path + "?page=2");
+      const legacy = parse(`/en-US/${workspace}/monitoring/${item}${suffix}`, "");
+      expect(legacy).toMatchObject({ group: "deploy", item, workspace });
+      expect(href({ ...legacy, group: "monitoring" }, {})).toBe(path);
+    }
+  }
+  expect(applications.items.some(item => item.resource === "application-health")).toBe(false);
+});
+
+it("routes legacy application-health pages to deployments and preserves health detail links", () => {
+  expect(nav.flatMap(group => group.items).some(item => item.resource === "application-health")).toBe(false);
+  for (const legacy of [`/en-US/workspaces/${workspace}/application-health`, `/en-US/${workspace}/monitoring/overview`]) {
+    expect(parse(legacy, "?page=2")).toMatchObject({ group: "deploy", item: "apps", mode: "list" });
+    expect(href(parse(legacy, ""), { page: "2" })).toBe(`/en-US/workspaces/${workspace}/deployments?page=2`);
+    expect(parse(legacy + "/123", "")).toMatchObject({ group: "deploy", item: "apps", id: "123", mode: "view" });
+  }
+  expect(href({ workspace, locale: "en-US", group: "deploy", item: "overview", mode: "view", id: "123" }, { page: "2" })).toBe(`/en-US/workspaces/${workspace}/deployments/123?page=2&tab=health`);
+});

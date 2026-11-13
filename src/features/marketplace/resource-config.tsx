@@ -12,6 +12,13 @@ import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import type { Navigation } from "../../shared/routing/types";
 import { isBlueprint } from "../deployments/blueprint-spec";
 import { marketProviders, trustLabel } from "./labels";
+import { lazy, Suspense } from "react";
+import { ManifestEditor } from "../deployments/ManifestEditor";
+import { TemplateParametersEditor } from "../templates/TemplateParametersEditor";
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
+
+const MarkdownValuePreview = lazy(() => import("../maintenance/MarkdownValuePreview"));
+const ignoreReadOnlyChange = () => {};
 
 export interface MarketSource {
   id: string;
@@ -438,9 +445,12 @@ export function marketplaceForms({
               key: "readme",
               label: "说明文档",
               labelKey: "resource-domain:market.readme",
-              type: "textarea",
+              type: "custom",
               span: 2,
               when: (d) => !!d.readme,
+              render: ({ draft }) => <Suspense fallback={<LoadingSkeleton variant="inline" />}>
+                <MarkdownValuePreview value={String(draft.readme ?? "")} label={commonText("resource-domain:market.readme")} />
+              </Suspense>,
             },
             {
               key: "files",
@@ -455,15 +465,19 @@ export function marketplaceForms({
               key: "content",
               label: "应用配置",
               labelKey: "resource-domain:deployment.config",
-              type: "code",
+              type: "custom",
               span: 2,
+              render: ({ draft }) => <ManifestEditor value={String(draft.content ?? "")} mode="" workspace={workspace}
+                templateParameters={[]} readOnly onChange={ignoreReadOnlyChange} onValidityChange={ignoreReadOnlyChange} />,
             },
             {
               key: "parameters",
               label: "模板参数",
               labelKey: "resource-domain:template.parameters",
-              type: "code",
+              type: "custom",
               span: 2,
+              render: ({ draft }) => <TemplateParametersEditor value={String(draft.parameters ?? "[]")} readOnly
+                onChange={ignoreReadOnlyChange} onValidityChange={ignoreReadOnlyChange} />,
             },
           ],
         },

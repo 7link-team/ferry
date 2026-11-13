@@ -1,5 +1,60 @@
 use super::*;
 
+#[tokio::test]
+async fn deployment_list_reuses_health_with_permissions_and_workspace_isolation() {
+    let (_dir, s, _) = fixture("http://127.0.0.1:1/".into()).await;
+    s.db.execute_unprepared("INSERT INTO workspaces(id,slug,name,owner_id,join_code,pipeline_run_number,workflow_execution_number,created_at,updated_at) VALUES(2,'other','Other',1,'',0,0,0,0); INSERT INTO deployments(id,workspace_id,name,category,manifest,preview_artifact,mode,target_kind,target_ref,workdir,description,state,revision_number,current_revision,created_at,updated_at,version) VALUES(10,1,'Own app','','','', 'docker','host',1,'/app','','idle',0,0,0,0,1),(20,2,'Other app','','','', 'docker','host',2,'/app','','idle',0,0,0,0,1)").await.unwrap();
+    let mut scope = Scope {
+        workspace_id: 1.into(),
+        user: crate::accounts::auth::User {
+            id: 1.into(),
+            email: "checks@example.invalid".into(),
+            name: "Checks".into(),
+            is_superadmin: false,
+        },
+        permissions: ["deployments.read".into()].into_iter().collect(),
+    };
+    let Json(without) =
+        crate::deployments::list(State(s.clone()), scope.clone(), Query(HashMap::new()))
+            .await
+            .unwrap();
+    assert_eq!(without["total"], 1);
+    assert_eq!(without["items"][0]["name"], "Own app");
+    assert!(without["items"][0].get("health").is_none());
+    assert!(
+        applications(State(s.clone()), scope.clone(), Query(HashMap::new()))
+            .await
+            .is_err()
+    );
+    scope.permissions.insert("alerts.read".into());
+    let Json(with) =
+        crate::deployments::list(State(s.clone()), scope.clone(), Query(HashMap::new()))
+            .await
+            .unwrap();
+    let Json(health) = applications(State(s.clone()), scope.clone(), Query(HashMap::new()))
+        .await
+        .unwrap();
+    assert_eq!(with["total"], 1);
+    for field in ["health", "healthy_instances", "expected_instances"] {
+        assert_eq!(with["items"][0][field], health["items"][0][field]);
+    }
+    assert!(
+        super::application(
+            State(s.clone()),
+            scope.clone(),
+            Path(("1".into(), 20.into()))
+        )
+        .await
+        .is_err()
+    );
+    scope.workspace_id = 2.into();
+    let Json(other) = crate::deployments::list(State(s), scope, Query(HashMap::new()))
+        .await
+        .unwrap();
+    assert_eq!(other["total"], 1);
+    assert_eq!(other["items"][0]["name"], "Other app");
+}
+
 #[test]
 fn swarm_managers_do_not_multiply_cluster_replicas_or_hide_conflicts() {
     let sample = |name: &str, expected, healthy, unknown| runtime::Service {

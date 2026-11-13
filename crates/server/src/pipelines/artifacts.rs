@@ -255,6 +255,18 @@ pub async fn list(
         json!({"items":items,"total":total,"page":q.page,"page_size":q.page_size}),
     ))
 }
+fn download_disposition(path: &str, id: Id) -> String {
+    let name = path.rsplit('/').next().filter(|name| !name.is_empty());
+    let fallback = format!("artifact-{id}.bin");
+    format!(
+        "attachment; filename*=UTF-8''{}",
+        percent_encoding::utf8_percent_encode(
+            name.unwrap_or(&fallback),
+            percent_encoding::NON_ALPHANUMERIC,
+        )
+    )
+}
+
 pub async fn download(
     State(s): State<AppState>,
     scope: Scope,
@@ -285,7 +297,7 @@ pub async fn download(
             (header::CONTENT_TYPE, "application/octet-stream".to_owned()),
             (
                 header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"artifact-{id}.bin\""),
+                download_disposition(&row.path, id),
             ),
             (header::CONTENT_LENGTH, row.size.to_string()),
         ],
@@ -562,6 +574,28 @@ async fn delete_rows(s: &AppState, rows: Vec<artifacts::Model>) -> Result<()> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn download_preserves_archive_and_unicode_names_without_header_injection() {
+        for (path, expected) in [
+            ("artifacts/10/video/video.zip", "video.zip"),
+            ("output/短片 5秒.mp4", "短片 5秒.mp4"),
+            ("output/a\"\r\n.txt", "a\"\r\n.txt"),
+            ("", "artifact-1.bin"),
+        ] {
+            let disposition = download_disposition(path, Id::from(1));
+            axum::http::HeaderValue::from_str(&disposition).unwrap();
+            let encoded = disposition
+                .strip_prefix("attachment; filename*=UTF-8''")
+                .unwrap();
+            assert_eq!(
+                percent_encoding::percent_decode_str(encoded)
+                    .decode_utf8()
+                    .unwrap(),
+                expected
+            );
+        }
+    }
 
     fn write_zip(path: &std::path::Path, member: &str, bytes: &[u8], mode: u32) {
         let mut writer = zip::ZipWriter::new(std::fs::File::create(path).unwrap());

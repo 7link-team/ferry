@@ -1,4 +1,7 @@
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
+import { Tabs } from "radix-ui";
+import type { ReactNode } from "react";
+import { useQueryValue } from "../../shared/routing/url-state";
 import { lazy,Suspense,useEffect,useId,useRef,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
 import { base,named,operationResource } from "../../shared/api/resource";
@@ -15,11 +18,14 @@ import { FailoverAttention, FailoverTimeline } from "./FailoverTimeline";
 
 const CodeEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 
-export function DeploymentDetail({ navigation, workspace, deploymentId, revisionId, permissions }: { navigation: Navigation;
-  workspace: string; deploymentId?: string; revisionId?: string; permissions: Set<string>;
+export function DeploymentDetail({ navigation, workspace, deploymentId, revisionId, permissions, healthContent }: { navigation: Navigation;
+  workspace: string; deploymentId?: string; revisionId?: string; permissions: Set<string>; healthContent?: ReactNode;
 }) {
   useCommonTranslation();
   const editorId = useId();
+  const [tab, setTab] = useQueryValue("tab", "info");
+  const healthAvailable = !revisionId && permissions.has("alerts.read") && !!healthContent;
+  const activeTab = healthAvailable && tab === "health" ? "health" : "info";
   const stateLabel = deploymentState;
   const [app, setApp] = useState<Deployment>();
   const [revision, setRevision] = useState<Revision>();
@@ -87,6 +93,12 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
       <h2 className="text-lg font-semibold">{app.name}</h2><Badge variant={["failed", "needs-review"].includes(app.state) ? "destructive" : "secondary"}>{deploymentState(app.state)}</Badge>
       <span className="text-sm text-muted-foreground">{commonText("resource-domain:resource.target")} · {app.target_kind === "blueprint" ? <BlueprintTarget workspace={workspace} deployment={app} permissions={permissions} /> : named(app.target_name, app.target_ref)}</span>
     </header>
+    <Tabs.Root value={activeTab} onValueChange={setTab} className="min-w-0 space-y-4">
+      {healthAvailable && <Tabs.List aria-label={app.name} className="flex flex-wrap gap-2 border-b">
+        {([['info', commonText("common.basic")], ['health', commonText("monitoring:healthTab")]] as const).map(([value, label]) => <Tabs.Trigger key={value} value={value} className="min-h-11 border-b-2 border-transparent px-3 py-2 text-sm data-[state=active]:border-primary data-[state=active]:text-primary">{label}</Tabs.Trigger>)}
+      </Tabs.List>}
+      <Tabs.Content value="health" className="min-w-0">{healthAvailable && healthContent}</Tabs.Content>
+      <Tabs.Content value="info" forceMount className="space-y-5 data-[state=inactive]:hidden">
     {!revisionId && app.target_kind === "blueprint" && <FailoverAttention workspace={workspace} deployment={app} permissions={permissions} onDone={() => setReload(n => n + 1)} />}
     <dl className="grid min-w-0 gap-4 rounded-md border p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
       {[
@@ -141,5 +153,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
       {!!revision.targets?.length && <section aria-label={executionText("deployment.perHostResults")} className="space-y-2"><h4 className="text-sm font-medium">{executionText("deployment.sequentialHosts")}</h4><ol className="space-y-2">{revision.targets.map((target) => <li key={target.id} className="rounded border p-3"><details><summary className="cursor-pointer text-sm">{executionText("deployment.hostNumber", { id: target.host_id })} · {deploymentState(target.state)}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-xs">{target.output || executionText("deployment.waiting")}</pre></details></li>)}</ol></section>}
       <details><summary className="cursor-pointer text-sm">{executionText("deployment.savedArtifact")}</summary><pre className="overflow-auto p-4 text-xs">{revision.artifact || executionText("deployment.artifactPending")}</pre></details>
     </section>}
+      </Tabs.Content>
+    </Tabs.Root>
   </div>;
 }

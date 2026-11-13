@@ -869,3 +869,30 @@ Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-a
 - Tradeoffs / verification：本地 Windows 覆盖协调、并发、版本、权限、事件与失败恢复的 Rust 测试及前端状态测试；浏览器 1440/900/390/320 截图用明确的故障状态夹具，不向数据库伪造故障。[Linux Docker 断机验收](https://github.com/7link-team/ferry/actions/runs/43380131479/job/131735830420) 在提交 `0b74c8c` 上通过 97 项检查：F0/F1/F2 + F3 备用，杀 F1 后 nginx/NATS 在 F3、NATS 20 条消息与两个副本 current、alert 不迁移、F1 恢复清理与解除隔离。夹具共享内核，不认证物理主机隔离；Compose 单机部署及 Swarm 蓝图部署分别验收，Swarm 有状态迁移不在范围内。PostgreSQL/MySQL 运行时未实测。
 - Verification method：回滚测试后将期望规格恢复为运行中的 v1，再注入故障，避免把规格仍为 v2 的升级混入恢复测试；副本健康读取 `STREAM.INFO`，不用可能返回 follower 局部视图的重复 `STREAM.CREATE`；重启夹具复用 Swarm 的 `/run` tmpfs 规则，保留 `/var/lib/docker` 和旧容器，验证恢复后的实际清理。未放宽消息数、副本、事件、健康钩子或清理断言。
 - Status：Tasks1–10 实现与关键断机验收已完成；本地 Rust 工作区 1050 项通过、20 项原有忽略，前端 711 项通过、1 项原有跳过，类型检查、构建和四档浏览器 254 项检查通过。用户已授权推送专用 `ci/scenario-templates-p3-20261113` 分支并修复验收失败；NATS 1.1.0 verified.yaml 按实际通过的驱动另行提交，1.0.0 保持原样。此记录不授权 merge/release，也不表示 4291 已更新。
+
+
+## 2026-11-12 Application health belongs to application deployment
+
+- Decision: user approved replacing the independent application-health menu with health summary columns in deployments and a current-health tab in deployment details. Independent health-check management remains.
+- Reason: the health resource aggregates existing deployments and has no independent creation lifecycle; the separate menu duplicated application identity and confused creation.
+- Alternatives considered: keep the separate aggregate list with explanatory copy; rejected in favor of the confirmed consolidation.
+- Tradeoffs: keep the existing health REST API for shared read-only form and compatibility. Reuse one calculation for list summaries and details; preserve alerts.read and workspace/host visibility rules. Old UI list links resolve to deployments; detail links resolve to the application's health tab. Revision details retain historical behavior.
+- Scope: navigation, list health presentation and detail tab only; no collector/notification rules, database migration, retention changes or new permission concepts.
+- Status: implemented and verified; UI72/Rust13 tests, actual isolated API/browser and local4291 acceptance PASS. Final navigation has no standalone health item; old URLs use explicit aliases. Evidence is recorded in MEMORY.md.
+
+## 2026-11-12 Prioritize existing capabilities; defer OKR
+
+- Decision: user explicitly deferred OKR and requested maturity of existing capabilities first. The broader24-point vision supplies direction, not approval to build all modules.
+- Reason: prove the existing requirement/execution/acceptance/delivery chain before expanding product scope.
+- Alternatives considered: expand immediately into OKR, organizational/planning modules and a new orchestration layer; deferred.
+- Tradeoffs: roadmap breadth waits while existing behavior, failure handling, evidence and delivery are verified.
+- Scope: current portability example and existing execution/conversation/workflow/Runner/preview defects; no unrequested new business modules or change to prior knowledge-PRD implementation hold.
+- Status: confirmed by user; Windows validation accepted with Linux native verification pending.
+
+## 2026-11-12 Keep project collaboration as the product entry point
+- Decision: user confirms Ferry's collaboration model follows raft.build and prefers native human/Agent collaboration over one-assistant/external-IM-bot entry points. Continue improving existing capabilities; no OKR or knowledge-PRD implementation authorized.
+- Reason: user's observed LobeHub instance has rich model/file/knowledge/memory capabilities but requires navigation across dispersed entries for their desired task flow. This is user experience feedback, not an independently audited universal LobeHub limitation.
+- Alternatives considered: reorganize Ferry around assistant/model configuration or copy every LobeHub module; not selected.
+- Tradeoffs: feature breadth alone is not acceptance evidence; real project/task coordination and discoverable outcomes must justify further investment.
+- Scope: product direction and existing-capability acceptance only. No navigation redesign, new IM/cloud-drive/memory module or retention/permission change.
+- Status: direction confirmed; current work validates native conversation-to-execution-to-acceptance delivery.

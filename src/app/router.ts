@@ -26,7 +26,9 @@ const movedRepositoryItems = new Set(["repositories", "code-insights", "reposito
 
 export function parse(pathname = location.pathname, search = location.search): Route {
   const locale = pathLocale(pathname);
-  const route = parseRoute(stripLocalePrefix(pathname), search);
+  const parsed = parseRoute(stripLocalePrefix(pathname), search);
+  const route: Route = parsed.group === "deploy" && parsed.item === "overview"
+    ? { ...parsed, item: "apps", mode: parsed.id ? "view" : "list" } : parsed;
   return locale ? { ...route, locale } : route;
 }
 
@@ -42,6 +44,7 @@ function parseRoute(pathname: string, search: string): Route {
   if (segments[0] === "account") return { workspace: "_account", group: "account", item: "profile", id: "1", mode: "edit" };
   if (segments[0] === "workspaces") {
     const [, workspace = "", resource = "dashboard", detail = "", action = ""] = segments;
+    if (resource === "application-health") return { workspace, group: "deploy", item: "overview", mode: detail && detail !== "new" ? "view" : "list", ...(detail && detail !== "new" ? { id: detail } : {}) };
     const scope = new URLSearchParams(search).get("scope");
     if (resource === "credentials" && scope === "ai") return {workspace,group:"ops",item:"ai-models",mode:detail === "new" ? "new" : "list"};
     const workflowKind = new URLSearchParams(search).get("workflow_kind");
@@ -68,11 +71,11 @@ function parseRoute(pathname: string, search: string): Route {
   }
   if (group === "workflow" && item === "credentials") return {workspace,group:"ops",item:"ai-models",mode:third === "new" ? "new" : "list"};
   const fallback = nav[0]!;
-  const groupKey = group === "build" && movedRepositoryItems.has(item) ? "repository" : group === "build" ? "workflow" : group === "infrastructure" ? "host" : group;
+  const groupKey = group === "build" && movedRepositoryItems.has(item) ? "repository" : group === "build" ? "workflow" : group === "infrastructure" ? "host" : group === "monitoring" ? "deploy" : group;
   const resolved = nav.find((g) => g.key === groupKey) ?? fallback;
   const legacyRepository = ["repository-auth", "api-tokens"].includes(item);
   const pipelineGroups = group === "build" && item === "pipelines" && third === "groups";
-  const resolvedItem = pipelineGroups ? "pipeline-groups" : legacyRepository ? "repositories" :
+  const resolvedItem = groupKey === "deploy" && item === "overview" ? "overview" : pipelineGroups ? "pipeline-groups" : legacyRepository ? "repositories" :
     resolved.key === "host" && item === "nodes" ? "hosts" :
     resolved.items.find((i) => i.key === item)?.key ?? resolved.items[0]!.key;
   const detail = pipelineGroups ? fourth : third;
@@ -91,11 +94,14 @@ function parseRoute(pathname: string, search: string): Route {
 export function href(route: Partial<Route>, query?: Record<string, string>) {
   const current = parse();
   const r = { ...current, ...route };
+  const legacyHealth = (r.group === "deploy" || r.group === "monitoring") && r.item === "overview";
+  if (legacyHealth) { r.group = "deploy"; r.item = "apps"; r.mode = r.id ? "view" : "list"; }
   const tail =
     r.mode === "new" ? "/new" : r.mode === "view" ? `/${r.id}` : r.mode === "edit" ? `/${r.id}/edit` : r.mode === "workspace" ? `/${r.id}/workspace` : "";
   const params = new URLSearchParams(query ? "" : location.search);
   for (const [key, value] of Object.entries(query ?? {})) if (value) params.set(key, value);
-  const groupKey = r.group === "build" && movedRepositoryItems.has(r.item) ? "repository" : r.group === "build" ? "workflow" : r.group;
+  if (legacyHealth && r.id) params.set("tab", "health");
+  const groupKey = r.group === "build" && movedRepositoryItems.has(r.item) ? "repository" : r.group === "build" ? "workflow" : r.group === "monitoring" ? "deploy" : r.group;
   const item = nav.find(group => group.key === groupKey)?.items.find(item => item.key === r.item);
   for (const [key, value] of Object.entries(item?.params ?? {})) if (!query?.[key]) params.set(key, value);
   if (["_login","_register","_initialize"].includes(r.workspace)) return localizedPath(`/${r.workspace.slice(1)}`, r.locale ?? currentLocale());
@@ -146,6 +152,12 @@ export function navigate(
 
 export function useRoute(): Route {
   const url = useSyncExternalStore(subscribe, snapshot);
-  useEffect(() => { commitRoute(url); }, [url]);
+  useEffect(() => {
+    const legacy = parseRoute(stripLocalePrefix(location.pathname), location.search);
+    if (legacy.group === "deploy" && legacy.item === "overview") {
+      replacePath(href({ ...legacy, locale: pathLocale(location.pathname) ?? currentLocale() }));
+    }
+    commitRoute(url);
+  }, [url]);
   return parse();
 }

@@ -24,6 +24,7 @@ export function TemplateChooserDialog<T>({ config, allowBlank, onBlank, onCancel
 }) {
   const radioName = useId();
   const [selected, setSelected] = useState(() => new URLSearchParams(location.search).get("template") ?? "");
+  const [step, setStep] = useState<"catalog" | "parameters">(() => new URLSearchParams(location.search).get("template") ? "parameters" : "catalog");
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
@@ -38,12 +39,19 @@ export function TemplateChooserDialog<T>({ config, allowBlank, onBlank, onCancel
   const [error, setError] = useState("");
   const alive = useRef(true);
   const body = useRef<HTMLDivElement>(null);
+  const title = useRef<HTMLHeadingElement>(null);
+  const previousStep = useRef(step);
+  useEffect(() => {
+    if (previousStep.current !== step) title.current?.focus();
+    previousStep.current = step;
+  }, [step]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 250);
     return () => clearTimeout(timer);
   }, [search]);
   useEffect(() => {
+    if (step !== "catalog") return;
     const controller = new AbortController();
     setLoading(true); setListError("");
     void config.list({ page, pageSize: PAGE_SIZE, search: query, signal: controller.signal })
@@ -57,7 +65,7 @@ export function TemplateChooserDialog<T>({ config, allowBlank, onBlank, onCancel
       .catch(cause => { if (!controller.signal.aborted) setListError(errorText(cause)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [config, page, query, attempt]);
+  }, [config, page, query, attempt, step]);
   useEffect(() => {
     let live = true;
     setTemplate(undefined); setError(""); setValues({});
@@ -77,14 +85,19 @@ export function TemplateChooserDialog<T>({ config, allowBlank, onBlank, onCancel
     <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
     <Dialog.Content className="dialog-shell fixed left-1/2 top-1/2 z-50 h-[min(46rem,90dvh)] w-[min(56rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-4 shadow-lg sm:p-6" onEscapeKeyDown={event => { if (busy) event.preventDefault(); }} onInteractOutside={event => event.preventDefault()}>
       <div className="space-y-2 pb-4">
-        <Dialog.Title className="text-lg font-semibold">{commonText(allowBlank ? "form.startTitle" : "form.importTemplate")}</Dialog.Title>
-        <Dialog.Description className="text-sm text-muted-foreground">{commonText("form.startHelp")}</Dialog.Description>
-        <Input aria-label={commonText("common.search")} placeholder={commonText("common.search")} value={search} disabled={busy} onChange={event => { setSearch(event.target.value); setPage(1); }} />
+        <Dialog.Title ref={title} tabIndex={-1} className="text-lg font-semibold">{commonText(step === "parameters" ? "form.templateParametersStep" : allowBlank ? "form.startTitle" : "form.importTemplate")}</Dialog.Title>
+        <Dialog.Description className="text-sm text-muted-foreground">{commonText(step === "parameters" ? "form.templateParametersHelp" : "form.templateSelectionHelp")}</Dialog.Description>
+        <ol className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground" aria-label={commonText("form.templateSteps")}>
+          <li aria-current={step === "catalog" ? "step" : undefined}>1. {commonText("form.templateList")}</li>
+          <li aria-current={step === "parameters" ? "step" : undefined}>2. {commonText("resource-domain:template.parameters")}</li>
+        </ol>
+        {step === "catalog" && <Input aria-label={commonText("common.search")} placeholder={commonText("common.search")} value={search} disabled={busy} onChange={event => { setSearch(event.target.value); setPage(1); }} />}
       </div>
       <AutoForm className="dialog-form" onSubmit={event => {
         event.preventDefault(); event.stopPropagation();
         if (busy) return;
         if (!selected) { if (allowBlank) onBlank(); return; }
+        if (step === "catalog") { setStep("parameters"); if (body.current) body.current.scrollTop = 0; return; }
         if (!current || !validate(current.fields, values)) return;
         setBusy(true); setError("");
         void config.generate(selected, current.version, values)
@@ -93,34 +106,35 @@ export function TemplateChooserDialog<T>({ config, allowBlank, onBlank, onCancel
           .finally(() => { if (alive.current) setBusy(false); });
       }}>
         <div ref={body} className="dialog-body space-y-4 pr-1" data-template-catalog>
-          <fieldset className="min-w-0" disabled={busy}>
+          {step === "catalog" && <fieldset className="min-w-0" disabled={busy}>
             <legend className="sr-only">{commonText("form.templateList")}</legend>
             <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {allowBlank && <label className={cardStyle(!selected)}><span className="flex items-center gap-2"><input type="radio" name={radioName} checked={!selected} onChange={() => choose("")} /><FilePlus2 className="size-5 shrink-0" /><span className="font-medium">{commonText("form.startBlank")}</span></span><span className="text-sm text-muted-foreground">{commonText("form.blankHelp")}</span></label>}
               {!loading && !listError && catalog.rows.map(row => <label key={row.id} className={cardStyle(selected === row.id)}>
-                <span className="flex items-start gap-2"><input type="radio" name={radioName} checked={selected === row.id} onChange={() => choose(row.id)} className="mt-1 shrink-0" /><LayoutTemplate className="size-5 shrink-0" /><span className="min-w-0 break-words font-medium [overflow-wrap:anywhere]">{row.name}</span></span>
+                <span className="flex items-start gap-2"><input type="radio" name={radioName} checked={selected === row.id} onChange={() => choose(row.id)} className="mt-1 shrink-0" /><LayoutTemplate className="size-5 shrink-0" /><span title={row.name} className="min-w-0 line-clamp-2 break-words font-medium [overflow-wrap:anywhere]">{row.name}</span></span>
                 <span className="line-clamp-3 break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">{row.description}</span>
                 <span className="text-xs text-muted-foreground">{commonText("common.version")} {row.version}</span>
               </label>)}
             </div>
-          </fieldset>
-          {loading && <LoadingSkeleton variant="form" label={commonText("form.loadingTemplates")} />}
-          {listError && <div role="alert" className="space-y-2 text-sm text-destructive"><p>{listError}</p><Button type="button" variant="outline" onClick={() => setAttempt(n => n + 1)}>{commonText("common.retry")}</Button></div>}
-          {!loading && !listError && !catalog.rows.length && <p className="py-4 text-sm text-muted-foreground">{commonText("form.noTemplates")}</p>}
-          {loadingTemplate && <LoadingSkeleton variant="inline" />}
-          {current && <section className="space-y-3 rounded-lg border bg-muted/20 p-3" aria-label={commonText("resource-domain:template.parameters")}>
+          </fieldset>}
+          {step === "catalog" && loading && <LoadingSkeleton variant="form" label={commonText("form.loadingTemplates")} />}
+          {step === "catalog" && listError && <div role="alert" className="space-y-2 text-sm text-destructive"><p>{listError}</p><Button type="button" variant="outline" onClick={() => setAttempt(n => n + 1)}>{commonText("common.retry")}</Button></div>}
+          {step === "catalog" && !loading && !listError && !catalog.rows.length && <p className="py-4 text-sm text-muted-foreground">{commonText("form.noTemplates")}</p>}
+          {step === "parameters" && loadingTemplate && <LoadingSkeleton variant="inline" />}
+          {step === "parameters" && current && <section className="space-y-3" aria-label={commonText("resource-domain:template.parameters")}>
             <h3 className="break-words font-medium [overflow-wrap:anywhere]">{current.name} · {commonText("common.version")} {current.version}</h3>
             <div className="grid min-w-0 gap-4 sm:grid-cols-2">{current.fields.map(field => <div key={field.key} className="min-w-0">{renderParameter(field, values[field.key], value => setValues(previous => ({ ...previous, [field.key]: value })), busy)}</div>)}</div>
           </section>}
-          {error && <div role="alert" className="space-y-2 text-sm text-destructive"><p>{error}</p><Button type="button" variant="outline" disabled={busy} onClick={() => setAttempt(n => n + 1)}>{commonText("form.reloadTemplate")}</Button></div>}
+          {step === "parameters" && error && <div role="alert" className="space-y-2 text-sm text-destructive"><p>{error}</p><Button type="button" variant="outline" disabled={busy} onClick={() => setAttempt(n => n + 1)}>{commonText("form.reloadTemplate")}</Button></div>}
         </div>
-        <nav aria-label={commonText("table.pagination")} className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t py-3 text-sm">
+        {step === "catalog" && <nav aria-label={commonText("table.pagination")} className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t py-3 text-sm">
           <span>{commonText("table.totalSummary", { count: catalog.total, start: catalog.total ? (page - 1) * PAGE_SIZE + 1 : 0, end: Math.min(page * PAGE_SIZE, catalog.total) })}</span>
           <div className="flex items-center gap-2"><Button type="button" variant="outline" className="min-h-11" disabled={loading || busy || page <= 1} onClick={() => setPage(n => n - 1)}>{commonText("table.previous")}</Button><span className="tabular-nums">{page} / {pages}</span><Button type="button" variant="outline" className="min-h-11" disabled={loading || busy || !!listError || page >= pages} onClick={() => setPage(n => n + 1)}>{commonText("table.next")}</Button></div>
-        </nav>
-        <div className="dialog-footer grid grid-cols-2 pb-[env(safe-area-inset-bottom)]">
+        </nav>}
+        <div className="dialog-footer grid grid-cols-2 pb-[env(safe-area-inset-bottom)] [&>button]:h-auto [&>button]:min-w-0 [&>button]:whitespace-normal [&>button]:py-2 sm:flex sm:flex-wrap sm:[&>button]:flex-1">
           <Button type="button" variant="outline" className="min-h-11" disabled={busy} onClick={cancel}>{commonText("common.cancel")}</Button>
-          <Button type="submit" className="min-h-11" disabled={busy || (selected ? !current || loadingTemplate || !validate(current.fields, values) : !allowBlank)}>{busy ? commonText("common.processing") : commonText(selected ? "form.useTemplate" : "form.startBlank")}</Button>
+          {step === "parameters" && <Button type="button" variant="outline" className="min-h-11" disabled={busy} onClick={() => { setStep("catalog"); if (body.current) body.current.scrollTop = 0; }}>{commonText("form.changeTemplate")}</Button>}
+          <Button type="submit" className={`min-h-11 ${step === "parameters" ? "col-span-2 sm:col-auto" : ""}`} disabled={busy || (selected ? step === "parameters" && (!current || loadingTemplate || !validate(current.fields, values)) : !allowBlank)}>{busy ? commonText("common.processing") : commonText(selected ? step === "catalog" ? "form.configureTemplate" : "form.useTemplate" : "form.startBlank")}</Button>
         </div>
       </AutoForm>
     </Dialog.Content>

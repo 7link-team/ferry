@@ -7,8 +7,15 @@ export function conversationResource(href: string | undefined, endpoint: string 
   if (!workspace || !href) return null;
   let url: URL;
   try { url = new URL(href, location.origin); } catch { return null; }
-  if (url.origin !== location.origin || url.search || url.hash) return null;
-  const match = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/(workflows|workflow-executions)\/(\d+)\/?$/);
+  if (url.origin !== location.origin || url.hash) return null;
+  const artifacts = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/pipeline-artifacts\/?$/);
+  const run = url.searchParams.get("run_id");
+  if (artifacts?.[1] === workspace && run && /^\d+$/.test(run) && [...url.searchParams].length === 1) {
+    return { workspace, kind: "pipeline-artifacts-list", id: run };
+  }
+  if (url.search) return null;
+  const match = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/(workflows|workflow-executions|pipelines|pipeline-runs|pipeline-artifacts)\/(\d+)(\/content)?\/?$/);
+  if (match && (match[2] === "pipeline-artifacts") !== Boolean(match[4])) return null;
   return match?.[1] === workspace ? { workspace, kind: match[2]!, id: match[3]! } : null;
 }
 
@@ -26,6 +33,15 @@ export function ConversationResourceLink({ resource, children }: { resource: Non
       .catch(cause => { if (!controller.signal.aborted) setError(errorText(cause)); });
     return () => controller.abort();
   }, [workspace, kind, id, retry]);
+  if (kind === "pipeline-artifacts-list") {
+    const url = localizedPath(`/workspaces/${workspace}/pipeline-artifacts`, currentLocale()) + `?run_id=${id}`;
+    return <a href={url} target="_blank" rel="noopener noreferrer">{children}</a>;
+  }
+  if (kind === "pipeline-artifacts") return <a href={`/api/workspaces/${workspace}/pipeline-artifacts/${id}/content`} download>{children}</a>;
+  if (kind === "pipelines" || kind === "pipeline-runs") {
+    const url = localizedPath(`/workspaces/${workspace}/${kind}/${id}`, currentLocale());
+    return <a href={url} target="_blank" rel="noopener noreferrer">{children}</a>;
+  }
   const workflow = kind === "workflows" ? id : parent;
   if (!workflow) return <span><button type="button" disabled={!error} aria-busy={!error} title={error || undefined} className="text-primary underline underline-offset-4 disabled:cursor-wait" onClick={() => setRetry(v => v + 1)}>{children}</button>{error && <span role="alert" className="ml-2 text-xs text-destructive">{error}</span>}</span>;
   const url = localizedPath(`/workspaces/${workspace}/workflows/${workflow}`, currentLocale()) + (kind === "workflow-executions" ? `?execution=${id}` : "");

@@ -315,6 +315,14 @@ pub async fn list(
     let (rows, total) =
         resource::list(&s.db, &SPEC, apps::Entity::find(), &scope.workspace_id, &q).await?;
     let mut items: Vec<Value> = rows.iter().map(app_json).collect();
+    if scope.permissions.contains("alerts.read") {
+        let summaries = crate::monitoring::application_summaries(&s, &scope, rows).await?;
+        for (item, summary) in items.iter_mut().zip(summaries) {
+            for field in ["health", "healthy_instances", "expected_instances"] {
+                item[field] = summary[field].clone();
+            }
+        }
+    }
     crate::resources::names::attach(
         &s.db,
         scope.workspace_id,
