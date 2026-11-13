@@ -152,6 +152,10 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     # This migration adds a public privilege flag, never elevation.
                     assert after['user'].get('is_superadmin', False) is False
                     before[path]['user']['is_superadmin'] = False
+                    # Avatars are additive preferences; upgraded accounts have none.
+                    assert after['user'].get('avatar') is None, after['user'].get('avatar')
+                    before[path]['user']['avatar'] = after['user'].get('avatar')
+                    if 'avatar' not in after['user']: before[path]['user'].pop('avatar')
                     allowed={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']} | {'config-templates.'+verb for verb in ['read','create','update','delete']}
                     allowed |= {resource+'.'+verb for resource in ['pipeline-groups','pipeline-environments'] for verb in ['read','create','update','delete']}
                     allowed |= {'code-insights.'+verb for verb in ['read','create','update','delete','sync']}

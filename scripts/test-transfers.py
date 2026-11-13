@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
     log = open(data / 'server.log', 'wb')
     def launch():
         proc = subprocess.Popen([binary], env=env, stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-        for _ in range(150):
+        for _ in range(600):  # fresh MySQL/PostgreSQL migrations can exceed 15s on CI
             if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text())
             try:
                 if request(anonymous, '/status')['ok']: return proc

@@ -27,6 +27,7 @@ try {
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
+  globalThis.failurePage = page;
   const errors = [], requests = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('request', r => requests.push(r.url()));
@@ -56,7 +57,7 @@ try {
   await concurrentPage.getByLabel('密码', { exact: true }).fill('temporary-concurrent-password');
   await concurrentPage.getByLabel('确认密码', { exact: true }).fill('temporary-concurrent-password');
   await page.getByRole('button', { name: '初始化并进入平台' }).click();
-  await page.getByRole('heading', { name: '平台管理', exact: true }).waitFor();
+  await page.waitForURL('**/zh-CN/platform/workspaces');
   await concurrentPage.getByRole('button', { name: '初始化并进入平台' }).click();
   await concurrentPage.getByText('平台已初始化，请登录。').waitFor();
   await concurrentPage.getByRole('button', { name: '登录', exact: true }).waitFor();
@@ -106,7 +107,7 @@ try {
   await page.getByRole('link', { name: '平台用户', exact: true }).click();
   await page.getByRole('cell', { name: 'admin@example.invalid', exact: true }).waitFor();
   await page.getByRole('row').filter({ hasText: 'admin@example.invalid' }).getByRole('link', { name: '编辑', exact: true }).click();
-  await page.getByRole('checkbox').nth(1).click();
+  await page.getByRole('switch').nth(1).click();
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByText('必须保留至少一个启用的平台超级管理员。').waitFor();
   const ordinary = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' } });
@@ -121,7 +122,7 @@ try {
   assert.equal(await ordinaryPage.getByRole('cell').count(), 0, 'ordinary account cannot view platform table');
   await page.getByRole('link', { name: '平台设置', exact: true }).click();
   await page.getByRole('button', { name: '账号注册', exact: true }).click();
-  const toggle = page.getByRole('checkbox', { name: '允许注册新账号', exact: true });
+  const toggle = page.getByRole('switch', { name: '允许注册新账号', exact: true });
   await toggle.waitFor();
   assert.equal(await toggle.getAttribute('aria-checked'), 'true');
   await toggle.click();
@@ -133,43 +134,50 @@ try {
   await page.getByRole('menuitem', { name: '个人资料', exact: true }).click();
   await page.getByRole('heading', { name: '个人资料', exact: true }).first().waitFor();
   assert.equal(new URL(page.url()).pathname, '/zh-CN/account');
-  const nameField = page.getByLabel('姓名', { exact: true }), emailField = page.getByLabel('登录邮箱', { exact: true });
+  const nameField = page.getByLabel('姓名', { exact: true }), emailField = page.getByRole('textbox', { name: '登录邮箱', exact: true });
   const newPassword = page.getByLabel('新密码', { exact: true }), currentPassword = page.getByLabel('当前密码', { exact: true });
+  // Profile fields are grouped: name under basics, email and passwords under security.
+  const openGroup = async (label, field) => { await page.getByText(label, { exact: true }).first().click(); await field.waitFor(); };
   await nameField.waitFor();
   assert.equal(await nameField.inputValue(), 'Platform Admin');
+  await openGroup('账号安全', emailField);
   assert.equal(await emailField.inputValue(), 'admin@example.invalid');
   assert.deepEqual([await newPassword.getAttribute('type'), await currentPassword.getAttribute('type'), await newPassword.inputValue()], ['password', 'password', '']);
+  await openGroup('基础资料', nameField);
   await nameField.fill('Renamed Admin');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByText('个人资料已保存。').waitFor();
   assert.equal((await (await context.request.get(`${origin}/api/me`)).json()).user.name, 'Renamed Admin', 'name saved without a password');
-  await emailField.waitFor();
+  await openGroup('账号安全', emailField);
   await emailField.fill('renamed@example.invalid');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByText('当前密码不正确。修改邮箱或密码需要填写当前密码。').waitFor();
   await currentPassword.fill('temporary-admin-password');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByText('个人资料已保存。').last().waitFor();
-  await page.waitForFunction(() => document.querySelector('input[type="password"]')?.value === '');
   assert.equal((await (await context.request.get(`${origin}/api/me`)).json()).user.email, 'renamed@example.invalid', 'email changed with the current password; this session stays signed in');
+  await openGroup('账号安全', emailField);
+  await page.waitForFunction(() => document.querySelector('input[type="password"]')?.value === '');
   assert.equal(await emailField.inputValue(), 'renamed@example.invalid');
   assert.deepEqual([await newPassword.inputValue(), await currentPassword.inputValue()], ['', ''], 'saved form reloads without the typed passwords');
   await page.screenshot({ path: '/tmp/profile.png', fullPage: true });
+  await openGroup('基础资料', nameField);
   await page.getByLabel('姓名', { exact: true }).fill('Discarded');
   await page.getByRole('button', { name: '取消', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('input[name="name"]')?.value === 'Renamed Admin');
   assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), 'Renamed Admin', 'cancel discards unsaved edits');
   await page.goto(`${origin}${entryPath}`);
-  await page.getByRole('button', { name: /Renamed Admin/ }).click();
-  await page.getByRole('menuitem', { name: '切换空间', exact: true }).hover();
+  // The workspace switcher is its own header menu, separate from the account menu.
+  await page.getByRole('button', { name: '切换空间', exact: true }).click();
   assert.match(await page.getByRole('menuitemradio').filter({ hasText: 'First workspace' }).textContent(), /拥有者（我创建的）/, 'workspace menu shows the role in each workspace');
-  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: /Renamed Admin/ }).click();
   await page.getByRole('menuitem', { name: '个人资料', exact: true }).click();
-  await page.getByLabel('登录邮箱', { exact: true }).waitFor();
+  await nameField.waitFor();
   assert.equal(new URL(page.url()).pathname, '/zh-CN/account', 'workspace account menu opens the profile');
   await page.reload();
-  await page.getByLabel('登录邮箱', { exact: true }).waitFor();
-  assert.equal(await page.getByLabel('登录邮箱', { exact: true }).inputValue(), 'renamed@example.invalid', '/account opens directly');
+  await openGroup('账号安全', emailField);
+  assert.equal(await page.getByRole('textbox', { name: '登录邮箱', exact: true }).inputValue(), 'renamed@example.invalid', '/account opens directly');
   await page.getByRole('button', { name: '返回', exact: true }).click();
   await page.waitForURL(url => url.pathname !== '/zh-CN/account');
   const fresh = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' } });
@@ -181,6 +189,9 @@ try {
   assert(!(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).includes(token), 'setup proof never stored');
   assert.deepEqual(errors, []);
   console.log('PASS: web/manual proof, native fragment, password confirmation, setup/session, platform lists, workspace creation/entry, registration setting, own profile (name, email with current password, menus, direct URL), my role per workspace, no secret persistence, no browser errors');
+} catch (error) {
+  await globalThis.failurePage?.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR || tmpdir(), 'platform-ui-failure.png'), fullPage: true }).catch(() => {});
+  throw error;
 } finally {
   if (browser) await browser.close();
   if (server.exitCode === null) { server.kill('SIGTERM'); await new Promise(r => server.once('exit', r)); }

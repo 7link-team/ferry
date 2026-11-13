@@ -62,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
     log = open(data / 'server.log', 'wb')
     def launch():
         proc = subprocess.Popen([binary,"--desktop-control"], env=env, stdout=log, stderr=log, stdin=subprocess.PIPE)
-        for _ in range(150):
+        for _ in range(600):  # fresh MySQL/PostgreSQL migrations can exceed 15s on CI
             if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text(encoding='utf8',errors='replace'))
             try:
                 if request(anonymous, '/status')['ok']: return proc
