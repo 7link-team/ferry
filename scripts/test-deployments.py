@@ -691,6 +691,10 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     check('docker nginx serves the revision 1 parameter after rollback',eventually(lambda:balanced(lb_url,'blueprint-v1'),120))
                     check('rollback revision is current on every bound host',len(row['current_targets'])==3 and all(t['current_revision']==row['latest_revision']['id'] for t in row['current_targets']))
                     report['blueprint']['deployments']['nginx-docker']['revisions']+=[second,row['latest_revision']['id']]
+                    # Rollback restores the running revision, not the desired spec.
+                    # Replacement previews that spec; align it with the verified v1
+                    # baseline so this fault scenario does not request a v2 upgrade.
+                    respec(nginx_id,nginx_spec(nginx_values))
                     print('== blueprint compose driver on one host',flush=True)
                     single=[fixtures[0]];ip=fixtures[0][2]
                     deploy('nats-compose',nats_template,{'client_port':24222,'cluster_port':26222,'monitor_port':28222},binding('compose',[('nats',3)],single))
@@ -768,6 +772,10 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                         check('recovered host removes old deployment containers '+id,old.returncode==0 and not old.stdout.strip())
                         check('recovered deployment has no remaining fences '+id,not app(id)['failover']['fences'])
             except Exception:
+                import traceback
+                failure=work/'blueprint-failure.log'
+                failure.write_text(traceback.format_exc(),encoding='utf8')
+                report_log_tail(failure,'blueprint acceptance failure')
                 if mode=='docker':
                     event_logs={}
                     for label in ['nginx-docker','nats-docker','nginx-alert']:
