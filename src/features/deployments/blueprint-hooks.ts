@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, errorText } from "../../shared/api/api";
 import { base, listResource } from "../../shared/api/resource";
+import type { FailoverEvent } from "./deployment";
 
 export interface HostRow { id: string; name: string; address?: string }
 
@@ -33,6 +34,33 @@ export interface InstanceHealth { name: string; role?: string; host_id?: string;
 export interface HealthState { loading: boolean; error: string; placement?: InstanceHealth[] }
 
 const REFRESH_MS = 10_000;
+
+/** Append-only events, newest first. Do not keep a previous page after navigation/error. */
+export function useFailoverEvents(workspace: string, id: string, page: number, reload: unknown) {
+  const [state, setState] = useState<{ loading: boolean; error: string; items: FailoverEvent[]; total: number }>({ loading: true, error: "", items: [], total: 0 });
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let live = true;
+    let request: AbortController | undefined;
+    const load = async () => {
+      if (document.hidden || request) return;
+      const controller = new AbortController(); request = controller;
+      try {
+        const result = await listResource<FailoverEvent>(workspace, `deployments/${encodeURIComponent(id)}/events`, { page, page_size: 20 }, controller.signal);
+        if (live) setState({ loading: false, error: "", items: result.items ?? [], total: result.total ?? 0 });
+      } catch (error) {
+        if (live && !controller.signal.aborted) setState({ loading: false, error: errorText(error), items: [], total: 0 });
+      } finally { request = undefined; }
+    };
+    setState({ loading: true, error: "", items: [], total: 0 });
+    void load();
+    const timer = setInterval(() => void load(), REFRESH_MS);
+    const visibility = () => { if (!document.hidden) void load(); };
+    document.addEventListener("visibilitychange", visibility);
+    return () => { live = false; clearInterval(timer); request?.abort(); document.removeEventListener("visibilitychange", visibility); };
+  }, [workspace, id, page, reload, attempt]);
+  return { ...state, retry: () => setAttempt(n => n + 1) };
+}
 
 /** Per-instance health of a deployment from `application-health`, refreshed while visible. */
 export function useInstanceHealth(workspace: string, id: string, enabled: boolean, reload: unknown): HealthState & { retry: () => void } {

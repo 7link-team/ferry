@@ -1,5 +1,4 @@
 import { deleteResource, named } from "../../shared/api/resource";
-import { commonText } from "../../shared/i18n/i18n";
 import { currentLocale } from "../../shared/i18n/locale";
 import type { ResourceConfigContext } from "../../shared/resources/config";
 import {
@@ -13,7 +12,7 @@ import {
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import { TARGETS } from "../hosts/resource-config";
 import { templateGenerator } from "../templates/resource-config";
-import { deploymentState, type Deployment, type Revision } from "./deployment";
+import { deploymentState, revisionActionLabel, type Deployment, type Revision } from "./deployment";
 
 export function deploymentsLists({
   workspace,
@@ -112,10 +111,7 @@ export function deploymentsLists({
           key: "action",
           label: "操作",
           labelKey: "common-domain:table.actions",
-          render: (r) =>
-            r.action === "rollback"
-              ? commonText("resource-domain:deployment.rollback")
-              : commonText("resource-domain:variable.deploy"),
+          render: (r) => revisionActionLabel(r.action),
         },
         {
           key: "state",

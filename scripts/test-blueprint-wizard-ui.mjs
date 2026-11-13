@@ -283,8 +283,8 @@ try {
     // saves to the real API; only the GET presentation's revision marker is stubbed.
     const detailPath = `${origin}/api${root}/deployments/${deploymentId}`;
     await page.route(detailPath, async route => {
-      if (route.request().method() !== 'GET') return route.continue();
       const response = await route.fetch();
+      if (route.request().method() !== 'GET') return route.fulfill({ response });
       await route.fulfill({ response, json: { ...await response.json(), current_revision: '999' } });
     });
     await page.reload();
@@ -304,6 +304,50 @@ try {
     await save.click();
     check((await savedPolicy).ok(), `${width}: frozen failure policy saves without a topology rejection`);
     await eventually(async () => parse((await get(`${root}/deployments/${deploymentId}`)).deploy_spec).failover?.mode === 'off', 'failure policy persisted');
+    await page.unrouteAll({ behavior: 'wait' });
+
+    // Task 9 presentation fixtures only: no actual failure, fence or acknowledgement
+    // is written to the isolated DB. Real failover remains Linux/Docker CI coverage.
+    let acknowledged = false;
+    await page.route(detailPath, async route => {
+      const response = await route.fetch();
+      await route.fulfill({ response, json: { ...await response.json(), failover: {
+        mode: 'auto', host_down_after: 90,
+        fences: [{ instance: 'nats-0', host_id: saved.blueprint_binding.roles.nats[0].hostId, created_at: 1000 }],
+        attention: acknowledged ? [] : [{ instance: 'nats-1', since: 2000 }],
+      } } });
+    });
+    await page.route(`${detailPath}/events**`, route => route.fulfill({ json: {
+      items: [{ id: '701', kind: 'replaceFailed', instance: 'nats-1', host_id: bound[1], host_name: 'test-host', revision_id: '999', created_at: 3000,
+        message: '替换失败：等待人工排查。' + '超长消息必须换行'.repeat(100), detail: { operation_id: '700' } }], total: 1, page: 1, page_size: 20,
+    } }));
+    await page.route(`${detailPath}/instances/nats/1/acknowledgements`, async route => {
+      check(route.request().method() === 'POST' && route.request().postDataJSON().version === saved.version + 1, `${width}: acknowledgement fixture receives current version`);
+      acknowledged = true; await route.fulfill({ json: {} });
+    });
+    await page.reload();
+    const attention = page.getByRole('region', { name: '需人工处理', exact: true });
+    await attention.waitFor();
+    const acknowledge = attention.getByRole('button', { name: '确认', exact: true });
+    await acknowledge.scrollIntoViewIfNeeded();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await reachable(acknowledge, `${width} failover acknowledge`);
+    await fits(`failover attention ${width}`);
+    await page.screenshot({ path: join(output, `failover-attention-${width}.png`) });
+    const fencedRow = page.locator('[data-topology-instance="nats-0"]');
+    check(await fencedRow.getByText('已隔离', { exact: true }).isVisible(), `${width}: fence badge matches host and instance`);
+    check(await page.locator('[data-topology-instance="nats-1"]').getByText('需人工处理', { exact: true }).isVisible(), `${width}: attention badge shown`);
+    await fencedRow.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(output, `failover-topology-${width}.png`) });
+    const timeline = page.getByRole('region', { name: '自动动作', exact: true });
+    await timeline.getByText('test-host', { exact: true }).waitFor();
+    await timeline.scrollIntoViewIfNeeded();
+    await fits(`failover long timeline ${width}`);
+    await shot(`failover-timeline-${width}`);
+    check(await timeline.getByRole('link', { name: '修订 999', exact: true }).count() === 1, `${width}: event links to its revision`);
+    await acknowledge.click();
+    await attention.waitFor({ state: 'detached' });
+    check(acknowledged, `${width}: acknowledged presentation refreshes`);
     await page.unrouteAll({ behavior: 'wait' });
   }
   const created = (await get(`${root}/deployments?page_size=50`)).items;

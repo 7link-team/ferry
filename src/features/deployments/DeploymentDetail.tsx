@@ -8,9 +8,10 @@ import { currentLocale } from "../../shared/i18n/locale";
 import type { Navigation } from "../../shared/routing/types";
 import { Button } from "../../shared/ui/button";
 import { Badge } from "../../shared/ui/badge";
-import { deploymentActive,deploymentState,type Deployment,type Preview,type Revision } from "./deployment";
+import { deploymentActive,deploymentState,revisionActionLabel,type Deployment,type Preview,type Revision } from "./deployment";
 import { BlueprintSpecEdit } from "./BlueprintSpecEdit";
 import { BlueprintTarget, BlueprintTopology } from "./BlueprintTopology";
+import { FailoverAttention, FailoverTimeline } from "./FailoverTimeline";
 
 const CodeEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 
@@ -33,6 +34,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
   const root = base(workspace, "deployments");
   useEffect(() => {
     let live = true, finished = false;
+    let interval = 1200;
     let request: AbortController | undefined, timer: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
       if (!live || document.hidden || request || finished) return;
@@ -44,10 +46,11 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
         if (!live || controller.signal.aborted) return;
         setApp(next); setRevision(selected ?? next.latest_revision); setError("");
         // Historical content is fixed, but action availability follows the live application.
-        finished = !deploymentActive(next.state) && !deploymentActive(selected?.state ?? next.state);
+        finished = !deploymentActive(next.state) && !deploymentActive(selected?.state ?? next.state) && (!!revisionId || next.target_kind !== "blueprint");
+        interval = deploymentActive(next.state) || deploymentActive(selected?.state ?? "") ? 1200 : 10_000;
         if (appRef.current && appRef.current.version !== next.version) setPreview(undefined);
       } catch (e) { if (live && !controller.signal.aborted) setError(errorText(e)); }
-      finally { request = undefined; if (live && !finished && !document.hidden) timer = setTimeout(load, 1200); }
+      finally { request = undefined; if (live && !finished && !document.hidden) timer = setTimeout(load, interval); }
     };
     const visibility = () => {
       clearTimeout(timer);
@@ -84,6 +87,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
       <h2 className="text-lg font-semibold">{app.name}</h2><Badge variant={["failed", "needs-review"].includes(app.state) ? "destructive" : "secondary"}>{deploymentState(app.state)}</Badge>
       <span className="text-sm text-muted-foreground">{commonText("resource-domain:resource.target")} · {app.target_kind === "blueprint" ? <BlueprintTarget workspace={workspace} deployment={app} permissions={permissions} /> : named(app.target_name, app.target_ref)}</span>
     </header>
+    {!revisionId && app.target_kind === "blueprint" && <FailoverAttention workspace={workspace} deployment={app} permissions={permissions} onDone={() => setReload(n => n + 1)} />}
     <dl className="grid min-w-0 gap-4 rounded-md border p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
       {[
         [commonText("resource-domain:deployment.mode"), ({ native: "Native (systemd)", docker: "Docker", compose: "Docker Compose", stack: "Docker Swarm / Stack" })[app.mode] ?? app.mode],
@@ -104,7 +108,8 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
     <p className="text-sm text-muted-foreground">{executionText("deployment.applyHelp")}</p>
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {!revisionId && <BlueprintSpecEdit workspace={workspace} deployment={app} permissions={permissions} navigation={navigation} disabled={blocked} onSaved={() => setReload((n) => n + 1)} />}
-    {!revisionId && app.target_kind === "blueprint" && <BlueprintTopology workspace={workspace} deployment={app} permissions={permissions} />}
+    {!revisionId && app.target_kind === "blueprint" && <BlueprintTopology workspace={workspace} deployment={app} permissions={permissions} onDone={() => setReload(n => n + 1)} />}
+    {!revisionId && app.target_kind === "blueprint" && <FailoverTimeline key={`${workspace}/${app.id}`} workspace={workspace} deployment={app} />}
     {app.state === "needs-review" && <section className="space-y-3 border-l-2 border-destructive pl-4">
       <h3 className="font-semibold">{executionText("deployment.reviewRequired")}</h3><p>{executionText("deployment.reviewHelp")}</p>
       {permissions.has("deployments.apply") && <><AutoField label={executionText("deployment.reviewNote")}>
@@ -126,7 +131,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
     </section>}
     {rendered !== undefined && <section><h3 className="mb-2 font-semibold">{executionText(revisionId ? "deployment.historicalRevision" : "deployment.currentRendered")}</h3><div className="h-96 min-w-0 overflow-hidden rounded-md border"><Suspense fallback={<LoadingSkeleton variant="editor" />}><CodeEditor value={rendered} language="yaml" path={`deployment-${editorId}-rendered.yaml`} label={executionText("deployment.viewRendered")} readOnly onChange={() => {}} /></Suspense></div></section>}
     {!!app.current_targets?.length && <details><summary className="cursor-pointer text-sm">{executionText("deployment.hostRevisions")}</summary><ul className="mt-2 space-y-1 text-sm">{app.current_targets.map((target) => <li key={target.host_id}>{executionText("deployment.hostRevision", { id: target.host_id, revision: target.current_revision })}</li>)}</ul></details>}
-    {revision && <section className="space-y-3"><h3 className="font-semibold">{executionText("deployment.revisionTitle", { number: revision.number, action: revision.action === "rollback" ? executionText("shared.resource.deployment.rollback") : executionText("shared.resource.variable.deploy"), state: stateLabel(revision.state) })}</h3>
+    {revision && <section className="space-y-3"><h3 className="font-semibold">{executionText("deployment.revisionTitle", { number: revision.number, action: revisionActionLabel(revision.action), state: stateLabel(revision.state) })}</h3>
       <dl className="grid gap-3 text-sm sm:grid-cols-3">{[
         [commonText("resource-domain:execution.triggeredBy"), named(revision.triggered_by_name, revision.triggered_by)],
         [commonText("resource-domain:execution.startedAt"), revision.started_at ? new Date(revision.started_at).toLocaleString(currentLocale()) : "—"],

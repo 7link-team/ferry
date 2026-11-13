@@ -63,6 +63,7 @@ export const alertTargets = [
 ];
 
 export const alertMetrics = [
+  { value: "failover-attention", label: "Failover needs attention", labelKey: "resource-domain:failover.attention" },
   { value: "health-failed", label: "Health failure", labelKey: "monitoring:healthMetric" },
   {
     value: "offline",
@@ -346,7 +347,7 @@ export function alertsForms({
               immutable: true,
               when: (d) => d.target_kind === "host",
               options: alertMetrics.filter(
-                (m) => !["execution-failed", "health-failed"].includes(m.value),
+                (m) => !["execution-failed", "health-failed", "failover-attention"].includes(m.value),
               ),
             },
             {
@@ -356,8 +357,12 @@ export function alertsForms({
               type: "select",
               required: true,
               immutable: true,
-              when: (d) => !["host", "health-check", "application-health"].includes(d.target_kind ?? ""),
+              when: (d) => !["host", "health-check", "application-health", "deployment"].includes(d.target_kind ?? ""),
               options: alertMetrics.filter(m => m.value === "execution-failed"),
+            },
+            {
+              key: "metric", label: "Metric", labelKey: "resource-domain:alert.metric", type: "select", required: true, immutable: true,
+              when: d => d.target_kind === "deployment", options: alertMetrics.filter(m => ["execution-failed", "failover-attention"].includes(m.value)),
             },
             {
               key: "metric", label: "Health", labelKey: "monitoring:healthMetric", type: "select", required: true, immutable: true,
@@ -371,7 +376,7 @@ export function alertsForms({
               required: true,
               when: (d) =>
                 !!d.metric &&
-                !["offline", "execution-failed", "health-failed"].includes(d.metric),
+                !["offline", "execution-failed", "health-failed", "failover-attention"].includes(d.metric),
               help: "指标严格大于阈值时触发；内存和磁盘范围0–100，负载为非负整数。",
               helpKey: "resource-domain:alert.thresholdHelp",
             },

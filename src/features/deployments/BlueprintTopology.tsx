@@ -1,15 +1,18 @@
-import { useId, useMemo } from "react";
+import { useId, useMemo, useState } from "react";
+import { api } from "../../shared/api/api";
 import { named } from "../../shared/api/resource";
 import { commonText, useCommonTranslation } from "../../shared/i18n/i18n";
 import { Badge } from "../../shared/ui/badge";
 import { Button } from "../../shared/ui/button";
-import { readBlueprint, type BlueprintSummary } from "./blueprint-spec";
+import { DeleteConfirmDialog } from "../../shared/ui/DeleteConfirmDialog";
+import { failoverClass, readBlueprint, type BlueprintSummary } from "./blueprint-spec";
 import { driverLabel } from "./BlueprintWizard";
 import { useHostNames, useInstanceHealth, type InstanceHealth } from "./blueprint-hooks";
-import type { BlueprintBinding, Deployment } from "./deployment";
+import { deploymentActive, instanceResource, type BlueprintBinding, type Deployment } from "./deployment";
 
 const t = (key: string, values?: Record<string, unknown>) => commonText(`resource-domain:topology.${key}`, values);
 const w = (key: string, values?: Record<string, unknown>) => commonText(`resource-domain:wizard.${key}`, values);
+const f = (key: string, values?: Record<string, unknown>) => commonText(`resource-domain:failover.${key}`, values);
 
 export type InstanceState = "up" | "down" | "unknown" | "loading";
 export interface TopologyRow { instance: string; hostId: string; hostName?: string; state: InstanceState; replicas?: number; healthy?: number; expected?: number }
@@ -66,9 +69,11 @@ export function BlueprintTarget({ workspace, deployment, permissions }: { worksp
 }
 
 /** Where a blueprint deployment's instances run and how healthy each one is. */
-export function BlueprintTopology({ workspace, deployment, permissions }: { workspace: string; deployment: Deployment; permissions: Set<string> }) {
+export function BlueprintTopology({ workspace, deployment, permissions, onDone }: { workspace: string; deployment: Deployment; permissions: Set<string>; onDone?: () => void }) {
   useCommonTranslation();
   const titleId = useId();
+  const [replacing, setReplacing] = useState<string>();
+  const [operation, setOperation] = useState<string>();
   const binding = deployment.blueprint_binding;
   const canHealth = permissions.has("alerts.read") && permissions.has("deployments.read");
   const names = useHostNames(workspace, permissions.has("hosts.read") && !!binding);
@@ -76,12 +81,14 @@ export function BlueprintTopology({ workspace, deployment, permissions }: { work
   const blueprint = useMemo(() => readBlueprint(deployment.manifest ?? ""), [deployment.manifest]);
   const groups = useMemo(() => binding ? topologyGroups(binding, blueprint, health.placement, health.loading) : [], [binding, blueprint, health.placement, health.loading]);
   const hostName = (row: TopologyRow) => row.hostName ?? named(names.get(row.hostId), row.hostId);
+  const replaceable = ["native", "docker"].includes(deployment.mode) && permissions.has("deployments.apply") && !deploymentActive(deployment.state) && deployment.state !== "needs-review";
 
   return <section aria-labelledby={titleId} className="min-w-0 space-y-3">
     <div className="flex min-w-0 flex-wrap items-center gap-2">
       <h3 id={titleId} className="font-semibold">{t("title")}</h3>
       {binding?.driver === "stack" && binding.manager && <span className="min-w-0 break-all text-sm text-muted-foreground">{t("manager", { host: named(names.get(binding.manager), binding.manager) })}</span>}
     </div>
+    {operation && <p role="status" className="break-words text-sm text-muted-foreground">{f("accepted", { id: operation })}</p>}
     {!binding ? <p className="rounded-md border p-4 text-sm text-muted-foreground">{t("noBinding")}</p>
       : !groups.length ? <p className="rounded-md border p-4 text-sm text-muted-foreground">{t("empty")}</p>
       : <>
@@ -115,11 +122,21 @@ export function BlueprintTopology({ workspace, deployment, permissions }: { work
                   {row.replicas !== undefined && <span className="block text-xs text-muted-foreground">{t("replicated", { count: row.replicas })}</span>}
                 </span>
                 <span className="min-w-0 break-all"><span className="me-1 text-muted-foreground md:sr-only">{t("label", { label: w("host") })}</span>{hostName(row)}</span>
-                <span className="flex items-center gap-2"><span className="text-muted-foreground md:sr-only">{t("label", { label: t("health") })}</span><HealthBadge state={row.state} /></span>
+                <span className="flex min-w-0 flex-wrap items-center gap-2"><span className="text-muted-foreground md:sr-only">{t("label", { label: t("health") })}</span><HealthBadge state={row.state} />
+                  {deployment.failover?.fences.some(item => item.instance === row.instance && item.host_id === row.hostId) && <Badge variant="outline" className="max-w-full whitespace-normal break-words">{t("fenced")}</Badge>}
+                  {deployment.failover?.attention.some(item => item.instance === row.instance) && <Badge variant="destructive" className="max-w-full whitespace-normal break-words">{t("needsAttention")}</Badge>}
+                  {replaceable && blueprint?.roles.some(role => role.name === group.role && failoverClass(role) !== "manual") && instanceResource(workspace, deployment.id, row.instance) && <Button type="button" size="sm" variant="outline" className="min-h-11 lg:min-h-9" data-replace-instance={row.instance} onClick={() => setReplacing(row.instance)}>{f("replace")}</Button>}
+                </span>
               </li>)}</ul>
             </div>
           </section>;
         })}</div>
       </>}
+    {replacing && <DeleteConfirmDialog action={f("replace")} target={replacing} description={f("replaceHelp")} onClose={() => setReplacing(undefined)} onConfirm={async () => {
+      const path = instanceResource(workspace, deployment.id, replacing);
+      if (!path || !replaceable) return;
+      const result = await api<{ operation_id: string }>(`${path}/replace`, { method: "POST", body: JSON.stringify({ version: deployment.version }) });
+      setOperation(result.operation_id); onDone?.();
+    }} />}
   </section>;
 }

@@ -74,6 +74,42 @@ const button = (name: string) => [...host.querySelectorAll("button")].find(b => 
 const click = async (name: string) => { const target = button(name); expect(target, name).toBeDefined(); await act(async () => target.click()); await flush(); };
 const alertWith = (text: string) => [...host.querySelectorAll('[role="alert"]')].find(alert => alert.textContent?.includes(text));
 
+it("fenced_and_attention_badges_match_host_and_instance", async () => {
+  await mountTopology(deployment({ failover: { mode: "auto", host_down_after: 90, fences: [{ host_id: "1", instance: "nats-0", created_at: 1 }, { host_id: "99", instance: "nats-1", created_at: 1 }], attention: [{ instance: "nats-1", since: 1 }] } }));
+  expect(rowsOf("nats")[0]!.textContent).toContain(t("fenced"));
+  expect(rowsOf("nats")[1]!.textContent).not.toContain(t("fenced"));
+  expect(rowsOf("nats")[1]!.textContent).toContain(t("needsAttention"));
+});
+
+it("replace_action_only_for_supported_driver_class_and_permission", async () => {
+  const permissions = new Set([...all, "deployments.apply"]);
+  await mountTopology(deployment(), permissions);
+  expect(rowsOf("web")[0]!.querySelector("button")).not.toBeNull();
+  expect(rowsOf("nats")[0]!.querySelector("button")).toBeNull();
+  for (const mode of ["stack", "compose"]) { await mountTopology(deployment({ mode }), permissions); expect(host.querySelector('[data-replace-instance]')).toBeNull(); }
+  for (const state of ["queued", "running", "needs-review"]) { await mountTopology(deployment({ state }), permissions); expect(host.querySelector('[data-replace-instance]')).toBeNull(); }
+  await mountTopology(deployment(), all); expect(host.querySelector('[data-replace-instance]')).toBeNull();
+});
+
+it("replace_confirms_then_posts_version_and_accepts_operation_id", async () => {
+  await mountTopology(deployment(), new Set([...all, "deployments.apply"]));
+  const pressReplace = async () => { const b = rowsOf("web")[0]!.querySelector<HTMLButtonElement>("button")!; expect(b).not.toBeNull(); await act(async () => b.click()); await flush(); };
+  await pressReplace(); expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  const dialogButton = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(b => b.textContent === name)!;
+  await act(async () => dialogButton(commonText("common.cancel")).click());
+  expect(requests.filter(r => r.method === "POST")).toHaveLength(0);
+  await pressReplace();
+  const prior = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (...args) => {
+    if (String(args[0]).endsWith("/instances/web/0/replace")) { requests.push({ url: String(args[0]), method: "POST", body: JSON.parse(String(args[1]?.body)) }); return { ok: true, status: 202, json: async () => ({ operation_id: "81" }) } as Response; }
+    return prior(...args);
+  });
+  await act(async () => dialogButton(commonText("delete.confirm", { action: commonText("resource-domain:failover.replace") })).click()); await flush();
+  expect(requests.find(r => r.url.endsWith("/instances/web/0/replace"))).toMatchObject({ method: "POST", body: { version: 4 } });
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(host.textContent).toContain(commonText("resource-domain:failover.accepted", { id: "81" }));
+});
+
 it("topology_groups_instances_by_role_with_host_names", async () => {
   await mountTopology(deployment());
   // Roles follow the blueprint's order, not the binding's key order.

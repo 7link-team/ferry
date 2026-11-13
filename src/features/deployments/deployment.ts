@@ -1,4 +1,23 @@
 import { commonText } from "../../shared/i18n/i18n";
+import { base } from "../../shared/api/resource";
+export interface FailoverSummary {
+  mode: string; host_down_after: number;
+  fences: { host_id: string; instance: string; created_at: number }[];
+  attention: { instance: string; since: number }[];
+}
+export interface FailoverEvent {
+  id: string; kind: string; instance: string; host_id: string; host_name?: string;
+  revision_id: string; created_at: number; message: string; detail: Record<string, unknown>;
+}
+/** Instance names are `<role>-<index>`; role names may themselves contain dashes. */
+export function instanceResource(workspace: string, id: string, instance: string): string | undefined {
+  const match = /^(.*)-(\d+)$/.exec(instance);
+  return match?.[1] ? `${base(workspace, "deployments")}/${encodeURIComponent(id)}/instances/${encodeURIComponent(match[1])}/${match[2]}` : undefined;
+}
+export const revisionActionLabel = (action: string) => {
+  const key = ({ apply: "variable.deploy", rollback: "deployment.rollback", restart: "failover.restart", "auto-replace": "failover.autoReplace", "manual-replace": "failover.manualReplace" } as Record<string, string>)[action];
+  return key ? commonText(`resource-domain:${key}`) : commonText("state.unknown", { value: action });
+};
 export interface Deployment {
   id: string; name: string; category?: string; manifest: string; mode: string; target_kind: string;
   target_ref: string; workdir: string; description: string; state: string;
@@ -9,6 +28,7 @@ export interface Deployment {
   blueprint_binding?: BlueprintBinding | null;
   /** Deployment spec (`ferry/deploy-v1`) the server derives the blueprint deployment from. */
   deploy_spec?: string | null;
+  failover?: FailoverSummary | null;
 }
 export interface BlueprintBinding { driver: string; manager?: string; roles: Record<string, { hostId: string; address: string }[]> }
 /** Once any host runs a revision, the server freezes the topology (`blueprint.topologyChangeRequiresPlan`). */

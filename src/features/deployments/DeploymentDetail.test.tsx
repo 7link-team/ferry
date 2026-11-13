@@ -2,8 +2,8 @@ import { act } from "react";
 import { createRoot,type Root } from "react-dom/client";
 import { afterEach,beforeEach,expect,it,vi } from "vitest";
 import { DeploymentDetail } from "../../app/pages/DeploymentDetail";
-import { i18n } from "../../shared/i18n/i18n";
-import { artifactDiff } from "./deployment";
+import { commonText, i18n } from "../../shared/i18n/i18n";
+import { artifactDiff, revisionActionLabel } from "./deployment";
 vi.mock("../../shared/editor/CodeEditor", () => ({ CodeEditor: ({ value }: { value: string }) => <pre data-editor-value>{value}</pre> }));
 let root: Root, host: HTMLDivElement, state: string, calls: string[];
 const mount = async () => { await act(async () => root.render(<DeploymentDetail workspace="ops" deploymentId="1" permissions={new Set(["deployments.apply"])} />)); };
@@ -18,6 +18,19 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => { calls.push(url); return { ok: true, json: async () => ({ id: "1", name: "web", state, target_ref: "2", version: 1 }) }; }));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+it.each(["auto-replace", "manual-replace", "restart", "rollback", "apply"])("revision_title_labels_%s", async action => {
+  state = "succeeded";
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ id: "1", name: "web", state, version: 1, latest_revision: { id: "9", number: 3, action, state, started_at: 0, finished_at: 0 } }) })));
+  await mount(); expect(host.querySelector("h3")?.textContent).toContain(revisionActionLabel(action));
+  expect(revisionActionLabel(action)).not.toMatch(/^failover\./);
+});
+it("idle_blueprint_refreshes_failover_summary_while_visible", async () => {
+  state = "idle";
+  vi.stubGlobal("fetch", vi.fn(async url => { calls.push(String(url)); return { ok: true, json: async () => String(url).includes("/events") ? { items: [], total: 0 } : { id: "1", name: "web", state, version: 1, target_kind: "blueprint", mode: "docker", failover: { mode: "auto", host_down_after: 90, fences: [], attention: [] } } }; }));
+  await mount(); const count = calls.filter(url => url.endsWith("/deployments/1")).length;
+  await tick(10_000); expect(calls.filter(url => url.endsWith("/deployments/1"))).toHaveLength(count + 1);
+  expect(host.textContent).toContain(commonText("resource-domain:failover.timeline"));
+});
 it.each(["idle", "succeeded", "failed", "needs-review"])("%s stops periodic polling", async (terminal) => {
   await mount(); state = terminal; await tick(1200); const n = calls.length; await tick(6000); expect(calls).toHaveLength(n);
 });
