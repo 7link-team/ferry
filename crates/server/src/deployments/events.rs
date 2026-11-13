@@ -23,6 +23,7 @@ pub(crate) enum Kind {
 }
 
 impl Kind {
+    #[cfg(test)]
     pub(crate) const ALL: [Kind; 13] = [
         Kind::HostSuspected,
         Kind::HostConfirmedDown,

@@ -328,5 +328,8 @@
   "deployment.failoverReason.conflict": "部署同時發生變更，未替換任何實例。",
   "deployment.event.revisionQueued": "實例 {instance} 的替換已排入修訂 {revision}。",
   "deployment.failoverBusy": "此部署已有替換操作正在執行。",
-  "deployment.replaceQuorumLost": "健康同伴不足，無法替換此成員。"
+  "deployment.replaceQuorumLost": "健康同伴不足，無法替換此成員。",
+  "deployment.failoverNotAttention": "此執行個體無需人工處理。",
+  "deployment.alert.failoverAttention": "{count} 個部署執行個體的容錯移轉需要人工處理。",
+  "deployment.alert.failoverRecovered": "目前沒有部署執行個體的容錯移轉需要人工處理。"
 }

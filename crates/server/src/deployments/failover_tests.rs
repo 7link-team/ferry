@@ -7,6 +7,578 @@ use crate::entities::{deployment_events, deployment_fences};
 use crate::i18n::{Locale, with_locale};
 use sea_orm::{PaginatorTrait, Set};
 
+mod coordinator {
+    use super::super::reconciler::{self, Episodes, Probe};
+    use super::*;
+    use crate::blueprint::failover::PeerCheck;
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    #[tokio::test]
+    async fn stale_intentions_cannot_replace_a_recovered_host_or_disabled_mode() {
+        let (_d, s, id) = deployed([6101, 6102, 6103, 6104], replicated_spec("2")).await;
+        let probe = StubProbe::new(false);
+        let now = db::now();
+        stale(&s, 6101, now, 100_000).await;
+        let job = reconciler::tick(&s, &probe, now, &mut Episodes::default())
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        stale(&s, 6101, now, 0).await;
+        reconciler::dispatch(&s, job).await.unwrap();
+        stale(&s, 6101, now, 100_000).await;
+        let job = reconciler::tick(&s, &probe, now, &mut Episodes::default())
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        config(&s, &id, "off").await;
+        reconciler::dispatch(&s, job).await.unwrap();
+        assert!(
+            !events_of(&s, &id)
+                .await
+                .iter()
+                .any(|e| e.kind == "replaceStarted")
+        );
+        assert!(fences_of(&s, &id).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn automatic_revoked_actor_records_attention_once_without_remote_work() {
+        let (_d, s, id) = deployed([6111, 6112, 6113, 6114], replicated_spec("2")).await;
+        let now = db::now();
+        stale(&s, 6111, now, 100_000).await;
+        let probe = StubProbe::new(false);
+        let mut episodes = Episodes::default();
+        let job = reconciler::tick(&s, &probe, now, &mut episodes)
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        use crate::entities::workspace_roles;
+        workspace_roles::Entity::update_many()
+            .col_expr(workspace_roles::Column::Permissions, Expr::value("[]"))
+            .filter(workspace_roles::Column::WorkspaceId.eq(1))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        reconciler::dispatch(&s, job).await.unwrap();
+        assert!(
+            reconciler::tick(&s, &probe, now, &mut episodes)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let rows = events_of(&s, &id).await;
+        assert_eq!(
+            rows.iter()
+                .filter(|e| e.kind == "replaceFailed" && detail(e)["reason"] == "actorRevoked")
+                .count(),
+            1
+        );
+        assert_eq!(
+            rows.iter().filter(|e| e.kind == "needsAttention").count(),
+            1
+        );
+        assert!(fences_of(&s, &id).await.is_empty());
+        assert_eq!(row(&s, &id).await.revision_number, 1);
+    }
+
+    #[tokio::test]
+    async fn no_candidate_failure_is_durable_and_cools_down() {
+        let (_d, s, id) = deployed([6071, 6072, 6073, 6074], replicated_spec("2")).await;
+        let now = db::now();
+        stale(&s, 6071, now, 100_000).await;
+        hosts::Entity::update_many()
+            .col_expr(hosts::Column::State, Expr::value("offline"))
+            .filter(hosts::Column::Id.eq(6074))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let probe = StubProbe::new(false);
+        let mut episodes = Episodes::default();
+        let job = reconciler::tick(&s, &probe, now, &mut episodes)
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        let pending = sequence::begin(&s, &admin(1), job, None).await.unwrap();
+        assert_eq!(
+            sequence::run(s.clone(), pending).await.unwrap(),
+            sequence::Outcome::Failed {
+                reason: "noCandidate"
+            }
+        );
+        assert!(fences_of(&s, &id).await.is_empty());
+        assert_eq!(row(&s, &id).await.revision_number, 1);
+        assert!(
+            events_of(&s, &id)
+                .await
+                .iter()
+                .any(|e| e.kind == "replaceFailed" && detail(e)["reason"] == "noCandidate")
+        );
+        assert!(
+            reconciler::tick(&s, &probe, db::now(), &mut episodes)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            events_of(&s, &id)
+                .await
+                .iter()
+                .filter(|e| e.kind == "replaceFailed")
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn stack_stateless_is_ignored_compose_only_alerts_and_non_blueprint_is_null() {
+        let (_d, s, id) = deployed([6081, 6082, 6083, 6084], replicated_spec("2")).await;
+        let now = db::now();
+        stale(&s, 6081, now, 100_000).await;
+        let app = row(&s, &id).await;
+        let mut manifest: Value = serde_json::from_str(&app.manifest).unwrap();
+        manifest["roles"][0]["identity"] = json!("stateless");
+        let mut binding: Value =
+            serde_json::from_str(app.blueprint_binding.as_deref().unwrap()).unwrap();
+        binding["driver"] = json!("stack");
+        apps::Entity::update_many()
+            .col_expr(apps::Column::Manifest, Expr::value(manifest.to_string()))
+            .col_expr(
+                apps::Column::BlueprintBinding,
+                Expr::value(binding.to_string()),
+            )
+            .filter(apps::Column::Id.eq(app.id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let probe = StubProbe::new(false);
+        let mut episodes = Episodes::default();
+        assert!(
+            reconciler::tick(&s, &probe, now, &mut episodes)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(probe.calls.lock().unwrap().is_empty());
+        binding["driver"] = json!("compose");
+        apps::Entity::update_many()
+            .col_expr(
+                apps::Column::BlueprintBinding,
+                Expr::value(binding.to_string()),
+            )
+            .filter(apps::Column::Id.eq(app.id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        assert!(
+            reconciler::tick(&s, &probe, now, &mut episodes)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            events_of(&s, &id)
+                .await
+                .iter()
+                .any(|e| e.kind == "alertOnly" && detail(e)["reason"] == "driverUnsupported")
+        );
+        let mut ordinary = row(&s, &id).await;
+        ordinary.target_kind = "host".into();
+        assert_eq!(
+            reconciler::summary(&s.db, &ordinary).await.unwrap(),
+            Value::Null
+        );
+    }
+
+    struct StubProbe {
+        server_ok: AtomicBool,
+        reachable: bool,
+        calls: Mutex<Vec<i64>>,
+    }
+    impl StubProbe {
+        fn new(reachable: bool) -> Self {
+            Self {
+                server_ok: AtomicBool::new(false),
+                reachable,
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+    #[async_trait::async_trait]
+    impl Probe for StubProbe {
+        async fn server(&self, _: &AppState, _: Id, host: Id) -> bool {
+            self.calls.lock().unwrap().push(host.into());
+            self.server_ok.load(Ordering::SeqCst)
+        }
+        async fn peer(&self, _: &AppState, _: Id, peer: Id, _: &str, _: u16) -> PeerCheck {
+            if self.reachable {
+                PeerCheck::Reachable(peer)
+            } else {
+                PeerCheck::Unreachable(peer)
+            }
+        }
+    }
+    async fn stale(s: &AppState, id: i64, now: i64, age: i64) {
+        hosts::Entity::update_many()
+            .col_expr(hosts::Column::SeenAt, Expr::value(now - age))
+            .filter(hosts::Column::Id.eq(id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+    }
+    async fn config(s: &AppState, id: &str, mode: &str) {
+        let app = row(s, id).await;
+        let mut spec: Value = serde_json::from_str(app.deploy_spec.as_deref().unwrap())
+            .unwrap_or_else(|_| {
+                serde_yaml_ng::from_str(app.deploy_spec.as_deref().unwrap()).unwrap()
+            });
+        spec["failover"] = json!({"mode":mode,"hostDownAfter":90});
+        apps::Entity::update_many()
+            .col_expr(apps::Column::DeploySpec, Expr::value(spec.to_string()))
+            .filter(apps::Column::Id.eq(app.id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+    }
+    async fn mark(s: &AppState, id: &str, kind: Kind) {
+        let app = row(s, id).await;
+        events::record(
+            s,
+            &s.db,
+            NewEvent {
+                workspace: 1.into(),
+                deployment: app.id.into(),
+                kind,
+                instance: "nats-0".into(),
+                host: 0.into(),
+                revision: 0.into(),
+                message: Message::new("deployment.failoverReason.interrupted"),
+                data: json!({}),
+            },
+        )
+        .await
+        .unwrap();
+    }
+    async fn ack(s: &AppState, scope: Scope, id: &str, version: i64) -> Result<StatusCode> {
+        reconciler::acknowledge_instance(
+            State(s.clone()),
+            scope,
+            Path(("1".into(), id.into(), "nats".into(), 0)),
+            Json(serde_json::from_value(json!({"version":version})).unwrap()),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn fresh_hosts_are_not_probed_and_never_seen_counts_from_registration() {
+        let (_d, s, id) = deployed([6001, 6002, 6003, 6004], replicated_spec("2")).await;
+        let now = db::now();
+        hosts::Entity::update_many()
+            .col_expr(hosts::Column::SeenAt, Expr::value(0))
+            .col_expr(hosts::Column::CreatedAt, Expr::value(now))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let probe = StubProbe::new(false);
+        assert!(
+            reconciler::tick(&s, &probe, now + 90_000, &mut Episodes::default())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(probe.calls.lock().unwrap().is_empty());
+        stale(&s, 6001, now, 180_001).await;
+        assert_eq!(
+            reconciler::tick(&s, &probe, now, &mut Episodes::default())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(*probe.calls.lock().unwrap(), [6001]);
+        assert_eq!(row(&s, &id).await.revision_number, 1);
+    }
+
+    #[tokio::test]
+    async fn peer_veto_records_once_then_recovery_starts_new_episode() {
+        let (_d, s, id) = deployed([6011, 6012, 6013, 6014], replicated_spec("2")).await;
+        let now = db::now();
+        stale(&s, 6011, now, 100_000).await;
+        let probe = StubProbe::new(true);
+        let mut episodes = Episodes::default();
+        for _ in 0..2 {
+            assert!(
+                reconciler::tick(&s, &probe, now, &mut episodes)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        assert_eq!(
+            events_of(&s, &id)
+                .await
+                .iter()
+                .filter(|e| e.kind == "peerVeto")
+                .count(),
+            1
+        );
+        assert!(fences_of(&s, &id).await.is_empty());
+        stale(&s, 6011, now, 0).await;
+        reconciler::tick(&s, &probe, now, &mut episodes)
+            .await
+            .unwrap();
+        stale(&s, 6011, now, 100_000).await;
+        reconciler::tick(&s, &probe, now, &mut episodes)
+            .await
+            .unwrap();
+        assert_eq!(
+            events_of(&s, &id)
+                .await
+                .iter()
+                .filter(|e| e.kind == "peerVeto")
+                .count(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn runner_requires_twice_the_window_and_one_action_per_deployment() {
+        let (_d, s, _id) = deployed([6021, 6022, 6023, 6024], replicated_spec("2")).await;
+        let now = db::now();
+        hosts::Entity::update_many()
+            .col_expr(hosts::Column::Connection, Expr::value("runner"))
+            .filter(hosts::Column::Id.eq(6021))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        stale(&s, 6021, now, 180_000).await;
+        let probe = StubProbe::new(false);
+        let mut ep = Episodes::default();
+        assert!(
+            reconciler::tick(&s, &probe, now, &mut ep)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            reconciler::tick(&s, &probe, now + 1, &mut ep)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        stale(&s, 6022, now, 180_001).await;
+        assert_eq!(
+            reconciler::tick(&s, &probe, now, &mut ep)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn alert_only_is_deduplicated_and_recovers_without_binding_change() {
+        let (_d, s, id) = deployed([6031, 6032, 6033, 6034], replicated_spec("2")).await;
+        config(&s, &id, "alert").await;
+        let original = row(&s, &id).await.blueprint_binding;
+        let now = db::now();
+        stale(&s, 6031, now, 100_000).await;
+        let probe = StubProbe::new(false);
+        let mut ep = Episodes::default();
+        for _ in 0..2 {
+            assert!(
+                reconciler::tick(&s, &probe, now, &mut ep)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        assert_eq!(
+            events_of(&s, &id)
+                .await
+                .iter()
+                .filter(|e| e.kind == "alertOnly")
+                .count(),
+            1
+        );
+        assert_eq!(row(&s, &id).await.blueprint_binding, original);
+        assert!(
+            reconciler::alert(&s.db, &row(&s, &id).await, now)
+                .await
+                .unwrap()
+                .0
+        );
+        stale(&s, 6031, now, 0).await;
+        assert!(
+            !reconciler::alert(&s.db, &row(&s, &id).await, now)
+                .await
+                .unwrap()
+                .0
+        );
+    }
+
+    #[tokio::test]
+    async fn cooldown_attention_ack_permissions_version_and_summary() {
+        let (_d, s, id) = deployed([6041, 6042, 6043, 6044], replicated_spec("2")).await;
+        let now = db::now();
+        stale(&s, 6041, now, 100_000).await;
+        let probe = StubProbe::new(false);
+        let mut ep = Episodes::default();
+        mark(&s, &id, Kind::ReplaceStarted).await;
+        mark(&s, &id, Kind::ReplaceFailed).await;
+        assert!(
+            reconciler::tick(&s, &probe, now, &mut ep)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        for _ in 0..2 {
+            mark(&s, &id, Kind::ReplaceStarted).await;
+            mark(&s, &id, Kind::ReplaceFailed).await;
+        }
+        mark(&s, &id, Kind::NeedsAttention).await;
+        // Advancing the test clock must keep the unaffected peers healthy.
+        for host in [6042, 6043, 6044] {
+            stale(&s, host, now + 660_000, 0).await;
+        }
+        assert!(
+            reconciler::tick(&s, &probe, now + 660_000, &mut ep)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let version = row(&s, &id).await.version;
+        let mut reader = admin(1);
+        reader.permissions.remove("deployments.apply");
+        assert_eq!(
+            ack(&s, reader, &id, version).await.unwrap_err().0,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ack(&s, admin(2), &id, version).await.unwrap_err().0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            ack(&s, admin(1), &id, version - 1).await.unwrap_err().0,
+            StatusCode::CONFLICT
+        );
+        let Json(out) = get(State(s.clone()), admin(1), Path(("1".into(), id.clone())))
+            .await
+            .unwrap();
+        assert_eq!(out["failover"]["attention"][0]["instance"], "nats-0");
+        assert_eq!(
+            ack(&s, admin(1), &id, version).await.unwrap(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            ack(&s, admin(1), &id, version).await.unwrap_err().0,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            reconciler::tick(&s, &probe, now + 660_000, &mut ep)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            !reconciler::alert(&s.db, &row(&s, &id).await, now)
+                .await
+                .unwrap()
+                .0
+        );
+    }
+
+    #[tokio::test]
+    async fn returning_host_must_stop_before_fence_is_cleared() {
+        let (_d, s, id) = deployed([6051, 6052, 6053, 6054], replicated_spec("2")).await;
+        fence(&s, 900_605, app_id(&id), 6054).await;
+        let probe = StubProbe::new(false);
+        probe.server_ok.store(true, Ordering::SeqCst);
+        let fake = crate::hosts::fake::get(6054);
+        fake.fail_on("docker info", "daemon unavailable");
+        let mut ep = Episodes::default();
+        reconciler::tick(&s, &probe, db::now(), &mut ep)
+            .await
+            .unwrap();
+        assert_eq!(fences_of(&s, &id).await[0].cleared_at, 0);
+        assert!(
+            !events_of(&s, &id)
+                .await
+                .iter()
+                .any(|e| e.kind == "unfenced")
+        );
+        assert!(
+            fake.commands
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|c| c.contains("docker info"))
+        );
+        fake.failures.lock().unwrap().clear();
+        reconciler::tick(&s, &probe, db::now(), &mut ep)
+            .await
+            .unwrap();
+        assert!(fences_of(&s, &id).await[0].cleared_at > 0);
+        assert_eq!(
+            events_of(&s, &id)
+                .await
+                .iter()
+                .filter(|e| e.kind == "unfenced")
+                .count(),
+            1
+        );
+        let summary = reconciler::summary(&s.db, &row(&s, &id).await)
+            .await
+            .unwrap();
+        assert_eq!(summary["fences"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn confirmed_down_produces_auto_revision_using_existing_sequence() {
+        let (_d, s, id) = deployed([6061, 6062, 6063, 6064], replicated_spec("2")).await;
+        let now = db::now();
+        stale(&s, 6061, now, 100_000).await;
+        let mut jobs = reconciler::tick(&s, &StubProbe::new(false), now, &mut Episodes::default())
+            .await
+            .unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert!(
+            fences_of(&s, &id).await.is_empty(),
+            "tick cannot fence before claim"
+        );
+        let pending = sequence::begin(&s, &admin(1), jobs.pop().unwrap(), None)
+            .await
+            .unwrap();
+        let op = pending.operation.to_string();
+        let state = s.clone();
+        let task = tokio::spawn(async move { sequence::run(state, pending).await });
+        let revision = queued(&s, &id, &op).await;
+        assert_eq!(super::revision(&s, &revision).await.action, "auto-replace");
+        assert!(run(&s, &revision).await);
+        assert!(matches!(
+            task.await.unwrap().unwrap(),
+            sequence::Outcome::Succeeded { .. }
+        ));
+        let kinds: Vec<_> = events_of(&s, &id)
+            .await
+            .into_iter()
+            .map(|e| e.kind)
+            .collect();
+        let pos = |kind: &str| kinds.iter().position(|k| k == kind).unwrap();
+        assert!(pos("hostConfirmedDown") < pos("replaceStarted"));
+        assert!(pos("replaceStarted") < pos("fenced"));
+        assert!(pos("fenced") < pos("replaceSucceeded"));
+    }
+}
+
 fn suspected(deployment: Id, seq: usize) -> NewEvent {
     NewEvent {
         workspace: Id::from(1),

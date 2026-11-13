@@ -20,7 +20,6 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(crate) enum ReplaceTrigger {
     /// The reconciler confirmed `failed_host` down.
-    #[allow(dead_code)] // built by the failover reconciler (P3 Task 6)
     Auto {
         failed_host: Id,
     },

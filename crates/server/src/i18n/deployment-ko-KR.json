@@ -328,5 +328,8 @@
   "deployment.failoverReason.conflict": "배포가 동시에 변경되어 아무것도 교체하지 않았습니다.",
   "deployment.event.revisionQueued": "인스턴스 {instance} 교체가 리비전 {revision}에 대기 중입니다.",
   "deployment.failoverBusy": "이 배포에서 다른 교체 작업이 진행 중입니다.",
-  "deployment.replaceQuorumLost": "정상 피어가 부족하여 이 멤버를 교체할 수 없습니다."
+  "deployment.replaceQuorumLost": "정상 피어가 부족하여 이 멤버를 교체할 수 없습니다.",
+  "deployment.failoverNotAttention": "이 인스턴스는 수동 조치가 필요하지 않습니다.",
+  "deployment.alert.failoverAttention": "{count}개 배포 인스턴스의 장애 조치에 수동 대응이 필요합니다.",
+  "deployment.alert.failoverRecovered": "수동 대응이 필요한 장애 조치가 없습니다."
 }

@@ -1495,6 +1495,20 @@
     ]
   },
   {
+    "path": "/deployments/{id}/instances/{role}/{index}/acknowledgements",
+    "method": "POST",
+    "handler": "deployments::reconciler::acknowledge_instance",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn acknowledge_instance(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, role, index)): Path<(String, String, String, u32)>,\n    Json(body): Json<AckBody>,\n) -> Result<StatusCode>",
+    "definitions": [
+      "struct AckBody {\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "deployments.apply"
+    ],
+    "permission": "deployments.apply"
+  },
+  {
     "path": "/deployments/{id}/instances/{role}/{index}/replace",
     "method": "POST",
     "handler": "deployments::replace::replace",

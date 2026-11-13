@@ -124,6 +124,8 @@ async fn validate(conn: &impl ConnectionTrait, scope: &Scope, b: &Body) -> Resul
             "cpu-percent" | "memory-percent" | "disk-percent" => (0..=100).contains(&b.threshold),
             _ => false,
         }
+    } else if b.target_kind == "deployment" {
+        matches!(b.metric.as_str(), "execution-failed" | "failover-attention")
     } else {
         b.metric == "execution-failed"
     };
@@ -445,6 +447,16 @@ async fn abnormal(s: &AppState, r: &rules::Model) -> Result<Option<(bool, Messag
     let scope = Scope::for_actor(s, r.workspace_id.into(), r.run_as.into()).await?;
     scope.require("alerts.read")?;
     target(&s.db, &scope, &r.target_kind, r.target_ref.into()).await?;
+    if r.target_kind == "deployment" && r.metric == "failover-attention" {
+        let app = crate::entities::deployments::Entity::find_by_id(r.target_ref)
+            .filter(crate::entities::deployments::Column::WorkspaceId.eq(r.workspace_id))
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        return Ok(Some(
+            crate::deployments::reconciler::alert(&s.db, &app, db::now()).await?,
+        ));
+    }
     if r.target_kind == "application-health" {
         let Json(value) = crate::monitoring::application(
             State(s.clone()),
@@ -860,6 +872,67 @@ mod locale_tests {
     use crate::i18n::{Locale, render_stored, with_locale};
     use sea_orm::{Database, IntoActiveModel};
     use sea_orm_migration::MigratorTrait;
+
+    #[tokio::test]
+    async fn failover_metric_uses_existing_firing_and_recovery_events() {
+        use crate::agents::tests::admin;
+        use crate::deployments::{blueprint_tests, events as failover};
+        let (_dir, s) = blueprint_tests::fixture(&[6091, 6092]).await;
+        let deployment = blueprint_tests::create_app(&s, blueprint_tests::body(&[6091, 6092]))
+            .await
+            .unwrap();
+        let body = || {
+            serde_json::from_value(json!({"name":"failover","target_kind":"deployment","target_ref":deployment,"metric":"failover-attention","enabled":true})).unwrap()
+        };
+        let (_, Json(created)) = create(State(s.clone()), admin(1), Json(body()))
+            .await
+            .unwrap();
+        let id: Id = created["id"].as_str().unwrap().parse().unwrap();
+        let rule = rules::Entity::find_by_id(i64::from(id))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let client = reqwest::Client::new();
+        assert!(!abnormal(&s, &rule).await.unwrap().unwrap().0);
+        for kind in [failover::Kind::NeedsAttention, failover::Kind::Acknowledged] {
+            failover::record(
+                &s,
+                &s.db,
+                failover::NewEvent {
+                    workspace: 1.into(),
+                    deployment: deployment.parse().unwrap(),
+                    kind,
+                    instance: "nats-0".into(),
+                    host: 6091.into(),
+                    revision: 0.into(),
+                    message: Message::new("deployment.failoverReason.interrupted"),
+                    data: json!({}),
+                },
+            )
+            .await
+            .unwrap();
+            evaluate(&s, &client, rule.clone()).await.unwrap();
+            let rows = events::Entity::find()
+                .filter(events::Column::RuleId.eq(id))
+                .all(&s.db)
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(
+                rows[0].state,
+                if kind == failover::Kind::NeedsAttention {
+                    "firing"
+                } else {
+                    "recovered"
+                }
+            );
+        }
+        let err = create(State(s.clone()), admin(2), Json(body()))
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::NOT_FOUND);
+    }
 
     #[tokio::test]
     async fn persisted_event_projection_and_restart_keep_identity_and_legacy_values() {

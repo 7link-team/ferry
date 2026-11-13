@@ -328,5 +328,8 @@
   "deployment.failoverReason.conflict": "デプロイが同時に変更されたため、何も置き換えていません。",
   "deployment.event.revisionQueued": "インスタンス {instance} の置き換えをリビジョン {revision} に登録しました。",
   "deployment.failoverBusy": "このデプロイでは別の置き換え操作を実行中です。",
-  "deployment.replaceQuorumLost": "正常なピアが不足しているため、このメンバーを置き換えられません。"
+  "deployment.replaceQuorumLost": "正常なピアが不足しているため、このメンバーを置き換えられません。",
+  "deployment.failoverNotAttention": "このインスタンスは手動対応を必要としていません。",
+  "deployment.alert.failoverAttention": "{count} 個のデプロイインスタンスのフェイルオーバーに手動対応が必要です。",
+  "deployment.alert.failoverRecovered": "手動対応が必要なフェイルオーバーはありません。"
 }

@@ -5,11 +5,10 @@ pub(crate) mod modes;
 mod specs;
 use crate::i18n::{Message, StoredText};
 pub use specs::placement;
-// Temporary until the failover coordinator (P3 Task 6) records and reads events.
-#[allow(dead_code)]
 pub(crate) mod events;
 mod groups;
 mod hooks;
+pub(crate) mod reconciler;
 pub(crate) mod replace;
 pub(crate) mod sequence;
 use crate::error::{Json, Path, Query};
@@ -364,6 +363,7 @@ pub async fn get(
             groups::details(&s.db, scope.workspace_id, latest.id).await?;
     }
     out["current_targets"] = groups::current(&s.db, scope.workspace_id, r.id).await?;
+    out["failover"] = reconciler::summary(&s.db, &r).await?;
     Ok(Json(out))
 }
 pub async fn revision_get(
@@ -2431,7 +2431,7 @@ mod variable_snapshot_tests {
 }
 
 #[cfg(test)]
-mod blueprint_tests;
+pub(crate) mod blueprint_tests;
 #[cfg(test)]
 mod failover_tests;
 #[cfg(test)]

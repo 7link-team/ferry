@@ -251,6 +251,8 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     let (deployment_stop, deployment_rx) = tokio::sync::watch::channel(false);
+    let deployment_reconciler =
+        tokio::spawn(deployments::reconciler::run(s.clone(), drain_rx.clone()));
     let deployment_task = tokio::spawn(deployments::scheduler(
         s.clone(),
         deployment_rx,
@@ -467,6 +469,7 @@ async fn main() -> anyhow::Result<()> {
     workflow_task.await?;
     conversation_task.await?;
     deployment_task.await?;
+    deployment_reconciler.await?;
     pipeline_task.await?;
     let _ = cluster_stop.send(true);
     if let Some(task) = cluster_task {
@@ -933,6 +936,10 @@ fn workspace_routes() -> Router<state::AppState> {
         .route(
             "/{workspace}/deployments/{id}/acknowledgements",
             post(deployments::acknowledge),
+        )
+        .route(
+            "/{workspace}/deployments/{id}/instances/{role}/{index}/acknowledgements",
+            post(deployments::reconciler::acknowledge_instance),
         )
         .route(
             "/{workspace}/deployments/{id}/instances/{role}/{index}/replace",

@@ -328,5 +328,8 @@
   "deployment.failoverReason.conflict": "deployment berubah pada masa yang sama; tiada apa-apa diganti.",
   "deployment.event.revisionQueued": "Penggantian instans {instance} dijadualkan dalam semakan {revision}.",
   "deployment.failoverBusy": "Operasi penggantian lain sedang aktif untuk penggunaan ini.",
-  "deployment.replaceQuorumLost": "Rakan yang sihat tidak mencukupi untuk menggantikan ahli ini."
+  "deployment.replaceQuorumLost": "Rakan yang sihat tidak mencukupi untuk menggantikan ahli ini.",
+  "deployment.failoverNotAttention": "Instans ini tidak memerlukan perhatian.",
+  "deployment.alert.failoverAttention": "{count} instans penggunaan memerlukan perhatian untuk pemulihan kegagalan.",
+  "deployment.alert.failoverRecovered": "Tiada instans penggunaan memerlukan perhatian untuk pemulihan kegagalan."
 }
