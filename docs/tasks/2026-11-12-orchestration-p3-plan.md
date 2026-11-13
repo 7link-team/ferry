@@ -315,6 +315,12 @@ hooks:
 #
 > Task7 local acceptance (2026-11-13): reused templates/official_blueprints_tests.rs, where the real official compiler lives. RED4PASS/1FAIL (old NATS Manual); final official5PASS and marketplace42PASS, index/fmt/diff checks PASS. Docker is not installed locally; Step1 image tools and real healthy hook execution remain pending Task10 Linux CI, explicitly stated in1.1.0README. Comment-only verified.yaml emits no verified metadata. Version1.0.0 and nginx-ha unchanged.
 
+## Local verification checkpoint (2026-11-13)
+
+- Tasks1-9 implemented and locally accepted; Git HEAD is authoritative for scoped commits. Task8 aa81f00; Task9 10c1b57. Task8 frontend697PASS/1skip and browser222checks; Task9 final frontend711PASS/1skip, typecheck/build/server build and browser254checks PASS. Tests include actual RED before implementation (Task9 RED scoped to timeline/topology); six locales covered. Four viewports1440/900/390/320 inspected; no Figma available.
+- Browser creates and edits through a real isolated server; failure summary/events/ack and frozen revision marker are explicit presentation fixtures. No live Docker/Linux fault evidence is claimed. 4291/main dirty tree are untouched.
+- Task10 harness/docs implemented and reviewed; local checks PASS: cargo workspace1050PASS/20existing ignored, check/fmt, Python syntax, tools306/index consistency, workflow YAML and diff/LF. Actual Linux/Docker harness NOT_RUN. CI push, actual killed-fixture acceptance and verified.yaml evidence remain pending user-approved CI push (Step6). No merge/release.
+
 ## Task 8: 前端规格 failover 与向导
 
 **Files:**
@@ -334,12 +340,12 @@ export function failoverClass(role: BlueprintRole): FailoverClass;   // 与服�
 ```
 - 向导：「角色与主机」步骤顶部加「故障处理」`<select>`（自动/仅告警/关闭，缺省显示自动，写入 `failover.mode`）；未冻结时在角色步骤，冻结（已部署）时在唯一的参数步骤显示，可修改。提示：driver 为 stack/compose 时显示 `wizard.failoverDriverAlertOnly`；auto 且存在 manual 类角色时逐角色显示 `wizard.failoverNeedsBackup`（说明需 P4 备份，当前只告警）。`hostDownAfter` 只在 YAML 中编辑，表单显示当前值（只读）。Phone 下 select 全宽、最小触控高度 44px。
 
-- [ ] Step 1 失败测试（blueprint-spec.test.ts）：`failover_roundtrip_and_validation`（读写保留注释；`mode: sometimes`、`hostDownAfter: 10` 报错；未知子键报错）、`topology_key_ignores_failover`、`failover_class_matches_server_rules`（stateless/stable+supported/stable）。
-- [ ] Step 2 失败测试（BlueprintWizard.test.tsx）：`failover_select_writes_spec`（选择「仅告警」后 YAML 含 `mode: alert`）、`failover_editable_after_deploy`（冻结编辑时 select 可用，改动不触发 locked/拓扑错误，提交体含新 failover）、`manual_class_role_explains_backup_needed`、`stack_driver_explains_alert_only`。
-- [ ] Step 3 `npx vitest run src/features/deployments` → FAIL。
-- [ ] Step 4 实现；六语补键。
-- [ ] Step 5 `npx vitest run src/features/deployments`、`npx tsc -b` PASS。
-- [ ] Step 6 Commit `feat(deployments): failover mode in the blueprint wizard`
+- [x] Step 1 失败测试（blueprint-spec.test.ts）：`failover_roundtrip_and_validation`（读写保留注释；`mode: sometimes`、`hostDownAfter: 10` 报错；未知子键报错）、`topology_key_ignores_failover`、`failover_class_matches_server_rules`（stateless/stable+supported/stable）。
+- [x] Step 2 失败测试（BlueprintWizard.test.tsx）：`failover_select_writes_spec`（选择「仅告警」后 YAML 含 `mode: alert`）、`failover_editable_after_deploy`（冻结编辑时 select 可用，改动不触发 locked/拓扑错误，提交体含新 failover）、`manual_class_role_explains_backup_needed`、`stack_driver_explains_alert_only`。
+- [x] Step 3 `npx vitest run src/features/deployments` → FAIL。
+- [x] Step 4 实现；六语补键。
+- [x] Step 5 `npx vitest run src/features/deployments`、`npx tsc -b` PASS。
+- [x] Step 6 Commit `feat(deployments): failover mode in the blueprint wizard`
 
 ### Task 9: 前端详情：自动动作时间线、替换、需人工处理、拓扑标记
 
@@ -365,14 +371,14 @@ export const revisionActionLabel: (action: string) => string;   // apply/rollbac
 - 拓扑徽标：实例在 `fences` 中显示「已隔离」（按 host_id+instance 匹配），在 `attention` 中显示「需人工处理」，与健康徽标并列，Phone 下换行不溢出。
 - 修订标题使用 `revisionActionLabel`。
 
-- [ ] Step 1 失败测试（FailoverTimeline.test.tsx）：`timeline_renders_events_with_host_names_and_revision_links`、`timeline_states_loading_empty_error_retry`、`timeline_paginates`（total=45 → 3 页，按钮可用性正确）、`attention_banner_acknowledges_with_version`（POST 路径与 body `{version}`；无 apply 权限不显示按钮）。
-- [ ] Step 2 失败测试（BlueprintTopology.test.tsx）：`fenced_and_attention_badges_shown`、`replace_action_only_for_supported_driver_class_and_permission`（stack、compose、manual 类、无 `deployments.apply` 时都不显示）、`replace_confirms_then_posts`（确认对话框后 POST `…/instances/nats/1/replace` body `{version}`；取消不请求）。
-- [ ] Step 3 失败测试（DeploymentDetail.test.tsx）：`revision_title_labels_replace_actions`；alerts：`deployment_target_offers_failover_attention_metric`（加在 `src/features/alerts` 现有测试文件中）。
-- [ ] Step 4 `npx vitest run src/features/deployments src/features/alerts` → FAIL。
-- [ ] Step 5 实现；六语补键。
-- [ ] Step 6 `npx vitest run`、`npx tsc -b`、`npm run build` PASS。
-- [ ] Step 7 扩展 `scripts/test-blueprint-wizard-ui.mjs`：在已创建的部署详情页用 `page.route` 为 `…/events` 与部署 GET 的 `failover` 字段注入固定数据（含 1 条超长消息、1 个隔离实例、1 个需人工处理实例），在 1440/900/390/320 截图到 `data/maintenance/orchestration-p3/`，断言无整页横向滚动、320 下「确认」按钮可达；本地运行通过。
-- [ ] Step 8 Commit `feat(deployments): failover timeline, replace action and attention banner`
+- [x] Step 1 失败测试（FailoverTimeline.test.tsx）：`timeline_renders_events_with_host_names_and_revision_links`、`timeline_states_loading_empty_error_retry`、`timeline_paginates`（total=45 → 3 页，按钮可用性正确）、`attention_banner_acknowledges_with_version`（POST 路径与 body `{version}`；无 apply 权限不显示按钮）。
+- [x] Step 2 失败测试（BlueprintTopology.test.tsx）：`fenced_and_attention_badges_shown`、`replace_action_only_for_supported_driver_class_and_permission`（stack、compose、manual 类、无 `deployments.apply` 时都不显示）、`replace_confirms_then_posts`（确认对话框后 POST `…/instances/nats/1/replace` body `{version}`；取消不请求）。
+- [x] Step 3 失败测试（DeploymentDetail.test.tsx）：`revision_title_labels_replace_actions`；alerts：`deployment_target_offers_failover_attention_metric`（加在 `src/features/alerts` 现有测试文件中）。
+- [x] Step 4 `npx vitest run src/features/deployments src/features/alerts` → FAIL。
+- [x] Step 5 实现；六语补键。
+- [x] Step 6 `npx vitest run`、`npx tsc -b`、`npm run build` PASS。
+- [x] Step 7 扩展 `scripts/test-blueprint-wizard-ui.mjs`：在已创建的部署详情页用 `page.route` 为 `…/events` 与部署 GET 的 `failover` 字段注入固定数据（含 1 条超长消息、1 个隔离实例、1 个需人工处理实例），在 1440/900/390/320 截图到 `data/maintenance/orchestration-p3/`，断言无整页横向滚动、320 下「确认」按钮可达；本地运行通过。
+- [x] Step 8 Commit `feat(deployments): failover timeline, replace action and attention banner`
 
 ### Task 10: CI 验收、ADR 与设计文档
 
@@ -385,17 +391,17 @@ export const revisionActionLabel: (action: string) => string;   // apply/rollbac
 - 故障注入（放在 docker 分支末尾、compose 段之后）：先向 NATS 流 `FERRY_FAILOVER`（3 副本）发布 20 条消息并记录；`docker stop` F1（承载 web-0 与 nats-1，不承载 lb）。
 - 诊断：失败时把三个部署的 `GET …/events?page_size=100` 写入 `work/failover-events.log` 并 `report_log_tail`；保留现有 `diagnostics()`。
 
-- [ ] Step 1 修改脚本，断言（均用 `eventually`，上限 300s）：
-  - nginx 与 NATS 部署事件依次含 `hostConfirmedDown`、`fenced`、`replaceStarted`、`replaceSucceeded`，且 `replaceStarted` 的 instance 分别为 `web-0`、`nats-1`；最新修订 `action == 'auto-replace'` 且 `succeeded`。
+- [x] Step 1 修改脚本，断言（均用 `eventually`，上限 300s）：
+  - nginx 与 NATS 部署事件依次含 `hostConfirmedDown`、`replaceStarted`、`fenced`、`replaceSucceeded`，且 `replaceStarted` 的 instance 分别为 `web-0`、`nats-1`；最新修订 `action == 'auto-replace'` 且 `succeeded`。此顺序对齐已确认的立即 202 operation_id：开始事件先持久化，随后后台 claim 绑定及 fence；破坏性 stop 仍必须晚于事务 claim/fence，不能因旧示例倒退安全顺序。
   - nginx：绑定中 web-0 的 hostId 为 F3；`balanced(lb_url, 当前 message)` 通过；F3 上 `owned(F3, nginx_id) == ['web-0']`。
   - NATS：绑定中 nats-1 在 F3；三个成员 `meta_cluster(..)['cluster_size'] == 3`；`replicated_stream(..)` 的 `cluster.replicas` 全部 `current == true`；从 F3 上的 nats-1 读取流状态 `state.messages == 20`；`hookOutput` 事件存在且 healthy 退出码 0。
   - `nginx-alert`：事件含 `alertOnly`（host 为 F1）且不含 `replaceStarted`；绑定与故障前相同。
   - 恢复：`docker start` F1 并重新 `docker exec -d … nested-daemon …`；等待其 SSH 连接测试成功；nginx 与 NATS 均出现 `unfenced`；`docker ps -a` 在 F1 上不再有这两个部署标签的容器；`GET /deployments/{id}` 的 `failover.fences` 为空。
   - `checks` 下限按新增断言数上调。
-- [ ] Step 2 本地：`python -m py_compile scripts/test-deployments.py`；全量 `cargo test -p ferry-server`；`cargo fmt --all -- --check`；`npx vitest run`；`npx tsc -b`；`npm run build`；`python scripts/generate-platform-tools.py --check`；`node scripts/build-marketplace-index.mjs --check`。
-- [ ] Step 3 ADR 条目「集群编排 P3：协调器 + 无状态/复制型自愈（2026-11-12，分支 feature/orchestration-p3）」，至少写明：驱动范围与 Swarm 重新固定推迟；类型判定；三步失联确认、runner 与无同伴 SSH 的单源规则、`/dev/tcp` 用 bash 而非 sh；隔离与恢复顺序；放置以 binding 为准并镜像人工 placement；新主机优先的目标顺序与替换修订跳过未变主机；回滚不得跨越替换修订；动作执行身份 = 当前修订触发人；事件推导冷却/失败/确认（新增 `acknowledged` 种类）；无规格的旧蓝图部署按 alert；告警指标 `failover-attention`；NATS 1.1.0 不设 leave 钩子的理由；未覆盖边界（stack 有状态重新固定、C/D 类、maxConcurrent、资源打分仍未做）。
-- [ ] Step 4 设计文档：§6 各小节标注 P3 已实现/未实现部分；§7 第 3 条「自动动作时间线」改为已实现并说明替换与确认入口；§8 P3 行补「实现状态」与 CI 验收待推送。
-- [ ] Step 5 Commit `test(deployments): failover acceptance on a killed fixture host; P3 ADR`
+- [x] Step 2 本地：`python -m py_compile scripts/test-deployments.py`；全量 `cargo test -p ferry-server`；`cargo fmt --all -- --check`；`npx vitest run`；`npx tsc -b`；`npm run build`；`python scripts/generate-platform-tools.py --check`；`node scripts/build-marketplace-index.mjs --check`。
+- [x] Step 3 ADR 条目「集群编排 P3：协调器 + 无状态/复制型自愈（2026-11-12，分支 feature/orchestration-p3）」，至少写明：驱动范围与 Swarm 重新固定推迟；类型判定；三步失联确认、runner 与无同伴 SSH 的单源规则、`/dev/tcp` 用 bash 而非 sh；隔离与恢复顺序；放置以 binding 为准并镜像人工 placement；新主机优先的目标顺序与替换修订跳过未变主机；回滚不得跨越替换修订；动作执行身份 = 当前修订触发人；事件推导冷却/失败/确认（新增 `acknowledged` 种类）；无规格的旧蓝图部署按 alert；告警指标 `failover-attention`；NATS 1.1.0 不设 leave 钩子的理由；未覆盖边界（stack 有状态重新固定、C/D 类、maxConcurrent、资源打分仍未做）。
+- [x] Step 4 设计文档：§6 各小节标注 P3 已实现/未实现部分；§7 第 3 条「自动动作时间线」改为已实现并说明替换与确认入口；§8 P3 行补「实现状态」与 CI 验收待推送。
+- [x] Step 5 Commit `test(deployments): failover acceptance on a killed fixture host; P3 ADR`
 - [ ] Step 6 CI：不得自行推送；向控制者报告就绪，由其征得用户同意后推送到 `ci/scenario-templates-*` 分支，读取公开注解；通过后另行补 nats-cluster 1.1.0 的 `verified.yaml` 证据（单独提交）。
 
 ## 不在本计划

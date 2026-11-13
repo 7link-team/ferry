@@ -408,7 +408,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 # user-defined bridge crosses bridges and can be filtered; the gateway of the fixtures'
                 # own network is the host itself, and the server listens on 0.0.0.0.
                 gateway=json.loads(command(['docker','network','inspect',network]))[0]['IPAM']['Config'][0]['Gateway']
-                for index in range(3):
+                for index in range(4):
                     child=f'{name}-bp-{index}'
                     extra_containers.append(child)
                     command(['docker','run','-d','--name',child,'--privileged','--cgroupns=private','--network',network,'--add-host','host.docker.internal:host-gateway','deployment-live-test-'+mode])
@@ -439,7 +439,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                         host=create('hosts',{'name':f'blueprint-ssh-{index}','connection':'ssh','address':ip,'port':22,'username':'root','credential_id':credential})
                         eventually(lambda host=host:api(f'/workspaces/{workspace_ops}/nodes/'+host+'/connection-tests',{},status=200)['ok'])
                     fixtures.append((host,child,ip))
-                check('three blueprint hosts with independent Docker daemons and distinct addresses',len({ip for _,_,ip in fixtures})==3)
+                check('four blueprint hosts with independent Docker daemons and distinct addresses',len({ip for _,_,ip in fixtures})==4)
                 # The runner reports its own address; placement uses it for the instances there.
                 recorded={h:api(f'/workspaces/{workspace_ops}/nodes/'+h)['address'] for h,_,_ in fixtures}
                 if any(recorded[h]!=ip for h,_,ip in fixtures):
@@ -486,10 +486,10 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             def tag_label(name):
                 # The Swarm node label standing for a host tag of this workspace.
                 return f'ferry.w{workspace_ops}.tag.'+hashlib.sha256(name.encode()).hexdigest()[:12]
-            def spec_text(template,driver,values,roles,manager=None):
+            def spec_text(template,driver,values,roles,manager=None,failover=None):
                 # A ferry/deploy-v1 spec (JSON is YAML) whose roles select hosts by tag only.
                 return json.dumps({'apiVersion':'ferry/deploy-v1','template':{'id':template['id'],'version':template['version']},'driver':driver,
-                                   **({'manager':manager} if manager else {}),'values':values,
+                                   **({'manager':manager} if manager else {}),**({'failover':failover} if failover else {}),'values':values,
                                    'roles':{role:{'instances':count,'hosts':{'tags':tags}} for role,count,tags in roles}})
             def deploy_from_spec(label,text,title,tagged):
                 # The server renders the template and places the instances; the stored binding must
@@ -500,7 +500,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 check(label+' stored binding equals the placement preview',bound==previewed['binding'])
                 for role,hosts in tagged.items():
                     placed=[item['hostId'] for item in bound['roles'][role]]
-                    check(f'{label} {role} instances run on exactly the hosts tagged for it',sorted(placed)==sorted(hosts))
+                    check(f'{label} {role} instances run on a subset of the hosts tagged for it',set(placed)<=set(hosts))
                 revision=start(id);row=done(id)
                 if row['state']!='succeeded': diagnostics(label)
                 check(label+' blueprint deployment from a spec succeeds: '+row['latest_revision']['output'],row['state']=='succeeded')
@@ -636,15 +636,16 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     check('stack rollback revision is current on the Swarm manager',[t['current_revision'] for t in row['current_targets']]==[row['latest_revision']['id']])
                     report['blueprint']['deployments']['nginx-stack']['revisions']+=[second,row['latest_revision']['id']]
                 else:
-                    print('== blueprint docker driver on three hosts',flush=True)
-                    # Hosts are chosen by tag: NATS on all three fixtures, the web instances on
-                    # the first two and the balancer on the third. Other online hosts of the
-                    # workspace carry no tag and must never be chosen.
+                    print('== blueprint docker driver on four hosts (one spare)',flush=True)
+                    # F0/F1/F2 carry NATS; F1/F2 carry web; F0 carries the balancer.
+                    # F3 is eligible but initially spare for both replaceable roles.
                     host_ids=[h for h,_,_ in fixtures]
-                    nats_tag,web_tag,lb_tag=tag('bp-nats',host_ids),tag('bp-web',host_ids[:2]),tag('bp-lb',host_ids[2:])
+                    nats_tag,web_tag,lb_tag=tag('bp-nats',host_ids),tag('bp-web',host_ids[1:]),tag('bp-lb',host_ids[:1])
+                    failover={'mode':'auto','hostDownAfter':30}
                     fixture_of={h:(child,ip) for h,child,ip in fixtures}
                     nats_values={'client_port':14222,'cluster_port':16222,'monitor_port':18222}
-                    nats_id,_,nats_bound=deploy_from_spec('nats-docker',spec_text(nats_template,'docker',nats_values,[('nats',3,[nats_tag])]),'NATS cluster',{'nats':host_ids})
+                    nats_id,_,nats_bound=deploy_from_spec('nats-docker',spec_text(nats_template,'docker',nats_values,[('nats',3,[nats_tag])],failover=failover),'NATS cluster',{'nats':host_ids})
+                    check('NATS starts on F0/F1/F2 with F3 spare',[item['hostId'] for item in nats_bound['roles']['nats']]==host_ids[:3])
                     for i,item in enumerate(nats_bound['roles']['nats']):
                         child,ip=fixture_of[item['hostId']]
                         check(f'docker host of nats-{i} runs only that NATS member',owned(child,nats_id)==[f'nats-{i}'])
@@ -656,8 +657,9 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     check('docker NATS creates a JetStream stream with 3 replicas',stream['config']['num_replicas']==3)
                     report['blueprint']['nats_docker_stream']=stream.get('cluster')
                     nginx_values={'message':'blueprint-v1','web_port':18080,'lb_port':18000}
-                    nginx_spec=lambda values:spec_text(nginx_template,'docker',values,[('web',2,[web_tag]),('lb',1,[lb_tag])])
-                    nginx_id,first,nginx_bound=deploy_from_spec('nginx-docker',nginx_spec(nginx_values),'Nginx HA web (docker)',{'web':host_ids[:2],'lb':host_ids[2:]})
+                    nginx_spec=lambda values:spec_text(nginx_template,'docker',values,[('web',2,[web_tag]),('lb',1,[lb_tag])],failover=failover)
+                    nginx_id,first,nginx_bound=deploy_from_spec('nginx-docker',nginx_spec(nginx_values),'Nginx HA web (docker)',{'web':host_ids[1:],'lb':host_ids[:1]})
+                    check('nginx starts web on F1/F2 and lb on F0',[item['hostId'] for item in nginx_bound['roles']['web']]==host_ids[1:3] and nginx_bound['roles']['lb'][0]['hostId']==host_ids[0])
                     expected={h:[] for h in host_ids}
                     for role,items in nginx_bound['roles'].items():
                         for i,item in enumerate(items): expected[item['hostId']].append(f'{role}-{i}')
@@ -668,11 +670,11 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     def messages(key):
                         return {json.loads(f.read_text(encoding='utf8'))[key] for f in Path('crates/server/src/i18n').glob('*.json') if key in json.loads(f.read_text(encoding='utf8'))}
                     moved=json.loads(nginx_spec(nginx_values))
-                    moved['placement']={'lb':[{'hostId':host_ids[0],'address':fixtures[0][2]}]}
+                    moved['placement']={'lb':[{'hostId':host_ids[2],'address':fixtures[2][2]}]}
                     rejected=api(f'/workspaces/{workspace_ops}/deployments/'+nginx_id,dict(row,deploy_spec=json.dumps(moved)),method='PATCH',status=400)
                     check('placement change in the spec after the first revision is rejected as a topology change',rejected['error'] in messages('blueprint.topologyChangeRequiresPlan'))
                     moved_binding=json.loads(json.dumps(row['blueprint_binding']))
-                    moved_binding['roles']['lb'][0]={'hostId':host_ids[0],'address':fixtures[0][2]}
+                    moved_binding['roles']['lb'][0]={'hostId':host_ids[2],'address':fixtures[2][2]}
                     rejected=api(f'/workspaces/{workspace_ops}/deployments/'+nginx_id,dict(row,blueprint_binding=moved_binding,deploy_spec=None),method='PATCH',status=409)
                     check('a spec-managed deployment rejects a binding edit outside its spec',rejected['error'] in messages('deployments.specManaged'))
                     check('binding is frozen after the first revision',app(nginx_id)['blueprint_binding']==row['blueprint_binding'])
@@ -698,10 +700,87 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     check('compose NATS creates a JetStream stream with 3 replicas',eventually(lambda:replicated_stream(ip,24222,'FERRY_COMPOSE'),120)['config']['num_replicas']==3)
                     deploy('nginx-compose',nginx_template,{'message':'compose-v1','web_port':28080,'lb_port':28000},binding('compose',[('web',2),('lb',1)],single))
                     check('compose nginx load balancer serves both web instances',eventually(lambda:balanced(f'http://{ip}:28000/','compose-v1'),120))
+                    print('== blueprint failover: kill F1, rebuild on F3, then recover F1',flush=True)
+                    alert_web_tag=tag('bp-alert-web',host_ids[1:3])
+                    alert_lb_tag=tag('bp-alert-lb',[host_ids[2]])
+                    alert_values={'message':'alert-only','web_port':19080,'lb_port':19000}
+                    alert_id,_,alert_bound=deploy_from_spec('nginx-alert',spec_text(nginx_template,'docker',alert_values,[('web',2,[alert_web_tag]),('lb',1,[alert_lb_tag])],failover={'mode':'alert','hostDownAfter':30}),'Nginx alert only',{'web':host_ids[1:3],'lb':[host_ids[2]]})
+                    check('alert-only web-0 starts on the failed fixture',alert_bound['roles']['web'][0]['hostId']==host_ids[1])
+                    tools=fixture_docker(fixtures[3][1],'run','--rm','nats:2.10-alpine','sh','-c','command -v wget; command -v nats || echo no-nats-cli')
+                    tool_output=tools.stdout.decode(errors='replace')
+                    (work/'nats-image-tools.log').write_text(tool_output,encoding='utf8')
+                    check('NATS image contains wget and has no nats CLI',tools.returncode==0 and '/wget' in tool_output and 'no-nats-cli' in tool_output)
+                    stream=eventually(lambda:replicated_stream(first_ip,14222,'FERRY_FAILOVER'),120)
+                    check('failover stream starts with three replicas',stream['config']['num_replicas']==3)
+                    for sequence in range(1,21):
+                        published=nats_request(first_ip,14222,'ferry_failover.messages',{'sequence':sequence})
+                        assert published.get('seq')==sequence and not published.get('error'),published
+                    check('twenty failover messages acknowledged',published['seq']==20)
+                    def timeline(id):
+                        return api(f'/workspaces/{workspace_ops}/deployments/{id}/events?page_size=100')['items']
+                    command(['docker','stop',fixtures[1][1]])
+                    for id,instance in [(nginx_id,'web-0'),(nats_id,'nats-1')]:
+                        def replacement_complete(id=id,instance=instance):
+                            events=timeline(id)
+                            return events if any(e['kind']=='replaceSucceeded' and e['instance']==instance for e in events) else None
+                        events=eventually(replacement_complete,300)
+                        chronological=[e['kind'] for e in reversed(events) if e['instance']==instance or (e['kind']=='hostConfirmedDown' and e['host_id']==host_ids[1])]
+                        # Acceptance is durable before remote preparation; the binding/fence
+                        # claim still precedes any destructive stop or new-host execution.
+                        ordered=['hostConfirmedDown','replaceStarted','fenced','replaceSucceeded']
+                        check(instance+' records confirmation, accepted operation, fencing and success in order',all(k in chronological for k in ordered) and [chronological.index(k) for k in ordered]==sorted(chronological.index(k) for k in ordered))
+                        def successful_revision(id=id):
+                            row=app(id)
+                            revision=row.get('latest_revision') or {}
+                            return row if revision.get('state')=='succeeded' and revision.get('action')=='auto-replace' else None
+                        row=eventually(successful_revision,300)
+                        check(instance+' latest revision is a successful automatic replacement',row['latest_revision']['action']=='auto-replace')
+                        role,index=instance.rsplit('-',1)
+                        check(instance+' moves to F3',row['blueprint_binding']['roles'][role][int(index)]['hostId']==host_ids[3])
+                    check('nginx balances the original message after failover',eventually(lambda:balanced(lb_url,'blueprint-v1'),300))
+                    check('F3 runs exactly the replacement web instance',owned(fixtures[3][1],nginx_id)==['web-0'])
+                    moved_nats=app(nats_id)['blueprint_binding']['roles']['nats']
+                    for i,item in enumerate(moved_nats):
+                        member_ip=fixture_of[item['hostId']][1]
+                        check(f'after failover nats-{i} sees three metadata members',eventually(lambda member_ip=member_ip,i=i:meta_cluster(member_ip,18222+i),300)['cluster_size']==3)
+                    def caught_up():
+                        state=replicated_stream(fixtures[3][2],14223,'FERRY_FAILOVER')
+                        return state if state and state.get('state',{}).get('messages')==20 and all(r.get('current') is True for r in state['cluster']['replicas']) else None
+                    recovered=eventually(caught_up,300)
+                    check('replacement member retains twenty messages and both replicas are current',recovered['state']['messages']==20)
+                    nats_events=timeline(nats_id)
+                    operation=next(e['id'] for e in nats_events if e['kind']=='replaceStarted' and e['instance']=='nats-1')
+                    check('replacement healthy hook exits zero for its operation',any(e['kind']=='hookOutput' and e['instance']=='nats-1' and e['detail'].get('hook')=='healthy' and e['detail'].get('code')==0 and e['detail'].get('operation_id')==operation for e in nats_events))
+                    def alert_recorded():
+                        events=timeline(alert_id)
+                        return events if any(e['kind']=='alertOnly' and e['host_id']==host_ids[1] for e in events) else None
+                    alert_events=eventually(alert_recorded,300)
+                    check('alert-only deployment never replaces a member',not any(e['kind']=='replaceStarted' for e in alert_events))
+                    check('alert-only deployment binding stays unchanged',app(alert_id)['blueprint_binding']==alert_bound)
+                    command(['docker','start',fixtures[1][1]])
+                    command(['docker','exec','-d',fixtures[1][1],'nested-daemon','--host=unix:///var/run/docker.sock','--storage-driver=vfs'])
+                    eventually(lambda:fixture_docker(fixtures[1][1],'info').returncode==0,120)
+                    eventually(lambda:api(f'/workspaces/{workspace_ops}/nodes/{host_ids[1]}/connection-tests',{},status=200)['ok'],120)
+                    for id in [nginx_id,nats_id]:
+                        check('recovered host records unfencing '+id,eventually(lambda id=id:any(e['kind']=='unfenced' and e['host_id']==host_ids[1] for e in timeline(id)),300))
+                        prefix=f"deployment-{workspace['id']}-{id}"
+                        old=fixture_docker(fixtures[1][1],'ps','-a','--filter','label=workspace.deployment='+prefix,'--format','{{.Names}}')
+                        check('recovered host removes old deployment containers '+id,old.returncode==0 and not old.stdout.strip())
+                        check('recovered deployment has no remaining fences '+id,not app(id)['failover']['fences'])
             except Exception:
+                if mode=='docker':
+                    event_logs={}
+                    for label in ['nginx-docker','nats-docker','nginx-alert']:
+                        deployed=report['blueprint']['deployments'].get(label)
+                        if deployed:
+                            try: event_logs[label]=api(f"/workspaces/{workspace_ops}/deployments/{deployed['deployment']}/events?page_size=100")
+                            except Exception as error: event_logs[label]={'error':str(error)}
+                    path=work/'failover-events.log'
+                    path.write_text(json.dumps(event_logs,indent=2),encoding='utf8')
+                    report_log_tail(path,'blueprint failover events',120)
                 diagnostics('failure')
                 raise
-            check('blueprint check floor',checks>=30)
+            check('blueprint check floor',checks>=(65 if mode=='docker' else 30))
             report['result']='PASS'
             print(f'{checks} passed, 0 failed, 0 skipped',flush=True)
             return

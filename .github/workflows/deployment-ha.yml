@@ -13,6 +13,11 @@ on:
       - scripts/test-deployments-ui.mjs
       - src/**
       - crates/server/src/deployments/**
+      - crates/server/src/migration.rs
+      - crates/server/src/migration/**
+      - crates/server/src/hosts.rs
+      - crates/server/src/hosts/**
+      - crates/server/src/notifications/**
       - crates/server/src/templates.rs
       - crates/server/src/templates/**
       - crates/server/src/blueprint/**
@@ -30,6 +35,11 @@ on:
       - scripts/test-deployments-ui.mjs
       - src/**
       - crates/server/src/deployments/**
+      - crates/server/src/migration.rs
+      - crates/server/src/migration/**
+      - crates/server/src/hosts.rs
+      - crates/server/src/hosts/**
+      - crates/server/src/notifications/**
       - crates/server/src/templates.rs
       - crates/server/src/templates/**
       - crates/server/src/blueprint/**
