@@ -562,20 +562,18 @@ pub fn replace(
         }
     }
     let by_id: BTreeMap<Id, &Candidate> = candidates.iter().map(|c| (c.id, c)).collect();
+    // As in `place`, only the chain root spreads; colocated roles follow its hosts.
+    let root_spread = selector(root).spread.map(|s| s.prefix);
     let violations = |c: &Candidate| -> usize {
-        group
+        let Some(prefix) = root_spread.as_deref() else {
+            return 0;
+        };
+        let own = zones(c, prefix);
+        others(root)
             .iter()
-            .zip(&selectors)
-            .filter_map(|(r, sel)| Some((r, sel.spread.as_ref()?.prefix.as_str())))
-            .map(|(r, prefix)| {
-                let own = zones(c, prefix);
-                others(r)
-                    .iter()
-                    .filter_map(|h| by_id.get(h))
-                    .filter(|p| !zones(p, prefix).is_disjoint(&own))
-                    .count()
-            })
-            .sum()
+            .filter_map(|h| by_id.get(h))
+            .filter(|p| !zones(p, prefix).is_disjoint(&own))
+            .count()
     };
     let best = candidates
         .iter()
@@ -1406,6 +1404,36 @@ mod tests {
         let by_sentinel =
             replace(&bp, None, &before, "sentinel", 1, &hosts(4), &no_fences()).unwrap();
         assert_eq!(by_sentinel.roles, by_redis.roles);
+    }
+
+    #[test]
+    fn replace_scores_spread_only_for_the_chain_root() {
+        // As in `place`, a colocated role follows its target's hosts: its own spread is ignored.
+        let bp = blueprint(vec![
+            role("redis", 1, 3, 5, false, json!({"distinctHosts": true})),
+            role("sentinel", 1, 3, 5, false, json!({"colocateWith": "redis"})),
+        ]);
+        let s = spec(
+            "native",
+            &[
+                ("redis", 3, Default::default()),
+                ("sentinel", 3, spread_sel("zone:")),
+            ],
+        );
+        let before = bind(&[("redis", &[1, 2, 3]), ("sentinel", &[1, 2, 3])]);
+        let cands = vec![
+            host(1, &["zone:a"]),
+            host(2, &["zone:b"]),
+            host(3, &["zone:c"]),
+            host(4, &["zone:a"]),
+            host(5, &["zone:b"]),
+        ];
+        let out = replace(&bp, Some(&s), &before, "sentinel", 1, &cands, &no_fences()).unwrap();
+        assert_eq!(ids(&out, "redis"), [1, 4, 3]);
+        // The root's own spread still counts.
+        let s = spec("native", &[("redis", 3, spread_sel("zone:"))]);
+        let out = replace(&bp, Some(&s), &before, "sentinel", 1, &cands, &no_fences()).unwrap();
+        assert_eq!(ids(&out, "redis"), [1, 5, 3]);
     }
 
     #[test]

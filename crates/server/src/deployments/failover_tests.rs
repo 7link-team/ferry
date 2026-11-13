@@ -237,7 +237,7 @@ async fn events_history_reads_one_instance_of_one_workspace() {
 // ---- Replacing one instance (manual API) ----
 
 use super::blueprint_tests::{
-    bound_hosts, key, preview_of, revision, row, run_body, run_first, spec_body, tag_host,
+    bound_hosts, key, preview_of, revision, row, run_body, run_first, secret, spec_body, tag_host,
     target_rows, update_spec,
 };
 use crate::entities::deployment_target_states;
@@ -246,6 +246,16 @@ const REPLACE_TEMPLATE: i64 = 9201;
 
 /// NATS whose members replicate their data, so a member may be rebuilt on another host.
 fn replicated() -> String {
+    replicated_with(json!({}))
+}
+
+/// [`replicated`] with `extra` merged into the role's service.
+fn replicated_with(extra: Value) -> String {
+    let mut service = json!({"image": "nats:{{ .Values.tag }}",
+        "files": [{"path": "/etc/nats.conf", "fromTemplate": "nats-conf"}]});
+    for (k, v) in extra.as_object().unwrap() {
+        service[k] = v.clone();
+    }
     json!({
         "apiVersion": "ferry/blueprint-v1",
         "kind": "Blueprint",
@@ -258,22 +268,21 @@ fn replicated() -> String {
             "failover": {"replace": "supported"},
             "ports": [{"name": "client", "container": 4222, "published": 4222},
                       {"name": "cluster", "container": 6222, "published": 6222}],
-            "service": {"image": "nats:{{ .Values.tag }}",
-                        "files": [{"path": "/etc/nats.conf", "fromTemplate": "nats-conf"}]}
+            "service": service
         }],
         "drivers": {"docker": {"supported": true}}
     })
     .to_string()
 }
 
-async fn replicated_template(s: &AppState) {
+async fn replicated_template_with(s: &AppState, content: String) {
     use crate::entities::app_templates as t;
     t::Entity::insert(t::ActiveModel {
         id: Set(REPLACE_TEMPLATE),
         workspace_id: Set(1),
         name: Set("nats-replicated".into()),
         description: Set(String::new()),
-        content: Set(replicated()),
+        content: Set(content),
         parameters: Set(r#"[{"name":"tag","type":"string","default":"2"}]"#.into()),
         version: Set(1),
         created_at: Set(1),
@@ -317,7 +326,7 @@ async fn deployed(hosts: [i64; 4], spec: Value) -> (tempfile::TempDir, AppState,
     for h in hosts {
         tag_host(&s, "mq", h).await;
     }
-    replicated_template(&s).await;
+    replicated_template_with(&s, replicated()).await;
     let id = create_app(&s, spec_body(&spec)).await.unwrap();
     assert!(run_first(&s, &id, &[]).await);
     land(&s, &id).await;
@@ -435,7 +444,10 @@ async fn manual_replace_creates_manual_replace_revision() {
     assert_eq!(after.version, before.version + 2);
     let events = events_of(&s, &id).await;
     let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
-    assert_eq!(kinds, ["replaceStarted", "fenced"]);
+    assert_eq!(kinds, ["replaceStarted", "fenced", "fenced"]);
+    assert_eq!(detail(&events[1])["pending"], true);
+    assert_eq!(events[1].revision_id, before.current_revision);
+    assert_eq!(detail(&events[2])["stopped"], true);
     for e in &events {
         assert_eq!((e.instance.as_str(), e.host_id), ("nats-1", 2012));
     }
@@ -728,4 +740,194 @@ async fn rollback_across_replace_rejected() {
     )
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn rollback_never_crosses_failed_replace() {
+    let (_dir, s, id) = deployed([2091, 2092, 2093, 2094], replicated_spec("2")).await;
+    let first = Id::from(row(&s, &id).await.current_revision).to_string();
+    crate::hosts::fake::get(2094)
+        .fail
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let rev = replace_now(&s, &id, 1).await;
+    assert!(!run(&s, &rev).await);
+    assert_eq!(row(&s, &id).await.current_revision, app_id(&first));
+    // The binding already names the new host: the old revision is no way back.
+    let error = preview_of(&s, &id, Some(first.clone())).await.unwrap_err();
+    assert_eq!(key(error), "deployment.rollbackAcrossReplace");
+    let error = scheduled(&s, admin(1), &id, true).await.unwrap_err();
+    assert_eq!(key(error), "deployment.rollbackAcrossReplace");
+    // Recovery builds from the binding: an ordinary apply.
+    crate::hosts::fake::get(2094)
+        .fail
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let again = scheduled(&s, admin(1), &id, false).await.unwrap();
+    assert!(run(&s, &again.to_string()).await);
+}
+
+#[tokio::test]
+async fn lost_claim_never_fences() {
+    let (_dir, s, id) = deployed([2101, 2102, 2103, 2104], replicated_spec("2")).await;
+    let before = row(&s, &id).await;
+    let checked = replace::check(&s.db, &admin(1), Id::from(before.id), "nats", 1)
+        .await
+        .unwrap();
+    // Another writer changes the record between the checks and the claim.
+    apps::Entity::update_many()
+        .col_expr(apps::Column::Version, Expr::value(before.version + 1))
+        .filter(apps::Column::Id.eq(before.id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    crate::hosts::fake::get(2102)
+        .commands
+        .lock()
+        .unwrap()
+        .clear();
+    let stopped = replace::replace_checked(
+        &s,
+        &admin(1),
+        checked,
+        "nats",
+        1,
+        replace::ReplaceTrigger::Manual,
+        None,
+    )
+    .await
+    .err()
+    .expect("lost the claim");
+    assert_eq!(stopped.error.0, StatusCode::CONFLICT);
+    assert!(!stopped.binding_moved);
+    let commands = crate::hosts::fake::get(2102)
+        .commands
+        .lock()
+        .unwrap()
+        .clone();
+    assert!(
+        commands.iter().all(|c| !c.contains("docker rm")),
+        "{commands:?}"
+    );
+    assert!(fences_of(&s, &id).await.is_empty());
+    assert!(events_of(&s, &id).await.is_empty());
+    assert_eq!(
+        row(&s, &id).await.blueprint_binding,
+        before.blueprint_binding
+    );
+}
+
+#[tokio::test]
+async fn failure_reasons_say_whether_binding_moved() {
+    let (_dir, s, id) = deployed([2121, 2122, 2123, 2124], replicated_spec("2")).await;
+    let failed = |events: Vec<deployment_events::Model>| {
+        let last = events.last().unwrap().clone();
+        assert_eq!(last.kind, "replaceFailed");
+        detail(&last)
+    };
+    // No spare host: nothing moved.
+    hosts::Entity::update_many()
+        .col_expr(hosts::Column::State, Expr::value("offline"))
+        .filter(hosts::Column::Id.eq(2124))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let version = row(&s, &id).await.version;
+    let error = replace_api(&s, admin(1), &id, "nats", 1, version)
+        .await
+        .unwrap_err();
+    assert_eq!(key(error), "blueprint.replaceNoCandidate");
+    let d = failed(events_of(&s, &id).await);
+    assert_eq!(d["reason"], "noCandidate");
+    assert!(d.get("bindingMoved").is_none(), "{d}");
+    assert!(
+        d["message"]
+            .as_str()
+            .unwrap()
+            .contains("deployment.failoverReason.noCandidate")
+    );
+    // The new host cannot be previewed: the binding moved but no revision was queued.
+    hosts::Entity::update_many()
+        .col_expr(hosts::Column::State, Expr::value("online"))
+        .filter(hosts::Column::Id.eq(2124))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    crate::hosts::fake::get(2124)
+        .unreachable
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    replace_api(&s, admin(1), &id, "nats", 1, version)
+        .await
+        .unwrap_err();
+    let d = failed(events_of(&s, &id).await);
+    assert_eq!(
+        (d["reason"].as_str(), d["bindingMoved"].as_bool()),
+        (Some("interrupted"), Some(true))
+    );
+    assert_eq!(
+        bound_hosts(row(&s, &id).await.blueprint_binding.as_deref().unwrap()),
+        ["2121", "2124", "2123"]
+    );
+    // No replacement revision exists, but its placement has already changed.
+    let first = row(&s, &id).await.current_revision;
+    let error = preview_of(&s, &id, Some(Id::from(first).to_string()))
+        .await
+        .unwrap_err();
+    assert_eq!(key(error), "deployment.rollbackAcrossReplace");
+}
+
+#[tokio::test]
+async fn skip_respects_changed_variables() {
+    let template =
+        replicated_with(json!({"env": [{"name": "TOKEN", "valueFrom": "variable/nats-token"}]}));
+    let hosts = [2111, 2112, 2113, 2114];
+    let (_dir, s) = fixture(&hosts).await;
+    for h in hosts {
+        tag_host(&s, "mq", h).await;
+    }
+    secret(&s, 2119, "nats-token", "TOKEN-ONE").await;
+    replicated_template_with(&s, template).await;
+    let id = create_app(&s, spec_body(&replicated_spec("2")))
+        .await
+        .unwrap();
+    assert!(run_first(&s, &id, &[]).await);
+    land(&s, &id).await;
+    // The token changes; artifacts only reference it.
+    use crate::entities::variables as v;
+    v::Entity::update_many()
+        .col_expr(
+            v::Column::Value,
+            Expr::value(
+                s.vault
+                    .seal("TOKEN-TWO", &crate::vault::aad("1", "variables", "2119"))
+                    .unwrap(),
+            ),
+        )
+        .filter(v::Column::Id.eq(2119))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let rev = replace_now(&s, &id, 1).await;
+    // Only the moved instance's host has no artifact in place.
+    let rows = target_rows(&s, &rev).await;
+    let in_place: Vec<i64> = rows
+        .iter()
+        .filter(|t| crate::deployments::hash(&t.artifact) == t.expected_hash)
+        .map(|t| t.host_id)
+        .collect();
+    assert_eq!(in_place, [2111, 2113]);
+    for host in [2111, 2113] {
+        crate::hosts::fake::get(host)
+            .commands
+            .lock()
+            .unwrap()
+            .clear();
+    }
+    assert!(run(&s, &rev).await);
+    assert!(docker_runs(2111) > 0 && docker_runs(2113) > 0);
+    for t in target_rows(&s, &rev).await {
+        assert!(
+            !t.output.contains("deployment.output.hostUnchanged"),
+            "{}",
+            t.output
+        );
+    }
 }

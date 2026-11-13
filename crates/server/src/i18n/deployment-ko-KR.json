@@ -321,8 +321,9 @@
   "deployment.replaceUnsupportedDriver": "Native와 Docker 배포만 인스턴스를 교체할 수 있습니다. Ferry는 Swarm이나 Compose 인스턴스를 옮기지 않습니다.",
   "deployment.replaceNeedsBackup": "이 인스턴스는 자체 데이터를 보관하므로 백업이 지원되기 전에는 다른 호스트에서 다시 만들 수 없습니다.",
   "deployment.replaceNotDeployed": "이 배포에는 아직 성공한 리비전이 없어 교체할 인스턴스가 없습니다.",
-  "deployment.rollbackAcrossReplace": "이 리비전은 인스턴스 교체 이전의 것으로 이전 배치에 속합니다. 교체 리비전 또는 그 이후로 롤백하세요.",
+  "deployment.rollbackAcrossReplace": "이 리비전은 인스턴스 교체 이전의 것으로 이전 배치에 속하므로 복원할 수 없습니다. 배포를 다시 적용하거나 교체를 다시 실행하세요. 둘 다 현재 배치를 기준으로 만듭니다.",
   "deployment.output.hostUnchanged": "호스트 {host}는 이미 이 아티팩트를 실행 중이므로 변경하지 않았습니다.",
   "deployment.replaceTrigger.auto": "자동",
-  "deployment.replaceTrigger.manual": "수동"
+  "deployment.replaceTrigger.manual": "수동",
+  "deployment.failoverReason.conflict": "배포가 동시에 변경되어 아무것도 교체하지 않았습니다."
 }

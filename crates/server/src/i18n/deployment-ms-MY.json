@@ -321,8 +321,9 @@
   "deployment.replaceUnsupportedDriver": "Hanya deployment native dan Docker boleh menggantikan instans; Ferry tidak memindahkan instans Swarm atau Compose.",
   "deployment.replaceNeedsBackup": "Instans ini menyimpan datanya sendiri dan tidak boleh dibina semula pada hos lain sehingga sandaran disokong.",
   "deployment.replaceNotDeployed": "Deployment ini belum mempunyai revisi yang berjaya, jadi tiada instans untuk diganti.",
-  "deployment.rollbackAcrossReplace": "Revisi ini lebih lama daripada penggantian instans dan milik peletakan terdahulu. Undur balik ke revisi penggantian atau yang lebih baharu.",
+  "deployment.rollbackAcrossReplace": "Revisi ini lebih lama daripada penggantian instans dan milik peletakan terdahulu, jadi ia tidak boleh dipulihkan. Gunakan semula deployment atau ulangi penggantian; kedua-duanya dibina daripada peletakan semasa.",
   "deployment.output.hostUnchanged": "Hos {host} sudah menjalankan artifak ini; tiada perubahan dibuat.",
   "deployment.replaceTrigger.auto": "automatik",
-  "deployment.replaceTrigger.manual": "secara manual"
+  "deployment.replaceTrigger.manual": "secara manual",
+  "deployment.failoverReason.conflict": "deployment berubah pada masa yang sama; tiada apa-apa diganti."
 }

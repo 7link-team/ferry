@@ -834,3 +834,18 @@ Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-a
 - Alternatives：放置只在前端计算（预览与保存可能不一致，否决）；标签名直接作 Swarm 标签（字符受限且跨工作空间互相覆盖，否决）；预览时同步 Swarm 标签（预览产生远程副作用，否决）；冻结后按新标签重新调度（会无计划迁移有状态成员，否决）。
 - Scope/Tradeoffs：Native/Docker 由 Ferry 放置，Compose 单机，Swarm 无状态角色交给 Swarm 按标签约束（仅 `tags`）；本期不做资源打分（推迟到 P3）。移除主机标签是运维动作，会在下次执行时缩小无状态角色的可调度节点。验收：Rust 单元/接口测试；`scripts/test-blueprint-wizard-ui.mjs`（市场 → 向导各步 → YAML 往返与无效锁定 → 放置预览改主机 → 创建 → 详情拓扑，1440/900/390/320 无整页横向滚动、320 底部操作可达，只创建不部署）；`deployment-ha.yml` 的 blueprint 矩阵项改为经规格 + 标签选择器创建 NATS/nginx 并断言放置等于打标签主机、stack 无状态服务带工作空间级标签约束。真实 CI 结果以公开注解为准，推送前需用户确认。
 - Status：已在分支 `feature/orchestration-p2c` 实现并本地验证；未合并 main、未发布。
+## 2026-11-13 P3 Task 4 replacement review corrections
+
+- Decision: a rollback or restart cannot cross a replacement, including a failed replacement or a binding move whose preview never produced a revision. Recovery uses an apply/replacement from the current binding. This completes the imported session's confirmed review ruling.
+- Reason: replaying pre-move artifacts can revive the old member while leaving a newer member untracked. Binding writes and pending old-instance fences commit in one optimistic-version transaction before any remote stop. A pending-fence timeline event references the last pre-move revision; rollback compares revision numbers, independent of clock skew and Snowflake worker ordering. After stopping, a second append-only fence event records the result; it does not rewrite the pending decision.
+- Alternatives considered: undo placement after failure (rejected by the prior review ruling); check only successful replacement revisions (unsafe); order fences by wall clock or ID (unsafe across server workers).
+- Tradeoffs / scope: reuse existing events/fences/revisions and encrypted snapshots; no new schema or migration. Replacement skips a host only when artifact and decrypted host-specific snapshot files both match; unreadable/missing snapshots force execution. Spread follows the colocate chain root, as initial placement does. Docker daemon failure is not treated as an absent container.
+- Status: server915PASS/9existing ignored, frontend691PASS/1existing skip, final crash/clock regression1PASS, frontend build/fmt/generator305/diff checks PASS; server binary build PASS. Task5 async lifecycle/completion events and Task6 coordinator remain separate work. No live deployment, merge or push.
+
+## 2026-11-13 Async replacement acknowledgement
+
+- Decision: user explicitly selected immediate202 with `{operation_id}`, backed by the durable replaceStarted event. The background sequence associates the eventual revision through later events' `revision_id` and `detail.operation_id`; failures keep the operation reference too.
+- Reason: a revision does not exist until remote preparation/preview succeeds; returning its ID synchronously would block on remote commands or require speculative revisions/states.
+- Alternatives considered: preallocate revisions with a new preparing state (not selected); synchronously wait for preview (violates confirmed immediate acknowledgement).
+- Scope / tradeoffs: Task5 replacement API and Task9 consumption; reuse existing events and revision states. No new operation table, new revision state or migration. Synchronous checks include workspace/permission/version/driver/type, action-lock ownership and cached quorum; hooks and remote preview execute asynchronously.
+- Status: confirmed by user; implementation next after Task4 checkpoint.

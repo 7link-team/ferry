@@ -158,8 +158,8 @@ pub fn replace(bp: &Blueprint, spec: Option<&DeploySpec>, binding: &Binding, rol
 pub(crate) enum ReplaceTrigger { Auto { failed_host: Id }, Manual }
 impl ReplaceTrigger { pub fn action(&self) -> &'static str }   // "auto-replace" | "manual-replace"
 /// 校验（blueprint、driver ∈ {native,docker}、class ≠ Manual、有当前修订、状态不在 queued/running/needs-review）→
-/// placement::replace（排除 failed_host 与未清除隔离的主机）→ 旧主机隔离（见下）→ 事务内按 version 写 blueprint_binding
-/// 与（若规格有该角色的人工 placement）镜像写 deploy_spec.placement，version+1 → scheduled_replace。返回修订 ID。
+/// placement::replace（排除 failed_host 与未清除隔离的主机）→ 事务内按 version 写 blueprint_binding、pending 隔离记录与事件，
+/// 与（若规格有该角色的人工 placement）镜像写 deploy_spec.placement，version+1 → 停旧实例并记录结果 → scheduled_replace。返回修订 ID。
 pub(crate) async fn replace_instance(s: &AppState, scope: &Scope, deployment: Id, role: &str, index: u32, trigger: ReplaceTrigger) -> Result<Id>;
 /// 旧主机可达（Manual 且主机不在新绑定中，或 Auto 下探测成功）时先执行 stop_command；
 /// 总是插入隔离行，停成功则同时写 cleared_at；记 fenced 事件（detail.stopped）。
@@ -175,11 +175,11 @@ pub unreachable: AtomicBool   // 为真时 exec/打开通道返回连接错误
 ```
 - 决定：放置位置以 `blueprint_binding` 为准；规格里该角色若有人工 `placement`，同步改写为新主机（地址取主机地址），保证 `same_topology(stored, 新规格)` 与绑定一致（写入 ADR，Task 10）。
 - 决定：`groups::targets` 对蓝图部署把「尚无 `deployment_target_states` 行的主机」排在最前，其余仍按主机 ID；新成员因此先于其他成员重建（预览与 `enqueue` 调用同一函数，顺序一致）。
-- 决定：`groups::execute` 遇到 `action` 以 `-replace` 结尾且 `hash(row.artifact) == row.expected_hash` 的目标不执行远程命令，目标记 `succeeded`，输出 `deployment.output.hostUnchanged`，并照常更新该主机的当前修订指针。普通 apply 行为不变。
+- 决定：`groups::execute` 遇到 `action` 以 `-replace` 结尾，且 `hash(row.artifact) == row.expected_hash`、该主机的变量/配置文件快照均与当前修订一致时不执行远程命令；无法读取旧快照时执行。目标记 `succeeded`，输出 `deployment.output.hostUnchanged`，并照常更新该主机的当前修订指针。普通 apply 行为不变。
 - 决定：修订成功后删除不再出现在绑定中的主机的 `deployment_target_states` 行（否则监控与删主机检查一直认为它承载部署）。
 - 手动 API：`POST /api/workspaces/{ws}/deployments/{id}/instances/{role}/{index}/replace`，`deployments.apply`；stack/compose → 400 `deployment.replaceUnsupportedDriver`；class Manual → 400 `deployment.replaceNeedsBackup`；version 不符 409 `deployment.error.030`。本任务直接调用 `replace_instance(Manual)`；Task 5 换成完整序列。
 
-- 决定：回滚目标若早于该部署最近一次成功的替换修订，拒绝 400 `deployment.rollbackAcrossReplace`（旧修订的产物属于旧放置，而绑定已是新放置；回滚放置推迟）。
+- 决定（Task4评审修正）：回滚/restart 不得跨越任何替换，不论替换成功、失败，或绑定已迁移但预览失败而未生成修订，均拒绝 400 `deployment.rollbackAcrossReplace`。恢复通过按当前绑定重新 apply/replace 完成。绑定变更、pending 隔离行与事件原子提交；事件关联迁移前最后一个修订，以修订号比较边界，不依赖跨服务器时钟/ID顺序。先提交 claim 再执行 stop；claim 失败无远程副作用。
 
 - [ ] Step 1 失败测试（placement.rs）：`replace_moves_only_that_instance`（3 主机 + 备用主机，nats-1 换到备用，其余项逐字不变）、`replace_respects_selector_distinct_and_spread`（备用主机缺标签不选；已有该角色实例的主机不选；两个备用按 spread → 负载 → ID 选择）、`replace_moves_colocated_group`（sentinel colocateWith redis：替换 redis-1 同时移动 sentinel-1；对 sentinel-1 调用等同对 redis-1）、`replace_without_candidate_is_an_error_not_a_panic`（返回 `blueprint.replaceNoCandidate`，含 role 与 instance）、`fenced_host_excluded_from_candidates`（excluded 中的唯一备用主机不被选）。
 - [ ] Step 2 失败测试（failover_tests.rs）：`manual_replace_creates_manual_replace_revision`（docker 部署成功后调用 API：202、新修订 `action=="manual-replace"`、绑定只变 nats-1、`version`+1、事件 replaceStarted 与 fenced 存在）、`replace_targets_new_host_first_and_skips_unchanged`（修订目标首位是新主机；未变的主机目标 `succeeded` 且其 FakeHost 未收到 `docker run`）、`manual_replace_stops_instance_on_reachable_old_host`（旧主机 FakeHost 收到 `docker rm -f deployment-…-nats-1`；隔离行 `cleared_at>0`）、`manual_replace_rejects_stack_compose_and_manual_class`、`manual_replace_requires_apply_permission`（缺 `deployments.apply` 403）、`spec_placement_mirrors_replaced_binding`（规格人工 placement 中该实例的 hostId 被改写；随后改 values 的更新不报 `topologyChangeRequiresPlan`）、`replace_success_drops_old_host_target_state`、`rollback_across_replace_rejected`（替换成功后对替换前修订预览/回滚返回 `deployment.rollbackAcrossReplace`；对替换修订本身回滚允许）。
@@ -189,6 +189,8 @@ pub unreachable: AtomicBool   // 为真时 exec/打开通道返回连接错误
 - [ ] Step 6 Commit `feat(deployments): replace one blueprint instance as a new revision`
 
 ### Task 5: 钩子执行与 B 类替换序列
+
+> 2026-11-13 用户已确认：立即202返回 `{operation_id}`（关联 replaceStarted 事件），后台生成修订后通过事件的 `revision_id` 关联。Task9刷新详情与事件时间线，不把operation_id当修订。拒绝预建修订/新增准备状态方案；失败也保留操作记录。Task4原有 `{id: revision}` 返回在Task5替换，不新增修订状态。
 
 **Files:**
 - Create: `crates/server/src/deployments/hooks.rs`、`crates/server/src/deployments/sequence.rs`
@@ -220,7 +222,7 @@ pub(crate) async fn begin(s: &AppState, scope: &Scope, job: &Job) -> Result<std:
 /// 无钩子时用监控实例状态 up，监控无数据（unknown）则以修订自身的就绪等待为准 → 记 replaceSucceeded / replaceFailed；第 3 次连续失败追加 needsAttention{tooManyFailures}；释放锁。
 pub(crate) async fn finish(s: AppState, job: Job, revision: Id) -> Outcome;
 ```
-- 手动 API（控制决策：请求不得长时间阻塞）：同步部分只做校验、类型/驱动判定、取动作锁与仲裁检查（不执行任何远程钩子），随即返回 202 `{"id": revision}`；leave 钩子、修订执行、join、healthy 全部在 `tokio::spawn` 中完成，进度与失败只通过事件时间线呈现；`Manual{quorumLost}` → 409 `deployment.replaceQuorumLost`；锁被占用 → 409 `deployment.failoverBusy`。手动替换不受冷却限制，但仍计入连续失败。
+- 手动 API（用户确认：请求不得长时间阻塞）：同步部分只做校验、类型/驱动判定、取动作锁与仲裁检查（不执行任何远程钩子），记录操作后立即返回 202 `{"operation_id": event_id}`；leave 钩子、预览/修订执行、join、healthy 全部在 `tokio::spawn` 中完成。新修订通过后续事件的 `revision_id` 与 `detail.operation_id` 关联到操作；失败也保留该关联。`Manual{quorumLost}` → 409 `deployment.replaceQuorumLost`；锁被占用 → 409 `deployment.failoverBusy`。手动替换不受冷却限制，但仍计入连续失败。
 
 - [ ] Step 1 失败测试（sequence.rs 单元）：`quorum_rule`（(3,2)→true、(3,1)→false、(5,3)→true、(5,2)→false、(1,0)→false）。
 - [ ] Step 2 失败测试（hooks.rs 单元）：`hook_command_docker_and_native`（argv 中 `{{ .Instance.Name }}` 渲染为 `nats-1`；含空格与单引号的项被 quote；docker 形如 `timeout 120 docker exec 'deployment-1-9-nats-1' …`；native 以 `cd '<dir>' &&` 开头）。

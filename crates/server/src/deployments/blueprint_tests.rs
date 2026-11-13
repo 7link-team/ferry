@@ -743,7 +743,7 @@ async fn config(s: &AppState, id: i64, name: &str, content: &str, parameters: &s
     .unwrap();
 }
 
-async fn secret(s: &AppState, id: i64, name: &str, value: &str) {
+pub(super) async fn secret(s: &AppState, id: i64, name: &str, value: &str) {
     crate::entities::variables::Entity::insert(crate::entities::variables::ActiveModel {
         id: Set(id),
         workspace_id: Set(1),

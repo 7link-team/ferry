@@ -13,7 +13,7 @@ use crate::entities::deployment_fences as fences;
 use sea_orm::ConnectionTrait;
 use std::collections::BTreeSet;
 
-/// Revision actions of a replacement; rollbacks never cross a succeeded one.
+/// Revision actions of a replacement; rollbacks never cross one, whatever its outcome.
 pub(crate) const ACTIONS: [&str; 2] = ["auto-replace", "manual-replace"];
 /// How long stopping one fenced instance may take.
 const STOP_TIMEOUT: Duration = Duration::from_secs(60);
@@ -47,7 +47,7 @@ fn refuse(status: StatusCode, key: &str) -> ApiError {
 }
 
 /// A deployment instance that may be replaced, as read before anything changes.
-struct Checked {
+pub(super) struct Checked {
     app: apps::Model,
     bp: Blueprint,
     spec: Option<DeploySpec>,
@@ -60,7 +60,7 @@ struct Checked {
 
 /// Blueprint, driver `native`/`docker`, a replaceable class for every moved role, a current
 /// revision, and no revision queued, running or awaiting review.
-async fn check(
+pub(super) async fn check(
     conn: &impl ConnectionTrait,
     scope: &Scope,
     deployment: Id,
@@ -136,10 +136,18 @@ async fn check(
     })
 }
 
+/// Why a replacement stopped before any revision was queued.
+pub(super) struct Stopped {
+    pub error: ApiError,
+    /// The new binding was already stored (the old host may have been fenced).
+    pub binding_moved: bool,
+}
+
 /// Validates (see [`check`]), places the instance anew with [`placement::replace`] (never on
-/// the failed host or a host still fenced for this deployment), fences the old host, stores
-/// the new binding (mirrored into the spec's manual placement, if the spec has one for a
-/// moved role) under the record's version, and queues the replacement revision.
+/// the failed host or a host still fenced for this deployment), then claims it: the new
+/// binding (mirrored into the spec's manual placement, if the spec has one for a moved role)
+/// is stored under the record's version. Only a successful claim fences the old host, so a
+/// lost race never stops anything; then the replacement revision is previewed and queued.
 #[allow(dead_code)] // called by the replacement sequence and reconciler (P3 Tasks 5-6)
 pub(crate) async fn replace_instance(
     s: &AppState,
@@ -149,19 +157,31 @@ pub(crate) async fn replace_instance(
     index: u32,
     trigger: ReplaceTrigger,
 ) -> Result<Id> {
-    replace_at(s, scope, deployment, role, index, trigger, None).await
+    let checked = check(&s.db, scope, deployment, role, index).await?;
+    replace_checked(s, scope, checked, role, index, trigger, None)
+        .await
+        .map_err(|stopped| stopped.error)
 }
 
-/// [`replace_instance`]; with `expected`, the record must still be at that version.
-async fn replace_at(
+/// [`replace_instance`] after [`check`]; with `expected`, the record must still be at that
+/// version.
+pub(super) async fn replace_checked(
     s: &AppState,
     scope: &Scope,
-    deployment: Id,
+    checked: Checked,
     role: &str,
     index: u32,
     trigger: ReplaceTrigger,
     expected: Option<i64>,
-) -> Result<Id> {
+) -> std::result::Result<Id, Stopped> {
+    let before = |error| Stopped {
+        error,
+        binding_moved: false,
+    };
+    let after = |error| Stopped {
+        error,
+        binding_moved: true,
+    };
     let Checked {
         app,
         bp,
@@ -169,12 +189,17 @@ async fn replace_at(
         binding,
         from,
         instances,
-    } = check(&s.db, scope, deployment, role, index).await?;
+    } = checked;
+    let deployment = Id::from(app.id);
     if expected.is_some_and(|v| v != app.version) {
-        return Err(refuse(StatusCode::CONFLICT, "deployment.error.030"));
+        return Err(before(refuse(StatusCode::CONFLICT, "deployment.error.030")));
     }
-    let candidates = candidates::load(&s.db, scope.workspace_id).await?;
-    let mut excluded = fenced_hosts(&s.db, scope.workspace_id, deployment).await?;
+    let candidates = candidates::load(&s.db, scope.workspace_id)
+        .await
+        .map_err(before)?;
+    let mut excluded = fenced_hosts(&s.db, scope.workspace_id, deployment)
+        .await
+        .map_err(before)?;
     if let ReplaceTrigger::Auto { failed_host } = trigger {
         excluded.insert(failed_host);
     }
@@ -186,8 +211,8 @@ async fn replace_at(
         index as usize,
         &candidates,
         &excluded,
-    )?;
-    fence(s, &app, from, &instances).await?;
+    )
+    .map_err(before)?;
     let mut spec_text = app.deploy_spec.clone();
     if let Some(spec) = spec.as_mut()
         && let Some(manual) = spec.placement.as_mut()
@@ -208,11 +233,29 @@ async fn replace_at(
             spec_text = Some(spec::to_yaml(spec));
         }
     }
-    let text = serde_json::to_string(&moved).map_err(|_| super::blueprint_invalid())?;
+    let text = serde_json::to_string(&moved).map_err(|_| before(super::blueprint_invalid()))?;
+    claim(s, &app, text, spec_text, from, &instances)
+        .await
+        .map_err(before)?;
+    fence(s, &app, from, &instances).await.map_err(after)?;
+    scheduled_replace(s, scope.clone(), &deployment.to_string(), trigger.action())
+        .await
+        .map_err(after)
+}
+
+/// Stores the moved binding and spec, guarded by the version and state `app` was read at.
+async fn claim(
+    s: &AppState,
+    app: &apps::Model,
+    binding: String,
+    spec: Option<String>,
+    from: Id,
+    instances: &[String],
+) -> Result<()> {
     let tx = s.db.begin().await?;
     let n = apps::Entity::update_many()
-        .col_expr(apps::Column::BlueprintBinding, Expr::value(text))
-        .col_expr(apps::Column::DeploySpec, Expr::value(spec_text))
+        .col_expr(apps::Column::BlueprintBinding, Expr::value(binding))
+        .col_expr(apps::Column::DeploySpec, Expr::value(spec))
         .col_expr(apps::Column::PreviewArtifact, Expr::value(""))
         .col_expr(
             apps::Column::Version,
@@ -220,7 +263,7 @@ async fn replace_at(
         )
         .col_expr(apps::Column::UpdatedAt, Expr::value(db::now()))
         .filter(apps::Column::Id.eq(app.id))
-        .filter(apps::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(apps::Column::WorkspaceId.eq(app.workspace_id))
         .filter(apps::Column::Version.eq(app.version))
         .filter(apps::Column::State.is_not_in(["queued", "running", "needs-review"]))
         .exec(&tx)
@@ -229,8 +272,77 @@ async fn replace_at(
     if n == 0 {
         return Err(refuse(StatusCode::CONFLICT, "deployment.error.030"));
     }
+    // A crash after this commit must leave the old instances fenced, even when no
+    // replacement revision could be previewed. Binding and fences are one durable change.
+    reserve_fences(s, &tx, app, from, instances).await?;
+    let boundary = revisions::Entity::find()
+        .filter(revisions::Column::WorkspaceId.eq(app.workspace_id))
+        .filter(revisions::Column::DeploymentId.eq(app.id))
+        .order_by_desc(revisions::Column::Number)
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    for instance in instances {
+        events::record(
+            s,
+            &tx,
+            NewEvent {
+                workspace: app.workspace_id.into(),
+                deployment: app.id.into(),
+                kind: Kind::Fenced,
+                instance: instance.clone(),
+                host: from,
+                // The last revision before the placement changed, not a wall-clock ordering.
+                revision: boundary.id.into(),
+                message: Message::new("deployment.event.fenced")
+                    .with("host", host_name(&tx, app.workspace_id, from).await?)
+                    .with("instance", instance),
+                data: json!({"pending": true, "stopped": false}),
+            },
+        )
+        .await?;
+    }
     tx.commit().await?;
-    scheduled_replace(s, scope.clone(), &deployment.to_string(), trigger.action()).await
+    Ok(())
+}
+
+async fn reserve_fences(
+    s: &AppState,
+    conn: &impl ConnectionTrait,
+    app: &apps::Model,
+    host: Id,
+    instances: &[String],
+) -> Result<Vec<i64>> {
+    let mut ids = Vec::new();
+    for instance in instances {
+        let existing = fences::Entity::find()
+            .filter(fences::Column::WorkspaceId.eq(app.workspace_id))
+            .filter(fences::Column::DeploymentId.eq(app.id))
+            .filter(fences::Column::HostId.eq(host))
+            .filter(fences::Column::Instance.eq(instance))
+            .filter(fences::Column::ClearedAt.eq(0))
+            .one(conn)
+            .await?;
+        let id = if let Some(row) = existing {
+            row.id
+        } else {
+            let id = i64::from(s.next_id()?);
+            fences::Entity::insert(fences::ActiveModel {
+                id: sea_orm::Set(id),
+                workspace_id: sea_orm::Set(app.workspace_id),
+                deployment_id: sea_orm::Set(app.id),
+                host_id: sea_orm::Set(host.into()),
+                instance: sea_orm::Set(instance.clone()),
+                created_at: sea_orm::Set(db::now()),
+                cleared_at: sea_orm::Set(0),
+            })
+            .exec(conn)
+            .await?;
+            id
+        };
+        ids.push(id);
+    }
+    Ok(ids)
 }
 
 /// The command that stops `instance` of `app` on its host, refusing anything this deployment
@@ -246,8 +358,9 @@ pub(crate) fn stop_command(app: &apps::Model, instance: &str) -> String {
         );
     }
     let container = quote(&format!("{prefix}-{instance}"));
+    // A daemon that does not answer must not read as "container already gone".
     format!(
-        "if docker container inspect {container} >/dev/null 2>&1; then owner=$(docker inspect --format '{{{{index .Config.Labels \"workspace.deployment\"}}}}' {container}); [ \"$owner\" = {prefix} ] || exit 75; docker rm -f {container}; fi",
+        "docker info >/dev/null 2>&1 || exit 1; if docker container inspect {container} >/dev/null 2>&1; then owner=$(docker inspect --format '{{{{index .Config.Labels \"workspace.deployment\"}}}}' {container}); [ \"$owner\" = {prefix} ] || exit 75; docker rm -f {container}; fi",
         prefix = quote(&prefix),
     )
 }
@@ -261,8 +374,8 @@ async fn host_name(conn: &impl ConnectionTrait, workspace: i64, host: Id) -> Res
 }
 
 /// Fences `instances` of `app` on `host`. When the host can be reached its instances are
-/// stopped first; a fence row is always written, already cleared when they were stopped,
-/// and each instance records a `fenced` event (`detail.stopped`).
+/// stopped; pending fences are stored before any remote command and cleared only after
+/// successful stops. Each instance records a `fenced` event (`detail.stopped`).
 pub(crate) async fn fence(
     s: &AppState,
     app: &apps::Model,
@@ -270,6 +383,9 @@ pub(crate) async fn fence(
     instances: &[String],
 ) -> Result<()> {
     let workspace = Id::from(app.workspace_id);
+    let tx = s.db.begin().await?;
+    let ids = reserve_fences(s, &tx, app, host, instances).await?;
+    tx.commit().await?;
     // Command output is never kept: only whether every stop succeeded.
     let stopped = async {
         let channel = remote::open(s, &workspace, &host).await?;
@@ -288,18 +404,16 @@ pub(crate) async fn fence(
     let name = host_name(&s.db, app.workspace_id, host).await?;
     let now = db::now();
     let tx = s.db.begin().await?;
+    if stopped {
+        fences::Entity::update_many()
+            .col_expr(fences::Column::ClearedAt, Expr::value(now))
+            .filter(fences::Column::Id.is_in(ids))
+            .filter(fences::Column::WorkspaceId.eq(app.workspace_id))
+            .filter(fences::Column::DeploymentId.eq(app.id))
+            .exec(&tx)
+            .await?;
+    }
     for instance in instances {
-        fences::Entity::insert(fences::ActiveModel {
-            id: sea_orm::Set(s.next_id()?.into()),
-            workspace_id: sea_orm::Set(app.workspace_id),
-            deployment_id: sea_orm::Set(app.id),
-            host_id: sea_orm::Set(host.into()),
-            instance: sea_orm::Set(instance.clone()),
-            created_at: sea_orm::Set(now),
-            cleared_at: sea_orm::Set(if stopped { now } else { 0 }),
-        })
-        .exec(&tx)
-        .await?;
         events::record(
             s,
             &tx,
@@ -362,12 +476,13 @@ pub async fn replace(
     }
     let trigger = ReplaceTrigger::Manual;
     let instance = format!("{role}-{index}");
+    let old_host = checked.from;
     let event = |kind, message: Message, data: Value| NewEvent {
         workspace: scope.workspace_id,
         deployment,
         kind,
         instance: instance.clone(),
-        host: checked.from,
+        host: old_host,
         revision: Id::from(0),
         message,
         data,
@@ -386,23 +501,22 @@ pub async fn replace(
         ),
     )
     .await?;
-    match replace_at(
-        &s,
-        &scope,
-        deployment,
-        &role,
-        index,
-        trigger,
-        Some(b.version),
-    )
-    .await
-    {
+    match replace_checked(&s, &scope, checked, &role, index, trigger, Some(b.version)).await {
         Ok(revision) => Ok((StatusCode::ACCEPTED, Json(json!({"id": revision})))),
-        Err(error) => {
+        Err(Stopped {
+            error,
+            binding_moved,
+        }) => {
+            // No revision ran: the request lost a race, or it stopped part way.
             let reason = match error.2.as_ref() {
                 Some(m) if m.key == "blueprint.replaceNoCandidate" => "noCandidate",
-                _ => "revisionFailed",
+                _ if error.0 == StatusCode::CONFLICT => "conflict",
+                _ => "interrupted",
             };
+            let mut data = json!({"reason": reason});
+            if binding_moved {
+                data["bindingMoved"] = json!(true);
+            }
             events::record(
                 &s,
                 &s.db,
@@ -414,11 +528,101 @@ pub async fn replace(
                             "reason",
                             Message::new(format!("deployment.failoverReason.{reason}")),
                         ),
-                    json!({"reason": reason}),
+                    data,
                 ),
             )
             .await?;
             Err(error)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::tests::admin;
+    use crate::deployments::blueprint_tests::{body, create_app, fixture, row, run_first};
+
+    #[tokio::test]
+    async fn claim_persists_fences_before_any_remote_work() {
+        let (_dir, s) = fixture(&[2131, 2132, 2133]).await;
+        let id = create_app(&s, body(&[2131, 2132])).await.unwrap();
+        assert!(run_first(&s, &id, &[]).await);
+        let before = row(&s, &id).await;
+        let mut binding = binding::parse(before.blueprint_binding.as_deref().unwrap()).unwrap();
+        binding.roles.get_mut("nats").unwrap()[0].host_id = Id::from(2133);
+        let text = serde_json::to_string(&binding).unwrap();
+        crate::hosts::fake::get(2131)
+            .commands
+            .lock()
+            .unwrap()
+            .clear();
+        claim(
+            &s,
+            &before,
+            text.clone(),
+            before.deploy_spec.clone(),
+            Id::from(2131),
+            &["nats-0".into()],
+        )
+        .await
+        .unwrap();
+        // Stop here, as if the process exited before fencing or preview could run.
+        assert!(
+            crate::hosts::fake::get(2131)
+                .commands
+                .lock()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            row(&s, &id).await.blueprint_binding.as_deref(),
+            Some(text.as_str())
+        );
+        let pending = fenced_hosts(&s.db, Id::from(1), Id::from(before.id))
+            .await
+            .unwrap();
+        assert_eq!(pending, BTreeSet::from([Id::from(2131)]));
+        // A different server's clock/worker ID may sort the decision before the old
+        // revision; the reference to its revision number remains authoritative.
+        use crate::entities::deployment_events as timeline;
+        let decision = timeline::Entity::find()
+            .filter(timeline::Column::DeploymentId.eq(before.id))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(decision.revision_id, before.current_revision);
+        timeline::Entity::update_many()
+            .col_expr(timeline::Column::Id, Expr::value(1_i64))
+            .col_expr(timeline::Column::CreatedAt, Expr::value(0_i64))
+            .filter(timeline::Column::Id.eq(decision.id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let old = Id::from(before.current_revision).to_string();
+        let error = old_revision(&s.db, &admin(1), before.id, &old)
+            .await
+            .unwrap_err();
+        assert_eq!(error.2.unwrap().key, "deployment.rollbackAcrossReplace");
+        // Failing the claim cannot create a second fence or move the binding again.
+        assert!(
+            claim(
+                &s,
+                &before,
+                text,
+                before.deploy_spec.clone(),
+                Id::from(2132),
+                &["nats-1".into()]
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            fenced_hosts(&s.db, Id::from(1), Id::from(before.id))
+                .await
+                .unwrap(),
+            pending
+        );
     }
 }

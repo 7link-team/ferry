@@ -704,7 +704,7 @@ pub(super) async fn execute(
                 .map(|name| (name.clone(), all[name].clone()))
                 .collect();
             let sealed = seal_snapshot(&s.vault, rev.workspace_id, rev.id, &own)?;
-            per_host.insert(host, (manifest, sealed));
+            per_host.insert(host, (manifest, sealed, own));
         }
     }
     let mut output = StoredText::new();
@@ -738,15 +738,25 @@ pub(super) async fn execute(
             .await?;
         let mut host_app = host_app(app, row.host_id.into(), app.manifest.clone());
         let mut host_revision = rev.clone();
-        if let Some((manifest, sealed)) = per_host.get(&row.host_id.to_string()) {
+        if let Some((manifest, sealed, _)) = per_host.get(&row.host_id.to_string()) {
             host_app.manifest = manifest.clone();
             host_revision.manifest = manifest.clone();
             host_revision.variable_snapshot = Some(sealed.clone());
         }
         // A replacement rebuilds every member, but a host whose artifact is already in place
-        // (only the moved instance's address could have changed it) is left untouched.
-        let unchanged =
-            rev.action.ends_with("-replace") && hash(&row.artifact) == row.expected_hash;
+        // (only the moved instance's address could have changed it) and whose variable and
+        // config files equal those it last ran with is left untouched.
+        let unchanged = rev.action.ends_with("-replace")
+            && hash(&row.artifact) == row.expected_hash
+            && match per_host.get(&row.host_id.to_string()) {
+                Some((_, _, own)) => {
+                    current_files(s, rev.workspace_id, app.id, row.host_id)
+                        .await
+                        .as_ref()
+                        == Some(own)
+                }
+                None => false,
+            };
         host_revision.artifact = row.artifact;
         host_revision.expected_hash = row.expected_hash;
         let result = if unchanged {
@@ -837,6 +847,39 @@ pub(super) async fn execute(
             .await?;
     }
     Ok((true, output.stored()))
+}
+
+/// The snapshot files `host` last ran this deployment with (those of its current revision),
+/// decrypted; `None` when they cannot be read, so nothing is ever skipped on a guess.
+async fn current_files(
+    s: &AppState,
+    workspace: i64,
+    app: i64,
+    host: i64,
+) -> Option<BTreeMap<String, String>> {
+    let state = current::Entity::find()
+        .filter(current::Column::WorkspaceId.eq(workspace))
+        .filter(current::Column::DeploymentId.eq(app))
+        .filter(current::Column::HostId.eq(host))
+        .one(&s.db)
+        .await
+        .ok()??;
+    let old = revisions::Entity::find_by_id(state.current_revision)
+        .filter(revisions::Column::WorkspaceId.eq(workspace))
+        .one(&s.db)
+        .await
+        .ok()??;
+    let all = open_snapshot(&s.vault, &old).ok()?;
+    let (_, files) = stored_plans(&old.rendered, &all)?.remove(&host.to_string())?;
+    Some(
+        files
+            .into_iter()
+            .map(|name| {
+                let text = all[&name].clone();
+                (name, text)
+            })
+            .collect(),
+    )
 }
 
 /// Host id → (compiled application, own snapshot files) from a blueprint revision's

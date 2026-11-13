@@ -321,8 +321,9 @@
   "deployment.replaceUnsupportedDriver": "インスタンスを置き換えられるのは Native と Docker のデプロイのみです。Ferry は Swarm や Compose のインスタンスを移動しません。",
   "deployment.replaceNeedsBackup": "このインスタンスは独自のデータを持つため、バックアップに対応するまで他のホストで再構築できません。",
   "deployment.replaceNotDeployed": "このデプロイにはまだ成功したリビジョンがないため、置き換えるインスタンスがありません。",
-  "deployment.rollbackAcrossReplace": "このリビジョンはインスタンスの置き換えより前のもので、以前の配置に属します。置き換えのリビジョン以降にロールバックしてください。",
+  "deployment.rollbackAcrossReplace": "このリビジョンはインスタンスの置き換えより前のもので、以前の配置に属するため復元できません。デプロイを再適用するか置き換えをやり直してください。どちらも現在の配置から構築されます。",
   "deployment.output.hostUnchanged": "ホスト {host} はすでにこの成果物を実行しているため、変更していません。",
   "deployment.replaceTrigger.auto": "自動",
-  "deployment.replaceTrigger.manual": "手動"
+  "deployment.replaceTrigger.manual": "手動",
+  "deployment.failoverReason.conflict": "デプロイが同時に変更されたため、何も置き換えていません。"
 }

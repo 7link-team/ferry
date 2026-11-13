@@ -321,8 +321,9 @@
   "deployment.replaceUnsupportedDriver": "只有 Native 与 Docker 部署可以替换实例；Ferry 不迁移 Swarm 或 Compose 实例。",
   "deployment.replaceNeedsBackup": "该实例自带数据，在支持备份之前不能在其他主机上重建。",
   "deployment.replaceNotDeployed": "该部署还没有成功的修订，没有可替换的实例。",
-  "deployment.rollbackAcrossReplace": "该修订早于一次实例替换，属于替换前的放置。请回滚到替换修订或之后的修订。",
+  "deployment.rollbackAcrossReplace": "该修订早于一次实例替换，属于替换前的放置，无法恢复。请重新应用部署或再次执行替换，两者都按当前放置构建。",
   "deployment.output.hostUnchanged": "主机 {host} 已运行此产物，未做任何变更。",
   "deployment.replaceTrigger.auto": "自动",
-  "deployment.replaceTrigger.manual": "手动"
+  "deployment.replaceTrigger.manual": "手动",
+  "deployment.failoverReason.conflict": "部署同时发生了变化，未替换任何实例。"
 }
