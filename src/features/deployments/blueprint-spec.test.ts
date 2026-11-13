@@ -1,6 +1,6 @@
 import { beforeEach, expect, it } from "vitest";
 import { i18n } from "../../shared/i18n/i18n";
-import { initialSpec, instancesProblem, isBlueprint, readBlueprint, readSpec, stepInstances, topologyKey, writeSpec } from "./blueprint-spec";
+import { failoverClass, initialSpec, instancesProblem, isBlueprint, readBlueprint, readSpec, stepInstances, topologyKey, writeSpec } from "./blueprint-spec";
 
 beforeEach(async () => { await i18n.changeLanguage("en-US"); });
 
@@ -16,6 +16,32 @@ roles:
     hosts:
       tags: [cache]
 `;
+
+it("failover_roundtrip_and_validation", () => {
+  const source = `${commented}failover:\n  mode: auto # keep policy note\n  hostDownAfter: 90\n`;
+  const read = readSpec(source);
+  expect(read.errors).toEqual([]);
+  const updated = writeSpec(read.doc!, [{ path: ["failover", "mode"], value: "alert" }]);
+  expect(updated).toContain("# keep policy note");
+  expect(updated).toContain("# chosen by ops");
+  expect(readSpec(updated).spec?.failover).toEqual({ mode: "alert", hostDownAfter: 90 });
+  for (const value of ["mode: sometimes", "mode: null", "hostDownAfter: 10", "hostDownAfter: 3601", "hostDownAfter: 30.5", 'hostDownAfter: "90"', "unknown: true"]) {
+    expect(readSpec(`${commented}failover:\n  ${value}\n`).errors).toHaveLength(1);
+  }
+  for (const hostDownAfter of [30, 3600]) expect(readSpec(`${commented}failover: {hostDownAfter: ${hostDownAfter}}\n`).errors).toEqual([]);
+});
+
+it("topology_key_ignores_failover", () => {
+  const spec = readSpec(commented).spec!;
+  expect(topologyKey({ ...spec, failover: { mode: "off", hostDownAfter: 300 } })).toBe(topologyKey(spec));
+});
+
+it("failover_class_matches_server_rules", () => {
+  const role = readBlueprint(JSON.stringify({ kind: "Blueprint", roles: [{ name: "r", instances: {min: 1,max: 3,default: 1}, identity: "stateless" }] }))!.roles[0]!;
+  expect(failoverClass(role)).toBe("stateless");
+  expect(failoverClass({ ...role, identity: "stable", failoverReplace: true })).toBe("replicated");
+  expect(failoverClass({ ...role, identity: "stable", failoverReplace: false })).toBe("manual");
+});
 
 it("spec_roundtrip_preserves_comments", () => {
   const read = readSpec(commented);
@@ -42,7 +68,7 @@ it("spec_roundtrip_preserves_comments", () => {
 it("rejects syntax errors, wrong apiVersion and unknown keys at every level", () => {
   expect(readSpec("roles: [").errors).toHaveLength(1);
   expect(readSpec(commented.replace("ferry/deploy-v1", "ferry/v1")).errors[0]).toContain("ferry/deploy-v1");
-  expect(readSpec(`${commented}failover: {}\n`).errors[0]).toContain("failover");
+  expect(readSpec(`${commented}surprise: {}\n`).errors[0]).toContain("surprise");
   expect(readSpec(commented.replace("tags: [cache]", "tags: [cache]\n      zone: a")).errors[0]).toContain("zone");
   expect(readSpec(commented.replace("instances: 3", "instances: three")).errors[0]).toContain("instances");
   expect(readSpec(`${commented}placement:\n  nats:\n    - {host: "1"}\n`).errors[0]).toContain("host");
@@ -76,7 +102,7 @@ it("recognizes blueprint templates in JSON and YAML", () => {
   expect(isBlueprint(json)).toBe(true);
   expect(isBlueprint("apiVersion: ferry/v1\nkind: Application\n")).toBe(false);
   expect(isBlueprint("kind: Blueprint\nroles:\n  - published: {{ .Values.port }}\n")).toBe(true);
-  expect(readBlueprint(json)).toEqual({ name: "mq", roles: [{ name: "nats", instances: { min: 3, max: 9, default: 3, odd: true }, identity: "stable", distinctHosts: false, colocateWith: undefined }], drivers: ["docker"] });
+  expect(readBlueprint(json)).toEqual({ name: "mq", roles: [{ name: "nats", instances: { min: 3, max: 9, default: 3, odd: true }, identity: "stable", distinctHosts: false, colocateWith: undefined, failoverReplace: false }], drivers: ["docker"] });
 });
 
 it("topology_key_ignores_values_version_and_placement_addresses", () => {

@@ -7,6 +7,9 @@ import { Document, parse, parseDocument, stringify } from "yaml";
 import { commonText } from "../../shared/i18n/i18n";
 
 export const SPEC_API_VERSION = "ferry/deploy-v1";
+export const HOST_DOWN_AFTER = { min: 30, max: 3600, default: 90 } as const;
+export type FailoverMode = "off" | "alert" | "auto";
+export interface FailoverSpec { mode?: FailoverMode; hostDownAfter?: number }
 
 export interface HostSelector { tags?: string[]; names?: string[]; group?: string; spread?: { prefix: string } }
 export interface RoleSpec { instances: number; hosts?: HostSelector }
@@ -18,6 +21,7 @@ export interface DeploySpec {
   values: Record<string, unknown>;
   roles: Record<string, RoleSpec>;
   placement?: Record<string, InstanceBinding[]>;
+  failover?: FailoverSpec;
 }
 export type SpecChange = { path: (string | number)[]; value: unknown };
 
@@ -55,7 +59,7 @@ function strings(value: unknown, field: string): string[] | undefined {
 function toSpec(value: unknown): DeploySpec {
   if (!isRow(value)) return fail("notMapping");
   const root = value as Row;
-  only(root, ["apiVersion", "template", "driver", "manager", "values", "roles", "placement"], "");
+  only(root, ["apiVersion", "template", "driver", "manager", "values", "roles", "placement", "failover"], "");
   if (root.apiVersion !== SPEC_API_VERSION) fail("apiVersion", { expected: SPEC_API_VERSION });
   if (!isRow(root.template)) fail("invalidField", { field: "template" });
   const template = root.template as Row;
@@ -89,6 +93,20 @@ function toSpec(value: unknown): DeploySpec {
     roles,
   };
   if (root.manager != null) spec.manager = string(root.manager, "manager");
+  if (root.failover != null) {
+    const raw = mapping(root.failover, "failover");
+    only(raw, ["mode", "hostDownAfter"], "failover");
+    const failover: FailoverSpec = {};
+    if (raw.mode !== undefined) {
+      if (raw.mode !== "off" && raw.mode !== "alert" && raw.mode !== "auto") fail("invalidField", { field: "failover.mode" });
+      failover.mode = raw.mode as FailoverMode;
+    }
+    if (raw.hostDownAfter !== undefined) {
+      if (!Number.isInteger(raw.hostDownAfter) || (raw.hostDownAfter as number) < HOST_DOWN_AFTER.min || (raw.hostDownAfter as number) > HOST_DOWN_AFTER.max) fail("invalidField", { field: "failover.hostDownAfter" });
+      failover.hostDownAfter = raw.hostDownAfter as number;
+    }
+    spec.failover = failover;
+  }
   if (root.placement != null) {
     spec.placement = {};
     for (const [name, list] of Object.entries(mapping(root.placement, "placement"))) {
@@ -152,7 +170,11 @@ export function stepInstances(count: number, delta: 1 | -1, bounds: InstanceBoun
   return next;
 }
 
-export interface BlueprintRole { name: string; instances: InstanceBounds; identity: string; distinctHosts: boolean; colocateWith: string | undefined }
+export interface BlueprintRole { name: string; instances: InstanceBounds; identity: string; distinctHosts: boolean; colocateWith: string | undefined; failoverReplace: boolean }
+export type FailoverClass = "stateless" | "replicated" | "manual";
+export function failoverClass(role: BlueprintRole): FailoverClass {
+  return role.identity === "stateless" ? "stateless" : role.failoverReplace ? "replicated" : "manual";
+}
 export interface BlueprintSummary { name: string; roles: BlueprintRole[]; drivers: string[] }
 
 const KIND_LINE = /^\s*"?kind"?\s*:\s*"?Blueprint"?\s*,?\s*$/m;
@@ -181,6 +203,7 @@ export function readBlueprint(content: string): BlueprintSummary | undefined {
       name: raw.name,
       instances: { min: min as number, max: max as number, default: initial as number, odd: odd === true },
       identity: String(raw.identity ?? ""),
+      failoverReplace: isRow(raw.failover) && raw.failover.replace === "supported",
       distinctHosts: placement.distinctHosts === true,
       colocateWith: typeof placement.colocateWith === "string" ? placement.colocateWith : undefined,
     });
@@ -195,10 +218,10 @@ export function readBlueprint(content: string): BlueprintSummary | undefined {
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : isRow(value) ? Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined).map(key => [key, canonical(value[key])])) : value;
 
-/** Everything but `values` and `template.version`, as the server's `same_topology` compares
+/** Everything but `values`, `failover` and `template.version`, as the server's `same_topology` compares
  * it: what decides where instances run. Manual placement compares by host (addresses are derived). */
 export function topologyKey(spec: DeploySpec): string {
-  const { values: _values, template, placement, ...rest } = spec;
+  const { values: _values, failover: _failover, template, placement, ...rest } = spec;
   const hosts = placement && Object.fromEntries(Object.entries(placement).map(([role, list]) => [role, list.map(item => item.hostId)]));
   return JSON.stringify(canonical({ ...rest, template: { id: template.id }, placement: hosts }));
 }

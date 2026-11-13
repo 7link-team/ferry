@@ -179,6 +179,19 @@ const mountEdit = async (app: Deployment, onSaved = vi.fn()) => {
 };
 const steps = () => [...host.querySelectorAll(`[aria-label="${w("steps")}"] li`)];
 
+it("failover_editable_after_deploy_without_unlocking_topology", async () => {
+  const onSaved = await mountEdit(deployment({ current_revision: "11" }));
+  await click(w("editSpec"));
+  const select = host.querySelector<HTMLSelectElement>(`select[aria-label="${w("failoverMode")}"]`)!;
+  expect(select.disabled).toBe(false);
+  await act(async () => { select.value = "alert"; select.dispatchEvent(new Event("change", { bubbles: true })); }); await flush();
+  expect(alertWith(w("topologyLocked"))).toBeUndefined();
+  await click(w("save"));
+  const saved = requests.find(r => r.method === "PATCH")!;
+  expect(parse(String(saved.body!.deploy_spec)).failover).toEqual({ mode: "alert" });
+  expect(onSaved).toHaveBeenCalledTimes(1);
+});
+
 it("spec_edit_limited_to_values_after_deploy", async () => {
   const onSaved = await mountEdit(deployment({ current_revision: "11" }));
   await click(w("editSpec"));

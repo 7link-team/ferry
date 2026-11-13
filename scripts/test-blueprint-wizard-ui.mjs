@@ -182,7 +182,7 @@ try {
 
     // An unknown field makes the YAML invalid: the error shows and the form is locked.
     const valid = await readYaml();
-    await setYaml(`${valid}\nfailover: true\n`);
+    await setYaml(`${valid}\nunknownSpecKey: true\n`);
     const yamlAlert = page.getByRole('alert').filter({ hasText: '未知字段' });
     await yamlAlert.waitFor();
     await page.getByRole('button', { name: '表单', exact: true }).click();
@@ -199,6 +199,11 @@ try {
 
     // ③ Roles and hosts: the tag selector through the form.
     check((await currentStep()).includes('角色与主机'), `${width}: roles step is current`);
+    const failureMode = page.getByRole('combobox', { name: '故障处理', exact: true });
+    check(await failureMode.inputValue() === 'auto', `${width}: failure handling defaults to automatic`);
+    check(await page.getByText('主机失联阈值：90 秒。可在 YAML 中修改 hostDownAfter。', { exact: true }).isVisible(), `${width}: host silence threshold is read-only guidance`);
+    await failureMode.selectOption('alert');
+    if (width < 1200) check((await failureMode.boundingBox()).height >= 44, `${width}: failure control has a 44px touch target`);
     const tagSelect = page.locator('select[name="nats-tags"]');
     await tagSelect.selectOption(['nats-ready']);
     check(await page.locator('output[aria-label="实例数"]').first().innerText() === '3', `${width}: nats keeps three instances`);
@@ -250,6 +255,7 @@ try {
     const deploymentId = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1);
     const saved = await get(`${root}/deployments/${deploymentId}`);
     const savedSpec = parse(saved.deploy_spec);
+    check(savedSpec.failover?.mode === 'alert', `${width}: failure handling is saved in the deployment spec`);
     const bound = saved.blueprint_binding.roles.nats.map(item => item.hostId);
     check(saved.name === name && saved.target_kind === 'blueprint' && saved.mode === 'docker', `${width}: the deployment is created as a docker blueprint deployment`);
     check(JSON.stringify(savedSpec.roles.nats.hosts.tags) === '["nats-ready"]' && savedSpec.values.client_port === clientPort, `${width}: the stored spec keeps the tag selector and the YAML-edited value`);
@@ -272,6 +278,33 @@ try {
     await fits(`detail topology ${width}`);
     await role.scrollIntoViewIfNeeded();
     await shot(`detail-topology-${width}`);
+
+    // Simulate an already deployed view without running Docker. The form still
+    // saves to the real API; only the GET presentation's revision marker is stubbed.
+    const detailPath = `${origin}/api${root}/deployments/${deploymentId}`;
+    await page.route(detailPath, async route => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const response = await route.fetch();
+      await route.fulfill({ response, json: { ...await response.json(), current_revision: '999' } });
+    });
+    await page.reload();
+    await page.getByRole('button', { name: '编辑部署规格', exact: true }).click();
+    await failureMode.waitFor();
+    check(await page.locator('ol[aria-label="向导步骤"] li').count() === 1 && await failureMode.isEnabled(), `${width}: frozen topology keeps only parameters and editable failure handling`);
+    await failureMode.selectOption('off');
+    await fits(`frozen failover ${width}`);
+    await shot(`wizard-frozen-failover-${width}`);
+    const save = page.getByRole('button', { name: '保存', exact: true });
+    await save.scrollIntoViewIfNeeded();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await reachable(save, `${width} frozen failover`);
+    await page.screenshot({ path: join(output, `wizard-frozen-save-${width}.png`) });
+    await reachable(save, `${width} frozen failover after capture`);
+    const savedPolicy = page.waitForResponse(response => response.url() === detailPath && response.request().method() === 'PATCH');
+    await save.click();
+    check((await savedPolicy).ok(), `${width}: frozen failure policy saves without a topology rejection`);
+    await eventually(async () => parse((await get(`${root}/deployments/${deploymentId}`)).deploy_spec).failover?.mode === 'off', 'failure policy persisted');
+    await page.unrouteAll({ behavior: 'wait' });
   }
   const created = (await get(`${root}/deployments?page_size=50`)).items;
   check(created.length === 4 && created.every(row => row.revision_number === 0), 'four deployments created, none of them deployed');

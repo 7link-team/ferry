@@ -17,7 +17,7 @@ import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { tagOptions } from "../tags/resource-config";
 import { templateParameterFields, type TemplateParameter } from "../templates/TemplateParametersEditor";
 import {
-  initialSpec, instancesProblem, readBlueprint, readSpec, stepInstances, topologyKey, writeSpec,
+  failoverClass, HOST_DOWN_AFTER, initialSpec, instancesProblem, readBlueprint, readSpec, stepInstances, topologyKey, writeSpec,
   type BlueprintSummary, type InstanceBinding, type SpecChange,
 } from "./blueprint-spec";
 import { allHosts, type HostRow } from "./blueprint-hooks";
@@ -142,7 +142,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
   const spec = form.spec;
   const invalid = current.errors.length > 0;
   const stored = useMemo(() => frozen ? readSpec(deployment?.deploy_spec ?? "").spec : undefined, [frozen, deployment]);
-  // After the first deploy only `values` and `template.version` may change; caught before submit.
+  // Values, failover policy and template.version remain editable after deployment.
   const locked = !!stored && !!current.spec && topologyKey(current.spec) !== topologyKey(stored);
   const key = steps[step] ?? steps[0]!;
   // While the YAML is invalid the form is locked: it never overwrites text the user is fixing.
@@ -189,6 +189,15 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
     if (at === "stepPlacement") return placement?.for === text && placement.result ? [] : [placement?.error ?? w("placementStale")];
     return [!name.trim() && commonText("form.required", { name: commonText("common-domain:common.name") }), !workdir.trim() && commonText("form.required", { name: commonText("resource-domain:deployment.workdir") })].filter((item): item is string => !!item);
   };
+  const failoverFields = spec && (<div className="min-w-0 space-y-2">
+    <AutoField label={w("failoverMode")} help={w("failoverHostDownAfter", { seconds: spec.failover?.hostDownAfter ?? HOST_DOWN_AFTER.default })}>
+      <select aria-label={w("failoverMode")} className={selectClass} value={spec.failover?.mode ?? "auto"} disabled={invalid || creating} onChange={event => patch([{ path: ["failover", "mode"], value: event.target.value }])}>
+        {(["auto", "alert", "off"] as const).map(mode => <option key={mode} value={mode}>{w(`failover.${mode}`)}</option>)}
+      </select>
+    </AutoField>
+    {(spec.driver === "stack" || spec.driver === "compose") && <p className="break-words text-sm text-muted-foreground">{w("failoverDriverAlertOnly")}</p>}
+    {(spec.failover?.mode ?? "auto") === "auto" && blueprint.roles.filter(role => failoverClass(role) === "manual").map(role => <p key={role.name} className="break-words text-sm text-muted-foreground">{w("failoverNeedsBackup", { role: role.name })}</p>)}
+  </div>);
   const blocked = invalid || locked || problems(key).length > 0;
   const submit = async () => {
     if (blocked || creating) return;
@@ -281,6 +290,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
         </section>}
 
         {key === "stepValues" && <section className="space-y-4" aria-label={w("stepValues")}>
+          {frozen && failoverFields}
           {!parameters.length && <p className="text-sm text-muted-foreground">{commonText("resource-domain:template.noParameters")}</p>}
           <div className="grid min-w-0 gap-4 md:grid-cols-2">{templateParameterFields(parameters).map((field, index) => {
             const parameter = parameters[index]!;
@@ -295,8 +305,9 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
         </section>}
 
         {key === "stepRoles" && <section className="space-y-4" aria-label={w("stepRoles")}>
+          {failoverFields}
           {spec.driver === "stack" && <AutoField label={w("manager")} help={w("managerHelp")} required>
-            <select className={selectClass} value={spec.manager ?? ""} required disabled={invalid} onChange={event => patch([{ path: ["manager"], value: event.target.value }])}>
+            <select aria-label={w("manager")} className={selectClass} value={spec.manager ?? ""} required disabled={invalid} onChange={event => patch([{ path: ["manager"], value: event.target.value }])}>
               <option value="">{commonText("common.select")}</option>
               {spec.manager && !hosts?.some(h => h.name === spec.manager) && <option value={spec.manager}>{spec.manager}</option>}
               {hosts?.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}

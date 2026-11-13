@@ -75,6 +75,24 @@ const chooseHost = async (instance: string, hostId: string) => {
 const restore = () => [...host.querySelectorAll("button")].find(b => b.textContent?.startsWith(w("autoPlacement")));
 const placementSpecs = () => requests.filter(r => r.url.includes("deployment-placements")).map(r => parse(String(r.body?.spec)) as Record<string, unknown>);
 
+it("failover_select_writes_spec_and_explains_manual_class", async () => {
+  await mount(); await click(w("next")); await click(w("next"));
+  const select = host.querySelector<HTMLSelectElement>(`select[aria-label="${w("failoverMode")}"]`)!;
+  expect(select.value).toBe("auto");
+  expect(host.textContent).toContain(w("failoverNeedsBackup", { role: "nats" }));
+  expect(host.textContent).toContain(w("failoverHostDownAfter", { seconds: 90 }));
+  await act(async () => { select.value = "alert"; select.dispatchEvent(new Event("change", { bubbles: true })); }); await flush();
+  expect(parse(await specOf()).failover).toEqual({ mode: "alert" });
+  expect(host.textContent).not.toContain(w("failoverNeedsBackup", { role: "nats" }));
+});
+
+it("stack_driver_explains_alert_only", async () => {
+  await mount(); await click(w("yaml"));
+  await typeYaml(yaml().value.replace("driver: docker", "driver: stack"));
+  await click(w("form")); await click(w("next")); await click(w("next"));
+  expect(host.textContent).toContain(w("failoverDriverAlertOnly"));
+});
+
 it("instances_stepper_respects_odd_and_bounds", async () => {
   await mount();
   expect(host.textContent).toContain("NATS cluster");
@@ -97,7 +115,7 @@ it("yaml_errors_block_submit_and_keep_form", async () => {
   await click(w("increase", { role: "nats" }));
   await click(w("yaml"));
   const valid = yaml().value;
-  await typeYaml(`${valid}failover: {}\n`);
+  await typeYaml(`${valid}failover: {mode: sometimes}\n`);
   expect(alertWith("failover")).toBeDefined();
   expect(button(w("next")).disabled).toBe(true);
   await typeYaml("roles: [");
@@ -117,7 +135,7 @@ it("yaml_errors_block_submit_and_keep_form", async () => {
   await typeYaml(valid);
   expect(button(w("next")).disabled).toBe(false);
   // Discarding restores the last valid spec and unlocks the form.
-  await typeYaml(`${valid}failover: {}\n`);
+  await typeYaml(`${valid}failover: {mode: sometimes}\n`);
   await click(w("form"));
   await click(w("discardYaml"));
   expect(alertWith(w("yamlInvalid"))).toBeUndefined();
@@ -238,7 +256,7 @@ it("offers the Swarm manager only for stack and drops it when the driver changes
   await click(w("next")); await click(w("next"));
   expect(host.textContent).toContain(w("manager"));
   expect(button(w("next")).disabled).toBe(true);
-  await pick(host.querySelector<HTMLSelectElement>("section select")!, "host-a");
+  await pick(host.querySelector<HTMLSelectElement>(`select[aria-label="${w("manager")}"]`)!, "host-a");
   expect(button(w("next")).disabled).toBe(false);
   expect(parse(await specOf())).toMatchObject({ driver: "stack", manager: "host-a" });
   await click(w("back")); await click(w("back"));
