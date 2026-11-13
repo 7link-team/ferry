@@ -46,7 +46,15 @@ not restore single-copy data or data whose replica quorum has been lost. Use
 
 No `leave` or `join` hook is configured: the package does not depend on the `nats`
 CLI. Its healthy hook invokes `wget` against the local JetStream-enabled health
-endpoint. The expected `nats:2.10-alpine` image tools and real hook execution are
-**pending Linux CI verification**; no runtime verification metadata is published
-for version 1.1.0 yet. The CI check must inspect `command -v wget` and
-`command -v nats` in the image and exercise the healthy hook on a replacement.
+endpoint. [Linux CI](https://github.com/7link-team/ferry/actions/runs/43380131479/job/131735830420)
+verified that `nats:2.10-alpine` contains `wget` and no `nats` CLI. Its 97 checks
+include killing a fixture host, rebuilding the member on a spare host, retaining
+20 messages in an R3 stream with both replicas current, executing the healthy hook,
+and removing the old container before clearing its fence when the host returns.
+Replication is observed with the read-only `STREAM.INFO` API; repeated
+`STREAM.CREATE` responses can contain a follower's local peer view.
+
+The fixtures use independent Docker daemons on one Linux host and share its kernel;
+this does not certify physical-host failure isolation. Compose verification covers
+single-host deployment, and [Swarm verification](https://github.com/7link-team/ferry/actions/runs/43380131479/job/131735830057)
+covers deployment, not automatic stateful member movement.

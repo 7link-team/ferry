@@ -1,2 +1,13 @@
-# Runtime image tools and replacement-hook execution are pending Linux CI.
-# No verification metadata is published until those checks actually pass.
+# Linux fixture acceptance at 0b74c8c26b81da928102ad5611f71b319ae1d164.
+# Docker: killed-host replacement, R3/20 messages, healthy hook and recovery cleanup.
+# Compose: single-host deployment only. Stack: deployment only, no stateful migration.
+# All fixtures share one host kernel; this is not physical-host HA certification.
+- driver: docker
+  ferry: 0.3.0-alpha.18
+  evidence: https://github.com/7link-team/ferry/actions/runs/43380131479/job/131735830420
+- driver: compose
+  ferry: 0.3.0-alpha.18
+  evidence: https://github.com/7link-team/ferry/actions/runs/43380131479/job/131735830420
+- driver: stack
+  ferry: 0.3.0-alpha.18
+  evidence: https://github.com/7link-team/ferry/actions/runs/43380131479/job/131735830057

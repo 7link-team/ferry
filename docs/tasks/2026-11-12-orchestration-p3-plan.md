@@ -402,7 +402,9 @@ export const revisionActionLabel: (action: string) => string;   // apply/rollbac
 - [x] Step 3 ADR 条目「集群编排 P3：协调器 + 无状态/复制型自愈（2026-11-12，分支 feature/orchestration-p3）」，至少写明：驱动范围与 Swarm 重新固定推迟；类型判定；三步失联确认、runner 与无同伴 SSH 的单源规则、`/dev/tcp` 用 bash 而非 sh；隔离与恢复顺序；放置以 binding 为准并镜像人工 placement；新主机优先的目标顺序与替换修订跳过未变主机；回滚不得跨越替换修订；动作执行身份 = 当前修订触发人；事件推导冷却/失败/确认（新增 `acknowledged` 种类）；无规格的旧蓝图部署按 alert；告警指标 `failover-attention`；NATS 1.1.0 不设 leave 钩子的理由；未覆盖边界（stack 有状态重新固定、C/D 类、maxConcurrent、资源打分仍未做）。
 - [x] Step 4 设计文档：§6 各小节标注 P3 已实现/未实现部分；§7 第 3 条「自动动作时间线」改为已实现并说明替换与确认入口；§8 P3 行补「实现状态」与 CI 验收待推送。
 - [x] Step 5 Commit `test(deployments): failover acceptance on a killed fixture host; P3 ADR`
-- [ ] Step 6 CI：不得自行推送；向控制者报告就绪，由其征得用户同意后推送到 `ci/scenario-templates-*` 分支，读取公开注解；通过后另行补 nats-cluster 1.1.0 的 `verified.yaml` 证据（单独提交）。
+- [x] Step 6 CI：用户已同意推送专用 `ci/scenario-templates-p3-20261113` 分支并修复验收问题。[提交 0b74c8c 的 Docker 蓝图验收](https://github.com/7link-team/ferry/actions/runs/43380131479/job/131735830420) 97 项通过，[Swarm 蓝图验收](https://github.com/7link-team/ferry/actions/runs/43380131479/job/131735830057) 63 项通过；NATS 1.1.0 的 `verified.yaml` 按实际 Docker/Compose/stack 驱动证据另行提交。夹具共享一个 Linux 内核，不认证物理主机 HA；未授权合并、发布或更新 4291。
+
+> CI 修正记录：回滚后对齐 v1 期望规格；恢复观测改为只读 STREAM.INFO（重复 CREATE 可返回 follower 局部副本视图）；重启夹具复用 Swarm 的 /run tmpfs。所有断机、20 条消息、两个 current 副本、健康钩子、alert-only、旧容器清理及解除隔离断言保留。失败过程与最终结果记录在 MEMORY.md。
 
 ## 不在本计划
 
