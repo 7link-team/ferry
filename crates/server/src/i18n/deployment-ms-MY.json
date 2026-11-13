@@ -325,5 +325,8 @@
   "deployment.output.hostUnchanged": "Hos {host} sudah menjalankan artifak ini; tiada perubahan dibuat.",
   "deployment.replaceTrigger.auto": "automatik",
   "deployment.replaceTrigger.manual": "secara manual",
-  "deployment.failoverReason.conflict": "deployment berubah pada masa yang sama; tiada apa-apa diganti."
+  "deployment.failoverReason.conflict": "deployment berubah pada masa yang sama; tiada apa-apa diganti.",
+  "deployment.event.revisionQueued": "Penggantian instans {instance} dijadualkan dalam semakan {revision}.",
+  "deployment.failoverBusy": "Operasi penggantian lain sedang aktif untuk penggunaan ini.",
+  "deployment.replaceQuorumLost": "Rakan yang sihat tidak mencukupi untuk menggantikan ahli ini."
 }

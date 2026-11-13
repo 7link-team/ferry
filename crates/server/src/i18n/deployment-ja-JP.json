@@ -325,5 +325,8 @@
   "deployment.output.hostUnchanged": "ホスト {host} はすでにこの成果物を実行しているため、変更していません。",
   "deployment.replaceTrigger.auto": "自動",
   "deployment.replaceTrigger.manual": "手動",
-  "deployment.failoverReason.conflict": "デプロイが同時に変更されたため、何も置き換えていません。"
+  "deployment.failoverReason.conflict": "デプロイが同時に変更されたため、何も置き換えていません。",
+  "deployment.event.revisionQueued": "インスタンス {instance} の置き換えをリビジョン {revision} に登録しました。",
+  "deployment.failoverBusy": "このデプロイでは別の置き換え操作を実行中です。",
+  "deployment.replaceQuorumLost": "正常なピアが不足しているため、このメンバーを置き換えられません。"
 }

@@ -1506,7 +1506,7 @@
     "permission_checks": [
       "deployments.apply"
     ],
-    "documentation": "`POST /deployments/{id}/instances/{role}/{index}/replace`: moves one instance to another\nhost as a `manual-replace` revision. Answers 202 with the revision; the revision runs\nlike any other.",
+    "documentation": "Returns 202 with `operation_id` before remote work; later timeline events link `revision_id`.",
     "permission": "deployments.apply"
   },
   {

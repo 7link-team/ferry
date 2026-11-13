@@ -325,5 +325,8 @@
   "deployment.output.hostUnchanged": "主机 {host} 已运行此产物，未做任何变更。",
   "deployment.replaceTrigger.auto": "自动",
   "deployment.replaceTrigger.manual": "手动",
-  "deployment.failoverReason.conflict": "部署同时发生了变化，未替换任何实例。"
+  "deployment.failoverReason.conflict": "部署同时发生了变化，未替换任何实例。",
+  "deployment.event.revisionQueued": "实例 {instance} 的替换已排入修订 {revision}。",
+  "deployment.failoverBusy": "此部署已有替换操作正在执行。",
+  "deployment.replaceQuorumLost": "健康同伴不足，无法替换此成员。"
 }

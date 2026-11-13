@@ -34,7 +34,7 @@ impl ReplaceTrigger {
             ReplaceTrigger::Manual => ACTIONS[1],
         }
     }
-    fn message(&self) -> Message {
+    pub(super) fn message(&self) -> Message {
         Message::new(match self {
             ReplaceTrigger::Auto { .. } => "deployment.replaceTrigger.auto",
             ReplaceTrigger::Manual => "deployment.replaceTrigger.manual",
@@ -48,14 +48,14 @@ fn refuse(status: StatusCode, key: &str) -> ApiError {
 
 /// A deployment instance that may be replaced, as read before anything changes.
 pub(super) struct Checked {
-    app: apps::Model,
-    bp: Blueprint,
-    spec: Option<DeploySpec>,
-    binding: Binding,
+    pub(super) app: apps::Model,
+    pub(super) bp: Blueprint,
+    pub(super) spec: Option<DeploySpec>,
+    pub(super) binding: Binding,
     /// The host the instance runs on now.
-    from: Id,
+    pub(super) from: Id,
     /// The instance and its colocated peers (same index), all on `from`.
-    instances: Vec<String>,
+    pub(super) instances: Vec<String>,
 }
 
 /// Blueprint, driver `native`/`docker`, a replaceable class for every moved role, a current
@@ -459,9 +459,7 @@ pub struct ReplaceBody {
     version: i64,
 }
 
-/// `POST /deployments/{id}/instances/{role}/{index}/replace`: moves one instance to another
-/// host as a `manual-replace` revision. Answers 202 with the revision; the revision runs
-/// like any other.
+/// Returns 202 with `operation_id` before remote work; later timeline events link `revision_id`.
 pub async fn replace(
     State(s): State<AppState>,
     scope: Scope,
@@ -470,71 +468,30 @@ pub async fn replace(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("deployments.apply")?;
     let deployment = id.parse::<Id>().map_err(|_| ApiError::missing())?;
-    let checked = check(&s.db, &scope, deployment, &role, index).await?;
-    if checked.app.version != b.version {
-        return Err(refuse(StatusCode::CONFLICT, "deployment.error.030"));
-    }
-    let trigger = ReplaceTrigger::Manual;
-    let instance = format!("{role}-{index}");
-    let old_host = checked.from;
-    let event = |kind, message: Message, data: Value| NewEvent {
-        workspace: scope.workspace_id,
-        deployment,
-        kind,
-        instance: instance.clone(),
-        host: old_host,
-        revision: Id::from(0),
-        message,
-        data,
-    };
-    let from = host_name(&s.db, checked.app.workspace_id, checked.from).await?;
-    events::record(
+    let pending = super::sequence::begin(
         &s,
-        &s.db,
-        event(
-            Kind::ReplaceStarted,
-            Message::new("deployment.event.replaceStarted")
-                .with("instance", &instance)
-                .with("from", &from)
-                .with_message("trigger", trigger.message()),
-            json!({"trigger": trigger.action()}),
-        ),
+        &scope,
+        super::sequence::Job {
+            workspace: scope.workspace_id,
+            deployment,
+            role,
+            index,
+            trigger: ReplaceTrigger::Manual,
+            actor: scope.user.id,
+        },
+        Some(b.version),
     )
     .await?;
-    match replace_checked(&s, &scope, checked, &role, index, trigger, Some(b.version)).await {
-        Ok(revision) => Ok((StatusCode::ACCEPTED, Json(json!({"id": revision})))),
-        Err(Stopped {
-            error,
-            binding_moved,
-        }) => {
-            // No revision ran: the request lost a race, or it stopped part way.
-            let reason = match error.2.as_ref() {
-                Some(m) if m.key == "blueprint.replaceNoCandidate" => "noCandidate",
-                _ if error.0 == StatusCode::CONFLICT => "conflict",
-                _ => "interrupted",
-            };
-            let mut data = json!({"reason": reason});
-            if binding_moved {
-                data["bindingMoved"] = json!(true);
-            }
-            events::record(
-                &s,
-                &s.db,
-                event(
-                    Kind::ReplaceFailed,
-                    Message::new("deployment.event.replaceFailed")
-                        .with("instance", &instance)
-                        .with_message(
-                            "reason",
-                            Message::new(format!("deployment.failoverReason.{reason}")),
-                        ),
-                    data,
-                ),
-            )
-            .await?;
-            Err(error)
+    let operation = pending.operation;
+    tokio::spawn(async move {
+        if let Err(error) = super::sequence::run(s, pending).await {
+            tracing::error!(operation = %operation, status = %error.0, "replacement operation persistence failed");
         }
-    }
+    });
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({"operation_id": operation})),
+    ))
 }
 
 #[cfg(test)]

@@ -325,5 +325,8 @@
   "deployment.output.hostUnchanged": "Host {host} already runs this artifact; nothing was changed.",
   "deployment.replaceTrigger.auto": "automatic",
   "deployment.replaceTrigger.manual": "manual",
-  "deployment.failoverReason.conflict": "the deployment changed at the same time; nothing was replaced."
+  "deployment.failoverReason.conflict": "the deployment changed at the same time; nothing was replaced.",
+  "deployment.event.revisionQueued": "Instance {instance} replacement queued revision {revision}.",
+  "deployment.failoverBusy": "Another replacement operation is active for this deployment.",
+  "deployment.replaceQuorumLost": "Not enough healthy peers remain to replace this member."
 }

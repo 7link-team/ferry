@@ -11,6 +11,7 @@ pub(crate) enum Kind {
     PeerVeto,
     Fenced,
     ReplaceStarted,
+    RevisionQueued,
     ReplaceSucceeded,
     ReplaceFailed,
     HookOutput,
@@ -22,12 +23,13 @@ pub(crate) enum Kind {
 }
 
 impl Kind {
-    pub(crate) const ALL: [Kind; 12] = [
+    pub(crate) const ALL: [Kind; 13] = [
         Kind::HostSuspected,
         Kind::HostConfirmedDown,
         Kind::PeerVeto,
         Kind::Fenced,
         Kind::ReplaceStarted,
+        Kind::RevisionQueued,
         Kind::ReplaceSucceeded,
         Kind::ReplaceFailed,
         Kind::HookOutput,
@@ -43,6 +45,7 @@ impl Kind {
             Kind::PeerVeto => "peerVeto",
             Kind::Fenced => "fenced",
             Kind::ReplaceStarted => "replaceStarted",
+            Kind::RevisionQueued => "revisionQueued",
             Kind::ReplaceSucceeded => "replaceSucceeded",
             Kind::ReplaceFailed => "replaceFailed",
             Kind::HookOutput => "hookOutput",
@@ -81,6 +84,9 @@ pub(crate) async fn record(
         Value::String(StoredText::from_message(event.message).stored()),
     );
     let id = s.next_id()?;
+    if matches!(event.kind, Kind::ReplaceStarted) {
+        detail.insert("operation_id".into(), json!(id));
+    }
     events::Entity::insert(events::ActiveModel {
         id: sea_orm::Set(id.into()),
         workspace_id: sea_orm::Set(event.workspace.into()),

@@ -277,6 +277,11 @@ fn replicated_with(extra: Value) -> String {
 
 async fn replicated_template_with(s: &AppState, content: String) {
     use crate::entities::app_templates as t;
+    hosts::Entity::update_many()
+        .col_expr(hosts::Column::SeenAt, Expr::value(db::now()))
+        .exec(&s.db)
+        .await
+        .unwrap();
     t::Entity::insert(t::ActiveModel {
         id: Set(REPLACE_TEMPLATE),
         workspace_id: Set(1),
@@ -349,14 +354,49 @@ async fn replace_api(
     )
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED);
-    Ok(out["id"].as_str().unwrap().to_owned())
+    Ok(out["operation_id"].as_str().unwrap().to_owned())
 }
 
+async fn queued(s: &AppState, id: &str, operation: &str) -> String {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let events = events_of(s, id).await;
+            if let Some(e) = events
+                .iter()
+                .find(|e| e.kind == "revisionQueued" && detail(e)["operation_id"] == operation)
+            {
+                return Id::from(e.revision_id).to_string();
+            }
+            assert!(
+                !events
+                    .iter()
+                    .any(|e| e.kind == "replaceFailed" && detail(e)["operation_id"] == operation),
+                "{events:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("replacement queued")
+}
+async fn idle(s: &AppState, id: &str) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while super::sequence::ensure_idle(&s.db, id.parse().unwrap())
+            .await
+            .is_err()
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("operation terminal and lease released");
+}
 async fn replace_now(s: &AppState, id: &str, index: u32) -> String {
     let version = row(s, id).await.version;
-    replace_api(s, admin(1), id, "nats", index, version)
+    let operation = replace_api(s, admin(1), id, "nats", index, version)
         .await
-        .unwrap()
+        .unwrap();
+    queued(s, id, &operation).await
 }
 
 /// Runs a queued revision to its end, as the scheduler would.
@@ -366,6 +406,7 @@ async fn run(s: &AppState, revision_id: &str) -> bool {
     finish(s, &rev, if ok { "succeeded" } else { "failed" }, &output)
         .await
         .unwrap();
+    idle(s, &Id::from(rev.deployment_id).to_string()).await;
     ok
 }
 
@@ -422,6 +463,249 @@ fn docker_runs(host: i64) -> usize {
         .count()
 }
 
+async fn hooked(hosts: [i64; 4], protected: bool) -> (tempfile::TempDir, AppState, String) {
+    let (dir, s) = fixture(&hosts).await;
+    for h in hosts {
+        tag_host(&s, "mq", h).await;
+    }
+    let mut template: Value = serde_json::from_str(&replicated()).unwrap();
+    template["roles"][0]["hooks"] = json!({
+        "leave": ["leave-member", "{{ .Instance.Name }}"],
+        "join": ["join-member", "{{ .Instance.Name }}"],
+        "healthy": ["healthy-member", "{{ .Instance.Name }}"]
+    });
+    template["update"] = json!({"healthTimeout": 2});
+    if protected {
+        secret(&s, hosts[0] + 8, "hook-token", "SECRET-HOOK-VALUE").await;
+        template["roles"][0]["service"]["env"] =
+            json!([{"name": "TOKEN", "valueFrom": "variable/hook-token"}]);
+    }
+    replicated_template_with(&s, template.to_string()).await;
+    let id = create_app(&s, spec_body(&replicated_spec("2")))
+        .await
+        .unwrap();
+    assert!(run_first(&s, &id, &[]).await);
+    land(&s, &id).await;
+    (dir, s, id)
+}
+
+#[tokio::test]
+async fn class_b_runs_leave_replace_join_healthy_in_order() {
+    let (_dir, s, id) = hooked([3101, 3102, 3103, 3104], false).await;
+    for h in [3101, 3102, 3103, 3104] {
+        crate::hosts::fake::get(h).commands.lock().unwrap().clear();
+    }
+    let operation = replace_api(&s, admin(1), &id, "nats", 1, row(&s, &id).await.version)
+        .await
+        .unwrap();
+    // The request only touched the database. The spawned future has not been polled.
+    for h in [3101, 3102, 3103, 3104] {
+        assert!(
+            crate::hosts::fake::get(h)
+                .commands
+                .lock()
+                .unwrap()
+                .is_empty()
+        );
+    }
+    let rev = queued(&s, &id, &operation).await;
+    assert!(run(&s, &rev).await);
+    let timeline = events_of(&s, &id).await;
+    let start = timeline
+        .iter()
+        .find(|e| e.kind == "replaceStarted")
+        .unwrap();
+    assert_eq!(Id::from(start.id).to_string(), operation);
+    let own: Vec<_> = timeline
+        .iter()
+        .filter(|e| detail(e)["operation_id"] == operation)
+        .collect();
+    assert_eq!(own.first().unwrap().kind, "replaceStarted");
+    assert_eq!(own.last().unwrap().kind, "replaceSucceeded");
+    assert_eq!(Id::from(own.last().unwrap().revision_id).to_string(), rev);
+    let hooks: Vec<_> = own
+        .iter()
+        .filter(|e| e.kind == "hookOutput")
+        .map(|e| (detail(e)["hook"].as_str().unwrap().to_owned(), e.host_id))
+        .collect();
+    assert_eq!(
+        hooks,
+        [
+            ("healthy".into(), 3101),
+            ("healthy".into(), 3103),
+            ("leave".into(), 3101),
+            ("join".into(), 3104),
+            ("healthy".into(), 3104)
+        ]
+    );
+    let commands = crate::hosts::fake::get(3104)
+        .commands
+        .lock()
+        .unwrap()
+        .clone();
+    let position = |needle: &str| commands.iter().position(|c| c.contains(needle)).unwrap();
+    assert!(position("docker run") < position("join-member"));
+    assert!(position("join-member") < position("healthy-member"));
+}
+
+#[tokio::test]
+async fn quorum_loss_goes_manual() {
+    let (_dir, s, id) = hooked([3111, 3112, 3113, 3114], false).await;
+    hosts::Entity::update_many()
+        .col_expr(hosts::Column::State, Expr::value("offline"))
+        .filter(hosts::Column::Id.is_in([3111, 3112]))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let before = row(&s, &id).await;
+    for index in [0, 1] {
+        let err = replace_api(&s, admin(1), &id, "nats", index, before.version)
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::CONFLICT);
+        assert_eq!(key(err), "deployment.replaceQuorumLost");
+    }
+    let events = events_of(&s, &id).await;
+    assert_eq!(events.len(), 2);
+    assert!(
+        events
+            .iter()
+            .all(|e| e.kind == "needsAttention" && detail(e)["reason"] == "quorumLost")
+    );
+    assert!(
+        events
+            .iter()
+            .all(|e| detail(e).get("operation_id").is_none()),
+        "a rejected request has no accepted operation to link"
+    );
+    assert_eq!(row(&s, &id).await.current_revision, before.current_revision);
+    assert_eq!(
+        row(&s, &id).await.blueprint_binding,
+        before.blueprint_binding
+    );
+    idle(&s, &id).await;
+}
+
+#[tokio::test]
+async fn leave_hook_failure_stops_before_replacing_and_counts_failures() {
+    let (_dir, s, id) = hooked([3121, 3122, 3123, 3124], false).await;
+    crate::hosts::fake::get(3121).fail_on("leave-member", "leave rejected");
+    let before = row(&s, &id).await;
+    for _ in 0..3 {
+        let operation = replace_api(&s, admin(1), &id, "nats", 1, before.version)
+            .await
+            .unwrap();
+        idle(&s, &id).await;
+        let events = events_of(&s, &id).await;
+        let failed = events
+            .iter()
+            .find(|e| e.kind == "replaceFailed" && detail(e)["operation_id"] == operation)
+            .unwrap();
+        assert_eq!(detail(failed)["reason"], "hookFailed");
+        assert_eq!(failed.revision_id, 0);
+    }
+    assert_eq!(
+        row(&s, &id).await.blueprint_binding,
+        before.blueprint_binding
+    );
+    assert_eq!(row(&s, &id).await.current_revision, before.current_revision);
+    let events = events_of(&s, &id).await;
+    assert_eq!(events.last().unwrap().kind, "needsAttention");
+    assert_eq!(detail(events.last().unwrap())["reason"], "tooManyFailures");
+}
+
+#[tokio::test]
+async fn healthy_timeout_records_failure() {
+    let (_dir, s, id) = hooked([3131, 3132, 3133, 3134], false).await;
+    crate::hosts::fake::get(3134).fail_on("healthy-member", "not ready");
+    let rev = replace_now(&s, &id, 1).await;
+    assert!(run(&s, &rev).await); // deployment readiness succeeds, membership health does not
+    let events = events_of(&s, &id).await;
+    let failed = events.iter().find(|e| e.kind == "replaceFailed").unwrap();
+    assert_eq!(detail(failed)["reason"], "unhealthy");
+    assert_eq!(Id::from(failed.revision_id).to_string(), rev);
+    assert!(!events.iter().any(|e| e.kind == "replaceSucceeded"));
+    assert_eq!(
+        crate::hosts::fake::get(3134)
+            .commands
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| c.contains("healthy-member"))
+            .count(),
+        1,
+        "do not start another health attempt after the deadline"
+    );
+}
+
+#[tokio::test]
+async fn hook_output_redacted_when_protected() {
+    let (_dir, s, id) = hooked([3141, 3142, 3143, 3144], true).await;
+    for h in [3141, 3143, 3144] {
+        crate::hosts::fake::get(h).respond("-member", "SECRET-HOOK-VALUE");
+    }
+    let rev = replace_now(&s, &id, 1).await;
+    assert!(run(&s, &rev).await);
+    let events = events_of(&s, &id).await;
+    assert!(events.iter().any(|e| e.kind == "hookOutput"));
+    for e in events {
+        assert!(!e.detail.contains("SECRET-HOOK-VALUE"));
+        if e.kind == "hookOutput" {
+            assert_eq!(detail(&e)["code"], 0);
+            assert!(
+                detail(&e)["output"]
+                    .as_str()
+                    .unwrap()
+                    .contains("deployment.output.exitCode")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn concurrent_manual_replace_is_busy_and_blocks_other_mutations() {
+    let (_dir, s, id) = hooked([3151, 3152, 3153, 3154], false).await;
+    let before = row(&s, &id).await;
+    let pending = sequence::begin(
+        &s,
+        &admin(1),
+        sequence::Job {
+            workspace: 1.into(),
+            deployment: before.id.into(),
+            role: "nats".into(),
+            index: 1,
+            trigger: replace::ReplaceTrigger::Manual,
+            actor: 1.into(),
+        },
+        Some(before.version),
+    )
+    .await
+    .unwrap();
+    let error = replace_api(&s, admin(1), &id, "nats", 0, before.version)
+        .await
+        .unwrap_err();
+    assert_eq!(key(error), "deployment.failoverBusy");
+    let error = remove(State(s.clone()), admin(1), Path(("1".into(), id.clone())))
+        .await
+        .unwrap_err();
+    assert_eq!(key(error), "deployment.failoverBusy");
+    let error = update_spec(&s, &id, &replicated_spec("2.1"))
+        .await
+        .unwrap_err();
+    assert_eq!(key(error), "deployment.failoverBusy");
+    let error = scheduled(&s, admin(1), &id, false).await.unwrap_err();
+    assert_eq!(key(error), "deployment.failoverBusy");
+    crate::hosts::fake::get(3151).fail_on("leave-member", "stop here");
+    assert_eq!(
+        sequence::run(s.clone(), pending).await.unwrap(),
+        sequence::Outcome::Failed {
+            reason: "hookFailed"
+        }
+    );
+    idle(&s, &id).await;
+    assert_eq!(row(&s, &id).await.version, before.version);
+}
+
 #[tokio::test]
 async fn manual_replace_creates_manual_replace_revision() {
     let (_dir, s, id) = deployed([2011, 2012, 2013, 2014], replicated_spec("2")).await;
@@ -444,13 +728,17 @@ async fn manual_replace_creates_manual_replace_revision() {
     assert_eq!(after.version, before.version + 2);
     let events = events_of(&s, &id).await;
     let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
-    assert_eq!(kinds, ["replaceStarted", "fenced", "fenced"]);
+    assert_eq!(
+        kinds,
+        ["replaceStarted", "fenced", "fenced", "revisionQueued"]
+    );
     assert_eq!(detail(&events[1])["pending"], true);
     assert_eq!(events[1].revision_id, before.current_revision);
     assert_eq!(detail(&events[2])["stopped"], true);
-    for e in &events {
+    for e in &events[..3] {
         assert_eq!((e.instance.as_str(), e.host_id), ("nats-1", 2012));
     }
+    assert_eq!(events[3].host_id, 2014);
     // The trigger is stored as a message key, rendered in each reader's language.
     let started = detail(&events[0]);
     assert!(
@@ -534,7 +822,12 @@ async fn manual_replace_stops_instance_on_reachable_old_host() {
         (2032, "nats-1")
     );
     assert!(fences[0].cleared_at > 0);
-    let fenced = events_of(&s, &id).await.pop().unwrap();
+    let fenced = events_of(&s, &id)
+        .await
+        .into_iter()
+        .rev()
+        .find(|e| e.kind == "fenced")
+        .unwrap();
     assert_eq!(fenced.kind, "fenced");
     assert_eq!(detail(&fenced)["stopped"], true);
     assert!(run(&s, &rev).await);
@@ -547,7 +840,12 @@ async fn manual_replace_stops_instance_on_reachable_old_host() {
     let fences = fences_of(&s, &id).await;
     assert_eq!(fences.len(), 2);
     assert_eq!((fences[1].host_id, fences[1].cleared_at), (2031, 0));
-    let fenced = events_of(&s, &id).await.pop().unwrap();
+    let fenced = events_of(&s, &id)
+        .await
+        .into_iter()
+        .rev()
+        .find(|e| e.kind == "fenced")
+        .unwrap();
     assert_eq!((fenced.kind.as_str(), fenced.host_id), ("fenced", 2031));
     assert_eq!(detail(&fenced)["stopped"], false);
     // The cleared fence let 2032 take the instance.
@@ -831,13 +1129,13 @@ async fn failure_reasons_say_whether_binding_moved() {
         .await
         .unwrap();
     let version = row(&s, &id).await.version;
-    let error = replace_api(&s, admin(1), &id, "nats", 1, version)
+    replace_api(&s, admin(1), &id, "nats", 1, version)
         .await
-        .unwrap_err();
-    assert_eq!(key(error), "blueprint.replaceNoCandidate");
+        .unwrap();
+    idle(&s, &id).await;
     let d = failed(events_of(&s, &id).await);
     assert_eq!(d["reason"], "noCandidate");
-    assert!(d.get("bindingMoved").is_none(), "{d}");
+    assert_eq!(d["bindingMoved"], false, "{d}");
     assert!(
         d["message"]
             .as_str()
@@ -856,7 +1154,8 @@ async fn failure_reasons_say_whether_binding_moved() {
         .store(true, std::sync::atomic::Ordering::SeqCst);
     replace_api(&s, admin(1), &id, "nats", 1, version)
         .await
-        .unwrap_err();
+        .unwrap();
+    idle(&s, &id).await;
     let d = failed(events_of(&s, &id).await);
     assert_eq!(
         (d["reason"].as_str(), d["bindingMoved"].as_bool()),
@@ -930,4 +1229,179 @@ async fn skip_respects_changed_variables() {
             t.output
         );
     }
+}
+
+#[tokio::test]
+async fn revoked_actor_fails_operation_without_remote_work() {
+    let (_dir, s, id) = hooked([3161, 3162, 3163, 3164], false).await;
+    let before = row(&s, &id).await;
+    let pending = sequence::begin(
+        &s,
+        &admin(1),
+        sequence::Job {
+            workspace: 1.into(),
+            deployment: before.id.into(),
+            role: "nats".into(),
+            index: 1,
+            trigger: replace::ReplaceTrigger::Manual,
+            actor: 1.into(),
+        },
+        Some(before.version),
+    )
+    .await
+    .unwrap();
+    let operation = pending.operation;
+    crate::entities::users::Entity::update_many()
+        .col_expr(crate::entities::users::Column::Active, Expr::value(0))
+        .filter(crate::entities::users::Column::Id.eq(1))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    for h in [3161, 3162, 3163, 3164] {
+        crate::hosts::fake::get(h).commands.lock().unwrap().clear();
+    }
+    assert_eq!(
+        sequence::run(s.clone(), pending).await.unwrap(),
+        sequence::Outcome::Failed {
+            reason: "actorRevoked"
+        }
+    );
+    for h in [3161, 3162, 3163, 3164] {
+        assert!(
+            crate::hosts::fake::get(h)
+                .commands
+                .lock()
+                .unwrap()
+                .is_empty()
+        );
+    }
+    let events = events_of(&s, &id).await;
+    let failed = events.last().unwrap();
+    assert_eq!(failed.kind, "replaceFailed");
+    assert_eq!(detail(failed)["operation_id"], json!(operation));
+    assert_eq!(
+        row(&s, &id).await.blueprint_binding,
+        before.blueprint_binding
+    );
+    idle(&s, &id).await;
+}
+
+#[tokio::test]
+async fn interrupted_operation_is_closed_under_its_original_id() {
+    let (_dir, s, id) = hooked([3171, 3172, 3173, 3174], false).await;
+    let before = row(&s, &id).await;
+    let job = || sequence::Job {
+        workspace: 1.into(),
+        deployment: before.id.into(),
+        role: "nats".into(),
+        index: 1,
+        trigger: replace::ReplaceTrigger::Manual,
+        actor: 1.into(),
+    };
+    let first = sequence::begin(&s, &admin(1), job(), Some(before.version))
+        .await
+        .unwrap();
+    // Simulate process death and expiry of the lease before any remote side effect.
+    crate::entities::locks::Entity::update_many()
+        .col_expr(
+            crate::entities::locks::Column::ExpiresAt,
+            Expr::value(0_i64),
+        )
+        .filter(crate::entities::locks::Column::Name.eq(format!("failover:{id}")))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let second = sequence::begin(&s, &admin(1), job(), Some(before.version))
+        .await
+        .unwrap();
+    let events = events_of(&s, &id).await;
+    assert_eq!(
+        events.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+        ["replaceStarted", "replaceFailed", "replaceStarted"]
+    );
+    assert_eq!(detail(&events[1])["operation_id"], json!(first.operation));
+    assert_eq!(detail(&events[2])["operation_id"], json!(second.operation));
+    assert_eq!(
+        sequence::run(s.clone(), first).await.unwrap(),
+        sequence::Outcome::Failed {
+            reason: "interrupted"
+        }
+    );
+    assert_eq!(
+        events_of(&s, &id).await.len(),
+        3,
+        "stale owner cannot close the new operation"
+    );
+
+    crate::hosts::fake::get(3171).fail_on("leave-member", "stop here");
+    sequence::run(s.clone(), second).await.unwrap();
+    idle(&s, &id).await;
+}
+
+#[tokio::test]
+async fn failed_peer_health_prevents_leave_and_replacement() {
+    let (_dir, s, id) = hooked([3181, 3182, 3183, 3184], false).await;
+    crate::hosts::fake::get(3181).fail_on("healthy-member", "unhealthy");
+    let before = row(&s, &id).await;
+    replace_api(&s, admin(1), &id, "nats", 1, before.version)
+        .await
+        .unwrap();
+    idle(&s, &id).await;
+    let events = events_of(&s, &id).await;
+    assert_eq!(events.last().unwrap().kind, "needsAttention");
+    assert_eq!(detail(events.last().unwrap())["reason"], "quorumLost");
+    assert!(
+        !events
+            .iter()
+            .any(|e| e.kind == "revisionQueued" || detail(e)["hook"] == "leave")
+    );
+    assert_eq!(
+        row(&s, &id).await.blueprint_binding,
+        before.blueprint_binding
+    );
+}
+
+#[tokio::test]
+async fn leave_selects_a_peer_that_passed_health_revalidation() {
+    let hosts = [3191, 3192, 3193, 3194, 3195, 3196];
+    let (_dir, s) = fixture(&hosts).await;
+    for h in hosts {
+        tag_host(&s, "mq", h).await;
+    }
+    let mut template: Value = serde_json::from_str(&replicated()).unwrap();
+    template["roles"][0]["hooks"] =
+        json!({"healthy": ["healthy-member"], "leave": ["leave-member"]});
+    replicated_template_with(&s, template.to_string()).await;
+    let mut spec = replicated_spec("2");
+    spec["roles"]["nats"]["instances"] = json!(5);
+    let id = create_app(&s, spec_body(&spec)).await.unwrap();
+    assert!(run_first(&s, &id, &[]).await);
+    land(&s, &id).await;
+    let before = row(&s, &id).await;
+    crate::hosts::fake::get(3191).fail_on("healthy-member", "not healthy");
+    // Three of the four peers pass: quorum is met; the first peer is excluded.
+    crate::hosts::fake::get(3193).fail_on("leave-member", "stop after choosing a healthy peer");
+    replace_api(&s, admin(1), &id, "nats", 1, before.version)
+        .await
+        .unwrap();
+    idle(&s, &id).await;
+    let events = events_of(&s, &id).await;
+    let leave = events
+        .iter()
+        .find(|e| e.kind == "hookOutput" && detail(e)["hook"] == "leave")
+        .unwrap();
+    assert_eq!(leave.host_id, 3193);
+    assert!(
+        !crate::hosts::fake::get(3191)
+            .commands
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|c| c.contains("leave-member"))
+    );
+    assert_eq!(detail(events.last().unwrap())["reason"], "hookFailed");
+    assert_eq!(
+        row(&s, &id).await.blueprint_binding,
+        before.blueprint_binding
+    );
 }

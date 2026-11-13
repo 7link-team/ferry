@@ -205,9 +205,9 @@ pub(crate) enum Hook { Join, Leave, Healthy }
 /// 用 groups::compiled(app) 中该实例的 Context 以 Phase::Instance 渲染每个 argv 项，然后：
 /// docker: `timeout <secs> docker exec <project>-<instance> <argv…>`；native: `cd <dir> && FERRY_INSTANCE=<i> FERRY_ROLE=<r> timeout <secs> <argv…>`（均经 quote）。
 pub(crate) fn hook_command(app: &apps::Model, instance: &str, argv: &[String], ctx: &Context, timeout_secs: u64) -> Result<String>;
-pub(crate) struct HookRun { pub code: i32, pub output: String /*StoredText*/ }
+pub(crate) struct HookRun { pub code: i32 } // output is persisted as bounded StoredText in hookOutput
 /// 经 remote::open 执行；输出按 execution_output 的 protected 规则脱敏（当前修订有变量快照或变量绑定即 protected，只保留退出码），截断 8 KiB；记 hookOutput 事件。
-pub(crate) async fn run(s: &AppState, app: &apps::Model, host: Id, instance: &str, hook: Hook, argv: &[String], timeout_secs: u64) -> Result<HookRun>;
+pub(crate) async fn run(s: &AppState, app: &apps::Model, host: Id, instance: &str, hook: Hook, argv: &[String], timeout_secs: u64, operation: Id) -> Result<HookRun>;
 pub(crate) const HOOK_TIMEOUT_SECS: u64 = 120;
 pub(crate) const HEALTHY_ATTEMPT_SECS: u64 = 15;
 // sequence.rs
@@ -215,22 +215,26 @@ pub(crate) struct Job { pub workspace: Id, pub deployment: Id, pub role: String,
 pub(crate) enum Outcome { Succeeded { revision: Id }, Failed { reason: &'static str }, Manual { reason: &'static str } }
 pub(crate) fn quorum_ok(members: usize, healthy_excluding_failed: usize) -> bool;   // healthy >= members/2 + 1
 /// 获取部署动作锁 `failover:<deployment>`（locks 表，TTL 120s，执行中每 30s 续期）；若有未结束的 replaceStarted 先记 replaceFailed{interrupted}；
-/// 记 replaceStarted；B 类：统计健康成员（有 healthy 钩子则逐个执行，否则用监控实例状态 ≠ down 且主机不陈旧）→ !quorum_ok 时记 needsAttention{quorumLost} 返回 Manual；
-/// 有 leave 钩子则在第一个健康同伴上执行，失败 → Failed{hookFailed}；然后 replace_instance。返回修订 ID。
-pub(crate) async fn begin(s: &AppState, scope: &Scope, job: &Job) -> Result<std::result::Result<Id, Outcome>>;
+/// 同步部分仅统计监控实例状态 ≠ down 且主机不陈旧的同伴；仲裁不足记 needsAttention{quorumLost} 并返回409；
+/// 记 replaceStarted，返回 Pending.operation（开始事件 ID），不调用远程通道。
+pub(crate) struct Pending { pub operation: Id, /* internal job, checked snapshot, lease owner, peers */ }
+pub(crate) async fn begin(s: &AppState, scope: &Scope, job: Job, expected: Option<i64>) -> Result<Pending>;
+/// 后台先用 healthy 钩子复核同伴仲裁，再在健康同伴执行 leave；失败则不替换。调用现有替换执行器，记 revisionQueued 关联修订；
 /// 轮询修订终态（间隔 2s，上限 2×healthTimeout+600s）→ 失败 Failed{revisionFailed}；B 类：join 钩子（新实例内）→ healthy 钩子每 5s 一次直至 healthTimeout，
 /// 无钩子时用监控实例状态 up，监控无数据（unknown）则以修订自身的就绪等待为准 → 记 replaceSucceeded / replaceFailed；第 3 次连续失败追加 needsAttention{tooManyFailures}；释放锁。
-pub(crate) async fn finish(s: AppState, job: Job, revision: Id) -> Outcome;
+pub(crate) async fn run(s: AppState, pending: Pending) -> Result<Outcome>;
 ```
 - 手动 API（用户确认：请求不得长时间阻塞）：同步部分只做校验、类型/驱动判定、取动作锁与仲裁检查（不执行任何远程钩子），记录操作后立即返回 202 `{"operation_id": event_id}`；leave 钩子、预览/修订执行、join、healthy 全部在 `tokio::spawn` 中完成。新修订通过后续事件的 `revision_id` 与 `detail.operation_id` 关联到操作；失败也保留该关联。`Manual{quorumLost}` → 409 `deployment.replaceQuorumLost`；锁被占用 → 409 `deployment.failoverBusy`。手动替换不受冷却限制，但仍计入连续失败。
 
-- [ ] Step 1 失败测试（sequence.rs 单元）：`quorum_rule`（(3,2)→true、(3,1)→false、(5,3)→true、(5,2)→false、(1,0)→false）。
-- [ ] Step 2 失败测试（hooks.rs 单元）：`hook_command_docker_and_native`（argv 中 `{{ .Instance.Name }}` 渲染为 `nats-1`；含空格与单引号的项被 quote；docker 形如 `timeout 120 docker exec 'deployment-1-9-nats-1' …`；native 以 `cd '<dir>' &&` 开头）。
-- [ ] Step 3 失败测试（failover_tests.rs）：`class_b_runs_leave_replace_join_healthy_in_order`（蓝图 nats 角色带三个钩子；FakeHost 记录：leave 在健康同伴、之后新主机先出现 `docker run`，再 join、healthy 在新主机；事件顺序 replaceStarted → hookOutput(leave) → hookOutput(join) → hookOutput(healthy) → replaceSucceeded）、`quorum_loss_goes_manual`（3 成员中两台主机 `unreachable`：不产生新修订；两实例分别记 needsAttention{quorumLost}；API 返回 409）、`leave_hook_failure_stops_before_replacing`（leave 退出 1 → replaceFailed{hookFailed}，绑定不变，无新修订）、`healthy_timeout_records_failure`（healthy 始终退出 1，`update.healthTimeout` 设 2 → replaceFailed{unhealthy}）、`hook_output_redacted_when_protected`（部署引用秘密变量：hookOutput 的 detail 只含退出码，不含 FakeHost 返回的 stdout 文本）、`concurrent_manual_replace_is_busy`（锁已被占 → 409 `deployment.failoverBusy`）。
-- [ ] Step 4 `cargo test -p ferry-server -- deployments::sequence deployments::hooks failover_tests::class_b failover_tests::quorum failover_tests::leave failover_tests::healthy failover_tests::hook_output failover_tests::concurrent` → FAIL。
-- [ ] Step 5 实现；六语补键。
-- [ ] Step 6 同一命令 PASS；全量 `cargo test -p ferry-server` PASS。
-- [ ] Step 7 Commit `feat(deployments): hook runner and one-member-at-a-time replacement sequence`
+- [x] Step 1 失败测试（sequence.rs 单元）：`quorum_rule`（(3,2)→true、(3,1)→false、(5,3)→true、(5,2)→false、(1,0)→false）。
+- [x] Step 2 失败测试（hooks.rs 单元）：`hook_command_docker_and_native`（argv 中 `{{ .Instance.Name }}` 渲染为 `nats-1`；含空格与单引号的项被 quote；docker 形如 `timeout 120 docker exec 'deployment-1-9-nats-1' …`；native 以 `cd '<dir>' &&` 开头）。
+- [x] Step 3 失败测试（failover_tests.rs）：`class_b_runs_leave_replace_join_healthy_in_order`（蓝图 nats 角色带三个钩子；FakeHost 记录：leave 在健康同伴、之后新主机先出现 `docker run`，再 join、healthy 在新主机；事件顺序 replaceStarted → hookOutput(leave) → hookOutput(join) → hookOutput(healthy) → replaceSucceeded）、`quorum_loss_goes_manual`（3 成员中两台主机 `unreachable`：不产生新修订；两实例分别记 needsAttention{quorumLost}；API 返回 409）、`leave_hook_failure_stops_before_replacing`（leave 退出 1 → replaceFailed{hookFailed}，绑定不变，无新修订）、`healthy_timeout_records_failure`（healthy 始终退出 1，`update.healthTimeout` 设 2 → replaceFailed{unhealthy}）、`hook_output_redacted_when_protected`（部署引用秘密变量：hookOutput 的 detail 只含退出码，不含 FakeHost 返回的 stdout 文本）、`concurrent_manual_replace_is_busy`（锁已被占 → 409 `deployment.failoverBusy`）。
+- [x] Step 4 `cargo test -p ferry-server deployments::` → FAIL。
+- [x] Step 5 实现；六语补键。
+- [x] Step 6 同一命令 PASS；全量 `cargo test -p ferry-server` PASS。
+- [x] Step 7 Commit `feat(deployments): hook runner and one-member-at-a-time replacement sequence`
+
+> Task5 local acceptance: full workspace1034PASS (server926), final source deployment102PASS/1existing ignored; cargo check/workspace, frontend/server builds, CLI smoke and static checks PASS. Evidence: data/maintenance/p3-task5-{workspace-final,deployments-final,check,build,cli-smoke,static-final}.log. Runtime tests use FakeHost and real SQLite/handlers; live Linux failover remains Task10. Local checkpoint only, no merge/push/4291 update.
 
 ### Task 6: 协调器循环、租约、冷却/人工确认、恢复后解除隔离、告警
 
@@ -241,7 +245,7 @@ pub(crate) async fn finish(s: AppState, job: Job, revision: Id) -> Outcome;
 - Modify: `crates/server/src/main.rs`（spawn + 路由）、`crates/server/src/deployments/mod.rs`（`get` 返回 `failover` 摘要）、`crates/server/src/notifications/alerts.rs`（新指标）、`crates/server/src/i18n/deployment-*.json`（含告警文案 `deployment.alert.failoverAttention`/`failoverRecovered`）
 
 **Interfaces:**
-- Consumes: Task 2 全部；Task 3 `events::*`；Task 4 `fence`/`stop_command`/`fenced_hosts`；Task 5 `sequence::{Job,begin,finish}`。
+- Consumes: Task 2 全部；Task 3 `events::*`；Task 4 `fence`/`stop_command`/`fenced_hosts`；Task 5 `sequence::{Job,begin,run}`。
 - Produces:
 ```rust
 pub(crate) const TICK: Duration = Duration::from_secs(15);

@@ -9,7 +9,9 @@ pub use specs::placement;
 #[allow(dead_code)]
 pub(crate) mod events;
 mod groups;
+mod hooks;
 pub(crate) mod replace;
+pub(crate) mod sequence;
 use crate::error::{Json, Path, Query};
 use crate::hosts::channel::HostChannel;
 use crate::{
@@ -553,6 +555,7 @@ pub async fn update(
         ));
     }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    sequence::ensure_idle(&tx, r.id.into()).await?;
     let current = scoped(&tx, &scope, &id).await?;
     let category = b.category.as_deref().unwrap_or(&current.category);
     check_category(&tx, &scope, category, Some(&current.category)).await?;
@@ -607,6 +610,7 @@ pub async fn remove(
     scope.require("deployments.delete")?;
     let r = scoped(&s.db, &scope, &id).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    sequence::ensure_idle(&tx, r.id.into()).await?;
     crate::notifications::alerts::ensure_unreferenced(
         &tx,
         scope.workspace_id,
@@ -1499,6 +1503,9 @@ async fn trigger(
     };
     let tx = crate::variables::transaction(s, scope.workspace_id).await?;
     let r = scoped(&tx, scope, id).await?;
+    if !replace::ACTIONS.contains(&action) {
+        sequence::ensure_idle(&tx, r.id.into()).await?;
+    }
     if restart && r.state != "succeeded" {
         return Err(ApiError::localized(
             axum::http::StatusCode::CONFLICT,
