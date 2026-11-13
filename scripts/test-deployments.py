@@ -372,6 +372,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     output.append('### target '+str(target.get('host_id'))+' '+str(target.get('state'))+'\n'+str(target.get('output')))
                 for _,child,_ in fixtures:
                     output.append('### '+child+'\n'+fixture_docker(child,'ps','-a').stdout.decode(errors='replace'))
+                    output.append(subprocess.run(['docker','exec',child,'sh','-c','tail -80 /tmp/fixture-docker.log 2>/dev/null || true'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT).stdout.decode(errors='replace'))
                     for container in fixture_docker(child,'ps','-aq').stdout.decode(errors='replace').split():
                         output.append(fixture_docker(child,'logs','--tail','80',container).stdout.decode(errors='replace'))
                 if mode=='stack':
@@ -411,8 +412,10 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 for index in range(4):
                     child=f'{name}-bp-{index}'
                     extra_containers.append(child)
-                    command(['docker','run','-d','--name',child,'--privileged','--cgroupns=private','--network',network,'--add-host','host.docker.internal:host-gateway','deployment-live-test-'+mode])
-                    command(['docker','exec','-d',child,'nested-daemon','--host=unix:///var/run/docker.sock','--storage-driver=vfs'])
+                    # Match the Swarm fixtures: reboot clears runtime PIDs/sockets,
+                    # while /var/lib/docker and its old workload containers persist.
+                    command(['docker','run','-d','--name',child,'--privileged','--cgroupns=private','--tmpfs','/run','--network',network,'--add-host','host.docker.internal:host-gateway','deployment-live-test-'+mode,'sh','-c','mkdir -p /run/sshd && exec /usr/sbin/sshd -D -e'])
+                    command(['docker','exec','-d',child,'sh','-c','exec nested-daemon --host=unix:///var/run/docker.sock --storage-driver=vfs >/tmp/fixture-docker.log 2>&1'])
                     eventually(lambda child=child:fixture_docker(child,'info').returncode==0,120)
                     ip=json.loads(command(['docker','inspect',child]))[0]['NetworkSettings']['Networks'][network]['IPAddress']
                     if index==0:
@@ -767,7 +770,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     check('alert-only deployment never replaces a member',not any(e['kind']=='replaceStarted' for e in alert_events))
                     check('alert-only deployment binding stays unchanged',app(alert_id)['blueprint_binding']==alert_bound)
                     command(['docker','start',fixtures[1][1]])
-                    command(['docker','exec','-d',fixtures[1][1],'nested-daemon','--host=unix:///var/run/docker.sock','--storage-driver=vfs'])
+                    command(['docker','exec','-d',fixtures[1][1],'sh','-c','exec nested-daemon --host=unix:///var/run/docker.sock --storage-driver=vfs >/tmp/fixture-docker.log 2>&1'])
                     eventually(lambda:fixture_docker(fixtures[1][1],'info').returncode==0,120)
                     eventually(lambda:api(f'/workspaces/{workspace_ops}/nodes/{host_ids[1]}/connection-tests',{},status=200)['ok'],120)
                     for id in [nginx_id,nats_id]:
