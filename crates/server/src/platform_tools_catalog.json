@@ -3699,7 +3699,7 @@
     "method": "GET",
     "handler": "node_catalog",
     "source": "crates/server/src/workflows/integration.rs",
-    "signature": "async fn node_catalog(scope: Scope, Path(_): Path<String>) -> Result<Json<Value>>",
+    "signature": "async fn node_catalog(\n    scope: Scope,\n    Path(_): Path<String>,\n    Query(query): Query<std::collections::HashMap<String, String>>,\n) -> Result<Json<Value>>",
     "definitions": [],
     "permission_checks": []
   },
