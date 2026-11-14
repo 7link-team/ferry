@@ -545,7 +545,7 @@ try {
   await page.screenshot({ path: join(work, 'host-hole-form-1440.png'), fullPage: true });
   result.screenshots.push('host-hole-form-1440.png');
   await page.getByLabel('名称', { exact: true }).fill('Manual tab preview');
-  await page.getByLabel('本地端口', { exact: true }).fill(String(ports.manual));
+  await page.getByLabel('端口', { exact: true }).fill(String(ports.manual));
   await page.getByRole('button', { name: /^(创建|保存|提交)$/ }).first().click();
   const manual = await until('manual preview created', async () => {
     const rows = await api(`${root}/holes?host_id=${host}&q=Manual%20tab%20preview`);

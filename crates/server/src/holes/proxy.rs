@@ -524,13 +524,33 @@ async fn pump(
 
 type Client = hyper_util::client::legacy::Client<Connector, http_body_util::Limited<Body>>;
 
-static CLIENT: LazyLock<Client> = LazyLock::new(|| {
+fn build_client() -> Client {
     hyper_util::client::legacy::Client::builder(TokioExecutor::new())
         .pool_idle_timeout(POOL_IDLE)
         .pool_timer(TokioTimer::new())
         .pool_max_idle_per_host(8)
         .build(Connector)
-});
+}
+
+/// One pool for the process: its idle reaper runs on the server's runtime.
+#[cfg(not(test))]
+static CLIENT: LazyLock<Client> = LazyLock::new(build_client);
+#[cfg(not(test))]
+fn client() -> Client {
+    CLIENT.clone()
+}
+
+// Each test has its own runtime. A process-wide pool would leave its idle
+// reaper on whichever runtime used it first, and stop reaping once that test
+// ended. Per-thread pools keep every reaper on the runtime that uses it.
+#[cfg(test)]
+thread_local! {
+    static CLIENT: Client = build_client();
+}
+#[cfg(test)]
+fn client() -> Client {
+    CLIENT.with(Client::clone)
+}
 
 // -------------------------------------------------------------- routes
 
@@ -701,7 +721,7 @@ pub(super) async fn serve_entry(
     let upstream_request =
         Request::from_parts(parts, http_body_util::Limited::new(body, BODY_LIMIT));
     let mut response =
-        match tokio::time::timeout(RESPONSE_TIMEOUT, CLIENT.request(upstream_request)).await {
+        match tokio::time::timeout(RESPONSE_TIMEOUT, client().request(upstream_request)).await {
             Err(_) => return refuse(StatusCode::GATEWAY_TIMEOUT, "holes.timeout"),
             Ok(Err(error)) => return failure(&error),
             Ok(Ok(response)) => response,

@@ -634,7 +634,7 @@ export function holesForms({
             },
             {
               key: "target_port",
-              label: "Local port",
+              label: "Port",
               labelKey: key("port"),
               type: "number",
               required: true,
