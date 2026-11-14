@@ -102,8 +102,15 @@ try {
       await page.goto(origin + path, { waitUntil: 'commit' });
       const select = languageTrigger(page);
       await select.waitFor({ state: 'visible' });
-      const box = await select.boundingBox();
-      assert(box && box.x >= 0 && box.x + box.width <= width + 1, `${width}px selector outside viewport: ${path}`);
+      // The header reflows while workspace data and long translations load;
+      // judge the settled layout, so a persistent overflow still fails.
+      let box;
+      for (let attempt = 0; attempt < 25; attempt++) {
+        box = await select.boundingBox();
+        if (box && box.x >= 0 && box.x + box.width <= width + 1) break;
+        await page.waitForTimeout(200);
+      }
+      assert(box && box.x >= 0 && box.x + box.width <= width + 1, `${width}px selector outside viewport: ${path} ${JSON.stringify(box)}`);
       const overlap = await select.evaluate(element => {
         const own = element.getBoundingClientRect();
         return [...element.closest('header').querySelectorAll('button, a')].some(other => {
