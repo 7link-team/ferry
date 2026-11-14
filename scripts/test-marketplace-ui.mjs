@@ -130,7 +130,8 @@ try {
       const native=selected.id===nativeExample.id;
       await p.setViewportSize({width,height:900});
       await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${selected.id}`);
-      const generator=p.getByRole('dialog');
+      // Application creation shows the template chooser as a page section (two steps); ?template= opens its parameter step.
+      const generator=p.locator('section[data-template-selection]');
       if(native){
         const pipelineParameter=JSON.parse(selected.parameters).find(parameter=>parameter.name==='pipeline');
         const pipelineInput=generator.getByRole('textbox',{name:pipelineParameter.label,exact:true});
@@ -167,7 +168,7 @@ try {
     for(const width of [1440,900,390,320]){
       await p.setViewportSize({width,height:900});
       await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${natsExample.id}`);
-      const generator=p.getByRole('dialog');
+      const generator=p.locator('section[data-template-selection]');
       for(const parameter of JSON.parse(natsExample.parameters)){
         const label=new RegExp('^'+parameter.label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
         if(parameter.name==='token') await generator.getByRole('textbox',{name:label}).fill('nats-client-secret');
@@ -192,7 +193,7 @@ try {
     for(const width of [1440,900,390,320]){
       await p.setViewportSize({width,height:900});
       await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${redisExample.id}`);
-      const generator=p.getByRole('dialog');
+      const generator=p.locator('section[data-template-selection]');
       for(const parameter of JSON.parse(redisExample.parameters)){
         const label=new RegExp('^'+parameter.label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
         if(parameter.name==='password') await generator.getByRole('textbox',{name:label}).fill('redis-auth-secret');

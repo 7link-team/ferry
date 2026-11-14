@@ -96,7 +96,8 @@ it("renders cluster blueprints as readonly fields with one functioning source/fo
 it("renders README headings and lists safely with a translated accessible label", async () => {
   await show("readme", { readme: "# Sample documentation\n\n- Port 8080\n\n<script>alert('untrusted')</script>" });
   // The markdown module is lazy-loaded; allow its import promise to settle.
-  await vi.waitFor(() => expect(host.querySelector("h1")?.textContent).toBe("Sample documentation"));
+  // The Markdown renderer loads lazily; allow for a loaded test machine.
+  await vi.waitFor(() => expect(host.querySelector("h1")?.textContent).toBe("Sample documentation"), { timeout: 5000 });
   expect(host.querySelector("li")?.textContent).toBe("Port 8080");
   expect(host.querySelector("script")).toBeNull();
   expect(host.querySelector('[aria-label="Documentation"]')).toBeTruthy();

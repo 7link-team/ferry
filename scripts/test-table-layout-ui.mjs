@@ -74,11 +74,14 @@ try {
       const rect = e => { const r = (e || table).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height }; };
       const body = table.querySelector('tbody tr');
       const sequenceIndex = [...table.querySelectorAll('thead th')].findIndex(cell => cell.textContent.trim() === '序号');
-      return { viewport: innerHeight, width: innerWidth, footer: rect(footer), scroll: rect(scroll), header: rect(table.querySelector('thead')), first: rect(body.firstElementChild), last: rect(body.lastElementChild), sequence: rect(body.children[sequenceIndex]), data: rect(body.children[sequenceIndex + 1]), scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight, scrollWidth: scroll.scrollWidth, clientWidth: scroll.clientWidth, pageHeight: document.documentElement.scrollHeight, pageWidth: document.documentElement.scrollWidth };
+      // Below md the shell docks a bottom navigation bar; the list then fills down to that bar.
+      const dock = [...document.querySelectorAll('nav[aria-label="底部导航"]')].find(nav => nav.getClientRects().length);
+      return { viewport: innerHeight, width: innerWidth, dock: dock ? rect(dock) : null, footer: rect(footer), scroll: rect(scroll), header: rect(table.querySelector('thead')), first: rect(body.firstElementChild), last: rect(body.lastElementChild), sequence: rect(body.children[sequenceIndex]), data: rect(body.children[sequenceIndex + 1]), scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight, scrollWidth: scroll.scrollWidth, clientWidth: scroll.clientWidth, pageHeight: document.documentElement.scrollHeight, pageWidth: document.documentElement.scrollWidth };
     });
   }
   function fills(g, label, padding = 0) {
-    assert(Math.abs(g.footer.bottom - (g.viewport - padding)) < 2, `${label}: footer must stay at viewport bottom: ${JSON.stringify(g)}`);
+    if (g.dock) assert(Math.abs(g.dock.bottom - g.viewport) < 2 && g.dock.height <= 96, `${label}: bottom navigation must be docked at viewport bottom: ${JSON.stringify(g)}`);
+    assert(Math.abs(g.footer.bottom - ((g.dock ? g.dock.top : g.viewport) - padding)) < 2, `${label}: footer must stay at viewport bottom: ${JSON.stringify(g)}`);
     assert(g.scroll.height > 100, `${label}: data viewport collapsed`);
     assert(g.scroll.bottom <= g.footer.top, `${label}: footer overlaps data`);
     assert(g.pageHeight <= g.viewport + 1 && g.pageWidth <= g.width + 1, `${label}: outer page scrolls`);
@@ -189,7 +192,7 @@ try {
   await page.getByRole('navigation', { name: '配置分类' }).waitFor();
   // Settings are grouped; the repository group is the long one.
   await page.getByRole('navigation', { name: '配置分类' }).getByRole('button', { name: '仓库关联', exact: true }).click();
-  await page.getByLabel('平台公开访问地址', { exact: true }).waitFor();
+  await page.getByLabel('当前回调地址', { exact: true }).waitFor();
   const formScroll = await page.locator('main').evaluate(main => {
     const el = [...main.querySelectorAll('*'), main].find(el => el.scrollHeight > el.clientHeight && ['auto','scroll'].includes(getComputedStyle(el).overflowY));
     if (!el) return false;

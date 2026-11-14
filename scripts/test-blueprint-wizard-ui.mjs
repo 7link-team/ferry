@@ -1,7 +1,8 @@
 /**
  * Real Chromium: blueprint deployment wizard from the market to the detail topology.
  * Three hosts carry a tag (a fourth does not) → the market's nats-cluster "Deploy" → every
- * wizard step → YAML round trip (an invalid YAML locks the form) → placement preview with one
+ * section of the continuous configuration form (basics, target with driver/roles/placement,
+ * parameters; the former numbered steps were merged by design) → YAML round trip (an invalid YAML locks the form) → placement preview with one
  * host changed by hand (addresses stay read-only) → create → detail topology. Repeated at
  * 1440/900/390/320 with screenshots, no page-level horizontal scroll, and the sticky bottom
  * action visible and clickable. Creation only: nothing is deployed, so no Docker is needed.
@@ -88,12 +89,18 @@ try {
   const errors = [];
   page.on('pageerror', e => errors.push(e.stack ?? e.message));
   page.on('dialog', d => d.accept());
-  const yamlEditor = page.locator('.monaco-editor .view-lines');
+  // The blueprint wizard is one continuous form (ScrollFormSections): basics, deployment target
+  // (driver, roles and hosts, placement preview), the read-only definition and template parameters.
+  const basics = page.getByRole('region', { name: '基本信息', exact: true });
+  const target = page.getByRole('region', { name: '部署目标', exact: true });
+  const params = page.getByRole('region', { name: '模板参数', exact: true });
+  const yamlEditor = params.locator('.monaco-editor .view-lines');
   const readYaml = async () => { await yamlEditor.click(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.press('ControlOrMeta+C'); return (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n'); };
   const setYaml = async value => { await yamlEditor.click(); await page.keyboard.press('ControlOrMeta+A'); await page.evaluate(text => navigator.clipboard.writeText(text), value); await page.keyboard.press('ControlOrMeta+V'); };
   const actions = page.locator('[data-form-actions]');
-  const next = actions.getByRole('button', { name: '下一步', exact: true });
   const createButton = actions.getByRole('button', { name: '创建部署', exact: true });
+  // The single bottom action is enabled once every section is valid and the placement preview is current.
+  const ready = label => eventually(() => createButton.isEnabled(), label);
   const fits = async label => check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${label}: no page-level horizontal scroll`);
   /** The sticky bottom action is inside the viewport, on top at its center, and enabled. */
   const reachable = async (button, label) => {
@@ -119,7 +126,6 @@ try {
     await page.screenshot({ path: join(output, `${name}.png`), fullPage: true });
     if (await scrollMain('end')) { await page.screenshot({ path: join(output, `${name}-end.png`), fullPage: true }); await scrollMain('start'); }
   };
-  const currentStep = () => page.locator('ol[aria-label="向导步骤"] li[aria-current="step"]').innerText();
 
   for (const width of [1440, 900, 390, 320]) {
     console.log(`== ${width}px`);
@@ -140,29 +146,29 @@ try {
     const template = await get(`${root}/app-templates/${templateId}`);
     check(JSON.parse(template.content).metadata?.name === 'nats-cluster', `${width}: market Deploy imported nats-cluster and opened the wizard for it`);
 
-    // ① Template and version.
-    const templateStep = page.getByRole('region', { name: '模板与版本' }).or(page.locator('section[aria-label="模板与版本"]'));
+    // ① Template and version: the version is in the basics section, driver and roles in the target section.
+    const templateStep = target.locator('section[aria-label="模板与版本"]');
     await templateStep.waitFor();
-    check(await templateStep.getByText(`v${template.version}`).isVisible() && await templateStep.getByText('nats', { exact: true }).isVisible(), `${width}: template step shows the version and the nats role`);
+    check(await basics.getByText(`v${template.version}`, { exact: true }).isVisible() && await basics.getByText(template.name, { exact: true }).isVisible() && await templateStep.getByText('nats', { exact: true }).isVisible(), `${width}: template section shows the template, its version and the nats role`);
     // Docker: one instance per host, on the hosts the scheduler picks.
     const driver = templateStep.locator('select').first();
     await driver.selectOption('docker');
     check(await driver.inputValue() === 'docker', `${width}: the docker driver is chosen in the form`);
     await fits(`wizard template ${width}`);
     await shot(`wizard-1-template-${width}`);
-    await reachable(next, `${width} template step`);
-    await next.click();
+    await ready('template section ready');
+    await reachable(createButton, `${width} template section`);
 
-    // ② Values, then the YAML round trip from this step.
-    check((await currentStep()).includes('参数'), `${width}: values step is current`);
-    const clientInput = page.locator('[name="client_port"]');
+    // ② Values, then the YAML round trip from this section.
+    check(await params.locator('section[aria-label="参数"]').isVisible(), `${width}: values section is present`);
+    const clientInput = params.locator('[name="client_port"]');
     await clientInput.waitFor();
     check(await clientInput.inputValue() === '14222', `${width}: values default from the template parameters`);
     await fits(`wizard values ${width}`);
     await shot(`wizard-2-values-${width}`);
-    await reachable(next, `${width} values step`);
+    await reachable(createButton, `${width} values section`);
 
-    await page.getByRole('button', { name: 'YAML', exact: true }).click();
+    await params.getByRole('button', { name: 'YAML', exact: true }).click();
     await yamlEditor.waitFor();
     const fromForm = await readYaml();
     const spec = parse(fromForm);
@@ -173,10 +179,10 @@ try {
     await setYaml(edited);
     await fits(`wizard yaml ${width}`);
     await shot(`wizard-yaml-${width}`);
-    await page.getByRole('button', { name: '表单', exact: true }).click();
+    await params.getByRole('button', { name: '表单', exact: true }).click();
     await clientInput.waitFor();
     check(await clientInput.inputValue() === String(clientPort), `${width}: YAML → form updates the parameter`);
-    await page.getByRole('button', { name: 'YAML', exact: true }).click();
+    await params.getByRole('button', { name: 'YAML', exact: true }).click();
     await yamlEditor.waitFor();
     check((await readYaml()).startsWith('# chosen by the acceptance run'), `${width}: the YAML comment survives the round trip`);
 
@@ -185,20 +191,20 @@ try {
     await setYaml(`${valid}\nunknownSpecKey: true\n`);
     const yamlAlert = page.getByRole('alert').filter({ hasText: '未知字段' });
     await yamlAlert.waitFor();
-    await page.getByRole('button', { name: '表单', exact: true }).click();
+    await params.getByRole('button', { name: '表单', exact: true }).click();
     const locked = page.getByRole('alert').filter({ hasText: 'YAML 规格有错误' });
     await locked.waitFor();
-    check(await clientInput.isDisabled() && await next.isDisabled() && await clientInput.inputValue() === String(clientPort),
-      `${width}: invalid YAML locks the form, keeps the last valid values and blocks Next`);
+    check(await clientInput.isDisabled() && await createButton.isDisabled() && await clientInput.inputValue() === String(clientPort),
+      `${width}: invalid YAML locks the form, keeps the last valid values and blocks creation`);
     await fits(`wizard yaml invalid ${width}`);
     await shot(`wizard-yaml-invalid-${width}`);
     await locked.getByRole('button', { name: '放弃 YAML 修改', exact: true }).click();
     await locked.waitFor({ state: 'detached' });
-    check(await clientInput.isEnabled() && await next.isEnabled(), `${width}: discarding the YAML edit unlocks the form`);
-    await next.click();
+    await ready('form unlocked');
+    check(await clientInput.isEnabled() && await createButton.isEnabled(), `${width}: discarding the YAML edit unlocks the form`);
 
     // ③ Roles and hosts: the tag selector through the form.
-    check((await currentStep()).includes('角色与主机'), `${width}: roles step is current`);
+    check(await target.locator('section[aria-label="角色与主机"]').isVisible(), `${width}: roles section is present`);
     const failureMode = page.getByRole('combobox', { name: '故障处理', exact: true });
     check(await failureMode.inputValue() === 'auto', `${width}: failure handling defaults to automatic`);
     check(await page.getByText('主机失联阈值：90 秒。可在 YAML 中修改 hostDownAfter。', { exact: true }).isVisible(), `${width}: host silence threshold is read-only guidance`);
@@ -210,11 +216,11 @@ try {
     check(await page.getByRole('button', { name: '减少一个 nats 实例' }).isDisabled(), `${width}: instances cannot go below the blueprint minimum`);
     await fits(`wizard roles ${width}`);
     await shot(`wizard-3-roles-${width}`);
-    await reachable(next, `${width} roles step`);
-    await next.click();
+    await ready('roles section ready');
+    await reachable(createButton, `${width} roles section`);
 
     // ④ Placement preview: exactly the tagged hosts, then one host changed by hand.
-    check((await currentStep()).includes('放置预览'), `${width}: placement step is current`);
+    check(await target.locator('section[aria-label="放置预览"]').isVisible(), `${width}: placement section is present`);
     const placement = page.getByRole('region', { name: '放置结果' });
     await placement.waitFor();
     const hostOf = instance => page.getByRole('combobox', { name: `${instance} 的主机`, exact: true });
@@ -240,16 +246,15 @@ try {
     check(await rowOf('nats-0').locator('input, textarea, [contenteditable="true"]').count() === 0, `${width}: the address is read-only`);
     await fits(`wizard placement ${width}`);
     await shot(`wizard-4-placement-${width}`);
-    await reachable(next, `${width} placement step`);
-    await next.click();
+    await ready('placement section ready');
+    await reachable(createButton, `${width} placement section`);
 
-    // ⑤ Confirm and create.
-    check((await currentStep()).includes('确认并创建'), `${width}: confirm step is current`);
+    // ⑤ Name and create (the name lives in the basics section).
     const name = `NATS wizard ${width}`;
-    await page.locator('input[name="name"]').fill(name);
+    await basics.locator('input[name="name"]').fill(name);
     await fits(`wizard confirm ${width}`);
     await shot(`wizard-5-confirm-${width}`);
-    await reachable(createButton, `${width} confirm step`);
+    await reachable(createButton, `${width} confirm`);
     await createButton.click();
     await page.waitForURL(url => !url.pathname.endsWith('/new') && url.pathname.includes('/deployments/'));
     const deploymentId = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1);
@@ -290,7 +295,10 @@ try {
     await page.reload();
     await page.getByRole('button', { name: '编辑部署规格', exact: true }).click();
     await failureMode.waitFor();
-    check(await page.locator('ol[aria-label="向导步骤"] li').count() === 1 && await failureMode.isEnabled(), `${width}: frozen topology keeps only parameters and editable failure handling`);
+    // The detail page has its own read-only sections; inspect only the spec editor that holds failure handling.
+    const specEditor = page.locator('[data-scroll-form-sections]').filter({ has: failureMode }).last();
+    check(await specEditor.getByRole('region', { name: '部署目标', exact: true }).count() === 0 && await specEditor.locator('section[aria-label="角色与主机"], section[aria-label="放置预览"]').count() === 0
+      && await specEditor.getByRole('region', { name: '模板参数', exact: true }).filter({ has: failureMode }).isVisible() && await failureMode.isEnabled(), `${width}: frozen topology keeps only parameters and editable failure handling`);
     await failureMode.selectOption('off');
     await fits(`frozen failover ${width}`);
     await shot(`wizard-frozen-failover-${width}`);

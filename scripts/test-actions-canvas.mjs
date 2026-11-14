@@ -64,7 +64,9 @@ try {
  await ordinaryPanel.getByLabel('运行条件（if）',{exact:true}).selectOption('success()');
  await ordinaryPanel.getByLabel('环境变量.MODE',{exact:true}).fill('production');
  await ordinaryPanel.getByLabel('超时（分钟）',{exact:true}).fill('8');
- await ordinaryPanel.getByRole('checkbox',{name:'失败后继续',exact:true}).check();
+ const continueOnError=ordinaryPanel.getByRole('switch',{name:'失败后继续',exact:true});
+ await continueOnError.click();
+ assert.equal(await continueOnError.getAttribute('aria-checked'),'true');
  let ordinarySource=await page.evaluate(()=>window.canvasDraft.definition);
  let ordinaryWorkflow=parseDocument(ordinarySource).toJS();
  assert.equal(ordinaryWorkflow.jobs.build.steps[0].run,'echo from-form');

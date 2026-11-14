@@ -600,7 +600,13 @@ E2E-FULL-REPORT-01交付记录：生产场景测试及HTML/截图证据已交付
 | README-SHOTS-01 | 待处理 | 用户要求本轮完成后更新本地，再自行制作关键、吸引眼球的生产示例截图放README，图片集中单独目录并用Markdown相对引用。沿用现有截图/README结构，示例数据避免泄露凭据；不提交推送。 |
 | MON-ACTOR-01 | 待验证 | 提交者标注回退已提交df3ee96并推main；4291已备份更新PID16908（release-040-local-update.json），真实浏览器列表无“未知”、显示“X（提交者）”1440/390无溢出（release040b-browser）。待用户刷新验收。 |
 | AI-MODEL-FORM-01 | 待验证 | CC Switch预设（126项，MIT署名）+CLI自定义API只选已有API模型，df3ee96已推main，4291已更新；真实浏览器预设分类/搜索/填充/链接、CLI无内联地址PASS。现有空间无API模型故下拉为空态，选择逻辑由单测覆盖。待用户验收。 |
-| REL-040-01 | 进行中 | v0.4.0-alpha tag在238e93e（release未发布）。main多日CI红均为测试过期：已修platform-ui/prefs/upgrade(avatar,官方市场源)/db-monitor/theme(44px,去粉色)/language/alpha2/theme-entry/workspace-admin/platform-auth/templates/workflow-editor/manifest/typed-values及启动60s、Windows桌面探测60s，本地逐个PASS。产品修复：Native固定构建默认“最新”存run空串被400拒绝→服务端空run视为最新（单测+浏览器3连PASS）。待CI全绿后移tag并核验Release；4291需再更新含此修复。遗留：模板选择分页“固定标题”检查在页面模式下不再有效；资料保存后回到基础资料组。 |
+| REL-040-01 | 进行中 | v0.4.0-alpha tag仍在238e93e（release未发布）。CI从多日全红收敛到1项（8d09168）；此后补齐e2e-build-ui后续从未在CI跑过的约40个浏览器脚本（本地逐个PASS，集群步骤需NATS交CI）。产品修复：Native默认最新构建run空串400；仓库通知结果如实；工作流面板空白滚动；Blueprint基本信息原始键wizard.template；定义树constraints/maxReplicasPerNode无译名；平台设置同存公开地址+OAuth被旧oauth_public_url覆盖致400。待CI全绿后移tag并核验Release。 |
+| WIN-HOST-FILES-01 | 待处理 | Windows主机文件列表（默认隐藏文件过滤）经HostAgent启动powershell判断隐藏属性，在ferry-runner→cmd下挂起15s超时（直接运行210ms）；Linux不走此路径。候选修复：HostAgent目录列表直接读取hidden/system属性，不起PowerShell。 |
+| UI-FOLLOWUP-01 | 待处理 | 390px顶栏44px控件换成三行高153px，表格数据区仅约162px；模板选择分页“固定标题”检查在页面模式下不再有效（需改为滚动页面验证）。 |
+| REPO-DELIVERY-01 | 待验证 | 通知结果“投递中；服务中断不会自动重发”误导：渠道全禁用时记“通知未开启，未发送”；占位改“待发送”；超10分钟仍占位显示“未发送（未开启通知或发送被中断）”，不改历史数据。0ad9de3已推，4291实测89条→未发送、11条未配置。待用户验收。 |
+| WF-PANEL-SCROLL-01 | 待验证 | 工作流节点面板：表单内绝对定位控件逃出面板裁剪导致外层11k空白滚动→面板relative；桌面填满画布框，窄屏画布/面板2:3。0ad9de3已推，4291实测1440/390无溢出。待用户验收。 |
+| WF-NODE-UX-01 | 待处理 | 用户问：节点面板大对象JSON表单过长，YAML是否更好；以及“设置字段”节点看不出靠什么/在哪执行。已答复（data.set在平台服务器内工作流引擎执行，值为常量/表达式，该草稿为早前会话验收数据）。改进方案（执行位置标识、大对象YAML编辑）待用户确认。 |
+| WF-PIPELINE-SOURCE-01 | 待处理 | 用户指出：会话发需求应全部在流水线执行。核实验收草稿113479187989270528：代理在会话内自行查代码洞察，再把结果写死进手动触发snapshot和两个data.set，工作流不取数（验收提示词还禁止主机命令/外网）。根因：节点目录无读取Ferry自身数据的节点、无通用HTTP节点。建议：新增平台数据节点（执行身份、权限校验、默认只读）+HTTP节点；规范会话代理取数必须是节点、触发只收参数、做不到如实说明；样例草稿归档。待用户确认后出设计。 |
 | WF-LEGACY-01 | 待处理 | 用户询问旧流水线是否丢失；4291确认demo空间原流水线23及3次执行完整保留。核对工作流→构建流水线入口/权限，提供原详情链接，不重建或覆盖数据。 |
 | DICT-STATE-01 | 待处理 | 用户明确要求：固定流程/不可随意维护的状态不放字典，清掉数据库记录与子项/初始化/展示读取；只保留可维护业务选项（环境/分类等）。前端状态字典读取已移除，后端清理迁移已补，待回归/更新4291。 |
 | TYPED-UI-01 | 待处理 | 字典与配置项按8092/zh-CN/sys/dicts/1001/edit参考：基本信息/值类型在前→类型约束→匹配类型的值编辑器（富文本/Monaco/图片文件等），控件联动、校验/保存/重开全验证。已用参考公开原型账号登录查看；不照搬原型源码。 |

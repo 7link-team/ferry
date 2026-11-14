@@ -5,7 +5,8 @@ const common = JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/commo
 const resources = JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/resource-domain.json', import.meta.url), 'utf8'));
 import { preview } from 'vite';
 import { chromium } from 'playwright';
-const languageTrigger = page => page.getByRole('button', { name: /^(Language|语言|語言|言語|언어|Bahasa)$/ });
+// The header switcher comes first; /account also has its own preferences switcher.
+const languageTrigger = page => page.getByRole('button', { name: /^(Language|语言|語言|言語|언어|Bahasa)$/ }).first();
 const switchLanguage = async (page, locale) => {
   await languageTrigger(page).click();
   await page.locator('[role="menuitemradio"][lang="' + locale + '"]').click();
@@ -67,16 +68,21 @@ try {
   await page.locator('input[name="name"]').fill('Unsaved profile draft');
   for (const locale of ['en-US', 'zh-CN', 'zh-TW', 'ja-JP', 'ko-KR', 'ms-MY']) {
     await switchLanguage(page, locale);
-    await page.waitForURL(`**/${locale}/account`, { waitUntil: 'commit' });
+    // After the first round the basics group is selected explicitly (?section=basics).
+    await page.waitForURL(new RegExp(`/${locale}/account(\\?section=basics)?$`), { waitUntil: 'commit' });
     await page.getByRole('heading', { level: 1, name: common[locale]['account.title'], exact: true }).waitFor();
-    await page.getByText(common[locale]['account.verifyHelp'], { exact: true }).waitFor();
     assert.equal(await page.locator('input[name="name"]').inputValue(), 'Unsaved profile draft');
-    await page.getByText(common[locale]['account.loginEmail'], { exact: true }).waitFor();
+    // Email and password verification live in the separate security group.
+    await page.getByRole('button', { name: common[locale]['account.security'], exact: true }).click();
+    await page.getByText(common[locale]['account.verifyHelp'], { exact: true }).waitFor();
+    await page.getByText(common[locale]['account.loginEmail'], { exact: true }).first().waitFor();
+    await page.getByRole('button', { name: common[locale]['account.basics'], exact: true }).click();
+    assert.equal(await page.locator('input[name="name"]').inputValue(), 'Unsaved profile draft');
   }
 
   await page.goto(origin + '/en-US/platform/settings/1/edit', { waitUntil: 'commit' });
   await page.getByRole('navigation').getByRole('button', { name: resources['en-US']['runner.settings'], exact: true }).click();
-  const policy = page.getByRole('checkbox', { name: resources['en-US']['runner.defaultAutoUpdate'], exact: true });
+  const policy = page.getByRole('switch', { name: resources['en-US']['runner.defaultAutoUpdate'], exact: true });
   await policy.click();
   const policyLoads = requests.filter(request => request.path === '/platform/settings/1').length;
   for (const locale of Object.keys(resources)) {
@@ -85,7 +91,7 @@ try {
     await help.focus();
     await page.getByRole('tooltip').getByText(resources[locale]['runner.defaultAutoHelp'], { exact: true }).waitFor();
     await help.press('Escape');
-    assert.equal(await page.getByRole('checkbox', { name: resources[locale]['runner.defaultAutoUpdate'], exact: true }).getAttribute('aria-checked'), 'true');
+    assert.equal(await page.getByRole('switch', { name: resources[locale]['runner.defaultAutoUpdate'], exact: true }).getAttribute('aria-checked'), 'true');
   }
   assert.equal(requests.filter(request => request.path === '/platform/settings/1').length, policyLoads);
 

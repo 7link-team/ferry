@@ -372,7 +372,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
   return <ScrollFormSections name={name || template.name} sections={[
     section("basics", commonText("common.basic"), <>{notices}
       <AutoField label={commonText("common.name")} required><Input name="name" className="min-h-11" required disabled={creating || frozen} maxLength={60} value={name} onChange={event => setName(event.target.value)} /></AutoField>
-      <dl className="grid min-w-0 gap-4 sm:grid-cols-2"><div><dt className="text-xs text-muted-foreground">{w("template")}</dt><dd className="mt-1 break-words text-sm">{template.name}</dd></div>
+      <dl className="grid min-w-0 gap-4 sm:grid-cols-2"><div><dt className="text-xs text-muted-foreground">{w("templateName")}</dt><dd className="mt-1 break-words text-sm">{template.name}</dd></div>
         <div><dt className="text-xs text-muted-foreground">{w("templateVersion")}</dt><dd className="mt-1 text-sm">v{spec?.template.version ?? version}</dd></div></dl>
     </>),
     ...(!frozen ? [section("target", commonText("resource-domain:deployment.targetSection"), <>

@@ -38,7 +38,9 @@ try {
     const geometry = await dialog.evaluate(element => {
       const bounds = element.getBoundingClientRect();
       return { width: bounds.width, left: bounds.left, right: bounds.right, overflow: element.scrollWidth - element.clientWidth,
-        controls: [...element.querySelectorAll('[data-notification-channel] input, [data-notification-channel] select, [data-notification-channel] button')].map(control => { const box = control.getBoundingClientRect(); return { left: box.left, right: box.right }; }) };
+        // Radix switches render an aria-hidden, opacity-0, pointer-events:none bubble <input> shifted by translateX(-100%) for native form events;
+        // it is neither visible nor reachable, so only user-facing controls are measured.
+        controls: [...element.querySelectorAll('[data-notification-channel] input:not([aria-hidden="true"]), [data-notification-channel] select, [data-notification-channel] button')].map(control => { const box = control.getBoundingClientRect(); return { left: box.left, right: box.right }; }) };
     });
     assert.ok(geometry.left >= 0 && geometry.right <= width, JSON.stringify({ width, geometry }));
     assert.ok(geometry.overflow <= 1, `dialog overflows at ${width}: ${JSON.stringify(geometry)}`);

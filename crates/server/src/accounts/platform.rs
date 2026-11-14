@@ -867,8 +867,12 @@ pub async fn update_settings(
     if oauth_changed {
         let mut config =
             crate::repositories::auth::OAuthSettings::read(&s, repository_oauth.as_deref())?;
+        // The shared public address is authoritative; a stale legacy
+        // oauth_public_url sent alongside it must not overwrite it.
         config.public_url = addresses.public_url.clone();
-        config.update(&s, &body.oauth)?;
+        let mut patch = body.oauth.clone();
+        patch.remove("oauth_public_url");
+        config.update(&s, &patch)?;
         repository_oauth = Some(config.seal(&s)?);
     }
     platform_state::Entity::update_many()

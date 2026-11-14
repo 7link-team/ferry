@@ -130,7 +130,11 @@ try {
   await platform.getByRole('navigation',{name:'配置分类'}).getByRole('button',{name:'仓库关联',exact:true}).click();
   for (const tab of ['GitHub','GitLab','Gitee','Gitea']) assert.equal(await platform.getByRole('tab',{name:tab,exact:true}).count(),1,`${tab} tab`);
   assert.equal(await platform.getByLabel('允许注册新账号',{exact:true}).count(),0,'other groups stay hidden');
+  assert.equal(await platform.getByLabel('平台公开访问地址',{exact:true}).count(),0,'public address lives in its own group');
+  // The public address that derives the callback URL has its own "访问地址" group.
+  await platform.getByRole('navigation',{name:'配置分类'}).getByRole('button',{name:'访问地址',exact:true}).click();
   await platform.getByLabel('平台公开访问地址',{exact:true}).fill(origin);
+  await platform.getByRole('navigation',{name:'配置分类'}).getByRole('button',{name:'仓库关联',exact:true}).click();
   const initialSettings = await (await context.request.get(`${origin}/api/platform/settings/1`)).json();
   for (const name of ['GitHub','GitLab','Gitee','Gitea']) {
     const key = name.toLowerCase();
@@ -152,7 +156,7 @@ try {
     assert.equal(await platform.getByLabel(`替换${name} ${secretLabel}（不勾选则保留原值）`,{exact:true}).count(),0,'unset secret needs no replace checkbox');
   }
   await platform.getByRole('tab',{name:'GitHub',exact:true}).click();
-  await platform.getByRole('checkbox',{name:'启用 GitHub 网页授权',exact:true}).check();
+  await platform.getByRole('switch',{name:'启用 GitHub 网页授权',exact:true}).check();
   await platform.getByLabel('GitHub Client ID',{exact:true}).fill('fixture-client-id');
   await platform.getByLabel('GitHub Client Secret',{exact:true}).fill('fixture-client-secret');
   await platform.getByLabel('GitHub 网站地址',{exact:true}).fill(providerOrigin);
@@ -167,12 +171,13 @@ try {
   assert.equal(await platform.evaluate(()=>navigator.clipboard.readText()),origin+'/api/repository-providers/callback');
   await platform.getByRole('navigation',{name:'配置分类'}).getByRole('button',{name:'主机代理',exact:true}).click();
   assert.equal(await platform.getByRole('heading',{name:'主机代理',exact:true}).count(),1,'HostAgent is the settings category; auto-upgrade is a field');
-  await platform.getByRole('checkbox',{name:'主机代理 默认自动升级',exact:true}).waitFor();
+  await platform.getByRole('switch',{name:'主机代理 默认自动升级',exact:true}).waitFor();
   for (const theme of ['modern','business','eyeCare','pinkKawaii','neoBrutalism','custom']) {
     for (const dark of [false,true]) {
       await platform.evaluate(({theme,dark})=>{document.documentElement.dataset.theme=theme;document.documentElement.classList.toggle('dark',dark);},{theme,dark});
+      // df3ee96 removed the forced heading color bars (test-ui-shell-avatar asserts their absence); themes must not reintroduce them.
       const backgrounds = await platform.locator('h1,h2,h3').evaluateAll(headings=>headings.filter(element=>element.getClientRects().length).map(element=>getComputedStyle(element).backgroundColor));
-      assert(backgrounds.length>0 && backgrounds.every(color=>color!=='rgba(0, 0, 0, 0)' && color!=='transparent'),`${theme}/${dark}: visible headings have themed backgrounds`);
+      assert(backgrounds.length>0 && backgrounds.every(color=>color==='rgba(0, 0, 0, 0)' || color==='transparent'),`${theme}/${dark}: visible headings have no forced color bars: ${JSON.stringify(backgrounds)}`);
     }
   }
   await platform.evaluate(()=>{document.documentElement.dataset.theme='modern';document.documentElement.classList.remove('dark');});
@@ -279,7 +284,7 @@ try {
   await p.getByRole('button',{name:'选择仓库',exact:true}).click();
   await p.getByRole('menuitemcheckbox',{name:'test-org/team/test-repo',exact:true}).click();
   await p.keyboard.press('Escape');
-  await p.getByRole('checkbox',{name:'持续采集',exact:true}).uncheck();
+  await p.getByRole('switch',{name:'持续采集',exact:true}).uncheck();
   await createInsight.click();
   await p.waitForURL(`**/workspaces/${workspace_tenant}/code-insights`);
   const savedInsights=await (await owner.request.get(`${origin}/api${root}/code-insights`)).json();

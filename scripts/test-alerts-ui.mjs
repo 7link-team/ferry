@@ -75,7 +75,7 @@ try {
   await p.getByRole('textbox',{name:/^名称/}).fill('Offline browser');
   await p.getByRole('combobox',{name:'目标主机',exact:true}).click();
   await p.getByRole('option',{name:'Cron UI runner',exact:true}).click();
-  await p.getByRole('checkbox',{name:'启用',exact:true}).click();
+  await p.getByRole('switch',{name:'启用',exact:true}).click();
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('row').filter({hasText:'Offline browser'}).getByRole('link',{name:'告警事件',exact:true}).click();
   await p.waitForURL(`**/workspaces/${workspace_tenant}/alert-events*`);

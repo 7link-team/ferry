@@ -9,6 +9,7 @@ import { type TemplateParameter } from "./TemplateParametersEditor";
 import { ReferencePicker, RunPicker, pipelineChoices } from "../deployments/manifest/pickers";
 
 const labelKeys: Record<string, string> = {
+  constraints: "deployment.placementConstraints", maxReplicasPerNode: "deployment.maxReplicasPerNode",
   apiVersion: "deployment.definitionVersion", kind: "blueprintDetails.kind", metadata: "blueprintDetails.metadata",
   allowSingleHost: "blueprintDetails.allowSingleHost", drivers: "wizard.driver", supported: "blueprintDetails.supported",
   memberAddressing: "blueprintDetails.memberAddressing", roles: "wizard.roles", identity: "wizard.identity",

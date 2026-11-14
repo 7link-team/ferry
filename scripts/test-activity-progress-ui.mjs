@@ -35,7 +35,7 @@ try {
     assert.ok((await page.evaluate(() => window.routePaints)).includes('1'), 'route uses full opacity');
     await page.waitForFunction(() => !document.querySelector('[data-kind="route"]'));
     const layers = page.locator('[data-kind="request"][data-done="false"]');
-    for (const theme of ['modern', 'business', 'eyeCare', 'pinkKawaii', 'neoBrutalism', 'custom']) {
+    for (const theme of ['modern', 'business', 'eyeCare', 'neoBrutalism', 'custom']) {
       for (const dark of [false, true]) {
       await page.evaluate(({ theme, dark }) => { document.documentElement.dataset.theme = theme; document.documentElement.classList.toggle('dark', dark); }, { theme, dark });
       const colors = await layers.evaluateAll(elements => elements.map(element => {

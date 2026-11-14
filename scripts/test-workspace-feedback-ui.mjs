@@ -17,7 +17,7 @@ try {
     let json = { items: [], total: 0, page: 1, page_size: 20 };
     if (path === '/api/me') json = { user: { id: '1', name: 'Tester', email: 'tester@example.invalid' }, workspaces: [{ id: '1', slug: 'ops', name: 'Workspace', permissions: ['hosts.read', 'pipelines.read', 'host-groups.read', 'pipeline-groups.read', 'members.read', 'members.create'] }] };
     else if (path === '/api/setup') json = { required: false };
-    else if (path.endsWith('/preferences')) { preferenceReads++; json = { default_page_size: 20, dictionaries: {} }; }
+    else if (path.endsWith('/preferences')) { if (path.startsWith('/api/workspaces/')) preferenceReads++; json = { default_page_size: 20, dictionaries: {} }; }
     else if (path.endsWith('/members/invitation')) json = { code: 'fixture-invite' };
     else if (path.endsWith('/nodes') && !pendingNodes) { pendingNodes = route; return; }
     await route.fulfill({ json });
@@ -43,7 +43,7 @@ try {
     assert.notEqual(await empty.locator('svg').evaluate(el => getComputedStyle(el).color), 'rgba(0, 0, 0, 0)');
   }
   await page.getByRole('link', { name: 'Workflows', exact: true }).click();
-  await page.getByRole('link', { name: 'Build pipeline', exact: true }).click();
+  await page.getByRole('link', { name: 'Pipeline', exact: true }).click();
   await page.waitForURL('**/pipelines');
   await page.locator('table').waitFor();
   assert.equal(preferenceReads, 1, 'ordinary navigation does not reload workspace preferences');

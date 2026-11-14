@@ -68,13 +68,21 @@ try{
   const version=page.getByLabel('应用定义版本',{exact:true});await version.waitFor();assert.equal(await version.inputValue(),'ferry/v2');
   assert.equal(await page.getByRole('textbox',{name:'镜像',exact:true}).inputValue(),'nginx:alpine');
   await page.getByRole('button',{name:'检查部署兼容性',exact:true}).click();
-  const results=page.getByRole('region',{name:'检查部署兼容性',exact:true});await results.getByText('配置可渲染',{exact:true}).waitFor();
-  assert.equal(await results.getByText('配置不兼容',{exact:true}).count(),3);
+  const results=page.getByRole('region',{name:'检查部署兼容性',exact:true});await results.getByText('stack · 配置可渲染',{exact:true}).waitFor();
+  assert.equal(await results.getByText(/^(native|docker|compose) · 配置不兼容$/).count(),3);
   await page.getByRole('textbox',{name:'镜像',exact:true}).fill('nginx:stable');
-  await results.getByText('配置可渲染',{exact:true}).waitFor({state:'hidden'});
+  await results.getByText('stack · 配置可渲染',{exact:true}).waitFor({state:'hidden'});
   assert.equal(JSON.parse((await api(root+'/deployments/'+stack.id)).manifest).services[0].image,'nginx:alpine','Compatibility does not save pending edits');
-  await page.getByRole('textbox',{name:'节点约束',exact:true}).fill('node.role == worker');
-  await page.getByRole('spinbutton',{name:'每节点副本上限',exact:true}).fill('2');
+  // Placement is edited through the generic definition field tree (ApplicationDefinitionFields); its constraint list
+  // items and maxReplicasPerNode are addressed by definition path because the tree labels them with raw keys.
+  const field=path=>page.locator(`[data-definition-path='${JSON.stringify(['services',0,'placement',...path])}']`);
+  await field(['constraints',1]).locator('xpath=ancestor::li[1]').getByRole('button',{name:'删除',exact:true}).click();
+  const confirm=page.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true});
+  await Promise.race([field(['constraints',1]).waitFor({state:'detached'}),confirm.waitFor()]);
+  if(await confirm.isVisible())await confirm.click();
+  await field(['constraints',1]).waitFor({state:'detached'});
+  await field(['constraints',0]).locator('textarea').fill('node.role == worker');
+  await field(['maxReplicasPerNode']).getByRole('spinbutton').fill('2');
   await page.getByRole('button',{name:'保存',exact:true}).click();
   await wait(async()=>JSON.parse((await api(root+'/deployments/'+stack.id)).manifest).services[0].placement.maxReplicasPerNode===2);
   const persisted=JSON.parse((await api(root+'/deployments/'+stack.id)).manifest);
@@ -86,7 +94,7 @@ try{
     await page.goto(`${origin}/${locale}${root}/deployments/${stack.id}/edit`);
     await page.getByLabel(translations[locale]['deployment.definitionVersion'],{exact:true}).waitFor();
     await page.getByRole('button',{name:translations[locale]['deployment.checkCompatibility'],exact:true}).click();
-    await page.getByText(translations[locale]['deployment.compatible'],{exact:true}).waitFor();
+    await page.getByText('stack · '+translations[locale]['deployment.compatible'],{exact:true}).waitFor();
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),locale+' viewport overflow');
     assert(!/resource-domain:|deployment\.portableHelp/.test(await page.locator('main').innerText()));
   }
