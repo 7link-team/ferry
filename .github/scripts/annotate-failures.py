@@ -40,7 +40,7 @@ def keep(line):
 lines = [line for line in open(sys.argv[1], errors='replace').read().splitlines() if keep(line)]
 seen, blocks = set(), []
 for index, line in enumerate(lines):
-    if line.lstrip().startswith('FAIL') or line.startswith('Traceback') or 'AssertionError' in line:
+    if line.lstrip().startswith('FAIL') or line.startswith('Traceback') or 'AssertionError' in line or 'panicked at' in line:
         key = line.strip()[:80]
         if key in seen:
             continue
