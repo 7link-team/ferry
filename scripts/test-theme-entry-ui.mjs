@@ -42,13 +42,14 @@ try{
     assert.equal(await scope().getByRole('button',{name:'语言',exact:true}).count(),1);
     if(name==='account'){const prefs=page.getByRole('region',{name:'偏好设置'});assert.equal(await prefs.getByRole('button',{name:'主题',exact:true}).count(),1);assert.equal(await prefs.getByRole('button',{name:'语言',exact:true}).count(),1);}
     await theme().click();await page.getByRole('menuitem',{name:'深色',exact:true}).click();
-    assert(await page.locator('html').evaluate(el=>el.classList.contains('dark')),name);
-    await page.reload();await ready();if(path.endsWith('/new'))await startBlank(page);await theme().waitFor();assert(await page.locator('html').evaluate(el=>el.classList.contains('dark')));
+    // The theme class is applied after the menu closes; wait for it rather than reading once.
+    await page.waitForFunction(()=>document.documentElement.classList.contains('dark'),undefined,{timeout:5000}).catch(()=>{throw new Error(name+': dark theme not applied');});
+    await page.reload();await ready();if(path.endsWith('/new'))await startBlank(page);await theme().waitFor();await page.waitForFunction(()=>document.documentElement.classList.contains('dark'),undefined,{timeout:5000}).catch(()=>{throw new Error(name+': dark theme not restored after reload');});
     await page.setViewportSize({width:390,height:844});const box=await theme().boundingBox();assert(box&&box.x>=0&&box.x+box.width<=390);
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     await page.screenshot({path:join(work,name+'.png')});
     await theme().click();await page.getByRole('menuitem',{name:'浅色',exact:true}).click();
-    assert(!await page.locator('html').evaluate(el=>el.classList.contains('dark')));
+    await page.waitForFunction(()=>!document.documentElement.classList.contains('dark'),undefined,{timeout:5000}).catch(()=>{throw new Error(name+': light theme not applied');});
     await page.setViewportSize({width:1280,height:900});report.checks.push(name);
   };
   await check('initialization','/login');
