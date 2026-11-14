@@ -932,3 +932,18 @@ async fn a_closed_review_wakes_its_parked_preview_before_the_deadline() {
         .unwrap();
     assert_eq!(node.state, "running");
 }
+
+#[test]
+fn agent_started_runs_report_the_agent_role_instead_of_a_revoked_user() {
+    use crate::{error::ApiError, i18n::Message};
+    use axum::http::StatusCode;
+    let agent = ApiError::localized(
+        StatusCode::FORBIDDEN,
+        Message::new("workflow.agentPermission"),
+    );
+    assert_eq!(super::failure_reason(&agent), "agent_permission");
+    assert_eq!(
+        super::failure_reason(&ApiError::forbidden()),
+        "permission_revoked"
+    );
+}

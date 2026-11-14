@@ -212,6 +212,7 @@
   "workflow.agentTimeout": "AI エージェントが {seconds} 秒以内に完了しなかったため停止しました。",
   "workflow.agentApproval": "AI エージェントが承認を求めました。このノードは無人の読み取り専用実行のため停止しました。",
   "workflow.agentFailed": "AI エージェントの実行が完了しませんでした。",
+  "workflow.agentPermission": "この実行は AI エージェントが開始しましたが、エージェントのロールに必要な権限（ホスト実行、エージェントの使用など）がありません。ロールに権限を付与するか、権限のあるメンバーが実行してください。",
   "workflow.agentNoJson": "AI エージェントの最終回答に JSON オブジェクトがありません。回答：{text}",
   "workflow.agentInvalidOutput": "AI エージェントの JSON が出力スキーマに一致しません（{path}：{reason}）。回答：{text}",
   "workflow.agentOutputTooLarge": "AI エージェントの JSON 出力が 1 MiB を超えています。"

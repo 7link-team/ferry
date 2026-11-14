@@ -880,6 +880,7 @@ pub(super) fn failure_reason(error: &ApiError) -> &'static str {
             | "workflow.agentSchema"
             | "workflow.agentInputTooLarge"
             | "workflow.agentHostRequired" => return "agent_invalid",
+            "workflow.agentPermission" => return "agent_permission",
             _ => {}
         }
     }
@@ -1024,6 +1025,18 @@ async fn dispatch(
             dispatch_inner(s, backend, lease, stop),
         )
         .await
+        // A run started by an Agent is bounded by the Agent role; say so rather
+        // than reporting the user's own permission as revoked.
+        .map_err(|error| {
+            if matches!(error.0, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+                ApiError::localized(
+                    StatusCode::FORBIDDEN,
+                    Message::new("workflow.agentPermission"),
+                )
+            } else {
+                error
+            }
+        })
     } else {
         dispatch_inner(s, backend, lease, stop).await
     }

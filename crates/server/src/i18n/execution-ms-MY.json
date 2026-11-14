@@ -212,6 +212,7 @@
   "workflow.agentTimeout": "Ejen AI tidak selesai dalam {seconds} saat dan telah dihentikan.",
   "workflow.agentApproval": "Ejen AI meminta kelulusan. Nod ini berjalan tanpa pengawasan dan baca sahaja, jadi ia dihentikan.",
   "workflow.agentFailed": "Larian ejen AI tidak selesai.",
+  "workflow.agentPermission": "Larian ini dimulakan oleh ejen AI yang peranannya tiada kebenaran yang diperlukan (contohnya pelaksanaan hos atau menggunakan ejen). Berikan kebenaran kepada peranan ejen, atau minta ahli yang berkebenaran menjalankannya.",
   "workflow.agentNoJson": "Jawapan akhir ejen AI tiada objek JSON. Jawapan: {text}",
   "workflow.agentInvalidOutput": "JSON ejen AI tidak sepadan dengan skema output di {path}: {reason}. Jawapan: {text}",
   "workflow.agentOutputTooLarge": "Output JSON ejen AI melebihi 1 MiB."

@@ -212,6 +212,7 @@
   "workflow.agentTimeout": "AI 에이전트가 {seconds}초 안에 끝나지 않아 중지되었습니다.",
   "workflow.agentApproval": "AI 에이전트가 승인을 요청했습니다. 이 노드는 무인 읽기 전용 실행이므로 중지되었습니다.",
   "workflow.agentFailed": "AI 에이전트 실행이 완료되지 않았습니다.",
+  "workflow.agentPermission": "이 실행은 AI 에이전트가 시작했으며, 에이전트 역할에 실행에 필요한 권한(호스트 실행, 에이전트 사용 등)이 없습니다. 역할에 권한을 부여하거나 권한이 있는 구성원이 직접 실행하세요.",
   "workflow.agentNoJson": "AI 에이전트의 최종 답변에 JSON 객체가 없습니다. 답변: {text}",
   "workflow.agentInvalidOutput": "AI 에이전트의 JSON이 출력 스키마와 맞지 않습니다({path}: {reason}). 답변: {text}",
   "workflow.agentOutputTooLarge": "AI 에이전트의 JSON 출력이 1 MiB를 넘습니다."

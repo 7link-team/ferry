@@ -6135,6 +6135,14 @@
     "AI 에이전트를 Runner에서 실행할 수 없습니다. 호스트, CLI 및 로그인 상태를 확인하세요.",
     "Ejen AI tidak dapat dijalankan pada Runner. Semak hos, CLI dan log masuknya."
   ],
+  "agent.failure.agent_permission": [
+    "This run was started by an AI agent whose role lacks a permission the run needs (for example host execution or using agents). Grant it to the agent role, or have a member with the permission run it.",
+    "该执行由智能体发起，智能体角色缺少本次运行所需的权限（例如主机执行、使用智能体）。请为智能体角色授权，或由有权限的成员直接运行。",
+    "此執行由智能體發起，智能體角色缺少本次執行所需的權限（例如主機執行、使用智能體）。請為智能體角色授權，或由有權限的成員直接執行。",
+    "この実行は AI エージェントが開始しましたが、エージェントのロールに必要な権限（ホスト実行、エージェントの使用など）がありません。ロールに権限を付与するか、権限のあるメンバーが実行してください。",
+    "이 실행은 AI 에이전트가 시작했으며, 에이전트 역할에 실행에 필요한 권한(호스트 실행, 에이전트 사용 등)이 없습니다. 역할에 권한을 부여하거나 권한이 있는 구성원이 직접 실행하세요.",
+    "Larian ini dimulakan oleh ejen AI yang peranannya tiada kebenaran yang diperlukan (contohnya pelaksanaan hos atau menggunakan ejen). Berikan kebenaran kepada peranan ejen, atau minta ahli yang berkebenaran menjalankannya."
+  ],
   "agent.failure.agent_invalid": [
     "The AI agent node configuration is invalid: check the agent, prompt, output schema and execution host.",
     "AI 智能体节点配置无效：请检查智能体、提示、输出 Schema 及执行主机。",
