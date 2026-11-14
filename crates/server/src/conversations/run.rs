@@ -6,6 +6,9 @@ use tokio::{
     task::JoinSet,
 };
 const LEASE: i64 = 30_000;
+/// Standing guidance for every turn: a workflow the user asks for must fetch and
+/// process its own data, so it keeps working without the conversation.
+const WORKFLOW_RULES: &str = "<platform_workflow_rules>\nWhen the user asks you to build or change a workflow/pipeline: discover the available node types with GET /workflow-node-catalog. Data must be fetched by workflow nodes at run time: use ferry.request (platform data, read-only) to read workspace data and ai.agent.run when AI analysis must produce structured JSON. Never query data in this conversation and copy the results into data.set fields or trigger inputs. Manual triggers declare only run parameters (IDs, date ranges). If no available node can do a step, tell the user instead of faking it with constants. When reporting, state what each node actually does at run time.\n</platform_workflow_rules>\n\n";
 
 #[cfg(test)]
 mod platform_tests;
@@ -462,7 +465,7 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
         if provider.is_none() && !config.authentication_usable(&probe.authentication) {
             return Err(error(StatusCode::CONFLICT, "conversations.loginRequired"));
         }
-        let mut prompt = String::new();
+        let mut prompt = String::from(WORKFLOW_RULES);
         if !config.system_prompt.is_empty() {
             prompt.push_str(&config.system_prompt);
             prompt.push_str("\n\n");
