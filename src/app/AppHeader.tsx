@@ -11,11 +11,13 @@ export function AppHeader({ navigation, actions, home }: {
 }) {
   const { t } = useTranslation();
   const site = useSiteSettings();
-  const brand = <><BrandIcon /><span className="min-w-0 break-words [overflow-wrap:anywhere]">{site.site_name || t("app.title")}</span></>;
-  const brandClass = "flex min-w-0 max-w-full items-center gap-2 font-semibold tracking-tight sm:max-w-xs";
-  return <header data-app-header className="flex min-h-14 min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-background px-4 py-2">
+  // Phones keep the header to one row: the brand shows its icon (the name stays
+  // available to assistive technology) and the actions shrink instead of wrapping.
+  const brand = <><BrandIcon /><span className="min-w-0 break-words [overflow-wrap:anywhere] max-sm:sr-only">{site.site_name || t("app.title")}</span></>;
+  const brandClass = "flex min-w-0 max-w-full shrink-0 items-center gap-2 font-semibold tracking-tight sm:max-w-xs";
+  return <header data-app-header className="flex min-h-14 min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-background px-4 py-2 max-sm:flex-nowrap max-sm:gap-x-2 max-sm:px-3">
     {home ? <a {...home} className={brandClass}>{brand}</a> : <div className={brandClass}>{brand}</div>}
     {navigation}
-    <div className="ms-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">{actions}</div>
+    <div className="ms-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2 max-sm:flex-nowrap max-sm:gap-1">{actions}</div>
   </header>;
 }

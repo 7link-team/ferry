@@ -272,7 +272,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
       } actions={<>
         <div className="flex min-w-0 max-w-full items-center gap-1">
           <WorkspaceSwitcher identity={identity} current={current} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} />
-          {identity.user.is_superadmin && <Button variant="ghost" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
+          {identity.user.is_superadmin && <Button variant="ghost" className="max-sm:hidden" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
         </div>
         <WorkspaceHeaderActions identity={identity} onSignedOut={onSignedOut} />
       </>} />
@@ -442,19 +442,21 @@ function AppearanceActions({ floating = false }: { floating?: boolean }) {
 
 function WorkspaceHeaderActions({ identity, onWorkspaces, onSignedOut }: { identity: Identity; onWorkspaces?: () => void; onSignedOut: () => void }) {
   const { t } = useTranslation();
-  return <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+  return <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 max-sm:flex-nowrap max-sm:gap-1">
         {onWorkspaces && <WorkspaceSwitcher identity={identity} onWorkspaces={onWorkspaces} />}
         <AppearanceActions />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="min-h-11 min-w-0 max-w-[min(16rem,calc(100vw-2rem))]">
+            <Button variant="ghost" size="sm" className="min-h-11 min-w-0 max-w-[min(16rem,calc(100vw-2rem))] max-sm:px-1.5">
               <IdentityAvatar id={identity.user.id} name={identity.user.name} kind="user" value={identity.user.avatar} className="size-7" />
-              <span className="truncate">{identity.user.name}</span>
+              <span className="truncate max-sm:sr-only">{identity.user.name}</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => navigate(accountRoute, {})}>{t("app.account")}</DropdownMenuItem>
+            {/* On phones the header has no room for the platform button; offer it here. */}
+            {identity.user.is_superadmin && <DropdownMenuItem className="sm:hidden" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</DropdownMenuItem>}
             <DropdownMenuItem
               onClick={() => void api("/sessions", { method: "DELETE" }).then(onSignedOut)}
             >
@@ -471,7 +473,7 @@ function WorkspaceSwitcher({ identity, current, onWorkspaces }: { identity: Iden
   return (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="min-h-11 min-w-0 max-w-[min(18rem,calc(100vw-2rem))] shrink gap-1.5" aria-label={workflowText("switchWorkspace")}>
+            <Button variant="ghost" size="sm" className="min-h-11 min-w-0 max-w-[min(18rem,calc(100vw-2rem))] shrink gap-1.5 max-sm:max-w-[38vw] max-sm:px-2" aria-label={workflowText("switchWorkspace")}>
               <span className="truncate">{current?.name ?? workflowText("switchWorkspace")}</span>
               <ChevronDown className="size-4 shrink-0" />
             </Button>
