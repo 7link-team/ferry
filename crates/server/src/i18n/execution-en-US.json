@@ -187,5 +187,12 @@
   "workflow.hostExecutionFailed": "Host execution failed: check connectivity, Git/curl, paths and account permissions.",
   "workflow.hostTargetRequired": "Select an execution host on the node or workflow.",
   "holes.domainRequired": "Configure a preview root domain in Platform settings ? Access addresses before using preview tunnels.",
-  "platform.addressInvalid": "Enter a valid HTTP(S) primary URL and a plain preview domain without protocol, wildcard or path."
+  "platform.addressInvalid": "Enter a valid HTTP(S) primary URL and a plain preview domain without protocol, wildcard or path.",
+  "workflow.platformOperation": "Platform data operation {operation} is not a read-only (GET) operation of this version's platform catalogue.",
+  "workflow.platformPathParam": "Path parameter {name} is required and must be one non-empty segment without “/” or “..”.",
+  "workflow.platformQuery": "Query parameters must have non-empty names and text, number or boolean values, and the request address must not exceed 4096 bytes.",
+  "workflow.platformRequest": "The platform data request failed (HTTP {status}): {message}",
+  "workflow.platformTooLarge": "The platform data response is too large. Narrow the query with filters or a smaller page_size.",
+  "workflow.platformPageLimit": "Reading all data needs more than {max_pages} pages. Narrow the query or raise the page limit (at most 50); results are never truncated.",
+  "workflow.platformPagination": "This operation does not return a paged list (items and total), so “Read all pages” cannot be used."
 }

@@ -123,6 +123,7 @@ fn supported(graph: &Value, plan: &plan::Plan) -> Result<()> {
             spec["type"].as_str(),
             Some("core.trigger.manual" | "data.set" | "core.wait" | "core.stop" | "host.preview")
         ) && !super::transform::supports(spec)
+            && !super::platform::supports(spec)
             && !super::media::supports(spec)
             && !super::ai::supports(spec)
             && !super::integration::supports(spec)
@@ -837,6 +838,17 @@ pub(super) fn failure_reason(error: &ApiError) -> &'static str {
             "workflow.integrationUnknown" => return "integration_unknown",
             "workflow.integrationRemote" => return "integration_remote",
             "workflow.integrationInvalid" => return "integration_invalid",
+            "workflow.platformTooLarge" => return "platform_too_large",
+            "workflow.platformPageLimit" => return "platform_page_limit",
+            "workflow.platformOperation"
+            | "workflow.platformPathParam"
+            | "workflow.platformQuery"
+            | "workflow.platformPagination" => return "platform_invalid",
+            "workflow.platformRequest"
+                if !matches!(error.0, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) =>
+            {
+                return "platform_request";
+            }
             _ => {}
         }
     }
@@ -1191,6 +1203,7 @@ async fn dispatch_inner(
                 || super::ai::supports(spec)
                 || (super::integration::supports(spec) && spec["type"] != "host.command")
                 || super::transform::per_item(spec)
+                || super::platform::supports(spec)
                 || super::condition::supports(spec)
             {
                 (0..selected).map(Some).collect()
@@ -1249,6 +1262,10 @@ async fn dispatch_inner(
                         &active.snapshot.params,
                     ))
                     .await?
+                }
+                _ if super::platform::supports(spec) => {
+                    super::platform::execute(s, &run, &items[..selected], &active.snapshot.params)
+                        .await?
                 }
                 _ if super::ai::supports(spec) => {
                     super::ai::execute(

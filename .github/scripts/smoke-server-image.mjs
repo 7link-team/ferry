@@ -58,6 +58,15 @@ async function expectWebUi(path) {
   }
 }
 
+async function expectStaticFile(path, type) {
+  const response = await fetch(`${base}${path}`);
+  const contentType = response.headers.get("content-type") ?? "";
+  // An unknown path falls back to the HTML shell, so status 200 alone proves nothing.
+  if (!response.ok || !contentType.startsWith(type)) {
+    throw new Error(`GET ${path} answered ${response.status} ${contentType}, expected ${type}`);
+  }
+}
+
 try {
   start(names[0]);
   const first = await waitForStatus("first boot");
@@ -67,6 +76,12 @@ try {
   // A client-side route is not a file; the server has to fall back to the shell.
   await expectWebUi("/demo/host/hosts");
   console.log("embedded web UI and client-side routes ok");
+  // The brand logo and favicons come from public/ and are referenced by index.html.
+  for (const path of ["/brand/logo-32.png", "/brand/logo-16.png", "/brand/logo-180.png"]) {
+    await expectStaticFile(path, "image/png");
+  }
+  await expectStaticFile("/brand/logo.ico", "image/");
+  console.log("brand logo and favicons ok");
 
   docker("stop", names[0]);
   start(names[1]);

@@ -141,6 +141,87 @@ async fn background_notifications_restore_agent_identity_and_recheck_revocation(
 }
 
 #[tokio::test]
+async fn platform_data_node_runs_in_the_executor_under_the_current_execution_identity() {
+    use crate::{agents::tests::admin, platform_tools::tests::setup};
+    let (_dir, s) = setup().await;
+    let graph = json!({"engine":"ferry-graph","schema":1,"settings":{"timezone":"UTC"},"nodes":[
+        {"id":"start","name":"Start","type":"core.trigger.manual","type_version":1,"params":{"input_schema":{"type":"object"}},"position":[0,0]},
+        {"id":"read","name":"Read","type":"ferry.request","type_version":1,"params":{"operation":"/workflows","path_params":{},
+            "query":{"page_size":1},"split_items":true,"all_pages":true,"max_pages":50},"position":[300,0]}
+    ],"connections":[{"from":{"node":"start","port":"main","index":0},"to":{"node":"read","port":"main","index":0}}]});
+    let (_, Json(workflow)) = super::super::create(
+        State(s.clone()),
+        admin(1),
+        Json(
+            serde_json::from_value(json!({"name":"Platform data","definition":graph.to_string()}))
+                .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    let workflow_id: Id = serde_json::from_value(workflow["id"].clone()).unwrap();
+    let backend = ArtifactStore::for_state(&s).await.unwrap();
+    let (_stop, stop) = tokio::sync::watch::channel(false);
+    for revoked in [false, true] {
+        let (_, Json(created)) = create(
+            State(s.clone()),
+            admin(1),
+            Path(("1".into(), workflow_id)),
+            Json(
+                serde_json::from_value(json!({"mode":"manual","revision":"draft","version":1,
+                    "entry_node_id":"start"}))
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+        if revoked {
+            crate::entities::workspace_roles::Entity::update_many()
+                .col_expr(
+                    crate::entities::workspace_roles::Column::Permissions,
+                    Expr::value(json!(["workflows.run"]).to_string()),
+                )
+                .filter(crate::entities::workspace_roles::Column::Id.eq(1))
+                .exec(&s.db)
+                .await
+                .unwrap();
+        }
+        let lease = claim(&s, "platform-fixture").await.unwrap().unwrap();
+        assert_eq!(lease.execution().id, i64::from(id));
+        let result = dispatch(&s, &backend, &lease, &stop).await;
+        if let Err(error) = &result {
+            finish(&s.db, &lease, "failed", failure_reason(error))
+                .await
+                .unwrap();
+        }
+        let ended = current(&s, id.into()).await.unwrap();
+        let read = nodes::Entity::find()
+            .filter(nodes::Column::ExecutionId.eq(i64::from(id)))
+            .filter(nodes::Column::NodeId.eq("read"))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        if revoked {
+            assert_eq!(result.unwrap_err().0, StatusCode::FORBIDDEN);
+            assert_eq!(
+                (ended.state.as_str(), ended.end_reason.as_str()),
+                ("failed", "permission_revoked")
+            );
+            assert_eq!(read.state, "failed");
+        } else {
+            result.unwrap();
+            assert_eq!(ended.state, "succeeded");
+            assert_eq!(read.state, "succeeded");
+            // page_size is 1; all pages were still read.
+            assert_eq!(read.items_out, 1);
+            assert!(read.resolved_params.is_some());
+        }
+    }
+}
+
+#[tokio::test]
 async fn running_cancellation_waits_for_owner_cleanup_and_preserves_successful_nodes() {
     use super::super::journal::tests::{Fixture, activation};
     let fixture = Fixture::new().await;

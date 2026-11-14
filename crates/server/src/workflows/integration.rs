@@ -604,6 +604,25 @@ fn clone_inputs(items: &[Item], params: &[Value]) -> Result<(Vec<Item>, Vec<Valu
     Ok((expanded_items, expanded_params))
 }
 
+/// The execution identity, workflow access and run lifecycle as of this moment.
+pub(super) async fn execution_scope(
+    s: &AppState,
+    run: &workflow_executions::Model,
+) -> Result<Scope> {
+    let scope = Scope::for_actor(s, Id::from(run.workspace_id), Id::from(run.triggered_by)).await?;
+    scope.require("workflows.run")?;
+    let workflow = super::scoped(&s.db, scope.workspace_id, Id::from(run.workflow_id)).await?;
+    access::require(&s.db, &scope, &workflow, Operation::Run).await?;
+    let current = workflow_executions::Entity::find_by_id(run.id)
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    if workflow.lifecycle != "active" || current.state != "running" {
+        return Err(ApiError::forbidden());
+    }
+    Ok(scope)
+}
+
 pub(super) async fn execute(
     s: &AppState,
     run: &workflow_executions::Model,
@@ -644,18 +663,7 @@ pub(super) async fn execute(
     let mut output = Vec::new();
     for (index, (item, params)) in items.iter().zip(params).enumerate() {
         // Recheck the actor, resource and lifecycle immediately before every request.
-        let scope =
-            Scope::for_actor(s, Id::from(run.workspace_id), Id::from(run.triggered_by)).await?;
-        scope.require("workflows.run")?;
-        let workflow = super::scoped(&s.db, scope.workspace_id, Id::from(run.workflow_id)).await?;
-        access::require(&s.db, &scope, &workflow, Operation::Run).await?;
-        let current = workflow_executions::Entity::find_by_id(run.id)
-            .one(&s.db)
-            .await?
-            .ok_or_else(ApiError::missing)?;
-        if workflow.lifecycle != "active" || current.state != "running" {
-            return Err(ApiError::forbidden());
-        }
+        let scope = execution_scope(s, run).await?;
         let (git_id, git_auth) = if git.is_some() {
             git_credential(s, &scope, params, manifest["git"]["provider"].as_str()).await?
         } else {
@@ -809,17 +817,7 @@ async fn execute_notification(
     }
     let mut output = Vec::new();
     for (index, (item, params)) in items.iter().zip(params).enumerate() {
-        let scope = Scope::for_actor(s, run.workspace_id.into(), run.triggered_by.into()).await?;
-        scope.require("workflows.run")?;
-        let workflow = super::scoped(&s.db, scope.workspace_id, run.workflow_id.into()).await?;
-        access::require(&s.db, &scope, &workflow, Operation::Run).await?;
-        let current = workflow_executions::Entity::find_by_id(run.id)
-            .one(&s.db)
-            .await?
-            .ok_or_else(ApiError::missing)?;
-        if workflow.lifecycle != "active" || current.state != "running" {
-            return Err(ApiError::forbidden());
-        }
+        let scope = execution_scope(s, run).await?;
         let channel_id = Id::reference(params["channel_id"].as_str().ok_or_else(invalid)?)?;
         let mut body = params.clone();
         body.as_object_mut()

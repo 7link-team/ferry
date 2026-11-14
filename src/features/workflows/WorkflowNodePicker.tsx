@@ -27,6 +27,7 @@ import {
   Terminal,
   Eye,
   Bell,
+  Database,
 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { workflowText as t } from "../../shared/i18n/i18n";
@@ -57,6 +58,7 @@ const builtinCatalog = [
   { type: "file.decode", key: "fileDecode", group: "media", icon: File },
   { type: "core.trigger.manual", key: "manual", group: "triggers", icon: Zap },
   { type: "data.set", key: "set", group: "data", icon: Braces },
+  { type: "ferry.request", key: "platformRequest", group: "data", icon: Database },
   { type: "core.if", key: "if", group: "flow", icon: GitBranch },
   { type: "core.switch", key: "switch", group: "flow", icon: GitBranch },
   { type: "core.filter", key: "filter", group: "data", icon: Filter },

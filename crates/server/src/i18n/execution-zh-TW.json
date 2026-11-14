@@ -187,5 +187,12 @@
   "workflow.hostExecutionFailed": "主機執行失敗：請檢查主機連線、Git/curl 安裝、目錄和帳號權限。",
   "workflow.hostTargetRequired": "请选择节点或工作流的执行主机。",
   "holes.domainRequired": "請先在平台設定 → 存取位址設定預覽根網域，再使用預覽穿透。",
-  "platform.addressInvalid": "請填寫有效的 HTTP(S) 主要位址；預覽根網域不能包含協定、萬用字元或路徑。"
+  "platform.addressInvalid": "請填寫有效的 HTTP(S) 主要位址；預覽根網域不能包含協定、萬用字元或路徑。",
+  "workflow.platformOperation": "平台資料介面 {operation} 不是目前版本平台目錄中的唯讀（GET）介面。",
+  "workflow.platformPathParam": "路徑參數 {name} 必填，且必須是不含「/」或「..」的單一非空片段。",
+  "workflow.platformQuery": "查詢參數名稱不可為空，值只能是文字、數字或布林值，請求位址不得超過4096位元組。",
+  "workflow.platformRequest": "平台資料請求失敗（HTTP {status}）：{message}",
+  "workflow.platformTooLarge": "平台資料回應過大，請以篩選條件或更小的 page_size 縮小查詢範圍。",
+  "workflow.platformPageLimit": "讀取全部資料需要超過 {max_pages} 頁。請縮小查詢範圍或提高頁數上限（最多50）；結果不會被截斷。",
+  "workflow.platformPagination": "該介面不回傳分頁清單（items 與 total），不能使用「讀取全部分頁」。"
 }

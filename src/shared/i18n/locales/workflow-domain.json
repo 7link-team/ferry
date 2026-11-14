@@ -5814,5 +5814,133 @@
     "ワークスペースのチャネルで権限を確認して送信",
     "권한을 확인하고 워크스페이스 채널로 전송",
     "Hantar melalui saluran ruang kerja dengan semakan kebenaran"
+  ],
+  "platformRequest": [
+    "Platform data",
+    "平台数据",
+    "平台資料",
+    "プラットフォームデータ",
+    "플랫폼 데이터",
+    "Data platform"
+  ],
+  "nodeHint.platformRequest": [
+    "Read this workspace's data through a read-only platform API",
+    "通过只读平台接口读取本空间数据",
+    "透過唯讀平台介面讀取本空間資料",
+    "読み取り専用 API でこのワークスペースのデータを取得",
+    "읽기 전용 플랫폼 API로 이 워크스페이스 데이터 읽기",
+    "Baca data ruang kerja ini melalui API platform baca sahaja"
+  ],
+  "platform.location": [
+    "Execution location: inside the platform server (not on a host)",
+    "执行位置：平台服务器内（不经主机）",
+    "執行位置：平台伺服器內（不經主機）",
+    "実行場所：プラットフォームサーバー内（ホストを経由しない）",
+    "실행 위치: 플랫폼 서버 내부(호스트를 거치지 않음)",
+    "Lokasi pelaksanaan: dalam pelayan platform (tidak melalui hos)"
+  ],
+  "platform.operation": [
+    "Operation (GET)",
+    "接口（GET）",
+    "介面（GET）",
+    "操作（GET）",
+    "작업(GET)",
+    "Operasi (GET)"
+  ],
+  "platform.unknownOperation": [
+    "Select a read-only (GET) operation from the list; other paths cannot be saved.",
+    "请从列表选择只读（GET）接口，其他路径无法保存。",
+    "請從清單選擇唯讀（GET）介面，其他路徑無法儲存。",
+    "一覧から読み取り専用（GET）操作を選択してください。その他のパスは保存できません。",
+    "목록에서 읽기 전용(GET) 작업을 선택하세요. 다른 경로는 저장할 수 없습니다.",
+    "Pilih operasi baca sahaja (GET) daripada senarai; laluan lain tidak boleh disimpan."
+  ],
+  "platform.permission": [
+    "Required permission",
+    "所需权限",
+    "所需權限",
+    "必要な権限",
+    "필요한 권한",
+    "Kebenaran diperlukan"
+  ],
+  "platform.pathParam": [
+    "Path parameter",
+    "路径参数",
+    "路徑參數",
+    "パスパラメーター",
+    "경로 매개변수",
+    "Parameter laluan"
+  ],
+  "platform.query": [
+    "Query parameters",
+    "查询参数",
+    "查詢參數",
+    "クエリパラメーター",
+    "쿼리 매개변수",
+    "Parameter pertanyaan"
+  ],
+  "platform.splitItems": [
+    "One item per list row",
+    "列表每行输出一项",
+    "清單每列輸出一項",
+    "一覧の行ごとに1項目",
+    "목록 행마다 항목 1개",
+    "Satu item bagi setiap baris senarai"
+  ],
+  "platform.allPages": [
+    "Read all pages",
+    "读取全部分页",
+    "讀取全部分頁",
+    "全ページを読み取る",
+    "모든 페이지 읽기",
+    "Baca semua halaman"
+  ],
+  "platform.maxPages": [
+    "Page limit (1–50)",
+    "页数上限（1–50）",
+    "頁數上限（1–50）",
+    "ページ上限（1–50）",
+    "페이지 한도(1–50)",
+    "Had halaman (1–50)"
+  ],
+  "platform.help": [
+    "Runs as the execution identity in this workspace only; the operation's own permission checks apply. Path parameters and query values accept expressions. Reading more pages than the limit fails instead of truncating.",
+    "以执行身份只读取本空间数据，并按接口原有权限校验。路径参数和查询值支持表达式。分页超过上限时失败，不截断结果。",
+    "以執行身分只讀取本空間資料，並依介面原有權限校驗。路徑參數和查詢值支援表達式。分頁超過上限時失敗，不截斷結果。",
+    "実行ユーザーとしてこのワークスペースのみを読み取り、操作本来の権限チェックが適用されます。パスパラメーターとクエリ値は式を使用できます。ページ上限を超えると切り捨てずに失敗します。",
+    "실행 신원으로 이 워크스페이스만 읽으며 작업 고유의 권한 검사가 적용됩니다. 경로 매개변수와 쿼리 값에 표현식을 사용할 수 있습니다. 페이지 한도를 넘으면 잘라내지 않고 실패합니다.",
+    "Dijalankan sebagai identiti pelaksanaan dalam ruang kerja ini sahaja; semakan kebenaran operasi terpakai. Parameter laluan dan nilai pertanyaan menerima ungkapan. Melebihi had halaman akan gagal, bukan dipotong."
+  ],
+  "platform.failure.platform_request": [
+    "The platform data request was rejected. Check the operation, parameters and the run identity's permissions.",
+    "平台数据请求被拒绝，请检查接口、参数及执行身份权限。",
+    "平台資料請求被拒絕，請檢查介面、參數及執行身分權限。",
+    "プラットフォームデータのリクエストが拒否されました。操作、パラメーター、実行ユーザーの権限を確認してください。",
+    "플랫폼 데이터 요청이 거부되었습니다. 작업, 매개변수 및 실행 신원의 권한을 확인하세요.",
+    "Permintaan data platform ditolak. Semak operasi, parameter dan kebenaran identiti pelaksanaan."
+  ],
+  "platform.failure.platform_too_large": [
+    "The platform data response is too large. Narrow the query with filters or a smaller page_size.",
+    "平台数据响应过大，请用筛选条件或更小的 page_size 缩小查询范围。",
+    "平台資料回應過大，請以篩選條件或更小的 page_size 縮小查詢範圍。",
+    "プラットフォームデータの応答が大きすぎます。フィルターや小さい page_size で範囲を絞ってください。",
+    "플랫폼 데이터 응답이 너무 큽니다. 필터나 더 작은 page_size로 조회 범위를 좁히세요.",
+    "Respons data platform terlalu besar. Kecilkan pertanyaan dengan penapis atau page_size yang lebih kecil."
+  ],
+  "platform.failure.platform_page_limit": [
+    "Reading all data needs more pages than the node's page limit. Narrow the query or raise the limit (at most 50).",
+    "读取全部数据所需页数超过节点上限，请缩小查询范围或提高上限（最多50）。",
+    "讀取全部資料所需頁數超過節點上限，請縮小查詢範圍或提高上限（最多50）。",
+    "全データの読み取りに必要なページ数がノードの上限を超えています。範囲を絞るか上限を上げてください（最大50）。",
+    "전체 데이터를 읽는 데 필요한 페이지 수가 노드 한도를 초과합니다. 조회 범위를 좁히거나 한도를 늘리세요(최대 50).",
+    "Membaca semua data memerlukan lebih banyak halaman daripada had nod. Kecilkan pertanyaan atau naikkan had (maksimum 50)."
+  ],
+  "platform.failure.platform_invalid": [
+    "The platform data node configuration is invalid: check the operation, path parameters, query and paging.",
+    "平台数据节点配置无效：请检查接口、路径参数、查询参数及分页设置。",
+    "平台資料節點設定無效：請檢查介面、路徑參數、查詢參數及分頁設定。",
+    "プラットフォームデータノードの設定が無効です。操作、パスパラメーター、クエリ、ページ設定を確認してください。",
+    "플랫폼 데이터 노드 구성이 잘못되었습니다. 작업, 경로 매개변수, 쿼리 및 페이지 설정을 확인하세요.",
+    "Konfigurasi nod data platform tidak sah: semak operasi, parameter laluan, pertanyaan dan penghalaman."
   ]
 }

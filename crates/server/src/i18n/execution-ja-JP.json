@@ -187,5 +187,12 @@
   "workflow.hostExecutionFailed": "ホストでの実行に失敗しました。接続、Git/curl、パスとアカウントの権限を確認してください。",
   "workflow.hostTargetRequired": "ノードまたはワークフローで実行ホストを選択してください。",
   "holes.domainRequired": "プラットフォーム設定のアクセスアドレスでプレビュー用ルートドメインを設定してください。",
-  "platform.addressInvalid": "有効なHTTP(S)の主要URLと、プロトコル・ワイルドカード・パスのないプレビュードメインを入力してください。"
+  "platform.addressInvalid": "有効なHTTP(S)の主要URLと、プロトコル・ワイルドカード・パスのないプレビュードメインを入力してください。",
+  "workflow.platformOperation": "プラットフォームデータ操作 {operation} は、このバージョンのカタログにある読み取り専用（GET）操作ではありません。",
+  "workflow.platformPathParam": "パスパラメーター {name} は必須で、「/」や「..」を含まない空でない1区間である必要があります。",
+  "workflow.platformQuery": "クエリパラメーター名は空にできず、値はテキスト・数値・真偽値のみで、リクエストアドレスは4096バイト以内です。",
+  "workflow.platformRequest": "プラットフォームデータのリクエストに失敗しました（HTTP {status}）：{message}",
+  "workflow.platformTooLarge": "プラットフォームデータの応答が大きすぎます。フィルターや小さい page_size で範囲を絞ってください。",
+  "workflow.platformPageLimit": "全データの読み取りに {max_pages} ページを超えて必要です。範囲を絞るかページ上限（最大50）を上げてください。結果は切り捨てません。",
+  "workflow.platformPagination": "この操作はページ付き一覧（items と total）を返さないため、「全ページを読み取る」は使用できません。"
 }

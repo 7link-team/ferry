@@ -187,5 +187,12 @@
   "workflow.hostExecutionFailed": "主机执行失败：检查主机连接、Git/curl 安装、目录和账号权限。",
   "workflow.hostTargetRequired": "请选择节点或工作流的执行主机。",
   "holes.domainRequired": "请先在平台设置 → 访问地址中配置预览根域名，再使用预览穿透。",
-  "platform.addressInvalid": "请填写有效的 HTTP(S) 主要地址；预览根域名不能包含协议、通配符或路径。"
+  "platform.addressInvalid": "请填写有效的 HTTP(S) 主要地址；预览根域名不能包含协议、通配符或路径。",
+  "workflow.platformOperation": "平台数据接口 {operation} 不是当前版本平台目录中的只读（GET）接口。",
+  "workflow.platformPathParam": "路径参数 {name} 必填，且必须是不含“/”或“..”的单个非空片段。",
+  "workflow.platformQuery": "查询参数名不能为空，值只能是文本、数字或布尔值，请求地址不得超过4096字节。",
+  "workflow.platformRequest": "平台数据请求失败（HTTP {status}）：{message}",
+  "workflow.platformTooLarge": "平台数据响应过大，请用筛选条件或更小的 page_size 缩小查询范围。",
+  "workflow.platformPageLimit": "读取全部数据需要超过 {max_pages} 页。请缩小查询范围或提高页数上限（最多50）；结果不会被截断。",
+  "workflow.platformPagination": "该接口不返回分页列表（items 与 total），不能使用“读取全部分页”。"
 }

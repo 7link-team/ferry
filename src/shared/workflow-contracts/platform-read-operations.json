@@ -1,0 +1,504 @@
+[
+  {
+    "path": "/activity",
+    "permission": "activity.read"
+  },
+  {
+    "path": "/ai-agents",
+    "permission": "ai-agents.read"
+  },
+  {
+    "path": "/ai-agents/{id}"
+  },
+  {
+    "path": "/ai-agents/{id}/revisions"
+  },
+  {
+    "path": "/ai-calls"
+  },
+  {
+    "path": "/ai-models",
+    "permission": "ai-models.read"
+  },
+  {
+    "path": "/ai-models/{id}"
+  },
+  {
+    "path": "/ai-providers",
+    "permission": "credentials.read"
+  },
+  {
+    "path": "/alert-events",
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/alert-events/{id}",
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/alert-rules",
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/alert-rules/{id}",
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/app-templates",
+    "permission": "app-templates.read"
+  },
+  {
+    "path": "/app-templates/{id}",
+    "permission": "app-templates.read"
+  },
+  {
+    "path": "/application-health",
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/application-health/{id}"
+  },
+  {
+    "path": "/code-connection-analyses/{id}"
+  },
+  {
+    "path": "/code-connection-monitors/{id}",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connections",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connections/{id}",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connections/{id}/analysis",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connections/{id}/branches",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connections/{id}/events",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-connections/{id}/repositories",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-contributions/{kind}",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/code-insights",
+    "permission": "code-insights.read"
+  },
+  {
+    "path": "/code-insights/{id}",
+    "permission": "code-insights.read"
+  },
+  {
+    "path": "/code-insights/{id}/reports/{kind}",
+    "permission": "code-insights.read"
+  },
+  {
+    "path": "/config-templates",
+    "permission": "config-templates.read"
+  },
+  {
+    "path": "/config-templates/{id}",
+    "permission": "config-templates.read"
+  },
+  {
+    "path": "/conversation-participants"
+  },
+  {
+    "path": "/conversations",
+    "permission": "conversations.read"
+  },
+  {
+    "path": "/conversations/{id}"
+  },
+  {
+    "path": "/conversations/{id}/events"
+  },
+  {
+    "path": "/conversations/{id}/files/{file}"
+  },
+  {
+    "path": "/credentials",
+    "permission": "credentials.read"
+  },
+  {
+    "path": "/credentials/{id}"
+  },
+  {
+    "path": "/cron-jobs",
+    "permission": "cron-jobs.read"
+  },
+  {
+    "path": "/cron-jobs/{id}",
+    "permission": "cron-jobs.read"
+  },
+  {
+    "path": "/cron-jobs/{id}/runs",
+    "permission": "cron-jobs.read"
+  },
+  {
+    "path": "/cron-runs",
+    "permission": "cron-jobs.read"
+  },
+  {
+    "path": "/cron-runs/{id}",
+    "permission": "cron-jobs.read"
+  },
+  {
+    "path": "/dashboard",
+    "permission": "dashboard.read"
+  },
+  {
+    "path": "/deployment-revisions",
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployment-revisions/{id}",
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployments",
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployments/{id}",
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployments/{id}/events",
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/deployments/{id}/revisions",
+    "permission": "deployments.read"
+  },
+  {
+    "path": "/dictionaries",
+    "permission": "dictionaries.read"
+  },
+  {
+    "path": "/dictionaries/categories",
+    "permission": "dictionaries.read"
+  },
+  {
+    "path": "/dictionaries/{id}",
+    "permission": "dictionaries.read"
+  },
+  {
+    "path": "/health-checks",
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/health-checks/{id}",
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/health-observations",
+    "permission": "alerts.read"
+  },
+  {
+    "path": "/holes",
+    "permission": "holes.read"
+  },
+  {
+    "path": "/holes/{id}"
+  },
+  {
+    "path": "/marketplace",
+    "permission": "marketplace.read"
+  },
+  {
+    "path": "/marketplace-sources",
+    "permission": "marketplace-sources.read"
+  },
+  {
+    "path": "/marketplace-sources/{id}",
+    "permission": "marketplace-sources.read"
+  },
+  {
+    "path": "/marketplace/{id}",
+    "permission": "marketplace.read"
+  },
+  {
+    "path": "/members",
+    "permission": "members.read"
+  },
+  {
+    "path": "/members/invitation",
+    "permission": "members.create"
+  },
+  {
+    "path": "/members/role-options",
+    "permission": "members.update"
+  },
+  {
+    "path": "/members/{id}",
+    "permission": "members.read"
+  },
+  {
+    "path": "/node-groups",
+    "permission": "host-groups.read"
+  },
+  {
+    "path": "/node-groups/{id}"
+  },
+  {
+    "path": "/nodes",
+    "permission": "hosts.read"
+  },
+  {
+    "path": "/nodes/{id}"
+  },
+  {
+    "path": "/nodes/{id}/connection-credentials"
+  },
+  {
+    "path": "/nodes/{id}/file-systems",
+    "permission": "hosts.files"
+  },
+  {
+    "path": "/nodes/{id}/files"
+  },
+  {
+    "path": "/nodes/{id}/files/content"
+  },
+  {
+    "path": "/nodes/{id}/metrics",
+    "permission": "hosts.read"
+  },
+  {
+    "path": "/nodes/{id}/runner-updates",
+    "permission": "hosts.read"
+  },
+  {
+    "path": "/nodes/{id}/terminal-sessions"
+  },
+  {
+    "path": "/notification-channels",
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/notification-channels/{id}",
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/notification-deliveries",
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/notification-deliveries/{id}",
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/notification-templates",
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/notification-templates/{id}",
+    "permission": "notifications.read"
+  },
+  {
+    "path": "/pipeline-artifacts"
+  },
+  {
+    "path": "/pipeline-artifacts/{id}/content"
+  },
+  {
+    "path": "/pipeline-environments",
+    "permission": "pipeline-environments.read"
+  },
+  {
+    "path": "/pipeline-environments/{id}",
+    "permission": "pipeline-environments.read"
+  },
+  {
+    "path": "/pipeline-groups",
+    "permission": "pipeline-groups.read"
+  },
+  {
+    "path": "/pipeline-groups/{id}",
+    "permission": "pipeline-groups.read"
+  },
+  {
+    "path": "/pipeline-groups/{id}/acl"
+  },
+  {
+    "path": "/pipeline-runs",
+    "permission": "pipelines.read"
+  },
+  {
+    "path": "/pipeline-runs/{id}",
+    "permission": "pipelines.read"
+  },
+  {
+    "path": "/pipeline-runs/{id}/logs",
+    "permission": "pipelines.read"
+  },
+  {
+    "path": "/pipeline-templates",
+    "permission": "pipeline-templates.read"
+  },
+  {
+    "path": "/pipeline-templates/{id}",
+    "permission": "pipeline-templates.read"
+  },
+  {
+    "path": "/pipelines",
+    "permission": "pipelines.read"
+  },
+  {
+    "path": "/pipelines/{id}"
+  },
+  {
+    "path": "/pipelines/{id}/acl"
+  },
+  {
+    "path": "/pipelines/{id}/revisions"
+  },
+  {
+    "path": "/pipelines/{id}/revisions/{revision}"
+  },
+  {
+    "path": "/preferences"
+  },
+  {
+    "path": "/preview-ingresses",
+    "permission": "holes.read"
+  },
+  {
+    "path": "/repositories",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/repositories/{id}"
+  },
+  {
+    "path": "/repository-events",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/repository-events/{id}",
+    "permission": "repositories.read"
+  },
+  {
+    "path": "/repository-providers",
+    "permission": "credentials.read"
+  },
+  {
+    "path": "/repository-providers/{provider}/repositories",
+    "permission": "credentials.read"
+  },
+  {
+    "path": "/roles",
+    "permission": "roles.read"
+  },
+  {
+    "path": "/roles/{id}",
+    "permission": "roles.read"
+  },
+  {
+    "path": "/runner-tokens/{id}",
+    "permission": "hosts.enroll"
+  },
+  {
+    "path": "/settings",
+    "permission": "settings.read"
+  },
+  {
+    "path": "/settings/categories",
+    "permission": "settings.read"
+  },
+  {
+    "path": "/settings/{id}",
+    "permission": "settings.read"
+  },
+  {
+    "path": "/tags",
+    "permission": "tags.read"
+  },
+  {
+    "path": "/tags/{id}"
+  },
+  {
+    "path": "/value-files/{id}"
+  },
+  {
+    "path": "/variables",
+    "permission": "variables.read"
+  },
+  {
+    "path": "/variables/{id}",
+    "permission": "variables.read"
+  },
+  {
+    "path": "/workflow-executions/{id}",
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflow-executions/{id}/node-runs",
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflow-executions/{id}/node-runs/{node}/data",
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflow-executions/{id}/node-runs/{node}/output",
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflow-groups",
+    "permission": "workflow-groups.read"
+  },
+  {
+    "path": "/workflow-groups/{id}",
+    "permission": "workflow-groups.read"
+  },
+  {
+    "path": "/workflow-groups/{id}/acl"
+  },
+  {
+    "path": "/workflow-node-catalog"
+  },
+  {
+    "path": "/workflows",
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflows/{id}",
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflows/{id}/acl"
+  },
+  {
+    "path": "/workflows/{id}/assets/{hash}",
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflows/{id}/executions"
+  },
+  {
+    "path": "/workflows/{id}/publications"
+  },
+  {
+    "path": "/workflows/{id}/revisions",
+    "permission": "workflows.read"
+  },
+  {
+    "path": "/workflows/{id}/revisions/{revision}",
+    "permission": "workflows.read"
+  }
+]

@@ -105,6 +105,7 @@ fn contracts() -> &'static Contracts {
             include_str!(
                 "../../../../src/shared/workflow-contracts/workflow-integration-nodes.json"
             ),
+            include_str!("../../../../src/shared/workflow-contracts/workflow-platform-nodes.json"),
         ] {
             let catalog: Value =
                 serde_json::from_str(catalog).expect("bundled catalog must be JSON");
@@ -595,6 +596,9 @@ fn validate_semantics(kind: &str, params: &Value, base: &str) -> Result<()> {
             format!("{base}/params/overlap"),
             "workflow.graphSchema",
         ));
+    }
+    if kind == "ferry.request" {
+        super::platform::validate(params, base)?;
     }
     if kind == "human.pick" && params["min_selected"].as_f64() > params["max_selected"].as_f64() {
         return Err(invalid(
@@ -1212,7 +1216,7 @@ mod tests {
 
     #[test]
     fn draft_contracts_accept_all_catalog_examples_and_reject_unknown_parameters() {
-        assert_eq!(contracts().nodes.len(), 184);
+        assert_eq!(contracts().nodes.len(), 185);
         for kind in contracts().nodes.keys() {
             let mut graph = json!({"engine":"ferry-graph","schema":1,"nodes":[node("test",kind)],"connections":[]});
             accepts(&graph);

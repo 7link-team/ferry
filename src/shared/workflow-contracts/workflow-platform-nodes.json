@@ -1,0 +1,114 @@
+{
+  "contract_version": "1",
+  "scope": "Read-only platform data from the execution workspace through the in-process platform tool gateway (PRD §26)",
+  "nodes": [
+    {
+      "type": "ferry.request",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "search_aliases": [
+        "ferry",
+        "platform",
+        "api",
+        "get",
+        "request",
+        "code insights",
+        "平台数据"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^/"
+          },
+          "path_params": {
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "query": {
+            "type": "object",
+            "maxProperties": 64,
+            "propertyNames": {
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "split_items": {
+            "type": "boolean"
+          },
+          "all_pages": {
+            "type": "boolean"
+          },
+          "max_pages": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "operation",
+          "path_params",
+          "query",
+          "split_items",
+          "all_pages",
+          "max_pages"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/path_params/*",
+        "/query/*"
+      ],
+      "semantic_rule": "operation must be a GET template of the generated platform tool catalogue; path_params must name exactly its placeholders, each one non-empty segment without '/' or '..'. The workspace always comes from the execution.",
+      "example_params": {
+        "operation": "/workflows",
+        "path_params": {},
+        "query": {
+          "page_size": 20
+        },
+        "split_items": true,
+        "all_pages": false,
+        "max_pages": 50
+      }
+    }
+  ]
+}

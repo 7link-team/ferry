@@ -187,5 +187,12 @@
   "workflow.hostExecutionFailed": "Pelaksanaan hos gagal: semak sambungan, Git/curl, laluan dan kebenaran akaun.",
   "workflow.hostTargetRequired": "Pilih hos pelaksanaan pada nod atau aliran kerja.",
   "holes.domainRequired": "Konfigurasikan domain akar pratonton dalam tetapan platform ? Alamat akses dahulu.",
-  "platform.addressInvalid": "Masukkan URL utama HTTP(S) yang sah dan domain pratonton tanpa protokol, kad bebas atau laluan."
+  "platform.addressInvalid": "Masukkan URL utama HTTP(S) yang sah dan domain pratonton tanpa protokol, kad bebas atau laluan.",
+  "workflow.platformOperation": "Operasi data platform {operation} bukan operasi baca sahaja (GET) dalam katalog platform versi ini.",
+  "workflow.platformPathParam": "Parameter laluan {name} diperlukan dan mesti satu segmen tidak kosong tanpa “/” atau “..”.",
+  "workflow.platformQuery": "Nama parameter pertanyaan tidak boleh kosong, nilai mesti teks, nombor atau boolean, dan alamat permintaan tidak melebihi 4096 bait.",
+  "workflow.platformRequest": "Permintaan data platform gagal (HTTP {status}): {message}",
+  "workflow.platformTooLarge": "Respons data platform terlalu besar. Kecilkan pertanyaan dengan penapis atau page_size yang lebih kecil.",
+  "workflow.platformPageLimit": "Membaca semua data memerlukan lebih daripada {max_pages} halaman. Kecilkan pertanyaan atau naikkan had halaman (maksimum 50); hasil tidak dipotong.",
+  "workflow.platformPagination": "Operasi ini tidak memulangkan senarai berhalaman (items dan total), jadi “Baca semua halaman” tidak boleh digunakan."
 }

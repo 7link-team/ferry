@@ -350,9 +350,23 @@ pub(crate) async fn dispatch(s: &AppState, scope: Scope, call: Call) -> Result<V
     Ok(json!({"status":status.as_u16(),"ok":status.is_success(),"data":body}))
 }
 
+fn routes() -> &'static [Value] {
+    static ROUTES: std::sync::OnceLock<Vec<Value>> = std::sync::OnceLock::new();
+    ROUTES.get_or_init(|| {
+        serde_json::from_str(include_str!("platform_tools_catalog.json"))
+            .expect("generated platform catalogue")
+    })
+}
+
+/// Workflow platform-data nodes may call exactly the catalogue's GET templates.
+pub(crate) fn read_operation(path: &str) -> bool {
+    routes()
+        .iter()
+        .any(|row| row["method"] == "GET" && row["path"] == path)
+}
+
 pub(crate) fn catalogue(scope: &Scope, search: &str, offset: usize) -> Value {
-    let routes: Vec<Value> = serde_json::from_str(include_str!("platform_tools_catalog.json"))
-        .expect("generated platform catalogue");
+    let routes = routes().to_vec();
     let search = search.to_ascii_lowercase();
     let mut permissions = scope.permissions.iter().cloned().collect::<Vec<_>>();
     permissions.sort();

@@ -22,6 +22,13 @@ import { WorkflowAssetUpload, type WorkflowAsset } from "./WorkflowAssets";
 import { WorkflowAIParameters } from "./WorkflowAIParameters";
 import { WorkflowIntegrationParameters } from "./WorkflowIntegrationParameters";
 import { integrationManifest } from "./integrations";
+import { ComboInput } from "../../shared/forms/ComboInput";
+import platformOperations from "../../shared/workflow-contracts/platform-read-operations.json";
+
+/** Placeholders of a catalogue path template, in path order. */
+export const platformPathParams = (operation: string) =>
+  [...operation.matchAll(/\{(\w+)\}/g)].map((match) => match[1]!);
+const platformPaths = platformOperations.map((row) => row.path);
 
 const control =
   "h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm";
@@ -811,6 +818,38 @@ export function WorkflowNodeParameters({
     case "notification.send":
       fields = <NotificationParameters workspace={workspace} value={p} readOnly={readOnly} onChange={update} invalid={blocked => invalid("notification", blocked)} />;
       break;
+    case "ferry.request": {
+      const operation = String(p.operation ?? "");
+      const known = (platformOperations as { path: string; permission?: string }[]).find((row) => row.path === operation);
+      const pathParams = (p.path_params ?? {}) as Params;
+      fields = <>
+        <p className="text-sm leading-6 text-muted-foreground">{t("platform.location")}</p>
+        <Field label={t("platform.operation")}>
+          <ComboInput aria-label={t("platform.operation")} options={platformPaths} value={operation} readOnly={readOnly} required
+            placeholder="/code-insights/{id}/reports/{kind}"
+            onValueChange={(next) => patch({
+              operation: next,
+              // Keep values of placeholders that still exist; drop the rest.
+              path_params: Object.fromEntries(platformPathParams(next).map((name) => [name, pathParams[name] ?? ""])),
+            })} />
+        </Field>
+        {operation && !known && <p role="alert" className="text-sm text-destructive">{t("platform.unknownOperation")}</p>}
+        {known?.permission && <p className="text-xs leading-5 text-muted-foreground">{t("platform.permission")}: {known.permission}</p>}
+        {platformPathParams(operation).map((name) => (
+          <Field key={name} label={`${t("platform.pathParam")} · ${name}`}>
+            <Input aria-label={`${t("platform.pathParam")} · ${name}`} required readOnly={readOnly}
+              value={String(pathParams[name] ?? "")}
+              onChange={(event) => patch({ path_params: { ...pathParams, [name]: event.target.value } })} />
+          </Field>
+        ))}
+        <StructuredValue label={t("platform.query")} value={p.query ?? {}} readOnly={readOnly} change={(query) => patch({ query })} />
+        <Check label={t("platform.splitItems")} value={p.split_items !== false} readOnly={readOnly} change={(split_items) => patch({ split_items })} />
+        <Check label={t("platform.allPages")} value={p.all_pages === true} readOnly={readOnly} change={(all_pages) => patch({ all_pages })} />
+        {p.all_pages === true && number("max_pages", "platform.maxPages", 1)}
+        <p className="text-xs leading-5 text-muted-foreground">{t("platform.help")}</p>
+      </>;
+      break;
+    }
     case "host.command":
       fields = <>
         <p className="text-sm leading-6 text-muted-foreground">{t("hostCommandHelp")}</p>

@@ -4,6 +4,7 @@ import data from "../../shared/workflow-contracts/workflow-data-nodes.json";
 import file from "../../shared/workflow-contracts/workflow-file-nodes.json";
 import ai from "../../shared/workflow-contracts/workflow-ai-nodes.json";
 import integrations from "../../shared/workflow-contracts/workflow-integration-nodes.json";
+import platform from "../../shared/workflow-contracts/workflow-platform-nodes.json";
 
 export interface Port {
   port: string;
@@ -59,6 +60,7 @@ export const manifests = [
   ...file.nodes,
   ...ai.nodes,
   ...integrations.nodes,
+  ...platform.nodes,
 ] as unknown as Manifest[];
 const bundledManifestCount = manifests.length;
 export function setExtensionManifests(nodes: Manifest[]) {
@@ -114,6 +116,8 @@ export function newNode(graph: Graph, type: string, name: string): GraphNode {
   // The example names a sample host; a new preview must pick its own.
   if (type === "host.preview") defaults.host_id = "";
   if (type === "notification.send") defaults.channel_id = "";
+  // A platform data node starts unconfigured; the example operation is not a default.
+  if (type === "ferry.request") Object.assign(defaults, { operation: "", path_params: {}, query: {} });
   if (spec.params_schema.properties?.connection_id && spec.params_schema.properties?.credential_id) {
     delete defaults.credential_id;
     delete defaults.organization_id;

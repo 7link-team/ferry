@@ -10,6 +10,7 @@ pub(crate) mod integration;
 pub(crate) mod journal;
 pub(crate) mod media;
 pub(crate) mod plan;
+mod platform;
 pub(crate) mod preview;
 pub(crate) mod publication;
 pub(crate) mod run;

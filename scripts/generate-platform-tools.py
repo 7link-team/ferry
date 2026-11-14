@@ -122,9 +122,12 @@ for file in source.rglob('*.rs'):
         route=match.group(1).removeprefix('/{workspace}') or '/'
         for method,handler in re.findall(r'\b(get|post|put|patch|delete|any)\(\s*([\w:]+)\s*\)',text[start:end]):
             operations[(route,method)]={'path':route,'method':method.upper(),'handler':handler,'source':str(file.relative_to(root)).replace('\\','/'),**contract(handler,file)}
-output=json.dumps(sorted(operations.values(),key=lambda v:(v['path'],v['method'])),ensure_ascii=False,indent=2)+'\n'
-target=source/'platform_tools_catalog.json'
-if '--check' in sys.argv:
-    assert target.read_text(encoding='utf8')==output,'Run python scripts/generate-platform-tools.py after changing workspace routes'
-else: target.write_text(output,encoding='utf8',newline='\n')
+rows=sorted(operations.values(),key=lambda v:(v['path'],v['method']))
+output=json.dumps(rows,ensure_ascii=False,indent=2)+'\n'
+# The workflow editor only needs the read-only templates a platform data node may call.
+reads=json.dumps([{'path':v['path'],**({'permission':v['permission']} if 'permission' in v else {})} for v in rows if v['method']=='GET'],ensure_ascii=False,indent=2)+'\n'
+for target,text in [(source/'platform_tools_catalog.json',output),(root/'src/shared/workflow-contracts/platform-read-operations.json',reads)]:
+    if '--check' in sys.argv:
+        assert target.read_text(encoding='utf8')==text,'Run python scripts/generate-platform-tools.py after changing workspace routes'
+    else: target.write_text(text,encoding='utf8',newline='\n')
 print(f'{len(operations)} workspace operations in Agent tool directory')
