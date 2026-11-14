@@ -947,3 +947,32 @@ fn agent_started_runs_report_the_agent_role_instead_of_a_revoked_user() {
         "permission_revoked"
     );
 }
+
+#[tokio::test]
+async fn a_failed_run_keeps_its_full_message_in_the_running_node_logs() {
+    use super::super::journal::tests::{Fixture, activation};
+    let fixture = Fixture::new().await;
+    let journal = fixture.journal();
+    journal
+        .activate(fixture.run().await.version, activation(31, "/nodes/0"))
+        .await
+        .unwrap();
+    let run = fixture.run().await;
+    super::record_failure(
+        &fixture.db,
+        run.id,
+        "The platform data request failed (HTTP 404).",
+    )
+    .await;
+    let node = nodes::Entity::find_by_id(31)
+        .one(&fixture.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let logs = node.logs.unwrap_or_default();
+    assert!(
+        logs.contains("[error] The platform data request failed (HTTP 404)."),
+        "{logs}"
+    );
+    assert!(node.logs_updated_at > 0);
+}

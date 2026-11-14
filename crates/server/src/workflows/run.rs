@@ -956,6 +956,49 @@ async fn finish(
     Ok(())
 }
 
+/// Keep the full failure message with the node that failed: the execution only
+/// stores a short reason code, and the server log is not visible to users.
+async fn record_failure(db: &sea_orm::DatabaseConnection, run_id: i64, message: &str) {
+    const LIMIT: usize = 256 * 1024;
+    let Ok(active) = nodes::Entity::find()
+        .filter(nodes::Column::ExecutionId.eq(run_id))
+        .filter(nodes::Column::State.is_in(["running", "waiting"]))
+        .all(db)
+        .await
+    else {
+        return;
+    };
+    for node in active {
+        let mut logs = node.logs.clone().unwrap_or_default();
+        if !logs.is_empty() && !logs.ends_with('\n') {
+            logs.push('\n');
+        }
+        logs.push_str(&format!(
+            "[{}] [error] {message}",
+            chrono::Utc::now().to_rfc3339()
+        ));
+        let truncated = logs.len() > LIMIT;
+        if truncated {
+            let mut cut = LIMIT;
+            while !logs.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            logs.truncate(cut);
+        }
+        // Best effort: a failed write must not hide the original failure.
+        let _ = nodes::Entity::update_many()
+            .col_expr(nodes::Column::Logs, Expr::value(logs))
+            .col_expr(
+                nodes::Column::LogsTruncated,
+                Expr::value(truncated || node.logs_truncated),
+            )
+            .col_expr(nodes::Column::LogsUpdatedAt, Expr::value(db::now()))
+            .filter(nodes::Column::Id.eq(node.id))
+            .exec(db)
+            .await;
+    }
+}
+
 async fn finish_nodes(
     tx: &sea_orm::DatabaseTransaction,
     run_id: i64,
@@ -1545,6 +1588,7 @@ pub(crate) async fn scheduler(
                             if let Err(error) = dispatch(&s, &backend, &token, &stop).await {
                                 tracing::warn!(execution=token.execution().id,%error,"workflow execution stopped");
                                 if !*stop.borrow() {
+                                    record_failure(&s.db, token.execution().id, &error.to_string()).await;
                                     finish(&s.db, &token, "failed", failure_reason(&error)).await?;
                                 }
                             }
