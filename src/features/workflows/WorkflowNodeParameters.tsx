@@ -7,6 +7,8 @@ import { workflowFieldHelp } from "./workflow-field-help";
 import { Plus, X } from "lucide-react";
 import {
   createContext,
+  lazy,
+  Suspense,
   useContext,
   useEffect,
   useId,
@@ -17,6 +19,7 @@ import {
 import { workflowText as t } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { manifest, type GraphNode } from "./graph";
 import { WorkflowAssetUpload, type WorkflowAsset } from "./WorkflowAssets";
 import { WorkflowAIParameters } from "./WorkflowAIParameters";
@@ -24,6 +27,7 @@ import { WorkflowAgentParameters } from "./WorkflowAgentParameters";
 import { WorkflowIntegrationParameters } from "./WorkflowIntegrationParameters";
 import { integrationManifest } from "./integrations";
 import { ComboInput } from "../../shared/forms/ComboInput";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import platformOperations from "../../shared/workflow-contracts/platform-read-operations.json";
 
 /** Placeholders of a catalogue path template, in path order. */
@@ -370,7 +374,7 @@ function Value({
           </span>
         </Field>
       ) : type === "object" || type === "array" ? (
-        <StructuredValue label={label} value={value} readOnly={readOnly} change={change} />
+        <ObjectValueEditor label={label} value={value} array={type === "array"} readOnly={readOnly} change={change} />
       ) : type === "boolean" ? (
         <Check
           label={label}
@@ -406,6 +410,60 @@ function Value({
       )}
     </div>
   );
+}
+
+const CodeEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
+
+/** Values larger than this open as YAML: a field-per-key form for a big
+ *  object grows to thousands of pixels and is hard to read or edit. */
+const YAML_THRESHOLD = 2048;
+
+/** An object/list value edited either as a form or as YAML. YAML edits are
+ *  applied only when they parse to the same kind of value. */
+export function ObjectValueEditor({ label, value, array, readOnly, change }: {
+  label: string; value: unknown; array: boolean; readOnly: boolean; change: (value: unknown) => void;
+}) {
+  const [mode, setMode] = useState<"form" | "yaml">(() =>
+    JSON.stringify(value ?? (array ? [] : {})).length > YAML_THRESHOLD ? "yaml" : "form");
+  const [text, setText] = useState(() => stringifyYaml(value ?? (array ? [] : {})));
+  const [error, setError] = useState("");
+  const switchTo = (next: "form" | "yaml") => {
+    if (next === "yaml") setText(stringifyYaml(value ?? (array ? [] : {})));
+    setError("");
+    setMode(next);
+  };
+  return <div className="space-y-2">
+    {/* Read-only views keep every control disabled; the size alone picks the view. */}
+    {!readOnly && <div role="group" aria-label={t("valueMode")} className="inline-flex rounded-md border p-0.5">
+      {(["form", "yaml"] as const).map(option => <Button key={option} type="button" size="sm"
+        variant={mode === option ? "secondary" : "ghost"} aria-pressed={mode === option}
+        disabled={option === "form" && !!error} onClick={() => switchTo(option)}>
+        {t(option === "form" ? "valueModeForm" : "valueModeYaml")}
+      </Button>)}
+    </div>}
+    {mode === "form"
+      ? <StructuredValue label={label} value={value} readOnly={readOnly} change={change} />
+      : <div className="space-y-1">
+        <div className="h-72 overflow-hidden rounded-md border">
+          <Suspense fallback={<LoadingSkeleton variant="editor" />}><CodeEditor value={text} language="yaml" path={`value-${label}.yaml`} label={label} readOnly={readOnly}
+            onChange={next => {
+              setText(next);
+              try {
+                const parsed: unknown = parseYaml(next);
+                if (array ? !Array.isArray(parsed) : (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))) {
+                  setError(t(array ? "yamlExpectList" : "yamlExpectObject"));
+                  return;
+                }
+                setError("");
+                change(parsed);
+              } catch (cause) {
+                setError(`${t("yamlInvalid")} ${cause instanceof Error ? cause.message.split("\n")[0] : ""}`);
+              }
+            }} /></Suspense>
+        </div>
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      </div>}
+  </div>;
 }
 
 export function StructuredValue({ label, value, readOnly, change }: {

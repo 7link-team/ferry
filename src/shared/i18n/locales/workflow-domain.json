@@ -6150,5 +6150,11 @@
     "AI エージェントノードの設定が無効です。エージェント、プロンプト、出力スキーマ、実行ホストを確認してください。",
     "AI 에이전트 노드 구성이 잘못되었습니다. 에이전트, 프롬프트, 출력 스키마 및 실행 호스트를 확인하세요.",
     "Konfigurasi nod ejen AI tidak sah: semak ejen, gesaan, skema output dan hos pelaksanaan."
-  ]
+  ],
+  "valueMode": ["Edit as", "编辑方式", "編輯方式", "編集方法", "편집 방식", "Sunting sebagai"],
+  "valueModeForm": ["Form", "表单", "表單", "フォーム", "양식", "Borang"],
+  "valueModeYaml": ["YAML", "YAML", "YAML", "YAML", "YAML", "YAML"],
+  "yamlInvalid": ["Invalid YAML; the value was not changed.", "YAML 格式错误，值未修改。", "YAML 格式錯誤，值未修改。", "YAML が無効です。値は変更されていません。", "YAML이 올바르지 않아 값이 변경되지 않았습니다.", "YAML tidak sah; nilai tidak diubah."],
+  "yamlExpectObject": ["The YAML must be an object (key: value); the value was not changed.", "YAML 必须是对象（键: 值），值未修改。", "YAML 必須是物件（鍵: 值），值未修改。", "YAML はオブジェクト（キー: 値）である必要があります。値は変更されていません。", "YAML은 객체(키: 값)여야 하며 값이 변경되지 않았습니다.", "YAML mesti objek (kunci: nilai); nilai tidak diubah."],
+  "yamlExpectList": ["The YAML must be a list (- item); the value was not changed.", "YAML 必须是列表（- 项），值未修改。", "YAML 必須是清單（- 項），值未修改。", "YAML はリスト（- 項目）である必要があります。値は変更されていません。", "YAML은 목록(- 항목)이어야 하며 값이 변경되지 않았습니다.", "YAML mesti senarai (- item); nilai tidak diubah."]
 }
