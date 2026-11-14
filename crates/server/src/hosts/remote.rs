@@ -168,8 +168,13 @@ fn windows_hidden_command(path: &str) -> String {
         path.replace('\'', "''")
     );
     let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    // Under the host agent, `powershell -EncodedCommand` never exits (even for
+    // `1`), so hidden-file listing always hit the 15s timeout, while -Command
+    // returns in milliseconds. The script still travels as base64 (only
+    // [A-Za-z0-9+/=], safe inside cmd's quotes and PowerShell's single quotes),
+    // so paths containing quotes, % or & never reach either parser.
     format!(
-        "powershell.exe -NoProfile -NonInteractive -EncodedCommand {}",
+        "powershell.exe -NoProfile -NonInteractive -Command \"& ([scriptblock]::Create([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{}'))))\"",
         base64::engine::general_purpose::STANDARD.encode(bytes)
     )
 }
