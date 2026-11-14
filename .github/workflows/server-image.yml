@@ -1,18 +1,17 @@
 name: Server container
 
-# The registry keeps only version images (vX.Y.Z) and `latest`, which points at
-# the newest released version. Commits on main are built and smoke-tested but
-# never pushed, so they leave no sha-* tags behind.
+# Images are built only for version tags. The registry keeps only version
+# images (vX.Y.Z) and `latest`, which points at the newest released version;
+# commits on main never produce an image.
 on:
   push:
-    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing version tag to (re)build and publish, e.g. v0.4.0-alpha.1
+        description: Existing version tag to build and publish, e.g. v0.4.0-alpha.1
         type: string
-        default: ""
+        required: true
 
 permissions:
   contents: read
@@ -41,7 +40,7 @@ jobs:
     outputs:
       release: ${{ steps.release.outputs.tag }}
     steps:
-      - name: Resolve the release tag (empty for main)
+      - name: Resolve the release tag
         id: release
         shell: bash
         env:
@@ -49,7 +48,7 @@ jobs:
         run: |
           tag="${INPUT_TAG:-}"
           if [ -z "$tag" ] && [ "$GITHUB_REF_TYPE" = tag ]; then tag="$GITHUB_REF_NAME"; fi
-          if [ -n "$tag" ] && ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Not a version tag: $tag"; exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -61,7 +60,6 @@ jobs:
           node-version: "24"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
-        if: steps.release.outputs.tag != ''
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -81,11 +79,10 @@ jobs:
           cache-to: type=gha,scope=server-${{ matrix.arch }},mode=max
       - name: Verify initialization, the embedded web UI and a persistent restart
         run: node .github/scripts/smoke-server-image.mjs ferry-server:check
-      # Releases only: push the verified image (same layers, from the build
+      # Push the verified image (same layers, from the build
       # cache) by digest, without any tag, so no scratch tags are left behind.
       - name: Push the verified architecture by digest
         id: push
-        if: steps.release.outputs.tag != ''
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -97,7 +94,6 @@ jobs:
           cache-from: type=gha,scope=server-${{ matrix.arch }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
       - name: Record the pushed digest
-        if: steps.release.outputs.tag != ''
         shell: bash
         env:
           ARCH: ${{ matrix.arch }}
@@ -106,14 +102,12 @@ jobs:
           [[ "$DIGEST" == sha256:* ]] || { echo "::error::No pushed digest"; exit 1; }
           mkdir -p digests && echo "$DIGEST" > "digests/$ARCH"
       - uses: actions/upload-artifact@v4
-        if: steps.release.outputs.tag != ''
         with:
           name: digest-${{ matrix.arch }}
           path: digests/${{ matrix.arch }}
 
   publish:
     needs: build
-    if: needs.build.outputs.release != ''
     runs-on: ubuntu-24.04
     permissions:
       packages: write
