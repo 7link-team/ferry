@@ -130,9 +130,10 @@ jobs:
         run: |
           amd64=$(cat digests/amd64); arm64=$(cat digests/arm64)
           # A published version is immutable: never repoint it to different content.
+          # Re-running a release (e.g. to retry asset uploads) keeps the existing image.
           if docker buildx imagetools inspect "$IMAGE:$RELEASE_TAG" --raw > existing.json 2> inspect-error.txt; then
-            echo "::error::$IMAGE:$RELEASE_TAG already exists; publish a new version instead"
-            exit 1
+            echo "::notice::$IMAGE:$RELEASE_TAG is already published; keeping it unchanged"
+            exit 0
           fi
           grep -Eqi 'not found|manifest_unknown|manifest unknown' inspect-error.txt || { cat inspect-error.txt; exit 1; }
           docker buildx imagetools create --tag "$IMAGE:$RELEASE_TAG" --tag "$IMAGE:latest" \
