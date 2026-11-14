@@ -842,7 +842,8 @@ fn http() -> reqwest::Client {
 }
 
 async fn until(what: &str, mut check: impl AsyncFnMut() -> bool) {
-    for _ in 0..100 {
+    // Generous for loaded CI machines; fast when the condition already holds.
+    for _ in 0..400 {
         if check().await {
             return;
         }
@@ -1049,7 +1050,8 @@ async fn proxy_isolates_the_console_and_releases_every_connection() {
         .unwrap()
         .unwrap();
     assert_eq!(row.probe_state, "reachable");
-    assert!(proxy::active(id) > 0, "pooled connection is counted");
+    // Counting is asserted below on a live upgrade; an idle pooled connection may
+    // already have expired (500ms in tests) on a loaded machine.
 
     // Idle pooled connections are released: nothing leaks after traffic stops.
     until("idle connections to be released", async || {

@@ -56,7 +56,13 @@ try{
   assert.equal(await results.getByRole('textbox').count(),0);
   await page.screenshot({path:join(work,'running.png')});
   await results.getByRole('button',{name:t('execution.cancel'),exact:true}).click();assert.equal((await terminal(running.id)).state,'cancelled');
-  await view.locator('.react-flow__node[data-id="remote"]').getByText(t('execution.state.cancelled'),{exact:true}).waitFor();
+  const cancelledLabel=view.locator('.react-flow__node[data-id="remote"]').getByText(t('execution.state.cancelled'),{exact:true});
+  try { await cancelledLabel.waitFor(); }
+  catch (error) {
+    // Diagnose CI-only hidden labels: report which ancestor hides it and how.
+    const chain=await cancelledLabel.evaluate(node=>{const out=[];for(let e=node;e&&e!==document.body;e=e.parentElement){const s=getComputedStyle(e),r=e.getBoundingClientRect();out.push(`${e.tagName}.${String(e.className).slice(0,40)} vis=${s.visibility} disp=${s.display} op=${s.opacity} ${Math.round(r.width)}x${Math.round(r.height)}`);}return out;}).catch(e=>[String(e)]);
+    throw new Error(`${error.message}\nancestors:\n${chain.join('\n')}`);
+  }
   await wait(async()=>await view.locator('.react-flow__edge.animated').count()===0);
   report.checks.push('Actual Agent running node, directed animated edges, per-node status, cancellation and stopped animation; no parameter editing');
 
