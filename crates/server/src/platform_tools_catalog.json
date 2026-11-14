@@ -143,7 +143,7 @@
     "source": "crates/server/src/models.rs",
     "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n}"
+      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n}"
     ],
     "permission_checks": [
       "ai-models.create",
@@ -158,7 +158,7 @@
     "signature": "async fn discover(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Discovery>,\n) -> Result<Json<Value>>",
     "definitions": [
       "struct Discovery {\n    #[serde(default)]\n    provider_id: Id,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    host_id: Id,\n    #[serde(default)]\n    connection: Option<crate::workflows::ai::Body>,\n}",
-      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n}"
+      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n}"
     ],
     "permission_checks": [
       "ai-agents.probe",
@@ -188,7 +188,7 @@
     "source": "crates/server/src/models.rs",
     "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Body>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n}"
+      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n}"
     ],
     "permission_checks": [
       "ai-models.create",
@@ -214,7 +214,7 @@
     "source": "crates/server/src/workflows/ai.rs",
     "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct Body {\n    pub(crate) name: String,\n    #[serde(default)]\n    pub(crate) credential_id: Id,\n    /// Input only: never serialize into revisions, audit or responses.\n    #[serde(default, skip_serializing)]\n    pub(crate) api_key: Option<String>,\n    pub(crate) base_url: String,\n    pub(crate) protocol: String,\n    currency: String,\n    timezone: String,\n    monthly_limit_micros: i64,\n    qps: i64,\n    concurrency: i64,\n    prices: Vec<Price>,\n    #[serde(default)]\n    version: i64,\n}",
+      "struct Body {\n    pub(crate) name: String,\n    #[serde(default)]\n    pub(crate) credential_id: Id,\n    /// Input only: never serialize into revisions, audit or responses.\n    #[serde(default, skip_serializing)]\n    pub(crate) api_key: Option<String>,\n    pub(crate) base_url: String,\n    pub(crate) protocol: String,\n    /// Metering is optional: a connection without prices is unmetered and has no budget.\n    #[serde(default = \"default_currency\")]\n    currency: String,\n    #[serde(default = \"default_timezone\")]\n    timezone: String,\n    #[serde(default)]\n    monthly_limit_micros: i64,\n    qps: i64,\n    concurrency: i64,\n    #[serde(default)]\n    prices: Vec<Price>,\n    #[serde(default)]\n    version: i64,\n}",
       "struct Price {\n    model: String,\n    operation: String,\n    input_micros: i64,\n    output_micros: i64,\n    unit_size: i64,\n}"
     ],
     "permission_checks": [
@@ -231,7 +231,7 @@
     "source": "crates/server/src/workflows/ai.rs",
     "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Body>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct Body {\n    pub(crate) name: String,\n    #[serde(default)]\n    pub(crate) credential_id: Id,\n    /// Input only: never serialize into revisions, audit or responses.\n    #[serde(default, skip_serializing)]\n    pub(crate) api_key: Option<String>,\n    pub(crate) base_url: String,\n    pub(crate) protocol: String,\n    currency: String,\n    timezone: String,\n    monthly_limit_micros: i64,\n    qps: i64,\n    concurrency: i64,\n    prices: Vec<Price>,\n    #[serde(default)]\n    version: i64,\n}",
+      "struct Body {\n    pub(crate) name: String,\n    #[serde(default)]\n    pub(crate) credential_id: Id,\n    /// Input only: never serialize into revisions, audit or responses.\n    #[serde(default, skip_serializing)]\n    pub(crate) api_key: Option<String>,\n    pub(crate) base_url: String,\n    pub(crate) protocol: String,\n    /// Metering is optional: a connection without prices is unmetered and has no budget.\n    #[serde(default = \"default_currency\")]\n    currency: String,\n    #[serde(default = \"default_timezone\")]\n    timezone: String,\n    #[serde(default)]\n    monthly_limit_micros: i64,\n    qps: i64,\n    concurrency: i64,\n    #[serde(default)]\n    prices: Vec<Price>,\n    #[serde(default)]\n    version: i64,\n}",
       "struct Price {\n    model: String,\n    operation: String,\n    input_micros: i64,\n    output_micros: i64,\n    unit_size: i64,\n}"
     ],
     "permission_checks": [

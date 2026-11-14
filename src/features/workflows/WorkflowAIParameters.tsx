@@ -213,20 +213,8 @@ export function WorkflowAIParameters({
                   credential_id: "0",
                   base_url: "https://api.openai.com/v1",
                   protocol: "openai",
-                  currency: "USD",
-                  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                  monthly_limit_micros: 0,
                   qps: 1,
                   concurrency: 1,
-                  prices: [
-                    {
-                      model: String(value.model),
-                      operation: type,
-                      input_micros: 0,
-                      output_micros: 0,
-                      unit_size: 1,
-                    },
-                  ],
                   version: 0,
                 });
               } catch (e) {
@@ -258,7 +246,7 @@ export function WorkflowAIParameters({
           aria-label={t("aiAddProvider")}
           className="space-y-3 rounded-lg border p-3"
         >
-          <ProviderFields draft={draft} onChange={setDraft} type={type} />
+          <ProviderFields draft={draft} onChange={setDraft} />
           <div className="flex gap-2">
             <Button
               type="button"

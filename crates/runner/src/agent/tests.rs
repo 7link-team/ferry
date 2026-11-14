@@ -97,6 +97,7 @@ fn request(runtime: Runtime) -> Request {
         permission: Permission::OnRequest,
         timeout_seconds: 10,
         platform_tools: false,
+        provider: None,
     }
 }
 
@@ -121,11 +122,14 @@ fn acp_ready_platform(
         .writes[0]["method"],
         "session/new"
     );
-    let step = p.receive(json!({"id":1,"result":{"sessionId":"native-acp","modes":{"availableModes":[{"id":"default"},{"id":"plan"}]}}})).unwrap();
+    let step = p.receive(json!({"id":1,"result":{"sessionId":"native-acp","modes":{"availableModes":[{"id":"default"},{"id":"build"},{"id":"plan"}]}}})).unwrap();
     assert_eq!(
         step.writes[0]["params"]["modeId"],
         if permission == Permission::ReadOnly {
             "plan"
+        } else if runtime == Runtime::Opencode {
+            // OpenCode asks first in build mode; the Runner forces permission "ask".
+            "build"
         } else {
             "default"
         }
@@ -987,4 +991,110 @@ async fn live_native_cancel_pending_tool() {
     assert!(asked, "must cancel an actual native permission request");
     assert_eq!(outcome, Outcome::Cancelled);
     assert!(!dir.path().join("cancelled-marker.txt").exists());
+}
+
+// Opt-in acceptance against a local mock upstream (data/maintenance/cli-e2e):
+// FERRY_E2E_UPSTREAM=http://127.0.0.1:18431 FERRY_E2E_RUNTIMES=claude,codex,...
+// Proves each real CLI reaches the configured address, key and model through
+// its generated isolated configuration, and never reads the user's own login.
+#[tokio::test]
+#[ignore = "requires installed native CLIs and a local mock upstream"]
+async fn live_custom_provider_roundtrip() {
+    let upstream = std::env::var("FERRY_E2E_UPSTREAM").expect("FERRY_E2E_UPSTREAM");
+    let runtimes = std::env::var("FERRY_E2E_RUNTIMES").expect("FERRY_E2E_RUNTIMES");
+    let mut failures = Vec::new();
+    for name in runtimes.split(',').filter(|v| !v.is_empty()) {
+        let runtime = Runtime::parse(name).expect("known runtime");
+        let format = runtime.provider_formats()[0];
+        let base = match format {
+            "gemini" => upstream.clone(),
+            _ => format!("{upstream}/v1"),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let mut req = request(runtime);
+        req.cwd = dir.path().to_string_lossy().into_owned();
+        req.permission = if runtime == Runtime::Pi {
+            Permission::ReadOnly
+        } else {
+            Permission::OnRequest
+        };
+        req.timeout_seconds = 180;
+        req.model = Some(format!("e2e-{name}"));
+        req.prompt = "Reply with the word ready. Do not use tools.".into();
+        req.provider = Some(ferry_protocol::agent::Provider {
+            key: "4242".into(),
+            format: format.into(),
+            base_url: base,
+            api_key: format!("e2e-key-{name}"),
+            models: vec![format!("e2e-{name}")],
+            options: serde_json::json!({"format": format}),
+        });
+        let (events, mut received) = mpsc::channel(64);
+        let (_input, inputs) = mpsc::channel(2);
+        let (_stop, cancel) = watch::channel(false);
+        let task = tokio::spawn(run(req, events, inputs, cancel));
+        let mut text = String::new();
+        while let Some(event) = received.recv().await {
+            if let Event::Text {
+                text: value,
+                replace,
+                ..
+            } = event
+            {
+                if replace {
+                    text = value;
+                } else {
+                    text.push_str(&value);
+                }
+            }
+        }
+        let outcome = task.await.unwrap();
+        let ok = matches!(outcome, Ok(Outcome::Completed)) && text.contains("FERRY-E2E-OK");
+        println!("E2E {name}: outcome={outcome:?} text={text:?}");
+        if !ok {
+            failures.push(name.to_owned());
+        }
+    }
+    assert!(failures.is_empty(), "failed: {failures:?}");
+}
+
+#[test]
+fn acp_selects_config_option_modes_and_ignores_vendor_extensions() {
+    // OpenCode 1.19 exposes modes as a configOptions select, not `modes`.
+    let mut p = protocol::Protocol::new(request(Runtime::Opencode), "acp-test".into());
+    p.receive(json!({"id":0,"result":{"protocolVersion":1}}))
+        .unwrap();
+    let step = p
+        .receive(json!({"id":1,"result":{"sessionId":"s","configOptions":[{"id":"mode","options":[{"value":"build"},{"value":"plan"}]}]}}))
+        .unwrap();
+    assert_eq!(step.writes[0]["method"], "session/set_config_option");
+    assert_eq!(step.writes[0]["params"]["value"], "build");
+    // Grok sends `_x.ai/*` extensions before admission; requests get method-not-found.
+    let mut g = protocol::Protocol::new(request(Runtime::Grok), "acp-test".into());
+    g.receive(json!({"id":0,"result":{"protocolVersion":1}}))
+        .unwrap();
+    assert!(
+        g.receive(json!({"jsonrpc":"2.0","method":"_x.ai/session/setup","params":{}}))
+            .unwrap()
+            .writes
+            .is_empty()
+    );
+    let reply = g
+        .receive(json!({"jsonrpc":"2.0","id":9,"method":"_x.ai/ask","params":{}}))
+        .unwrap();
+    assert_eq!(reply.writes[0]["error"]["code"], -32601);
+    // Grok has no modes: on-request goes straight to the prompt; read-only is refused.
+    let step = g
+        .receive(json!({"id":1,"result":{"sessionId":"g"}}))
+        .unwrap();
+    assert_eq!(step.writes[0]["method"], "session/prompt");
+    let mut read_only = request(Runtime::Grok);
+    read_only.permission = Permission::ReadOnly;
+    let mut g = protocol::Protocol::new(read_only, "acp-test".into());
+    g.receive(json!({"id":0,"result":{"protocolVersion":1}}))
+        .unwrap();
+    assert!(
+        g.receive(json!({"id":1,"result":{"sessionId":"g"}}))
+            .is_err()
+    );
 }

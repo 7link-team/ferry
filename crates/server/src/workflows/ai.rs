@@ -123,14 +123,25 @@ pub(crate) struct Body {
     pub(crate) api_key: Option<String>,
     pub(crate) base_url: String,
     pub(crate) protocol: String,
+    /// Metering is optional: a connection without prices is unmetered and has no budget.
+    #[serde(default = "default_currency")]
     currency: String,
+    #[serde(default = "default_timezone")]
     timezone: String,
+    #[serde(default)]
     monthly_limit_micros: i64,
     qps: i64,
     concurrency: i64,
+    #[serde(default)]
     prices: Vec<Price>,
     #[serde(default)]
     version: i64,
+}
+fn default_currency() -> String {
+    "USD".into()
+}
+fn default_timezone() -> String {
+    "UTC".into()
 }
 pub(crate) fn view(row: &providers::Model) -> Value {
     json!({"id":Id::from(row.id),"name":row.name,"credential_id":Id::from(row.credential_id),"base_url":row.base_url,"protocol":row.protocol,"currency":row.currency,"timezone":row.timezone,"monthly_limit_micros":row.monthly_limit_micros,"qps":row.qps,"concurrency":row.concurrency,"prices":serde_json::from_str::<Value>(&row.prices).unwrap_or(Value::Null),"version":row.version})
@@ -164,7 +175,6 @@ async fn validate(conn: &impl ConnectionTrait, workspace: Id, body: &Body) -> Re
         || body.monthly_limit_micros > 1_000_000_000_000
         || !(1..=1000).contains(&body.qps)
         || !(1..=100).contains(&body.concurrency)
-        || body.prices.is_empty()
         || body.prices.len() > 100
     {
         return Err(invalid());
@@ -460,11 +470,25 @@ async fn reserve(
         tx.commit().await?;
         return Ok((row, price, call));
     }
-    let price: Price = serde_json::from_str::<Vec<Price>>(&row.prices)
-        .map_err(|_| invalid())?
-        .into_iter()
-        .find(|x| x.model == p["model"] && x.operation == operation)
-        .ok_or_else(|| error("workflow.aiPriceMissing"))?;
+    let prices = serde_json::from_str::<Vec<Price>>(&row.prices).map_err(|_| invalid())?;
+    // An unpriced connection is unmetered: no cost, no budget. A priced connection
+    // still refuses models it has no price for, so metered spend is never uncounted.
+    let metered = !prices.is_empty();
+    let price: Price = if metered {
+        prices
+            .into_iter()
+            .find(|x| x.model == p["model"] && x.operation == operation)
+            .ok_or_else(|| error("workflow.aiPriceMissing"))?
+    } else {
+        Price {
+            model: p["model"].as_str().unwrap_or_default().into(),
+            operation: operation.into(),
+            input_micros: 0,
+            output_micros: 0,
+            unit_size: 1,
+        }
+    };
+    let cap = if metered { cap } else { 0 };
     let tz = row
         .timezone
         .parse::<chrono_tz::Tz>()
@@ -490,9 +514,10 @@ async fn reserve(
             })
         })
         .ok_or_else(invalid)?;
-    if used
-        .checked_add(cap)
-        .is_none_or(|total| total > row.monthly_limit_micros)
+    if (metered
+        && used
+            .checked_add(cap)
+            .is_none_or(|total| total > row.monthly_limit_micros))
         || all
             .iter()
             .filter(|c| matches!(c.state.as_str(), "reserved" | "sent" | "unknown"))

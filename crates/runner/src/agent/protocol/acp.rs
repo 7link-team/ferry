@@ -37,6 +37,15 @@ impl Protocol {
                 });
                 return Ok(step);
             }
+            // ACP reserves "_" methods for vendor extensions (Grok's _x.ai/*).
+            // Notifications carry no turn data; requests get "method not found".
+            if method.starts_with('_') {
+                if !value["id"].is_null() {
+                    step.writes.push(json!({"jsonrpc":"2.0","id":value["id"],
+                        "error":{"code":-32601,"message":"Method not found"}}));
+                }
+                return Ok(step);
+            }
             // load may replay native history before its response. It is already
             // durable in Ferry and must not become a new assistant reply.
             if method == "session/update" && self.turn.is_none() {
@@ -226,23 +235,57 @@ impl Protocol {
                     }
                     return Ok(step);
                 }
+                if self.request.runtime == Runtime::Grok {
+                    // Grok has no ACP modes. Started without --always-approve it
+                    // asks through session/request_permission; it has no read-only mode.
+                    ensure!(
+                        self.request.permission != Permission::ReadOnly,
+                        "Grok Build has no read-only mode"
+                    );
+                    if let Some(model) = &self.request.model {
+                        step.writes.push(json!({"jsonrpc":"2.0","id":3,"method":"session/set_model","params":{"sessionId":id,"modelId":model}}));
+                    } else {
+                        self.acp_prompt(&mut step);
+                    }
+                    return Ok(step);
+                }
                 // Set an explicit mode. Never inherit native yolo/auto-edit settings.
                 let target = if self.request.permission == Permission::ReadOnly {
                     &["plan"][..]
+                } else if self.request.runtime == Runtime::Opencode {
+                    // OpenCode's build mode asks first: the Runner forces every
+                    // tool permission to "ask" through OPENCODE_CONFIG_CONTENT.
+                    &["build"][..]
                 } else {
                     &["default", "ask"][..]
                 };
-                let mode = result["modes"]["availableModes"]
+                // Legacy `modes` or the newer `configOptions` select with id "mode".
+                let legacy = result["modes"]["availableModes"]
                     .as_array()
                     .and_then(|modes| {
                         modes
                             .iter()
                             .find_map(|mode| mode["id"].as_str().filter(|id| target.contains(id)))
-                    })
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("CLI does not expose the requested safe ACP mode")
-                    })?;
-                step.writes.push(json!({"jsonrpc":"2.0","id":2,"method":"session/set_mode","params":{"sessionId":id,"modeId":mode}}));
+                    });
+                let option = || {
+                    result["configOptions"]
+                        .as_array()?
+                        .iter()
+                        .find(|option| option["id"] == "mode")?["options"]
+                        .as_array()?
+                        .iter()
+                        .find_map(|o| o["value"].as_str().filter(|v| target.contains(v)))
+                };
+                if let Some(mode) = legacy {
+                    step.writes.push(json!({"jsonrpc":"2.0","id":2,"method":"session/set_mode","params":{"sessionId":id,"modeId":mode}}));
+                } else if let Some(mode) = option() {
+                    step.writes.push(
+                        json!({"jsonrpc":"2.0","id":2,"method":"session/set_config_option",
+                        "params":{"sessionId":id,"configId":"mode","value":mode}}),
+                    );
+                } else {
+                    bail!("CLI does not expose the requested safe ACP mode");
+                }
             }
             Some(2)
                 if self.ready && self.turn.is_none() && self.request.runtime != Runtime::Dsh =>

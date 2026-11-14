@@ -1,4 +1,5 @@
 import { ConversationMembers, type ConversationMember } from "./ConversationMembers";
+import { cliToolLabel } from "../../shared/forms/cli-tools";
 import { IdentityAvatar, type AvatarValue } from "../../shared/ui/identity-avatar";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api, errorText } from "../../shared/api/api";
@@ -684,11 +685,7 @@ export function Conversation({
               <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2">
                 <dt>{t("runtime")}</dt>
                 <dd>
-                  {data.config.runtime === "claude"
-                    ? "Claude Code"
-                    : data.config.runtime === "codex"
-                      ? "Codex"
-                      : data.config.runtime}{" "}
+                  {cliToolLabel(data.config.runtime)}{" "}
                   · {data.config.model || t("nativeModel")}
                 </dd>
                 <dt>{t("revision")}</dt>

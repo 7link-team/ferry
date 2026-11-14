@@ -9,6 +9,7 @@ mod account_otp;
 mod account_preferences;
 mod agent_models;
 mod ai_agents;
+mod ai_model_cli_options;
 mod ai_models;
 mod blueprint_deployments;
 mod chat;
@@ -164,6 +165,7 @@ impl MigratorTrait for Migrator {
             Box::new(conversations::Migration),
             Box::new(chat::Migration),
             Box::new(ai_models::Migration),
+            Box::new(ai_model_cli_options::Migration),
             Box::new(chat_messages::Migration),
             Box::new(agent_models::Migration),
             Box::new(chat_interactions::Migration),

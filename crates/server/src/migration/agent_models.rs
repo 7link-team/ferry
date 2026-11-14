@@ -119,6 +119,7 @@ impl MigrationTrait for Migration {
                         default_model: agent.model.clone(),
                         tool_version: String::new(),
                         state: "enabled".into(),
+                        cli_options: None,
                         revision_id: agent.id,
                         version: 1,
                         created_at: agent.created_at,

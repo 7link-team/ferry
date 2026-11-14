@@ -3,6 +3,7 @@
 pub(crate) mod platform;
 pub(super) mod probe;
 mod protocol;
+mod provider;
 pub(super) mod provision;
 #[cfg(test)]
 mod tests;
@@ -59,9 +60,12 @@ pub(super) async fn workspace(
 
 fn validate(request: &Request) -> Result<()> {
     ensure!(
-        request.runtime != Runtime::Pi || request.permission == Permission::ReadOnly,
+        !matches!(request.runtime, Runtime::Pi) || request.permission == Permission::ReadOnly,
         "Pi currently supports read-only conversations only"
     );
+    if let Some(provider) = &request.provider {
+        provider::validate(request.runtime, provider)?;
+    }
     ensure!(
         std::path::Path::new(&request.cwd).is_absolute(),
         "Agent workdir must be absolute"
@@ -156,24 +160,28 @@ fn command_with(request: &Request, environment: &provision::Environment) -> Comm
             }
             c
         }
-        Runtime::Gemini | Runtime::Qwen | Runtime::Opencode | Runtime::Dsh | Runtime::Kimi => {
-            let name = match request.runtime {
-                Runtime::Gemini => "gemini",
-                Runtime::Qwen => "qwen",
-                Runtime::Dsh => "dsh",
-                Runtime::Kimi => "kimi",
-                _ => "opencode",
-            };
-            let mut c = native_command(executable.as_deref().unwrap_or(std::path::Path::new(name)));
-            c.arg(match request.runtime {
-                Runtime::Gemini => "--experimental-acp",
-                Runtime::Qwen => "--acp",
-                _ => "acp",
-            });
+        runtime if protocol::is_acp(runtime) => {
+            let mut c = native_command(
+                executable
+                    .as_deref()
+                    .unwrap_or(std::path::Path::new(probe::binary(runtime))),
+            );
+            c.args(acp_args(runtime));
+            if runtime == Runtime::Opencode {
+                // Highest-precedence config: never inherit native auto-approval.
+                c.env(
+                    "OPENCODE_CONFIG_CONTENT",
+                    r#"{"permission":{"edit":"ask","bash":"ask","webfetch":"ask"}}"#,
+                );
+            }
             c
         }
         Runtime::Pi => {
-            let mut c = native_command(executable.as_deref().unwrap_or(std::path::Path::new("pi")));
+            let mut c = native_command(
+                executable
+                    .as_deref()
+                    .unwrap_or(std::path::Path::new(probe::binary(request.runtime))),
+            );
             // Pi's MCP integrations are extensions; disabling extensions also disables them.
             c.args([
                 "--mode",
@@ -191,17 +199,45 @@ fn command_with(request: &Request, environment: &provision::Environment) -> Comm
             }
             c
         }
+        _ => unreachable!("every runtime has a protocol"),
     };
     environment.apply(&mut command);
     command
 }
 
+/// A JavaScript entry launched through node.exe: a .js/.mjs/.cjs file, or an
+/// extensionless npm bin with a node shebang (Grok Build, CodeBuddy).
+pub(super) fn node_script(program: &std::path::Path) -> bool {
+    match program.extension().and_then(|ext| ext.to_str()) {
+        Some("js" | "mjs" | "cjs") => true,
+        Some(_) => false,
+        None => {
+            cfg!(windows)
+                && std::fs::File::open(program)
+                    .and_then(|mut file| {
+                        let mut head = [0u8; 19];
+                        std::io::Read::read_exact(&mut file, &mut head)?;
+                        Ok(&head == b"#!/usr/bin/env node")
+                    })
+                    .unwrap_or(false)
+        }
+    }
+}
+
+/// Arguments that start each CLI's Agent Client Protocol server on stdio.
+fn acp_args(runtime: Runtime) -> &'static [&'static str] {
+    match runtime {
+        Runtime::Gemini => &["--experimental-acp"],
+        Runtime::Qwen | Runtime::Copilot | Runtime::Codebuddy => &["--acp"],
+        // Never --always-approve: approvals go through ACP permission requests.
+        Runtime::Grok => &["agent", "--no-leader", "stdio"],
+        _ => &["acp"],
+    }
+}
+
 fn native_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let program = std::path::Path::new(program.as_ref());
-    let mut command = if program
-        .extension()
-        .is_some_and(|ext| matches!(ext.to_str(), Some("js" | "mjs" | "cjs")))
-    {
+    let mut command = if node_script(program) {
         let node = std::env::var_os("PATH")
             .and_then(|path| {
                 std::env::split_paths(&path)
@@ -322,7 +358,31 @@ pub(super) async fn run_managed(
             "Agent execution identity changed; create a new conversation"
         );
     }
-    let command = command_with(&request, &environment);
+    let mut environment = environment;
+    let mut request = request;
+    let mut launch = provider::Launch::default();
+    if let Some(provider) = request.provider.clone() {
+        // A custom upstream never reads or writes the user's own CLI configuration.
+        let home = match environment.home.clone() {
+            Some(home) => home,
+            None => {
+                provision::private_home(
+                    state_dir,
+                    &std::path::Path::new("agent-provider-homes").join(&provider.key),
+                )
+                .await?
+            }
+        };
+        launch =
+            provider::prepare(&home, request.runtime, &provider, request.model.as_deref()).await?;
+        environment.home = Some(home);
+        request.model = launch.model.take();
+    }
+    let mut command = command_with(&request, &environment);
+    command.args(&launch.args);
+    for (key, value) in &launch.env {
+        command.env(key, value);
+    }
     #[cfg(unix)]
     let mut command = command;
     #[cfg(unix)]

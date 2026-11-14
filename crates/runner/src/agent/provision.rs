@@ -37,6 +37,7 @@ impl Environment {
                 ("CLAUDE_CONFIG_DIR", ".claude"),
                 ("PI_CODING_AGENT_DIR", ".pi/agent"),
                 ("DSH_HOME", ".dsh"),
+                ("KIMI_CODE_HOME", ".kimi-code"),
                 ("TMPDIR", "tmp"),
                 ("TEMP", "tmp"),
                 ("TMP", "tmp"),
@@ -48,16 +49,7 @@ impl Environment {
 }
 
 fn name(runtime: Runtime) -> &'static str {
-    match runtime {
-        Runtime::Codex => "codex",
-        Runtime::Claude => "claude",
-        Runtime::Gemini => "gemini",
-        Runtime::Qwen => "qwen",
-        Runtime::Opencode => "opencode",
-        Runtime::Pi => "pi",
-        Runtime::Dsh => "dsh",
-        Runtime::Kimi => "kimi",
-    }
+    super::probe::binary(runtime)
 }
 fn package(runtime: Runtime) -> &'static str {
     match runtime {
@@ -68,8 +60,10 @@ fn package(runtime: Runtime) -> &'static str {
         Runtime::Opencode => "opencode-ai",
         Runtime::Pi => "@mariozechner/pi-coding-agent",
         Runtime::Dsh => "@deepseek-ai/dsh",
-        // Kimi is a Python CLI and never enters the npm installation path.
-        Runtime::Kimi => "kimi-cli",
+        Runtime::Kimi => "@moonshot-ai/kimi-code",
+        Runtime::Grok => "@xai-official/grok",
+        Runtime::Copilot => "@github/copilot",
+        Runtime::Codebuddy => "@tencent-ai/codebuddy-code",
     }
 }
 
@@ -146,7 +140,7 @@ async fn private_directory(root: &Path, relative: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 
-async fn private_home(root: &Path, relative: &Path) -> Result<PathBuf> {
+pub(super) async fn private_home(root: &Path, relative: &Path) -> Result<PathBuf> {
     let home = private_directory(root, relative).await?;
     for directory in [
         "tmp",
@@ -498,13 +492,6 @@ async fn selected(
     policy: &Policy,
     prepare: bool,
 ) -> Result<Option<PathBuf>> {
-    if runtime == Runtime::Kimi {
-        ensure!(
-            !policy.versions.contains_key("kimi"),
-            "Kimi versions are managed by its native Python installer"
-        );
-        return Ok(None);
-    }
     let mut record = installed(root)?;
     if prepare
         && ((record.is_none() && policy.auto_install) || (record.is_some() && policy.auto_upgrade))

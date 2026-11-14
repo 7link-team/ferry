@@ -68,6 +68,8 @@ pub mod ai_model_profiles {
         pub default_model: String,
         pub tool_version: String,
         pub state: String,
+        #[sea_orm(column_type = "Text", nullable)]
+        pub cli_options: Option<String>,
         pub revision_id: i64,
         pub version: i64,
         pub created_at: i64,

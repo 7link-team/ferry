@@ -457,7 +457,10 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
         {
             return Err(error(StatusCode::CONFLICT, "conversations.bindingChanged"));
         }
-        if !config.authentication_usable(&probe.authentication) {
+        let provider =
+            crate::models::cli_provider(&s, scope.workspace_id, c.agent_id, config.runtime).await?;
+        // A custom upstream replaces the CLI's own login for this execution.
+        if provider.is_none() && !config.authentication_usable(&probe.authentication) {
             return Err(error(StatusCode::CONFLICT, "conversations.loginRequired"));
         }
         let mut prompt = String::new();
@@ -526,6 +529,7 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
                 permission: config.permission,
                 timeout_seconds: 3600,
                 platform_tools: true,
+                provider,
             },
         ))
     };

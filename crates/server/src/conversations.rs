@@ -147,16 +147,13 @@ pub(super) struct Configuration {
 }
 impl Configuration {
     fn authentication_usable(&self, authentication: &str) -> bool {
+        // Only Codex and Claude expose a stable login-status command; the
+        // others report unknown and fail at session start when signed out.
         authentication == "logged_in"
             || (authentication == "unknown"
-                && matches!(
+                && !matches!(
                     self.runtime,
-                    ferry_protocol::agent::Runtime::Gemini
-                        | ferry_protocol::agent::Runtime::Qwen
-                        | ferry_protocol::agent::Runtime::Opencode
-                        | ferry_protocol::agent::Runtime::Pi
-                        | ferry_protocol::agent::Runtime::Dsh
-                        | ferry_protocol::agent::Runtime::Kimi
+                    ferry_protocol::agent::Runtime::Codex | ferry_protocol::agent::Runtime::Claude
                 ))
     }
     fn for_conversation(a: &ai_agents::Model, body: &Create) -> Result<Self> {
@@ -167,10 +164,12 @@ impl Configuration {
         if let Some(permission) = body.permission {
             config.permission = permission;
         }
-        if (config.runtime == ferry_protocol::agent::Runtime::Pi
+        if (matches!(config.runtime, ferry_protocol::agent::Runtime::Pi)
             && config.permission != ferry_protocol::agent::Permission::ReadOnly)
-            || (config.runtime == ferry_protocol::agent::Runtime::Kimi
-                && config.permission == ferry_protocol::agent::Permission::ReadOnly)
+            || (matches!(
+                config.runtime,
+                ferry_protocol::agent::Runtime::Kimi | ferry_protocol::agent::Runtime::Grok
+            ) && config.permission == ferry_protocol::agent::Permission::ReadOnly)
         {
             return Err(error(
                 StatusCode::BAD_REQUEST,

@@ -203,3 +203,213 @@ async fn catalog_accepts_manual_models_but_rejects_bad_runtime_and_cross_workspa
     b.models = vec!["--execute".into()];
     assert!(b.validate(&s.db, &admin(1)).await.is_err());
 }
+
+#[tokio::test]
+async fn api_connection_saves_without_metering_fields() {
+    let (_dir, s) = setup().await;
+    crate::entities::workspace_roles::Entity::insert(
+        crate::entities::workspace_roles::Model {
+            id: 1,
+            workspace_id: 1,
+            name: "Manager".into(),
+            permissions: serde_json::to_string(&admin(1).permissions).unwrap(),
+            builtin: 0,
+            created_at: 0,
+            updated_at: 0,
+            version: 1,
+        }
+        .into_active_model(),
+    )
+    .exec(&s.db)
+    .await
+    .unwrap();
+    let input = json!({"name":"Unmetered","kind":"api","state":"enabled","default_model":"m","models":["m"],"connection":{
+        "name":"Unmetered","api_key":"unmetered-token","protocol":"openai","base_url":"https://api.example.invalid/v1","qps":1,"concurrency":1}});
+    let created = save(&s, &admin(1), None, serde_json::from_value(input).unwrap())
+        .await
+        .unwrap();
+    let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let Json(row) = detail(State(s.clone()), admin(1), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert_eq!(row["connection"]["prices"], json!([]));
+    assert_eq!(row["connection"]["currency"], "USD");
+    assert_eq!(row["connection"]["timezone"], "UTC");
+    assert_eq!(row["connection"]["monthly_limit_micros"], 0);
+}
+
+async fn manager(s: &AppState) {
+    crate::entities::workspace_roles::Entity::insert(
+        crate::entities::workspace_roles::Model {
+            id: 1,
+            workspace_id: 1,
+            name: "Manager".into(),
+            permissions: serde_json::to_string(&admin(1).permissions).unwrap(),
+            builtin: 0,
+            created_at: 0,
+            updated_at: 0,
+            version: 1,
+        }
+        .into_active_model(),
+    )
+    .exec(&s.db)
+    .await
+    .unwrap();
+}
+
+fn cli_body(runtime: &str, options: Value, connection: Value) -> Body {
+    serde_json::from_value(
+        json!({"name":"CLI","kind":"cli","runtime":runtime,"state":"enabled",
+        "models":["m"],"default_model":"m","cli_options":options,"connection":connection}),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn cli_custom_api_is_its_own_connection_and_reaches_the_runner_request() {
+    let (_dir, s) = setup().await;
+    manager(&s).await;
+    let connection = json!({"name":"x","api_key":"cli-private-key","protocol":"openai",
+        "base_url":"https://gw.example.invalid/anthropic","qps":1,"concurrency":1});
+    // A format the CLI cannot call directly is refused; so is any custom API for login-only CLIs.
+    for (runtime, options) in [
+        ("claude", json!({"format":"openai_chat"})),
+        ("copilot", json!({"format":"openai_chat"})),
+        ("claude", json!({"format":"anthropic","x":{"nested":true}})),
+    ] {
+        assert!(
+            save(
+                &s,
+                &admin(1),
+                None,
+                cli_body(runtime, options, connection.clone())
+            )
+            .await
+            .is_err(),
+            "{runtime}"
+        );
+    }
+    let created = save(
+        &s,
+        &admin(1),
+        None,
+        cli_body(
+            "claude",
+            json!({"format":"anthropic","opus_model":"big"}),
+            connection,
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        created["cli_options"],
+        json!({"format":"anthropic","opus_model":"big"})
+    );
+    let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let Json(detail) = detail(State(s.clone()), admin(1), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    // Anthropic format stores an Anthropic connection; the key never comes back.
+    assert_eq!(detail["connection"]["protocol"], "anthropic");
+    assert!(!detail.to_string().contains("cli-private-key"));
+    crate::entities::ai_agents::Entity::insert(
+        crate::entities::ai_agents::Model {
+            id: 777,
+            model_profile_id: i64::from(id),
+            workspace_id: 1,
+            name: "a".into(),
+            avatar: None,
+            role: String::new(),
+            description: String::new(),
+            runtime: "claude".into(),
+            model: "m".into(),
+            host_id: 0,
+            owner_id: 1,
+            cwd: String::new(),
+            system_prompt: String::new(),
+            permission: "on_request".into(),
+            visibility: "workspace".into(),
+            state: "enabled".into(),
+            revision_id: 0,
+            version: 1,
+            created_at: 0,
+            updated_at: 0,
+        }
+        .into_active_model(),
+    )
+    .exec(&s.db)
+    .await
+    .unwrap();
+    let provider = cli_provider(&s, 1.into(), 777, ferry_protocol::agent::Runtime::Claude)
+        .await
+        .unwrap()
+        .expect("custom provider");
+    assert_eq!(provider.api_key, "cli-private-key");
+    assert_eq!(provider.format, "anthropic");
+    assert_eq!(provider.base_url, "https://gw.example.invalid/anthropic");
+    assert_eq!(provider.options["opus_model"], "big");
+    assert!(!format!("{provider:?}").contains("cli-private-key"));
+    // Another runtime, or a native CLI, keeps its own configuration.
+    assert!(
+        cli_provider(&s, 1.into(), 777, ferry_protocol::agent::Runtime::Codex)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn editing_a_cli_that_shares_an_api_connection_splits_it_instead_of_changing_the_api_model() {
+    let (_dir, s) = setup().await;
+    manager(&s).await;
+    let api = save(
+        &s,
+        &admin(1),
+        None,
+        serde_json::from_value(json!({"name":"API","kind":"api","state":"enabled","default_model":"m","connection":{
+            "name":"API","api_key":"api-key","protocol":"openai","base_url":"https://api.example.invalid/v1","qps":1,"concurrency":1}}))
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    let shared = api["provider_id"].as_str().unwrap().to_owned();
+    // A profile saved by the previous release: CLI referencing the API model's connection.
+    let legacy = save(
+        &s,
+        &admin(1),
+        None,
+        serde_json::from_value(
+            json!({"name":"Old CLI","kind":"cli","runtime":"codex","state":"enabled",
+            "provider_id":shared,"models":["m"],"default_model":"m"}),
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(legacy["cli_options"], json!({"format":"openai_responses"}));
+    let id: Id = serde_json::from_value(legacy["id"].clone()).unwrap();
+    let mut edit = cli_body(
+        "codex",
+        json!({"format":"openai_responses"}),
+        json!({"name":"Old CLI","protocol":"openai","base_url":"https://changed.example.invalid/v1","qps":1,"concurrency":1,"credential_id":"0","version":1}),
+    );
+    edit.provider_id = shared.clone();
+    edit.version = 1;
+    let error = save(&s, &admin(1), Some(id), edit).await.err().unwrap();
+    assert!(format!("{error:?}").contains("sharedConnectionNeedsKey"));
+    let mut edit = cli_body(
+        "codex",
+        json!({"format":"openai_responses"}),
+        json!({"name":"Old CLI","api_key":"cli-key","protocol":"openai","base_url":"https://changed.example.invalid/v1","qps":1,"concurrency":1,"credential_id":"0","version":1}),
+    );
+    edit.provider_id = shared.clone();
+    edit.version = 1;
+    let saved = save(&s, &admin(1), Some(id), edit).await.unwrap();
+    assert_ne!(saved["provider_id"], json!(shared));
+    let original = providers::Entity::find_by_id(shared.parse::<i64>().unwrap())
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(original.base_url, "https://api.example.invalid/v1");
+}

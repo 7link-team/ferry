@@ -28,20 +28,23 @@ export function matchPreset(protocol: unknown, baseUrl: unknown) {
 export function ProviderPresetPicker({
   selected,
   onSelect,
+  presets = providerPresets,
 }: {
   selected: ProviderPreset | undefined;
   onSelect: (preset: ProviderPreset | null) => void;
+  /** Restrict the chooser, e.g. to presets a CLI can reach directly. */
+  presets?: ProviderPreset[];
 }) {
   const [category, setCategory] = useState("all");
   const [query, setQuery] = useState("");
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return providerPresets.filter(
+    return presets.filter(
       (p) =>
         (category === "all" || p.category === category) &&
         (!q || p.name.toLowerCase().includes(q) || p.base_url.toLowerCase().includes(q)),
     );
-  }, [category, query]);
+  }, [category, query, presets]);
   const chip = (active: boolean) =>
     `inline-flex min-h-9 max-w-full items-center rounded-full border px-3 text-sm transition-colors ${
       active

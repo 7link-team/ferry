@@ -7,6 +7,21 @@ use std::collections::HashMap;
 mod acp;
 mod pi;
 
+/// CLIs driven through the Agent Client Protocol.
+pub(super) fn is_acp(runtime: Runtime) -> bool {
+    matches!(
+        runtime,
+        Runtime::Gemini
+            | Runtime::Qwen
+            | Runtime::Opencode
+            | Runtime::Dsh
+            | Runtime::Kimi
+            | Runtime::Grok
+            | Runtime::Copilot
+            | Runtime::Codebuddy
+    )
+}
+
 #[derive(Default)]
 pub(super) struct Step {
     pub writes: Vec<Value>,
@@ -63,12 +78,13 @@ impl Protocol {
                 "clientInfo":{"name":"agent_runtime","version":env!("CARGO_PKG_VERSION")}}}),
             Runtime::Claude => json!({"type":"control_request","request_id":"initialize",
                 "request":{"subtype":"initialize","hooks":{}}}),
-            Runtime::Gemini | Runtime::Qwen | Runtime::Opencode | Runtime::Dsh | Runtime::Kimi => {
+            runtime if is_acp(runtime) => {
                 json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
                 "protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false},
                 "clientInfo":{"name":"agent_runtime","version":env!("CARGO_PKG_VERSION")}}})
             }
             Runtime::Pi => json!({"id":"initialize","type":"get_state"}),
+            _ => unreachable!("every runtime has a protocol"),
         }
     }
 
@@ -80,10 +96,9 @@ impl Protocol {
         match self.request.runtime {
             Runtime::Codex => self.codex(value),
             Runtime::Claude => self.claude(value),
-            Runtime::Gemini | Runtime::Qwen | Runtime::Opencode | Runtime::Dsh | Runtime::Kimi => {
-                self.acp(value)
-            }
+            runtime if is_acp(runtime) => self.acp(value),
             Runtime::Pi => self.pi(value),
+            _ => unreachable!("every runtime has a protocol"),
         }
     }
 
@@ -103,7 +118,7 @@ impl Protocol {
                 "request_id":pending.native_id,"response":if allow {
                     json!({"behavior":"allow","updatedInput":pending.input})
                 } else { json!({"behavior":"deny","message":"The user declined this tool request."}) }}}),
-            Runtime::Gemini | Runtime::Qwen | Runtime::Opencode | Runtime::Dsh | Runtime::Kimi => {
+            runtime if is_acp(runtime) => {
                 let outcome = if allow {
                     json!({"outcome":"selected","optionId":pending.input["allow_once"]})
                 } else {
@@ -112,6 +127,7 @@ impl Protocol {
                 json!({"jsonrpc":"2.0","id":pending.native_id,"result":{"outcome":outcome}})
             }
             Runtime::Pi => bail!("Pi does not support tool approvals"),
+            _ => unreachable!("every runtime has a protocol"),
         };
         Ok(Step {
             writes: vec![response],

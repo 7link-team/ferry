@@ -530,6 +530,7 @@ mod tests {
                     permission: agent::Permission::OnRequest,
                     timeout_seconds: 60,
                     platform_tools: false,
+                    provider: None,
                 },
             },
             Session::AgentInput {

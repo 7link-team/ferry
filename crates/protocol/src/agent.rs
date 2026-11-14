@@ -13,9 +13,28 @@ pub enum Runtime {
     Opencode,
     Pi,
     Dsh,
+    /// Kimi Code (`@moonshot-ai/kimi-code`), not the legacy Python kimi-cli.
     Kimi,
+    Grok,
+    Copilot,
+    Codebuddy,
 }
 impl Runtime {
+    /// Upstream wire formats this CLI can be pointed at directly. Empty means the CLI
+    /// only uses its own login/configuration; Ferry never converts formats.
+    pub fn provider_formats(self) -> &'static [&'static str] {
+        match self {
+            Self::Claude => &["anthropic"],
+            Self::Codex => &["openai_responses"],
+            Self::Gemini => &["gemini"],
+            Self::Qwen => &["openai_chat"],
+            Self::Grok => &["openai_responses", "openai_chat"],
+            Self::Opencode | Self::Pi | Self::Kimi => {
+                &["openai_chat", "openai_responses", "anthropic", "gemini"]
+            }
+            Self::Dsh | Self::Copilot | Self::Codebuddy => &[],
+        }
+    }
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "codex" => Some(Self::Codex),
@@ -26,6 +45,9 @@ impl Runtime {
             "pi" => Some(Self::Pi),
             "dsh" => Some(Self::Dsh),
             "kimi" => Some(Self::Kimi),
+            "grok" => Some(Self::Grok),
+            "copilot" => Some(Self::Copilot),
+            "codebuddy" => Some(Self::Codebuddy),
             _ => None,
         }
     }
@@ -70,6 +92,35 @@ pub enum Permission {
     OnRequest,
 }
 
+/// A custom upstream for one execution. The Runner writes it into an isolated
+/// configuration home; the key travels only in the child's environment.
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Provider {
+    /// Server-issued model profile id; selects the isolated configuration home.
+    pub key: String,
+    /// One of `Runtime::provider_formats`.
+    pub format: String,
+    pub base_url: String,
+    pub api_key: String,
+    /// Catalog written into CLIs that need declared models.
+    #[serde(default)]
+    pub models: Vec<String>,
+    /// Per-CLI options (model roles, reasoning effort, context window, headers...).
+    #[serde(default)]
+    pub options: Value,
+}
+impl std::fmt::Debug for Provider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Provider")
+            .field("key", &self.key)
+            .field("format", &self.format)
+            .field("base_url", &self.base_url)
+            .field("api_key", &"<redacted>")
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
@@ -85,6 +136,9 @@ pub struct Request {
     pub timeout_seconds: u64,
     #[serde(default)]
     pub platform_tools: bool,
+    /// None keeps the CLI's own login and configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<Provider>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -12,12 +12,12 @@ import {
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
-import { Switch } from "../../shared/ui/switch";
 import {
   ProviderFields,
   type Provider,
 } from "../../shared/forms/ai-provider-fields";
 import { matchPreset, ProviderPresetPicker, type ProviderPreset } from "./ProviderPresets";
+import { CLI_TOOLS, CliConnection, cliToolOptions } from "./CliConnection";
 
 const key = (s: string) => `models:${s}`;
 const t = (s: string) => commonText(key(s));
@@ -26,100 +26,15 @@ const newConnection = (): Omit<Provider, "id"> => ({
   protocol: "openai",
   credential_id: "0",
   base_url: "https://api.openai.com/v1",
-  currency: "USD",
-  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-  monthly_limit_micros: 0,
   qps: 1,
   concurrency: 1,
-  prices: [
-    {
-      model: "",
-      operation: "ai.llm.chat",
-      input_micros: 0,
-      output_micros: 0,
-      unit_size: 1,
-    },
-  ],
   version: 0,
 });
-type ApiModel = { id: string; name: string; provider_id: string; models: string[]; default_model: string };
-/** A CLI with a custom API may only reuse the connection of an existing API model. */
-function ApiModelSource({
-  workspace,
-  draft,
-  readOnly,
-  onPatch,
-}: {
-  workspace: string;
-  draft: Partial<AnyRow>;
-  readOnly: boolean;
-  onPatch: (p: Partial<AnyRow>) => void;
-}) {
-  const [items, setItems] = useState<ApiModel[] | null>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let alive = true;
-    api<{ items: ApiModel[] }>(`/workspaces/${encodeURIComponent(workspace)}/ai-models?kind=api&page_size=100`)
-      .then((r) => alive && setItems(r.items))
-      .catch((e) => alive && setError(errorText(e)));
-    return () => {
-      alive = false;
-    };
-  }, [workspace]);
-  const provider = String(draft.provider_id ?? "0");
-  const current = items?.find((m) => m.provider_id === provider);
-  if (readOnly)
-    return (
-      <AutoField label={t("apiModelSource")}>
-        <p className="break-words text-sm">
-          {items ? current?.name ?? t("apiModelMissing") : t("loadingConnection")}
-        </p>
-      </AutoField>
-    );
-  return (
-    <AutoField label={t("apiModelSource")} required help={t("apiModelSourceHelp")}>
-      <div className="space-y-2">
-        <FieldControl
-          name="api-model-source"
-          field={{
-            type: "select",
-            name: t("apiModelSource"),
-            width: "full",
-            config: {
-              placeholder: t("apiModelPlaceholder"),
-              options: (items ?? []).map((m) => ({ value: m.id, label: m.name })),
-            },
-          }}
-          value={current?.id ?? ""}
-          required
-          onChange={(id) => {
-            const picked = items?.find((m) => m.id === id);
-            if (picked)
-              onPatch({
-                provider_id: picked.provider_id,
-                connection: null,
-                models: [...picked.models],
-                default_model: picked.default_model,
-              });
-          }}
-        />
-        {items && !items.length && <p className="text-sm text-muted-foreground">{t("apiModelNone")}</p>}
-        {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        )}
-      </div>
-    </AutoField>
-  );
-}
 function ModelConnection({
-  workspace,
   draft,
   readOnly,
   onPatch,
 }: {
-  workspace: string;
   draft: Partial<AnyRow>;
   readOnly: boolean;
   onPatch: (p: Partial<AnyRow>) => void;
@@ -131,27 +46,7 @@ function ModelConnection({
   const [preset, setPreset] = useState<ProviderPreset | undefined>(() =>
     matchPreset(draft.connection?.protocol, draft.connection?.base_url),
   );
-  const custom = draft.kind === "cli" && (!!draft.provider_id && draft.provider_id !== "0" || draft.customApi === true);
-  if (draft.kind === "cli")
-    return (
-      <div className="space-y-4">
-        {!readOnly && (
-          <AutoField label={t("customApi")}>
-            <Switch
-              checked={custom}
-              onCheckedChange={(checked) =>
-                onPatch({ customApi: checked, connection: null, provider_id: "0", models: [], default_model: "" })
-              }
-            />
-          </AutoField>
-        )}
-        {custom ? (
-          <ApiModelSource workspace={workspace} draft={draft} readOnly={readOnly} onPatch={onPatch} />
-        ) : (
-          readOnly && <p className="text-sm">{t("nativeDefault")}</p>
-        )}
-      </div>
-    );
+  if (draft.kind === "cli") return <CliConnection draft={draft} readOnly={readOnly} onPatch={onPatch} />;
   if (!draft.connection) return null;
   return (
     <div className="space-y-4">
@@ -391,16 +286,7 @@ export function modelsLists(
         {
           key: "runtime",
           label: "CLI",
-          render: (r) =>
-            ({
-              codex: "Codex",
-              claude: "Claude Code",
-              gemini: "Gemini CLI",
-              qwen: "Qwen Code",
-              opencode: "OpenCode",
-              pi: "Pi",
-              dsh: "DeepSeek Harness",
-            })[r.runtime as string] ?? "—",
+          render: (r) => CLI_TOOLS[r.runtime as string]?.label ?? "—",
         },
         {
           key: "default_model",
@@ -444,8 +330,6 @@ export function modelsForms({
       resource: "ai-models",
       width: "full",
       heading: (r) => r.name,
-      // A CLI reuses an API model's connection by reference and must never resave it.
-      editValues: (r) => (r.kind === "cli" ? { ...r, connection: null } : r),
       blank: {
         name: "",
         kind: "api",
@@ -456,6 +340,7 @@ export function modelsForms({
         default_model: "",
         tool_version: "",
         state: "enabled",
+        cli_options: null,
       },
       sections: [
         {
@@ -498,6 +383,7 @@ export function modelsForms({
                         runtime: "",
                         tool_version: "",
                         provider_id: "0",
+                        cli_options: null,
                         connection: kind === "api" ? newConnection() : null,
                         models: [],
                         default_model: "",
@@ -515,16 +401,7 @@ export function modelsForms({
               width: "full",
               required: true,
               when: (r) => r.kind === "cli",
-              options: [
-                { value: "codex", label: "Codex" },
-                { value: "claude", label: "Claude Code" },
-                { value: "gemini", label: "Gemini CLI" },
-                { value: "qwen", label: "Qwen Code" },
-                { value: "opencode", label: "OpenCode" },
-                { value: "pi", label: "Pi" },
-                { value: "dsh", label: "DeepSeek Harness" },
-                { value: "kimi", label: "Kimi CLI" },
-              ],
+              options: cliToolOptions,
             },
             {
               key: "tool_version",

@@ -61,6 +61,69 @@ struct Body {
     version: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     connection: Option<crate::workflows::ai::Body>,
+    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.
+    #[serde(default)]
+    cli_options: Value,
+}
+/// The format a profile saved before formats existed implies: the connection's
+/// protocol, narrowed to what this CLI can call (Codex only speaks Responses).
+fn legacy_format(runtime: &str, protocol: &str) -> &'static str {
+    let formats = ferry_protocol::agent::Runtime::parse(runtime)
+        .map(|r| r.provider_formats())
+        .unwrap_or_default();
+    let wanted: &[&'static str] = if protocol == "anthropic" {
+        &["anthropic"]
+    } else {
+        &["openai_chat", "openai_responses"]
+    };
+    wanted
+        .iter()
+        .copied()
+        .find(|f| formats.contains(f))
+        .unwrap_or(wanted[0])
+}
+/// Bounded, flat options: strings, numbers, booleans and a string-valued `headers` map.
+fn cli_options(runtime: &str, provider: bool, options: &mut Value) -> Result<()> {
+    if options.is_null() || !provider {
+        *options = Value::Null;
+        return Ok(());
+    }
+    let runtime = ferry_protocol::agent::Runtime::parse(runtime).ok_or_else(invalid)?;
+    let map = options.as_object().ok_or_else(invalid)?;
+    if map.len() > 40 || options.to_string().len() > 16 * 1024 {
+        return Err(invalid());
+    }
+    for (key, value) in map {
+        let ok = key.len() <= 64
+            && match value {
+                Value::String(v) => v.len() <= 256 && !v.chars().any(char::is_control),
+                Value::Bool(_) => true,
+                Value::Number(n) => n.as_u64().is_some_and(|n| n <= 100_000_000),
+                Value::Object(h) if key == "headers" => {
+                    h.len() <= 32
+                        && h.values().all(|v| {
+                            v.as_str().is_some_and(|v| {
+                                v.len() <= 4096 && !v.chars().any(char::is_control)
+                            })
+                        })
+                }
+                _ => false,
+            };
+        if !ok {
+            return Err(invalid());
+        }
+    }
+    let format = map
+        .get("format")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !runtime.provider_formats().contains(&format) {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("models.cliFormatUnsupported"),
+        ));
+    }
+    Ok(())
 }
 async fn provider(conn: &impl ConnectionTrait, workspace: Id, id: Id) -> Result<providers::Model> {
     providers::Entity::find_by_id(id)
@@ -116,12 +179,33 @@ impl Body {
         } else if self.kind == "api" {
             return Err(invalid());
         }
+        if self.kind == "cli"
+            && i64::from(id) != 0
+            && ferry_protocol::agent::Runtime::parse(&self.runtime)
+                .is_none_or(|r| r.provider_formats().is_empty())
+        {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("models.cliFormatUnsupported"),
+            ));
+        }
+        if self.kind == "cli" && i64::from(id) != 0 && self.cli_options.is_null() {
+            // Profiles saved before formats existed: the connection protocol decides.
+            let protocol = provider(conn, scope.workspace_id, id).await?.protocol;
+            self.cli_options = json!({ "format": legacy_format(&self.runtime, &protocol) });
+        }
+        let runtime = self.runtime.clone();
+        cli_options(
+            &runtime,
+            self.kind == "cli" && i64::from(id) != 0,
+            &mut self.cli_options,
+        )?;
         self.provider_id = id.to_string();
         Ok(id)
     }
 }
 fn view(p: &profiles::Model) -> Value {
-    json!({"id":Id::from(p.id),"name":p.name,"kind":p.kind,"runtime":p.runtime,"provider_id":Id::from(p.provider_id),"models":serde_json::from_str::<Value>(&p.models).unwrap_or(json!([])),"default_model":p.default_model,"tool_version":p.tool_version,"state":p.state,"revision_id":Id::from(p.revision_id),"version":p.version,"created_at":p.created_at,"updated_at":p.updated_at})
+    json!({"cli_options":p.cli_options.as_deref().and_then(|v|serde_json::from_str::<Value>(v).ok()).unwrap_or(Value::Null),"id":Id::from(p.id),"name":p.name,"kind":p.kind,"runtime":p.runtime,"provider_id":Id::from(p.provider_id),"models":serde_json::from_str::<Value>(&p.models).unwrap_or(json!([])),"default_model":p.default_model,"tool_version":p.tool_version,"state":p.state,"revision_id":Id::from(p.revision_id),"version":p.version,"created_at":p.created_at,"updated_at":p.updated_at})
 }
 async fn find(conn: &impl ConnectionTrait, scope: &Scope, id: Id) -> Result<profiles::Model> {
     scope.require("ai-models.read")?;
@@ -202,7 +286,38 @@ async fn save(s: &AppState, scope: &Scope, id: Option<Id>, mut body: Body) -> Re
     }
     if let Some(mut connection) = body.connection.take() {
         connection.name = body.name.clone();
-        let provider_id = Id::reference(&body.provider_id)?;
+        let mut provider_id = Id::reference(&body.provider_id)?;
+        if body.kind == "cli" {
+            // A CLI keeps its own connection. One still shared with another model
+            // becomes independent instead of silently changing that model.
+            connection.protocol = if body.cli_options["format"] == "anthropic" {
+                "anthropic".into()
+            } else {
+                "openai".into()
+            };
+            if i64::from(provider_id) != 0
+                && profiles::Entity::find()
+                    .filter(profiles::Column::WorkspaceId.eq(scope.workspace_id))
+                    .filter(profiles::Column::ProviderId.eq(i64::from(provider_id)))
+                    .all(&tx)
+                    .await?
+                    .iter()
+                    .any(|p| Some(Id::from(p.id)) != id)
+            {
+                if connection
+                    .api_key
+                    .as_deref()
+                    .is_none_or(|k| k.trim().is_empty())
+                {
+                    return Err(ApiError::localized(
+                        StatusCode::BAD_REQUEST,
+                        Message::new("models.sharedConnectionNeedsKey"),
+                    ));
+                }
+                connection.credential_id = Id::from(0);
+                provider_id = Id::from(0);
+            }
+        }
         let saved = crate::workflows::ai::save_in(
             s,
             &current,
@@ -243,6 +358,7 @@ async fn save(s: &AppState, scope: &Scope, id: Option<Id>, mut body: Body) -> Re
         default_model: body.default_model,
         tool_version: body.tool_version,
         state: body.state,
+        cli_options: (!body.cli_options.is_null()).then(|| body.cli_options.to_string()),
         revision_id: revision.id,
         version: old
             .as_ref()
@@ -474,4 +590,52 @@ async fn discover(
     Ok(Json(
         json!({"models":models,"has_more":data["has_more"].as_bool().unwrap_or(false)}),
     ))
+}
+
+/// The custom upstream for a CLI execution, or None when the CLI keeps its own
+/// login/configuration. Resolved from the Agent's current model profile.
+pub(crate) async fn cli_provider(
+    s: &AppState,
+    workspace: Id,
+    agent_id: i64,
+    runtime: ferry_protocol::agent::Runtime,
+) -> Result<Option<ferry_protocol::agent::Provider>> {
+    let Some(agent) = crate::entities::ai_agents::Entity::find_by_id(agent_id)
+        .filter(crate::entities::ai_agents::Column::WorkspaceId.eq(workspace))
+        .one(&s.db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let Some(profile) = profiles::Entity::find_by_id(agent.model_profile_id)
+        .filter(profiles::Column::WorkspaceId.eq(workspace))
+        .one(&s.db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    if profile.kind != "cli"
+        || profile.provider_id == 0
+        || ferry_protocol::agent::Runtime::parse(&profile.runtime) != Some(runtime)
+    {
+        return Ok(None);
+    }
+    let connection = provider(&s.db, workspace, Id::from(profile.provider_id)).await?;
+    let options: Value = profile
+        .cli_options
+        .as_deref()
+        .and_then(|v| serde_json::from_str(v).ok())
+        .unwrap_or_else(
+            || json!({"format": legacy_format(&profile.runtime, &connection.protocol)}),
+        );
+    let (_, _, api_key) =
+        crate::credentials::unseal(s, &workspace, &Id::from(connection.credential_id)).await?;
+    Ok(Some(ferry_protocol::agent::Provider {
+        key: profile.id.to_string(),
+        format: options["format"].as_str().unwrap_or_default().to_owned(),
+        base_url: connection.base_url,
+        api_key,
+        models: serde_json::from_str(&profile.models).unwrap_or_default(),
+        options,
+    }))
 }

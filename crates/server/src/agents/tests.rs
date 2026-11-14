@@ -183,6 +183,7 @@ async fn model_profile_agents_need_no_host_and_resolve_only_the_selected_catalog
                 default_model: "model-a".into(),
                 tool_version: String::new(),
                 state: state.into(),
+                cli_options: None,
                 revision_id: 0,
                 version: 1,
                 created_at: 0,

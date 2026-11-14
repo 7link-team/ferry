@@ -25,11 +25,29 @@
 
 Pi 0.74.2 的实测终态为 `agent_end`，不能等待未提供的 `agent_settled` 事件。Ferry 在该终态按最后一条 assistant 消息判定成功、失败或取消，随后关闭本次原生进程；本期不保证终态后的原生自动重试和上下文压缩。以隔离 HOME 和本地模拟 OpenAI SSE 验证了原生目录、返回内容及 UUID 恢复；不等同于商业模型推理验收。
 
-已发现的历史边界：CLI 模型上的自定义 API 连接尚未接入原生执行配置，不能把连接保存成功等同于 CLI 已使用该服务商。当前原生验收使用 Runner 执行用户自己的 CLI 配置；该执行配置覆盖能力仍待处理，不列为已交付能力。
+## CLI 自定义 API（v0.5.0-alpha）
+
+API 模型与 CLI 模型分开配置：API 模型由服务端直接调用（QPS/并发生效，价格/币种/预算已从表单移除，旧连接已有价格仍计费）；CLI 模型由 Runner 所在节点上的 CLI 直接访问上游。CLI 关闭“自定义 API”时使用节点上 CLI 自己的登录与配置（例如其登录命令或用户自装的 CC Switch），Ferry 不修改，失败只在会话中报错。开启后，CLI 模型拥有独立连接（加密密钥 + 地址）和 `cli_options`（接口格式与逐工具选项），每次执行由服务端解密后随请求下发，Runner 写入隔离配置目录（`isolate_config` 下为该 Agent 的目录，否则 `agent-provider-homes/<模型ID>`），密钥只放在子进程环境变量 `FERRY_PROVIDER_API_KEY` 或 CLI 规定的变量中，不落盘。
+
+| CLI | 直连格式（不做转换） | 写入位置 | 逐工具选项（参照 cc-switch） |
+|---|---|---|---|
+| Claude Code | anthropic | 环境变量 ANTHROPIC_*；`.claude/settings.json` | 认证字段、Sonnet/Opus/Haiku/Fable/子代理模型、隐藏署名、工具搜索、请求头 |
+| Codex | openai_responses | `.codex/config.toml` 的 `model_providers.ferry`（env_key） | 推理强度、上下文窗口、自动压缩阈值、子代理模型/推理强度、请求头 |
+| Gemini CLI | gemini | `.gemini/settings.json` + GEMINI_* 环境变量 | — |
+| Qwen Code | openai_chat | `.qwen/settings.json` + OPENAI_* 环境变量 | — |
+| OpenCode | 四种 | `.config/opencode/opencode.json` provider.ferry | 上下文窗口、最大输出、请求头 |
+| Pi | 四种 | `.pi/agent/models.json` providers.ferry，`--provider ferry` | 思考、上下文窗口、最大输出、请求头 |
+| Kimi Code | 四种 | `.kimi-code/config.toml`（api_key_env） | 思考、图片输入、上下文窗口、请求头 |
+| Grok Build | openai_responses / openai_chat | `.grok/config.toml`（env_key） | 上下文窗口 |
+| DeepSeek Harness、GitHub Copilot CLI、CodeBuddy Code | 无 | 仅使用自身登录 | — |
+
+新增 CLI：Grok Build（`grok agent --no-leader stdio`，ACP，无只读模式）、GitHub Copilot CLI（`copilot --acp`）、CodeBuddy Code（`codebuddy --acp`）；Kimi 改为 Kimi Code（`@moonshot-ai/kimi-code`，`kimi acp`）。未接入：oh-my-pi（需 Bun 运行时）、Qoder（无权限提示通道）、Cursor（非 npm 安装、无法验证）、OAuth/官方账号登录、格式转换代理。ACP 兼容：支持 `configOptions` 形式的 mode（OpenCode 1.19），忽略 `_` 前缀扩展通知（Grok）；OpenCode 通过 `OPENCODE_CONFIG_CONTENT` 强制工具权限为 ask。
+
+验收：真实 CLI 对本地模拟上游（`data/maintenance/cli-e2e/mock-upstream.mjs`，`live_custom_provider_roundtrip`）——Claude Code、Codex、Gemini CLI、Qwen Code、OpenCode、Pi、Kimi Code、Grok Build 均 Completed，上游记录到配置的地址、密钥与模型。Copilot/CodeBuddy 仅验证 ACP 握手与未登录报错；未做商业模型推理验收。
 
 原生清单属于指定主机的执行用户，不是 Ferry 服务器全局清单，不表示其他主机同账号可用。API 模型清单通过已配置 OpenAI/Anthropic 兼容接口发现。逐行输入允许自定义模型；默认模型仍属于清单。不得内置一份猜测的账号模型列表。
 
-用户提及的 `dsh` 尚无唯一对应的 AI CLI 仓库，未添加同名空壳。此次不接入无稳定结构化执行协议的交互终端产品，不安装系统级 CLI，不替用户登录商业服务，不复制 cc-switch 源码。
+用户提及的 `dsh` 尚无唯一对应的 AI CLI 仓库，未添加同名空壳。此次不接入无稳定结构化执行协议的交互终端产品，不安装系统级 CLI，不替用户登录商业服务，不复制 cc-switch 源码（配置项与写入位置参照其公开实现）。
 
 事实参考：
 

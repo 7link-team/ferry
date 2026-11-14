@@ -2,8 +2,9 @@
 use super::*;
 use ferry_protocol::agent::Probe;
 
-pub(super) fn executable(runtime: Runtime) -> Option<std::path::PathBuf> {
-    let name = match runtime {
+/// The executable name each CLI installs on PATH.
+pub(super) fn binary(runtime: Runtime) -> &'static str {
+    match runtime {
         Runtime::Codex => "codex",
         Runtime::Claude => "claude",
         Runtime::Gemini => "gemini",
@@ -12,7 +13,14 @@ pub(super) fn executable(runtime: Runtime) -> Option<std::path::PathBuf> {
         Runtime::Pi => "pi",
         Runtime::Dsh => "dsh",
         Runtime::Kimi => "kimi",
-    };
+        Runtime::Grok => "grok",
+        Runtime::Copilot => "copilot",
+        Runtime::Codebuddy => "codebuddy",
+    }
+}
+
+pub(super) fn executable(runtime: Runtime) -> Option<std::path::PathBuf> {
+    let name = binary(runtime);
     let path = std::env::var_os("PATH")?;
     for directory in std::env::split_paths(&path) {
         // An empty PATH entry would search the Agent's working directory.
@@ -32,6 +40,8 @@ pub(super) fn executable(runtime: Runtime) -> Option<std::path::PathBuf> {
             // npm's .cmd wrappers require a shell. Resolve only the named
             // package's declared JS entry and launch it through node.exe.
             let packages: &[&str] = match runtime {
+                Runtime::Codex => &["@openai/codex"],
+                Runtime::Claude => &["@anthropic-ai/claude-code"],
                 Runtime::Gemini => &["@google/gemini-cli"],
                 Runtime::Qwen => &["@qwen-code/qwen-code"],
                 Runtime::Dsh => &["@deepseek-ai/dsh"],
@@ -39,6 +49,10 @@ pub(super) fn executable(runtime: Runtime) -> Option<std::path::PathBuf> {
                     "@earendil-works/pi-coding-agent",
                     "@mariozechner/pi-coding-agent",
                 ],
+                Runtime::Kimi => &["@moonshot-ai/kimi-code"],
+                Runtime::Grok => &["@xai-official/grok"],
+                Runtime::Copilot => &["@github/copilot"],
+                Runtime::Codebuddy => &["@tencent-ai/codebuddy-code"],
                 _ => &[],
             };
             if runtime == Runtime::Opencode {
@@ -75,12 +89,9 @@ pub(super) fn executable(runtime: Runtime) -> Option<std::path::PathBuf> {
                                                 | std::path::Component::CurDir
                                         )
                                     })
-                                    && relative.extension().is_some_and(|ext| {
-                                        matches!(ext.to_str(), Some("js" | "mjs" | "cjs"))
-                                    })
                                 {
                                     let entry = base.join(relative);
-                                    if entry.is_file() {
+                                    if entry.is_file() && node_script(&entry) {
                                         return Some(entry);
                                     }
                                 }
