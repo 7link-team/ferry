@@ -1,5 +1,6 @@
 //! Workflow draft resources. Publication and execution use separate entry points;
 //! a draft write never grants production authority or changes an in-flight run.
+mod agent;
 pub(crate) mod ai;
 mod condition;
 pub(crate) mod expression;
@@ -334,6 +335,7 @@ pub async fn create(
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let scope = workspace_admin::authorize(&tx, &scope, "workflows.create").await?;
     integration::validate_connections(&tx, &scope, &definition).await?;
+    agent::validate_agents(&tx, &scope, &definition).await?;
     crate::pipelines::contexts::check_single(&tx, scope.workspace_id, "workflow_group", group)
         .await?;
     let id = s.next_id()?;
@@ -431,6 +433,7 @@ pub async fn update(
         row.definition = graph::checked(&value).await?;
         graph::repository_auth_policy(&row.definition, Some(&current.definition))?;
         integration::validate_connections(&tx, &scope, &row.definition).await?;
+        agent::validate_agents(&tx, &scope, &row.definition).await?;
     }
     let revision = definitions::record(
         &s,

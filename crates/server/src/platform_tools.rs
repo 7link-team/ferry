@@ -365,13 +365,53 @@ pub(crate) fn read_operation(path: &str) -> bool {
         .any(|row| row["method"] == "GET" && row["path"] == path)
 }
 
+/// A concrete request path (query ignored) matches a catalogue GET template;
+/// each placeholder stands for exactly one non-empty segment.
+pub(crate) fn read_path(path: &str) -> bool {
+    let concrete: Vec<_> = path.split('?').next().unwrap_or("").split('/').collect();
+    routes().iter().any(|row| {
+        row["method"] == "GET"
+            && row["path"].as_str().is_some_and(|template| {
+                let template: Vec<_> = template.split('/').collect();
+                template.len() == concrete.len()
+                    && template.iter().zip(&concrete).all(|(part, value)| {
+                        if part.starts_with('{') && part.ends_with('}') {
+                            !value.is_empty()
+                        } else {
+                            part == value
+                        }
+                    })
+            })
+    })
+}
+
+/// The tool result returned to an Agent when the platform refuses a call.
+pub(crate) fn denial(error: &ApiError) -> Value {
+    json!({"status":error.0.as_u16(),"ok":false,"error":error.1,
+        "guidance":"The platform denied or could not complete this call. No Agent role means no platform access. Check this workspace's current user and Agent role grants. Do not substitute local filesystem searches or invent counts."})
+}
+
 pub(crate) fn catalogue(scope: &Scope, search: &str, offset: usize) -> Value {
+    listing(scope, search, offset, false)
+}
+
+/// The catalogue as seen by an unattended workflow Agent: GET operations only.
+pub(crate) fn read_catalogue(scope: &Scope, search: &str, offset: usize) -> Value {
+    let mut value = listing(scope, search, offset, true);
+    value["instructions"] = json!(
+        "Paths are relative to this workflow execution's workspace. This is an unattended, read-only workflow step: only the GET operations listed here are available through ferry_request; any other method or path is refused with 403 and nothing is executed. GET list responses contain total; never count only the first page. A 403 is a permission denial, not an empty list. Never infer platform records by scanning the Runner filesystem."
+    );
+    value
+}
+
+fn listing(scope: &Scope, search: &str, offset: usize, read_only: bool) -> Value {
     let routes = routes().to_vec();
     let search = search.to_ascii_lowercase();
     let mut permissions = scope.permissions.iter().cloned().collect::<Vec<_>>();
     permissions.sort();
     let rows = routes
         .into_iter()
+        .filter(|row| !read_only || row["method"] == "GET")
         .filter(|row| {
             row["permission"]
                 .as_str()

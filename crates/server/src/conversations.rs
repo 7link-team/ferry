@@ -104,7 +104,7 @@ pub(crate) async fn audit_titles(
         .into_iter()
         .collect())
 }
-pub(super) async fn available(
+pub(crate) async fn available(
     conn: &impl ConnectionTrait,
     scope: &Scope,
     id: Id,
@@ -134,7 +134,7 @@ pub(super) async fn usable(
     Ok(row)
 }
 #[derive(Clone, Serialize, Deserialize)]
-pub(super) struct Configuration {
+pub(crate) struct Configuration {
     pub runtime: ferry_protocol::agent::Runtime,
     pub cwd: String,
     pub host_id: Id,
@@ -146,7 +146,7 @@ pub(super) struct Configuration {
     pub runner_key_hash: String,
 }
 impl Configuration {
-    fn authentication_usable(&self, authentication: &str) -> bool {
+    pub(crate) fn authentication_usable(&self, authentication: &str) -> bool {
         // Only Codex and Claude expose a stable login-status command; the
         // others report unknown and fail at session start when signed out.
         authentication == "logged_in"
@@ -184,7 +184,7 @@ impl Configuration {
         }
         Ok(config)
     }
-    fn from_agent(a: &ai_agents::Model) -> Result<Self> {
+    pub(crate) fn from_agent(a: &ai_agents::Model) -> Result<Self> {
         Ok(Self {
             runtime: ferry_protocol::agent::Runtime::parse(&a.runtime).ok_or_else(invalid)?,
             cwd: a.cwd.clone(),

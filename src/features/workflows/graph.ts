@@ -118,6 +118,8 @@ export function newNode(graph: Graph, type: string, name: string): GraphNode {
   if (type === "notification.send") defaults.channel_id = "";
   // A platform data node starts unconfigured; the example operation is not a default.
   if (type === "ferry.request") Object.assign(defaults, { operation: "", path_params: {}, query: {} });
+  // An AI agent node starts without a sample Agent or task; the example schema stays as a starting point.
+  if (type === "ai.agent.run") Object.assign(defaults, { agent_id: "", prompt: "" });
   if (spec.params_schema.properties?.connection_id && spec.params_schema.properties?.credential_id) {
     delete defaults.credential_id;
     delete defaults.organization_id;

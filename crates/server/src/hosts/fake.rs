@@ -29,6 +29,29 @@ pub(crate) struct FakeHost {
     /// When set, opening a channel or running a command fails with a connection error, as for
     /// a host that went down.
     pub unreachable: AtomicBool,
+    /// Scripted Agent executions, one per `agent` call in order; an exhausted queue
+    /// finishes immediately as completed without text.
+    pub agent_scripts: Mutex<std::collections::VecDeque<Vec<AgentStep>>>,
+    /// Every Agent request received, in order.
+    pub agent_requests: Mutex<Vec<ferry_protocol::agent::Request>>,
+    /// Every input the server sent to a running Agent, in order.
+    pub agent_inputs: Mutex<Vec<ferry_protocol::agent::Input>>,
+    /// Set once the server requested cancellation of a running Agent.
+    pub agent_cancelled: AtomicBool,
+    /// Overrides the default probe answer (a usable, signed-in CLI with platform tools).
+    pub agent_probe: Mutex<Option<ferry_protocol::agent::Probe>>,
+}
+
+/// One step of a scripted fake Agent execution.
+pub(crate) enum AgentStep {
+    /// Emitted to the server as is.
+    Event(ferry_protocol::agent::Event),
+    /// Waits for the next server input (recorded), or for cancellation.
+    Input,
+    /// Meets the test at this barrier, so the test can change state mid-run.
+    Barrier(Arc<tokio::sync::Barrier>),
+    /// Runs until cancelled.
+    Hang,
 }
 
 impl FakeHost {
@@ -193,6 +216,103 @@ impl HostChannel for Channel {
     async fn delete_file(&self, path: &str) -> Result<()> {
         self.0.files.lock().unwrap().remove(path);
         Ok(())
+    }
+    async fn agent_probe(
+        &self,
+        runtime: ferry_protocol::agent::Runtime,
+        cwd: &str,
+        _: Option<&ferry_protocol::agent::Binding>,
+    ) -> Result<ferry_protocol::agent::Probe> {
+        Ok(self.probe(runtime, cwd))
+    }
+    async fn agent_workspace(
+        &self,
+        runtime: ferry_protocol::agent::Runtime,
+        key: &str,
+    ) -> Result<ferry_protocol::agent::Probe> {
+        Ok(self.probe(runtime, &format!("/fake/workspaces/{key}")))
+    }
+    async fn agent(
+        &self,
+        request: ferry_protocol::agent::Request,
+        events: tokio::sync::mpsc::Sender<ferry_protocol::agent::Event>,
+        mut inputs: tokio::sync::mpsc::Receiver<ferry_protocol::agent::Input>,
+        mut cancel: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<()> {
+        use ferry_protocol::agent::{Event, Input, Outcome};
+        self.0.agent_requests.lock().unwrap().push(request);
+        let script = self
+            .0
+            .agent_scripts
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_default();
+        let cancelled = |fake: &FakeHost| fake.agent_cancelled.store(true, Ordering::SeqCst);
+        for step in script {
+            if *cancel.borrow() {
+                cancelled(&self.0);
+                break;
+            }
+            match step {
+                AgentStep::Event(event) => {
+                    let _ = events.send(event).await;
+                }
+                AgentStep::Barrier(barrier) => {
+                    barrier.wait().await;
+                }
+                AgentStep::Input => {
+                    tokio::select! {
+                        input = inputs.recv() => match input {
+                            Some(Input::Cancel) | None => { cancelled(&self.0); break; }
+                            Some(input) => self.0.agent_inputs.lock().unwrap().push(input),
+                        },
+                        _ = cancel.wait_for(|value| *value) => { cancelled(&self.0); break; }
+                    }
+                }
+                AgentStep::Hang => {
+                    let _ = cancel.wait_for(|value| *value).await;
+                    cancelled(&self.0);
+                    break;
+                }
+            }
+        }
+        if self.0.agent_cancelled.load(Ordering::SeqCst) {
+            let _ = events
+                .send(Event::Finished {
+                    outcome: Outcome::Cancelled,
+                    usage: None,
+                })
+                .await;
+        }
+        Ok(())
+    }
+}
+
+impl Channel {
+    fn probe(
+        &self,
+        runtime: ferry_protocol::agent::Runtime,
+        cwd: &str,
+    ) -> ferry_protocol::agent::Probe {
+        self.0
+            .agent_probe
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or(ferry_protocol::agent::Probe {
+                platform_tools: true,
+                runtime,
+                execution_user: "fake".into(),
+                execution_identity: "fake-identity".into(),
+                executable: Some("/usr/bin/fake-cli".into()),
+                version: Some("1.0.0".into()),
+                models: vec![],
+                authentication: "logged_in".into(),
+                directory_exists: true,
+                error: None,
+                canonical_directory: Some(cwd.into()),
+            })
     }
 }
 

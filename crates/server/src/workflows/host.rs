@@ -195,78 +195,8 @@ pub(super) async fn execute_with_credential(
     } else {
         None
     };
-    let target = node
-        .pointer("/settings/target_ref")
-        .and_then(Value::as_str)
-        .and_then(|v| v.parse::<i64>().ok())
-        .filter(|v| *v > 0)
-        .ok_or_else(invalid)?;
-    let group = node
-        .pointer("/settings/target_kind")
-        .and_then(Value::as_str)
-        == Some("host_group");
-    let lease = loop {
-        active(s, run).await?;
-        let tx = crate::variables::transaction(s, run.workspace_id.into()).await?;
-        let candidates = execution::candidates(
-            &tx,
-            run.workspace_id,
-            if group { 0 } else { target },
-            if group { target } else { 0 },
-            false,
-            &[],
-        )
-        .await?;
-        if candidates.is_empty() {
-            return Err(invalid());
-        }
-        let mut chosen = None;
-        for (host, policy, load) in candidates {
-            if load < policy.capacity as usize {
-                if let Some(lease) = execution::try_acquire(
-                    &tx,
-                    host.id,
-                    policy.capacity,
-                    run.id,
-                    &format!("workflow:{}", node["id"].as_str().unwrap_or_default()),
-                )
-                .await?
-                {
-                    chosen = Some(lease);
-                    break;
-                }
-            }
-        }
-        tx.commit().await?;
-        if let Some(lease) = chosen {
-            break lease;
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    };
-    let result = async {
-        let (_idle, idle) = tokio::sync::watch::channel(false);
-        let mut stop = crate::executions::stop_signal().unwrap_or(idle);
-        let lease_ref = &lease;
-        let mut renewed = std::time::Instant::now();
-        let guards = crate::hosts::runner::reservations::wait_for_reservation(
-            crate::hosts::runner::reservations::reserve_with(s.cluster.as_ref(), vec![lease.host.to_string()]),
-            &mut stop,
-            || {
-                let renew = renewed.elapsed() >= Duration::from_secs(10);
-                if renew { renewed = std::time::Instant::now(); }
-                async move {
-                    active(s, run).await?;
-                    if renew && !lease_ref.renew(&s.db).await? {
-                        return Err(crate::executions::ownership_lost());
-                    }
-                    Ok(true)
-                }
-            },
-        ).await?.ok_or_else(crate::executions::ownership_lost)?;
-        guards.run(async {
-            active(s, run).await?;
-            if !lease.renew(&s.db).await? { return Err(crate::executions::ownership_lost()); }
-            let row = crate::entities::hosts::Entity::find_by_id(lease.host).one(&s.db).await?.ok_or_else(invalid)?;
+    let target = target(node).ok_or_else(invalid)?;
+    on_host(s, run, node, target, |row, lease| async move {
             let (ch, private) = private_channel(s, run.workspace_id, &row).await?;
             let result = async {
                 let path = format!("{private}/operation.sh");
@@ -317,8 +247,118 @@ pub(super) async fn execute_with_credential(
             let cleaned = ch.exec(&format!("rm -rf -- {}", quote(&private)), Duration::from_secs(30)).await?;
             if cleaned.code != 0 { return Err(invalid()); }
             result
-        }).await
-    }.await;
+    }).await
+}
+
+/// The node's explicit host or host group target.
+pub(super) fn target(node: &Value) -> Option<(i64, bool)> {
+    let target = node
+        .pointer("/settings/target_ref")
+        .and_then(Value::as_str)
+        .and_then(|v| v.parse::<i64>().ok())
+        .filter(|v| *v > 0)?;
+    let group = node
+        .pointer("/settings/target_kind")
+        .and_then(Value::as_str)
+        == Some("host_group");
+    Some((target, group))
+}
+
+/// Holds an execution slot on `target` (a host, or a member of a host group) for
+/// the duration of `body`, after any exclusive reservation of that host ends.
+/// The body renews the lease while it runs; the slot is always released.
+pub(super) async fn on_host<T, F, Fut>(
+    s: &AppState,
+    run: &workflow_executions::Model,
+    node: &Value,
+    (target, group): (i64, bool),
+    body: F,
+) -> Result<T>
+where
+    F: FnOnce(crate::entities::hosts::Model, std::sync::Arc<execution::Lease>) -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    let lease = loop {
+        active(s, run).await?;
+        let tx = crate::variables::transaction(s, run.workspace_id.into()).await?;
+        let candidates = execution::candidates(
+            &tx,
+            run.workspace_id,
+            if group { 0 } else { target },
+            if group { target } else { 0 },
+            false,
+            &[],
+        )
+        .await?;
+        if candidates.is_empty() {
+            return Err(invalid());
+        }
+        let mut chosen = None;
+        for (host, policy, load) in candidates {
+            if load < policy.capacity as usize {
+                if let Some(lease) = execution::try_acquire(
+                    &tx,
+                    host.id,
+                    policy.capacity,
+                    run.id,
+                    &format!("workflow:{}", node["id"].as_str().unwrap_or_default()),
+                )
+                .await?
+                {
+                    chosen = Some(lease);
+                    break;
+                }
+            }
+        }
+        tx.commit().await?;
+        if let Some(lease) = chosen {
+            break lease;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+    let lease = std::sync::Arc::new(lease);
+    let result = async {
+        let (_idle, idle) = tokio::sync::watch::channel(false);
+        let mut stop = crate::executions::stop_signal().unwrap_or(idle);
+        let lease_ref = &*lease;
+        let mut renewed = std::time::Instant::now();
+        let guards = crate::hosts::runner::reservations::wait_for_reservation(
+            crate::hosts::runner::reservations::reserve_with(
+                s.cluster.as_ref(),
+                vec![lease.host.to_string()],
+            ),
+            &mut stop,
+            || {
+                let renew = renewed.elapsed() >= Duration::from_secs(10);
+                if renew {
+                    renewed = std::time::Instant::now();
+                }
+                async move {
+                    active(s, run).await?;
+                    if renew && !lease_ref.renew(&s.db).await? {
+                        return Err(crate::executions::ownership_lost());
+                    }
+                    Ok(true)
+                }
+            },
+        )
+        .await?
+        .ok_or_else(crate::executions::ownership_lost)?;
+        guards
+            .run(async {
+                active(s, run).await?;
+                if !lease.renew(&s.db).await? {
+                    return Err(crate::executions::ownership_lost());
+                }
+                let row = crate::entities::hosts::Entity::find_by_id(lease.host)
+                    .one(&s.db)
+                    .await?
+                    .ok_or_else(invalid)?;
+                body(row, lease.clone()).await
+            })
+            .await
+    }
+    .await;
     lease.release(&s.db).await?;
     result
 }

@@ -850,7 +850,7 @@ export function WorkflowEditor({
                 )}
                 {execution.end_reason && execution.end_reason !== "node_wait" ? (
                   <p className="mb-3 text-sm text-destructive">
-                    {execution.end_reason === "integration_unknown" ? t("integration.failure.unknown") : execution.end_reason === "integration_remote" ? t("integration.failure.remote") : execution.end_reason === "integration_invalid" ? t("integration.failure.invalid") : ["platform_request", "platform_too_large", "platform_page_limit", "platform_invalid"].includes(String(execution.end_reason)) ? t(`platform.failure.${execution.end_reason}` as Parameters<typeof t>[0]) : String(execution.end_reason)}
+                    {execution.end_reason === "integration_unknown" ? t("integration.failure.unknown") : execution.end_reason === "integration_remote" ? t("integration.failure.remote") : execution.end_reason === "integration_invalid" ? t("integration.failure.invalid") : ["platform_request", "platform_too_large", "platform_page_limit", "platform_invalid"].includes(String(execution.end_reason)) ? t(`platform.failure.${execution.end_reason}` as Parameters<typeof t>[0]) : ["agent_output", "agent_limit", "agent_timeout", "agent_failed", "agent_invalid"].includes(String(execution.end_reason)) ? t(`agent.failure.${execution.end_reason}` as Parameters<typeof t>[0]) : String(execution.end_reason)}
                   </p>
                 ) : null}
                 <WorkflowExecutionView workspace={workspace} execution={execution} graph={executionGraph} attempts={attempts} nodeTypes={nodeTypes} permissions={permissions} />
@@ -1189,7 +1189,7 @@ export function WorkflowEditor({
                     <h3 className="border-t pt-4 text-sm font-semibold">
                       {t("parameters")}
                     </h3>
-                    {(integrationManifest(node.type) || node.type === "host.command") && <WorkflowExecutionTarget workspace={workspace} value={node.settings ?? {}} change={settings => updateNode({settings})} readOnly={readOnly} hostOnly={node.type === "host.command" || !!integrationManifest(node.type)?.git} inherit />}
+                    {(integrationManifest(node.type) || node.type === "host.command" || node.type === "ai.agent.run") && <WorkflowExecutionTarget workspace={workspace} value={node.settings ?? {}} change={settings => updateNode({settings})} readOnly={readOnly} hostOnly={node.type === "host.command" || node.type === "ai.agent.run" || !!integrationManifest(node.type)?.git} inherit />}
                     <WorkflowInputFields.Provider value={inputFields}>
                       <WorkflowNodeParameters
                         key={node.id}

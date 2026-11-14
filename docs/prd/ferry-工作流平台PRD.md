@@ -3477,7 +3477,16 @@ compatible只代表静态连接关系，不代表Item有效或服务端已支持
 - D26-2：可读接口范围——目录全部134个 GET（建议，权限由原处理器保证），或人工白名单；响应上限 8MiB 与分页50页是否合适。
 - D26-3：通用 HTTP 请求节点（B032，含外网出站策略）是否同批做；建议分开，平台数据节点先行。
 
-### 26.2 AI 智能体节点：Runner 上经 MCP 取数并输出结构化 JSON（2026-11-14，用户确认方向，设计待评审）
+### 26.2 AI 智能体节点：Runner 上经 MCP 取数并输出结构化 JSON（2026-11-14，用户确认方向；2026-11-14 分支 feat/ai-agent-node 已实现，待真实 Runner 验收）
+
+**实现状态（2026-11-14，分支 feat/ai-agent-node，未合入 main、未发布）**：`ai.agent.run` 已按下表实现于 `crates/server/src/workflows/agent.rs`，契约登记在 `workflow-platform-nodes.json`，编辑面板 `WorkflowAgentParameters.tsx`；后端以脚本化假 Runner（`hosts/fake.rs` 的 `agent`）覆盖成功、围栏 JSON、Schema 不符与 1 次修正、平台 GET 取数、非 GET 一律 403 且不执行、运行中撤销智能体角色/执行身份、工具调用上限、超时与取消、审批请求、Kimi/Grok 拒绝、保存校验；前端 vitest 覆盖智能体选择、Schema 校验与六语执行位置。**未做**：真实 Runner + Codex/Claude CLI 验收、样例工作流 113479187989270528 的 AI 分支（④）。与下表的差异：
+- 主机覆盖不放在 params（无 `host_id` 参数），沿用节点 `settings.target_kind/target_ref`（及工作流默认执行目标）与既有执行槽/预留；无目标时用智能体默认主机，两者皆无则执行失败（`workflow.agentHostRequired`）。执行身份须有 `workflows.run`、`hosts.terminal` 与 `ai-agents.use`，每 0.5 秒复核。
+- 每次节点执行只运行一次，全部输入项以 JSON 附加到提示；无输入项不运行、无输出。Runner 协议限制整条提示≤64 KiB（系统提示+任务+输入项+Schema），超出即失败（`workflow.agentInputTooLarge`），大数据应由智能体经平台工具读取——未提供 256 KiB 输入通道（需改 Runner 协议，另行评审）。
+- 最终回答取最后一条非空消息：整段 JSON 或最后一个 ```json 围栏块；不符时若 CLI 报告了原生会话，则在同一会话追加 1 次修正提示（无会话则直接失败）。
+- 工具调用轨迹（方法/路径/状态码/字节数）、智能体/CLI/模型/主机与结果写入节点运行日志（`workflow_node_runs.logs`，≤256 KiB），未写入回合事件存储；无新表、无迁移。
+- 托管工作目录按“工作流 ID-智能体 ID”复用（`agent_workspace` 键），不随执行清理。
+- 失败原因：`agent_output`/`agent_limit`/`agent_timeout`/`agent_failed`/`agent_invalid`/`permission_revoked`。
+
 
 用户确认（2026-11-14）：平台数据节点按 D26-1 只读、D26-2 开放目录全部 GET、D26-3 HTTP 节点另行评审执行；同时增加“AI 使用 MCP”的流水线能力，两种标准化作业方式：
 

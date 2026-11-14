@@ -108,10 +108,15 @@ fn supported(graph: &Value, plan: &plan::Plan) -> Result<()> {
         if spec["type"] == "host.command" {
             super::host::command_script(&spec["params"])?;
         }
-        if super::host::requested(spec) && !super::integration::supports(spec) {
+        if super::host::requested(spec)
+            && !super::integration::supports(spec)
+            && !super::agent::supports(spec)
+        {
             return Err(error("workflow.runImplementation", &node.path));
         }
+        // An AI agent node without a target runs on its Agent's own host.
         if super::host::requested(spec)
+            && !super::agent::supports(spec)
             && spec
                 .pointer("/settings/target_ref")
                 .and_then(Value::as_str)
@@ -124,6 +129,7 @@ fn supported(graph: &Value, plan: &plan::Plan) -> Result<()> {
             Some("core.trigger.manual" | "data.set" | "core.wait" | "core.stop" | "host.preview")
         ) && !super::transform::supports(spec)
             && !super::platform::supports(spec)
+            && !super::agent::supports(spec)
             && !super::media::supports(spec)
             && !super::ai::supports(spec)
             && !super::integration::supports(spec)
@@ -173,7 +179,7 @@ fn supported(graph: &Value, plan: &plan::Plan) -> Result<()> {
     }
     Ok(())
 }
-struct NoExternalSchema;
+pub(super) struct NoExternalSchema;
 impl jsonschema::Retrieve for NoExternalSchema {
     fn retrieve(
         &self,
@@ -849,6 +855,25 @@ pub(super) fn failure_reason(error: &ApiError) -> &'static str {
             {
                 return "platform_request";
             }
+            "workflow.agentNoJson"
+            | "workflow.agentInvalidOutput"
+            | "workflow.agentOutputTooLarge" => return "agent_output",
+            "workflow.agentToolLimit" | "workflow.agentOutputLimit" => return "agent_limit",
+            "workflow.agentTimeout" => return "agent_timeout",
+            "workflow.agentNotRunner"
+            | "workflow.agentDirectoryMissing"
+            | "workflow.agentCliMissing"
+            | "workflow.agentRunnerUpgrade"
+            | "workflow.agentLoginRequired"
+            | "workflow.agentApproval"
+            | "workflow.agentFailed" => return "agent_failed",
+            "workflow.agentUnavailable"
+            | "workflow.agentApiModel"
+            | "workflow.agentReadOnly"
+            | "workflow.agentPrompt"
+            | "workflow.agentSchema"
+            | "workflow.agentInputTooLarge"
+            | "workflow.agentHostRequired" => return "agent_invalid",
             _ => {}
         }
     }
@@ -1266,6 +1291,17 @@ async fn dispatch_inner(
                 _ if super::platform::supports(spec) => {
                     super::platform::execute(s, &run, &items[..selected], &active.snapshot.params)
                         .await?
+                }
+                _ if super::agent::supports(spec) => {
+                    Box::pin(super::agent::execute(
+                        s,
+                        &run,
+                        node_id,
+                        spec,
+                        &items[..selected],
+                        &active.snapshot.params,
+                    ))
+                    .await?
                 }
                 _ if super::ai::supports(spec) => {
                     super::ai::execute(

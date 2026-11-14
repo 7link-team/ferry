@@ -5942,5 +5942,205 @@
     "プラットフォームデータノードの設定が無効です。操作、パスパラメーター、クエリ、ページ設定を確認してください。",
     "플랫폼 데이터 노드 구성이 잘못되었습니다. 작업, 경로 매개변수, 쿼리 및 페이지 설정을 확인하세요.",
     "Konfigurasi nod data platform tidak sah: semak operasi, parameter laluan, pertanyaan dan penghalaman."
+  ],
+  "aiAgent": [
+    "AI agent",
+    "AI 智能体",
+    "AI 智能體",
+    "AI エージェント",
+    "AI 에이전트",
+    "Ejen AI"
+  ],
+  "nodeHint.aiAgent": [
+    "Run an AI agent's CLI on a Runner: reads platform data read-only and outputs JSON matching your schema",
+    "在 Runner 上运行智能体 CLI：只读取平台数据，输出符合 Schema 的 JSON",
+    "在 Runner 上執行智能體 CLI：只讀取平台資料，輸出符合 Schema 的 JSON",
+    "Runner で AI エージェントの CLI を実行：プラットフォームデータを読み取り専用で取得し、スキーマに沿った JSON を出力",
+    "Runner에서 AI 에이전트 CLI 실행: 플랫폼 데이터를 읽기 전용으로 읽고 스키마에 맞는 JSON 출력",
+    "Jalankan CLI ejen AI pada Runner: baca data platform secara baca sahaja dan keluarkan JSON mengikut skema"
+  ],
+  "agent.agent": [
+    "AI agent",
+    "智能体",
+    "智能體",
+    "AI エージェント",
+    "AI 에이전트",
+    "Ejen AI"
+  ],
+  "agent.select": [
+    "Select an AI agent",
+    "选择智能体",
+    "選擇智能體",
+    "AI エージェントを選択",
+    "AI 에이전트 선택",
+    "Pilih ejen AI"
+  ],
+  "agent.location": [
+    "Execution location: {cli} on Runner {host}",
+    "执行位置：Runner {host} 上的 {cli}",
+    "執行位置：Runner {host} 上的 {cli}",
+    "実行場所：Runner {host} 上の {cli}",
+    "실행 위치: Runner {host}의 {cli}",
+    "Lokasi pelaksanaan: {cli} pada Runner {host}"
+  ],
+  "agent.locationPending": [
+    "Execution location: shown after you select an AI agent",
+    "执行位置：选择智能体后显示",
+    "執行位置：選擇智能體後顯示",
+    "実行場所：AI エージェントを選択すると表示されます",
+    "실행 위치: AI 에이전트를 선택하면 표시됩니다",
+    "Lokasi pelaksanaan: dipaparkan selepas anda memilih ejen AI"
+  ],
+  "agent.noHost": [
+    "This AI agent has no default host. Select a Runner host as the execution target.",
+    "该智能体没有默认主机，请选择 Runner 主机作为执行目标。",
+    "該智能體沒有預設主機，請選擇 Runner 主機作為執行目標。",
+    "この AI エージェントには既定のホストがありません。実行先の Runner ホストを選択してください。",
+    "이 AI 에이전트에는 기본 호스트가 없습니다. 실행 대상으로 Runner 호스트를 선택하세요.",
+    "Ejen AI ini tiada hos lalai. Pilih hos Runner sebagai sasaran pelaksanaan."
+  ],
+  "agent.readOnlyUnsupported": [
+    "This CLI cannot run read-only",
+    "该 CLI 不支持只读运行",
+    "該 CLI 不支援唯讀執行",
+    "この CLI は読み取り専用で実行できません",
+    "이 CLI는 읽기 전용으로 실행할 수 없습니다",
+    "CLI ini tidak boleh berjalan secara baca sahaja"
+  ],
+  "agent.disabled": [
+    "Disabled",
+    "已停用",
+    "已停用",
+    "無効",
+    "비활성화됨",
+    "Dinyahdayakan"
+  ],
+  "agent.prompt": [
+    "Task prompt",
+    "任务提示",
+    "任務提示",
+    "タスクプロンプト",
+    "작업 프롬프트",
+    "Gesaan tugas"
+  ],
+  "agent.promptHelp": [
+    "Input items are appended to the prompt as JSON. Start with = to use expressions, e.g. =Analyze {{ $json.since }}.",
+    "输入数据会以 JSON 附加到提示后。以 = 开头可使用表达式，例如 =分析 {{ $json.since }}。",
+    "輸入資料會以 JSON 附加到提示後。以 = 開頭可使用運算式，例如 =分析 {{ $json.since }}。",
+    "入力項目は JSON としてプロンプトの後に追加されます。= で始めると式を使えます（例：=分析 {{ $json.since }}）。",
+    "입력 항목은 JSON으로 프롬프트 뒤에 추가됩니다. =로 시작하면 표현식을 쓸 수 있습니다(예: =분석 {{ $json.since }}).",
+    "Item input ditambah pada gesaan sebagai JSON. Mulakan dengan = untuk ungkapan, cth. =Analisis {{ $json.since }}."
+  ],
+  "agent.promptTooLong": [
+    "The task prompt exceeds 32 KiB.",
+    "任务提示超过 32 KiB。",
+    "任務提示超過 32 KiB。",
+    "タスクプロンプトが 32 KiB を超えています。",
+    "작업 프롬프트가 32 KiB를 넘습니다.",
+    "Gesaan tugas melebihi 32 KiB."
+  ],
+  "agent.outputSchema": [
+    "Output JSON Schema",
+    "输出 JSON Schema",
+    "輸出 JSON Schema",
+    "出力 JSON Schema",
+    "출력 JSON Schema",
+    "JSON Schema output"
+  ],
+  "agent.schemaHelp": [
+    "The final answer must be one JSON object matching this schema (root type object, at most 64 KiB). It becomes the node's single output item.",
+    "最终回答必须是符合此 Schema 的一个 JSON 对象（根类型 object，不超过 64 KiB），作为节点唯一的输出项。",
+    "最終回答必須是符合此 Schema 的一個 JSON 物件（根類型 object，不超過 64 KiB），作為節點唯一的輸出項。",
+    "最終回答はこのスキーマに一致する1つの JSON オブジェクト（ルート型 object、64 KiB 以内）で、ノードの唯一の出力項目になります。",
+    "최종 답변은 이 스키마에 맞는 JSON 객체 하나여야 하며(루트 타입 object, 64 KiB 이하) 노드의 유일한 출력 항목이 됩니다.",
+    "Jawapan akhir mestilah satu objek JSON yang sepadan dengan skema ini (jenis akar object, maksimum 64 KiB) dan menjadi satu-satunya item output nod."
+  ],
+  "agent.schemaJson": [
+    "Enter valid JSON.",
+    "请输入合法的 JSON。",
+    "請輸入合法的 JSON。",
+    "有効な JSON を入力してください。",
+    "올바른 JSON을 입력하세요.",
+    "Masukkan JSON yang sah."
+  ],
+  "agent.schemaRoot": [
+    "The schema's root type must be object.",
+    "Schema 的根类型必须是 object。",
+    "Schema 的根類型必須是 object。",
+    "スキーマのルート型は object である必要があります。",
+    "스키마의 루트 타입은 object여야 합니다.",
+    "Jenis akar skema mestilah object."
+  ],
+  "agent.schemaSize": [
+    "The schema exceeds 64 KiB.",
+    "Schema 超过 64 KiB。",
+    "Schema 超過 64 KiB。",
+    "スキーマが 64 KiB を超えています。",
+    "스키마가 64 KiB를 넘습니다.",
+    "Skema melebihi 64 KiB."
+  ],
+  "agent.timeout": [
+    "Timeout (seconds, 30–1800)",
+    "超时（秒，30–1800）",
+    "逾時（秒，30–1800）",
+    "タイムアウト（秒、30–1800）",
+    "제한 시간(초, 30–1800)",
+    "Had masa (saat, 30–1800)"
+  ],
+  "agent.maxToolCalls": [
+    "Platform tool calls limit (1–128)",
+    "平台工具调用上限（1–128）",
+    "平台工具呼叫上限（1–128）",
+    "プラットフォームツール呼び出し上限（1–128）",
+    "플랫폼 도구 호출 한도(1–128)",
+    "Had panggilan alat platform (1–128)"
+  ],
+  "agent.help": [
+    "Runs once per execution over all input items, in read-only mode. Platform data is read through the platform tools as the execution identity limited by the agent's role, rechecked for every call; any write is refused. An answer that does not match the schema gets one correction request in the same session.",
+    "每次执行运行一次，处理全部输入项，只读模式。平台数据通过平台工具按执行身份∩智能体角色读取，每次调用重新校验；任何写操作都会被拒绝。不符合 Schema 的回答会在同一会话内要求修正一次。",
+    "每次執行運行一次，處理全部輸入項，唯讀模式。平台資料透過平台工具依執行身分∩智能體角色讀取，每次呼叫重新校驗；任何寫入操作都會被拒絕。不符合 Schema 的回答會在同一工作階段內要求修正一次。",
+    "実行ごとに1回、全入力項目を読み取り専用モードで処理します。プラットフォームデータは実行ユーザーと AI エージェントのロールの範囲内でツールから読み取り、呼び出しごとに再確認します。書き込みはすべて拒否されます。スキーマに合わない回答には同じセッションで1回だけ修正を求めます。",
+    "실행마다 한 번, 모든 입력 항목을 읽기 전용 모드로 처리합니다. 플랫폼 데이터는 실행 신원과 에이전트 역할의 교집합으로 도구를 통해 읽으며 호출마다 다시 확인합니다. 모든 쓰기는 거부됩니다. 스키마에 맞지 않는 답변은 같은 세션에서 한 번 수정을 요청합니다.",
+    "Dijalankan sekali bagi setiap pelaksanaan ke atas semua item input, dalam mod baca sahaja. Data platform dibaca melalui alat platform sebagai identiti pelaksanaan yang dihadkan oleh peranan ejen, disemak semula bagi setiap panggilan; sebarang penulisan ditolak. Jawapan yang tidak sepadan dengan skema diminta dibetulkan sekali dalam sesi yang sama."
+  ],
+  "agent.failure.agent_output": [
+    "The AI agent's final answer was not a JSON object matching the output schema. See the node's error for the answer.",
+    "智能体最终回答不是符合输出 Schema 的 JSON 对象，原文见节点错误。",
+    "智能體最終回答不是符合輸出 Schema 的 JSON 物件，原文見節點錯誤。",
+    "AI エージェントの最終回答が出力スキーマに一致する JSON オブジェクトではありませんでした。回答はノードのエラーを参照してください。",
+    "AI 에이전트의 최종 답변이 출력 스키마에 맞는 JSON 객체가 아니었습니다. 답변은 노드 오류를 확인하세요.",
+    "Jawapan akhir ejen AI bukan objek JSON yang sepadan dengan skema output. Lihat ralat nod untuk jawapan."
+  ],
+  "agent.failure.agent_limit": [
+    "The AI agent exceeded its tool call or data limit and was stopped.",
+    "智能体超过工具调用或数据上限，已终止。",
+    "智能體超過工具呼叫或資料上限，已終止。",
+    "AI エージェントがツール呼び出しまたはデータの上限を超えたため停止しました。",
+    "AI 에이전트가 도구 호출 또는 데이터 한도를 넘어 중지되었습니다.",
+    "Ejen AI melebihi had panggilan alat atau data dan telah dihentikan."
+  ],
+  "agent.failure.agent_timeout": [
+    "The AI agent did not finish within the node's timeout and was stopped.",
+    "智能体未在节点超时时间内完成，已终止。",
+    "智能體未在節點逾時時間內完成，已終止。",
+    "AI エージェントがノードのタイムアウト内に完了しなかったため停止しました。",
+    "AI 에이전트가 노드 제한 시간 안에 끝나지 않아 중지되었습니다.",
+    "Ejen AI tidak selesai dalam had masa nod dan telah dihentikan."
+  ],
+  "agent.failure.agent_failed": [
+    "The AI agent could not run on the Runner. Check the host, the CLI and its sign-in.",
+    "智能体无法在 Runner 上运行，请检查主机、CLI 及其登录状态。",
+    "智能體無法在 Runner 上執行，請檢查主機、CLI 及其登入狀態。",
+    "AI エージェントを Runner で実行できませんでした。ホスト、CLI とそのサインインを確認してください。",
+    "AI 에이전트를 Runner에서 실행할 수 없습니다. 호스트, CLI 및 로그인 상태를 확인하세요.",
+    "Ejen AI tidak dapat dijalankan pada Runner. Semak hos, CLI dan log masuknya."
+  ],
+  "agent.failure.agent_invalid": [
+    "The AI agent node configuration is invalid: check the agent, prompt, output schema and execution host.",
+    "AI 智能体节点配置无效：请检查智能体、提示、输出 Schema 及执行主机。",
+    "AI 智能體節點設定無效：請檢查智能體、提示、輸出 Schema 及執行主機。",
+    "AI エージェントノードの設定が無効です。エージェント、プロンプト、出力スキーマ、実行ホストを確認してください。",
+    "AI 에이전트 노드 구성이 잘못되었습니다. 에이전트, 프롬프트, 출력 스키마 및 실행 호스트를 확인하세요.",
+    "Konfigurasi nod ejen AI tidak sah: semak ejen, gesaan, skema output dan hos pelaksanaan."
   ]
 }

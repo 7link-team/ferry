@@ -51,8 +51,7 @@ async fn platform_call(
     let value = match result {
         Ok(Some(value)) => value,
         Ok(None) => return (request_id, Value::Null),
-        Err(error) => json!({"status":error.0.as_u16(),"ok":false,"error":error.1,
-            "guidance":"The platform denied or could not complete this call. No Agent role means no platform access. Check this workspace's current user and Agent role grants. Do not substitute local filesystem searches or invent counts."}),
+        Err(error) => crate::platform_tools::denial(&error),
     };
     if let Some(allowed) = approved {
         let _ = append(

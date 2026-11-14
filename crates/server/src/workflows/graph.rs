@@ -600,6 +600,9 @@ fn validate_semantics(kind: &str, params: &Value, base: &str) -> Result<()> {
     if kind == "ferry.request" {
         super::platform::validate(params, base)?;
     }
+    if kind == "ai.agent.run" {
+        super::agent::validate(params, base)?;
+    }
     if kind == "human.pick" && params["min_selected"].as_f64() > params["max_selected"].as_f64() {
         return Err(invalid(
             format!("{base}/params/max_selected"),
@@ -1216,7 +1219,7 @@ mod tests {
 
     #[test]
     fn draft_contracts_accept_all_catalog_examples_and_reject_unknown_parameters() {
-        assert_eq!(contracts().nodes.len(), 185);
+        assert_eq!(contracts().nodes.len(), 186);
         for kind in contracts().nodes.keys() {
             let mut graph = json!({"engine":"ferry-graph","schema":1,"nodes":[node("test",kind)],"connections":[]});
             accepts(&graph);

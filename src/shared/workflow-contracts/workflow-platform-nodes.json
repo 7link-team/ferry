@@ -1,6 +1,6 @@
 {
   "contract_version": "1",
-  "scope": "Read-only platform data from the execution workspace through the in-process platform tool gateway (PRD §26)",
+  "scope": "Read-only platform data from the execution workspace through the in-process platform tool gateway (PRD §26), and the read-only AI agent node that reads it through the platform MCP bridge on a Runner (PRD §26.2)",
   "nodes": [
     {
       "type": "ferry.request",
@@ -108,6 +108,111 @@
         "split_items": true,
         "all_pages": false,
         "max_pages": 50
+      }
+    },
+    {
+      "type": "ai.agent.run",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "search_aliases": [
+        "ai",
+        "agent",
+        "mcp",
+        "cli",
+        "codex",
+        "claude",
+        "analysis",
+        "structured output",
+        "json schema",
+        "智能体"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$"
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          },
+          "output_schema": {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "const": "object"
+              }
+            }
+          },
+          "timeout_s": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 1800
+          },
+          "max_tool_calls": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 128
+          }
+        },
+        "required": [
+          "agent_id",
+          "prompt",
+          "output_schema",
+          "timeout_s",
+          "max_tool_calls"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/prompt"
+      ],
+      "semantic_rule": "agent_id names an enabled Agent the saving user may use whose CLI can run read-only (not Kimi or Grok, not an API model profile). prompt is at most 32 KiB; output_schema is a JSON Schema of at most 64 KiB whose root type is object. The node runs once per execution over all input items on the node's host target, or the Agent's own host, with platform tools limited to catalogue GETs under the execution identity intersected with the Agent role.",
+      "example_params": {
+        "agent_id": "1",
+        "prompt": "Summarize the input items.",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "summary"
+          ]
+        },
+        "timeout_s": 600,
+        "max_tool_calls": 64
       }
     }
   ]

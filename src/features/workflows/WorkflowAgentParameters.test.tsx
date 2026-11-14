@@ -1,0 +1,132 @@
+import { act, useState } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { api } from "../../shared/api/api";
+import { i18n, workflowText as t } from "../../shared/i18n/i18n";
+import { WorkflowAssetContext } from "./WorkflowAssets";
+import { WorkflowNodeParameters } from "./WorkflowNodeParameters";
+import { schemaProblem } from "./WorkflowAgentParameters";
+import { emptyGraph, newNode, type GraphNode } from "./graph";
+
+vi.mock("../../shared/api/api", () => ({
+  api: vi.fn(),
+  errorText: (cause: unknown) => (cause instanceof Error ? cause.message : String(cause)),
+}));
+const calls = vi.mocked(api);
+const agents = [
+  { id: "11", name: "Analyst", state: "enabled", runtime: "codex", host_id: "5", host_name: "Build runner" },
+  { id: "12", name: "Writer", state: "enabled", runtime: "kimi", host_id: "5", host_name: "Build runner" },
+  { id: "13", name: "Retired", state: "disabled", runtime: "claude", host_id: "5", host_name: "Build runner" },
+  { id: "14", name: "Floating", state: "enabled", runtime: "claude", host_id: "0" },
+];
+
+let host: HTMLDivElement, root: Root;
+let current: Record<string, unknown>;
+const invalid = vi.fn();
+beforeEach(async () => {
+  await i18n.changeLanguage("zh-CN");
+  calls.mockReset();
+  invalid.mockReset();
+  calls.mockImplementation(async (path: string) => {
+    if (path.includes("/ai-agents")) return { items: agents } as never;
+    if (path.includes("/nodes")) return { items: [{ id: "9", name: "GPU runner" }] } as never;
+    throw new Error(`unexpected ${path}`);
+  });
+  host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+  current = newNode(emptyGraph(), "ai.agent.run", "agent").params;
+});
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
+
+function Harness({ readOnly = false, settings }: { readOnly?: boolean; settings?: Record<string, unknown> }) {
+  const [value, setValue] = useState(current);
+  current = value;
+  const node: GraphNode = { id: "agent", type: "ai.agent.run", type_version: 1, name: "agent", position: [0, 0], params: value, ...(settings ? { settings } : {}) };
+  return <WorkflowAssetContext.Provider value={{ workspace: "7", workflow: "1" }}>
+    <WorkflowNodeParameters node={node} readOnly={readOnly} update={setValue} invalid={invalid} />
+  </WorkflowAssetContext.Provider>;
+}
+const render = async (element: React.ReactElement) => { await act(async () => root.render(element)); await act(async () => {}); };
+const field = <T extends HTMLElement>(label: string) => host.querySelector<T>(`[aria-label="${label}"]`)!;
+async function change(label: string, value: string) {
+  const element = field<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(label);
+  expect(element, label).not.toBeNull();
+  const prototype = element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(element, value);
+    element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+  });
+}
+const reported = (key: string) => invalid.mock.calls.filter(([name]) => name === key).at(-1)?.[1];
+const location = () => host.querySelector('[data-testid="agent-location"]')?.textContent;
+
+it("starts unconfigured, lists usable agents and states the Runner and CLI it runs on", async () => {
+  expect(current).toMatchObject({ agent_id: "", prompt: "", timeout_s: 600, max_tool_calls: 64, output_schema: { type: "object" } });
+  await render(<Harness />);
+  expect(calls).toHaveBeenCalledWith("/workspaces/7/ai-agents?page_size=100");
+  expect(location()).toBe("执行位置：选择智能体后显示");
+  const options = [...field<HTMLSelectElement>(t("agent.agent")).options];
+  const option = (id: string) => options.find((item) => item.value === id)!;
+  expect(option("11").disabled).toBe(false);
+  // Kimi cannot run read-only; disabled agents cannot be chosen either.
+  expect(option("12").disabled).toBe(true);
+  expect(option("12").textContent).toContain(t("agent.readOnlyUnsupported"));
+  expect(option("13").disabled).toBe(true);
+  await change(t("agent.agent"), "11");
+  expect(current.agent_id).toBe("11");
+  expect(location()).toBe("执行位置：Runner Build runner 上的 Codex");
+  await change(t("agent.prompt"), "=分析 {{ $json.since }}");
+  expect(current.prompt).toBe("=分析 {{ $json.since }}");
+  await change(t("agent.timeout"), "900");
+  await change(t("agent.maxToolCalls"), "16");
+  expect(current).toMatchObject({ timeout_s: 900, max_tool_calls: 16 });
+  // An Agent without a default host needs a node target.
+  await change(t("agent.agent"), "14");
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(t("agent.noHost"));
+  await render(<Harness settings={{ runtime: "host", target_kind: "host", target_ref: "9" }} />);
+  await act(async () => {});
+  expect(location()).toBe("执行位置：Runner GPU runner 上的 Claude Code");
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("validates the output schema like the server before storing it", async () => {
+  await render(<Harness />);
+  const before = current.output_schema;
+  await change(t("agent.outputSchema"), "[1]");
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(t("agent.schemaRoot"));
+  expect(reported("agentSchema")).toBe(true);
+  expect(current.output_schema).toBe(before);
+  await change(t("agent.outputSchema"), "{\"type\":");
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(t("agent.schemaJson"));
+  const schema = { type: "object", properties: { verdict: { type: "string", enum: ["ok", "risk"] } }, required: ["verdict"] };
+  await change(t("agent.outputSchema"), JSON.stringify(schema));
+  expect(current.output_schema).toEqual(schema);
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(reported("agentSchema")).toBe(false);
+  expect(schemaProblem(JSON.stringify({ type: "object", description: "x".repeat(64 * 1024) }))).toBe("agent.schemaSize");
+  expect(schemaProblem("{\"properties\":{}}")).toBe("agent.schemaRoot");
+  expect(schemaProblem("{\"type\":\"object\"}")).toBe("");
+  // Over 32 KiB of UTF-8 is flagged before save.
+  await change(t("agent.prompt"), "数".repeat(12_000));
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(t("agent.promptTooLong"));
+  expect(reported("agentPrompt")).toBe(true);
+});
+
+it("is read-only in view mode and localizes the execution location in six languages", async () => {
+  current = { ...current, agent_id: "11", prompt: "Summarize" };
+  await render(<Harness readOnly />);
+  expect([...host.querySelectorAll("input,textarea")].every((item) => (item as HTMLInputElement).readOnly)).toBe(true);
+  expect(field<HTMLSelectElement>(t("agent.agent")).disabled).toBe(true);
+  const expected: Record<string, string> = {
+    "en-US": "Execution location: Codex on Runner Build runner",
+    "zh-CN": "执行位置：Runner Build runner 上的 Codex",
+    "zh-TW": "執行位置：Runner Build runner 上的 Codex",
+    "ja-JP": "実行場所：Runner Build runner 上の Codex",
+    "ko-KR": "실행 위치: Runner Build runner의 Codex",
+    "ms-MY": "Lokasi pelaksanaan: Codex pada Runner Build runner",
+  };
+  for (const [locale, text] of Object.entries(expected)) {
+    await act(async () => { await i18n.changeLanguage(locale); });
+    await render(<Harness readOnly />);
+    expect(location(), locale).toBe(text);
+  }
+});

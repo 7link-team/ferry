@@ -705,7 +705,7 @@ export function WorkflowNodeInspector({
                         )}
                       </div>
                     )}
-                    {node.type === "host.command" && <WorkflowExecutionTarget workspace={workspace} value={node.settings ?? {}} change={settings => update({settings})} readOnly={readOnly} hostOnly inherit />}
+                    {(node.type === "host.command" || node.type === "ai.agent.run") && <WorkflowExecutionTarget workspace={workspace} value={node.settings ?? {}} change={settings => update({settings})} readOnly={readOnly} hostOnly inherit />}
                     <WorkflowInputFields.Provider value={inputFields}>
                       <WorkflowNodeParameters
                         key={node.id}

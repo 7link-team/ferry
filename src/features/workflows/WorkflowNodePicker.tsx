@@ -28,6 +28,7 @@ import {
   Eye,
   Bell,
   Database,
+  Bot,
 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { workflowText as t } from "../../shared/i18n/i18n";
@@ -47,6 +48,7 @@ const builtinCatalog = [
   { type: "host.command", key: "hostCommand", group: "build", icon: Terminal },
   { type: "host.preview", key: "hostPreview", group: "build", icon: Eye },
   { type: "ai.llm.chat", key: "aiChat", group: "ai", icon: Braces },
+  { type: "ai.agent.run", key: "aiAgent", group: "ai", icon: Bot },
   { type: "ai.image.generate", key: "aiImage", group: "ai", icon: Image },
   { type: "ai.audio.speech", key: "aiSpeech", group: "ai", icon: Music },
   { type: "ai.audio.transcribe", key: "aiTranscribe", group: "ai", icon: Text },
