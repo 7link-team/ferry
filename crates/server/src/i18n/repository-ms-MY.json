@@ -843,5 +843,8 @@
   "templates.examples.redisSentinelPort": "Port Sentinel mendengar dan diterbitkan",
   "files.permissionInvalid": "Pilih laluan fail sah dan bit kebenaran antara 000 hingga 777.",
   "files.permissionUnsupported": "Penyuntingan kebenaran POSIX tidak tersedia untuk fail Windows dan pautan simbolik.",
-  "cron.workflowRun": "Pelaksanaan aliran kerja {id}"
+  "cron.workflowRun": "Pelaksanaan aliran kerja {id}",
+  "marketplace.gitFailed": "Tidak dapat membaca indeks melalui Git. Semak alamat repositori, cabang, laluan indeks dan token akses.",
+  "marketplace.gitUnavailable": "Git tidak dipasang pada pelayan, jadi sumber Git tidak dapat dibaca.",
+  "marketplace.gitTimeout": "Membaca indeks melalui Git tamat masa (2 minit)."
 }

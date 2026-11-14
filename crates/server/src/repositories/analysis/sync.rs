@@ -3,7 +3,7 @@ use crate::{entities::locks, lock};
 use ferry_protocol::contribution::{ANALYSIS_VERSION, Commit, valid_sha};
 use std::collections::VecDeque;
 
-mod git;
+pub(crate) mod git;
 mod git_facts;
 mod pipeline;
 mod provider;

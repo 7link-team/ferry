@@ -843,5 +843,8 @@
   "templates.examples.redisSentinelPort": "Sentinel 监听与发布端口",
   "files.permissionInvalid": "请选择有效文件路径和000到777范围的权限。",
   "files.permissionUnsupported": "Windows 文件和符号链接不支持此POSIX权限编辑。",
-  "cron.workflowRun": "工作流执行 {id}"
+  "cron.workflowRun": "工作流执行 {id}",
+  "marketplace.gitFailed": "无法通过 Git 读取索引。请检查仓库地址、分支、索引路径和访问令牌。",
+  "marketplace.gitUnavailable": "服务器未安装 Git，无法读取 Git 来源。",
+  "marketplace.gitTimeout": "通过 Git 读取索引超时（2 分钟）。"
 }

@@ -135,10 +135,15 @@ it("posts revocations and probes as item subresources", async () => {
   expect(api).toHaveBeenNthCalledWith(2, "/workspaces/ops/holes/7/probes", { method: "POST" });
 });
 
+const byKeyEarly = (key: string) => fields().filter((field) => field.key === key);
+
 it("starts creation with a 24-hour validity and prefix stripping, and locks host and port after creation", () => {
   const config = formConfig();
-  expect(config.blank).toEqual({ name: "", host_id: "", strip_prefix: true, ttl_hours: 24 });
-  const byKey = (key: string) => fields().filter((field) => field.key === key);
+  expect(config.blank).toEqual({ name: "", host_id: "", target_host: "", strip_prefix: true, ttl_hours: 24 });
+  // Optional LAN target: empty means the host's own 127.0.0.1; fixed after creation.
+  expect(byKeyEarly("target_host")[0]).toMatchObject({ type: "text", immutable: true, placeholder: "127.0.0.1" });
+  expect(byKeyEarly("target_host")[0]!.required).toBeUndefined();
+  const byKey = byKeyEarly;
   expect(byKey("host_id")[0]).toMatchObject({ type: "select", required: true, immutable: true });
   expect(byKey("target_port")[0]).toMatchObject({ type: "number", required: true, immutable: true, min: 1, max: 65535 });
   expect(byKey("name")[0]).toMatchObject({ required: true });
@@ -157,10 +162,10 @@ it("edits only name, path mode and validity, and treats revoked records as read-
   expect(edit).toMatchObject({ name: "Web", strip_prefix: true, version: 4 });
   expect(edit.ttl_hours).toBeUndefined();
   const visible = (draft: Partial<Hole>) => fields().filter((field) => !field.when || field.when(draft)).map((field) => field.key);
-  expect(visible(edit)).toEqual(["ingress_mode", "name", "host_id", "target_port", "ttl_hours"]);
-  expect(visible(config.blank)).toEqual(["ingress_mode", "name", "host_id", "target_port", "ttl_hours"]);
+  expect(visible(edit)).toEqual(["ingress_mode", "name", "host_id", "target_host", "target_port", "ttl_hours"]);
+  expect(visible(config.blank)).toEqual(["ingress_mode", "name", "host_id", "target_host", "target_port", "ttl_hours"]);
   expect(visible(row())).toEqual([
-    "ingress_mode", "name", "host_id", "target_port", "url", "state", "probe_state", "probe_error",
+    "ingress_mode", "name", "host_id", "target_host", "target_port", "url", "state", "probe_state", "probe_error",
     "active_connections", "expires_at", "created_by_name", "created_at", "updated_at", "usage",
   ]);
   expect(visible(row({ state: "revoked", revoked_at: 5, probe_error: "" }))).toContain("revoked_at");

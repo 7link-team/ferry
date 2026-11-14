@@ -20,5 +20,8 @@
   "holes.entryPorts": "No free port is available in the configured preview range.",
   "holes.entryBinary": "Cannot start cloudflared. Check its executable path and permissions on this server node.",
   "holes.entryUnavailable": "The preview ingress is unavailable. Check the connector and network, then retry explicitly.",
-  "holes.entryTimeout": "The temporary tunnel did not become ready within 45 seconds. The original ingress was kept."
+  "holes.entryTimeout": "The temporary tunnel did not become ready within 45 seconds. The original ingress was kept.",
+  "holes.targetNotPrivate": "The target must be this Runner host or an address on its local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10 or IPv6 ULA). Public, link-local and cloud metadata addresses are not allowed.",
+  "holes.targetInvalid": "Enter an IP address or host name without scheme, port or path.",
+  "holes.targetRunnerUpgrade": "Forwarding to a LAN address needs Runner 0.5.0-alpha or later on this host. Upgrade the Runner, or leave the target empty to use this host's own port."
 }

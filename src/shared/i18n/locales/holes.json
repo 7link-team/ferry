@@ -16,23 +16,23 @@
   "name": ["Name", "名称", "名稱", "名前", "이름", "Nama"],
   "host": ["Host", "主机", "主機", "ホスト", "호스트", "Hos"],
   "hostHelp": [
-    "Only runner hosts in this workspace are listed. The host and port cannot be changed after creation.",
-    "只列出当前工作空间的 Runner 主机。创建后主机和端口不可修改。",
-    "只列出目前工作空間的 Runner 主機。建立後主機和連接埠不可修改。",
-    "このワークスペースの Runner ホストのみ表示されます。作成後はホストとポートを変更できません。",
-    "이 워크스페이스의 Runner 호스트만 표시됩니다. 만든 후에는 호스트와 포트를 변경할 수 없습니다.",
-    "Hanya hos runner dalam ruang kerja ini disenaraikan. Hos dan port tidak boleh diubah selepas dicipta."
+    "Only runner hosts in this workspace are listed. The Runner on this host connects to the target. Host, address and port cannot be changed after creation.",
+    "只列出当前工作空间的 Runner 主机，由该主机上的 Runner 连接目标。创建后主机、地址和端口不可修改。",
+    "只列出目前工作空間的 Runner 主機，由該主機上的 Runner 連接目標。建立後主機、位址和連接埠不可修改。",
+    "このワークスペースの Runner ホストのみ表示され、そのホストの Runner がターゲットに接続します。作成後はホスト・アドレス・ポートを変更できません。",
+    "이 워크스페이스의 Runner 호스트만 표시되며 해당 호스트의 Runner가 대상에 연결합니다. 만든 후에는 호스트, 주소, 포트를 변경할 수 없습니다.",
+    "Hanya hos runner dalam ruang kerja ini disenaraikan; Runner pada hos ini menyambung ke sasaran. Hos, alamat dan port tidak boleh diubah selepas dicipta."
   ],
   "online": ["Online", "在线", "線上", "オンライン", "온라인", "Dalam talian"],
   "offline": ["Offline", "离线", "離線", "オフライン", "오프라인", "Luar talian"],
-  "port": ["Local port", "本地端口", "本機連接埠", "ローカルポート", "로컬 포트", "Port setempat"],
+  "port": ["Port", "端口", "連接埠", "ポート", "포트", "Port"],
   "portHelp": [
-    "Port of the HTTP service on the host's 127.0.0.1, an integer from 1 to 65535.",
-    "主机 127.0.0.1 上 HTTP 服务的端口，1–65535 的整数。",
-    "主機 127.0.0.1 上 HTTP 服務的連接埠，1–65535 的整數。",
-    "ホストの 127.0.0.1 で動作する HTTP サービスのポート（1～65535 の整数）。",
-    "호스트 127.0.0.1에서 실행 중인 HTTP 서비스의 포트(1–65535 정수)입니다.",
-    "Port perkhidmatan HTTP pada 127.0.0.1 hos, integer dari 1 hingga 65535."
+    "Port of the HTTP service on the target address (or this host's 127.0.0.1), an integer from 1 to 65535.",
+    "目标地址（留空为主机本机 127.0.0.1）上 HTTP 服务的端口，1–65535 的整数。",
+    "目標位址（留空為主機本機 127.0.0.1）上 HTTP 服務的連接埠，1–65535 的整數。",
+    "ターゲットアドレス（空欄はホストの 127.0.0.1）で動作する HTTP サービスのポート（1～65535 の整数）。",
+    "대상 주소(비우면 호스트의 127.0.0.1)에서 실행 중인 HTTP 서비스의 포트(1–65535 정수)입니다.",
+    "Port perkhidmatan HTTP pada alamat sasaran (atau 127.0.0.1 hos ini), integer dari 1 hingga 65535."
   ],
   "stripPrefix": ["Strip path prefix", "去掉路径前缀", "去除路徑前綴", "パスのプレフィックスを除去", "경로 접두사 제거", "Buang awalan laluan"],
   "stripPrefixHelp": [
@@ -156,5 +156,8 @@
   "warning.cloudflare": ["Public Internet access: anyone with this address can access the preview; the random hostname is not platform token authentication. Up to 200 in-flight requests, no SSE or uptime guarantee. Restarting changes the URL. Do not expose sensitive data.", "公网公开访问：知道地址的人即可访问，随机域名不等于平台 Token 鉴权。最多 200 个处理中请求，不支持 SSE，无可用性保证；重启后地址改变。不要暴露敏感数据。", "網際網路公開存取：知道位址的人即可存取，隨機網域不等於平台 Token 驗證。最多 200 個處理中請求，不支援 SSE，無可用性保證；重啟後位址改變。勿暴露敏感資料。", "インターネット公開：アドレスを知る人は閲覧できます。ランダムなドメインはトークン認証ではありません。同時処理は最大200件、SSE非対応、稼働保証なし。再起動でURLが変わります。機密データを公開しないでください。", "인터넷 공개: 주소를 아는 누구나 접근할 수 있으며 임의 도메인은 토큰 인증이 아닙니다. 처리 중 요청은 최대 200개이며 SSE와 가용성 보장이 없습니다. 재시작 시 URL이 변경됩니다. 민감한 데이터를 노출하지 마세요.", "Akses Internet awam: sesiapa yang tahu alamat boleh mengaksesnya; nama hos rawak bukan pengesahan token platform. Maksimum 200 permintaan dalam proses, tiada SSE atau jaminan masa beroperasi. Mula semula menukar URL. Jangan dedahkan data sensitif."],
   "compatibilityWarning": ["Browser isolation remains enabled. Cookie login, browser storage and Service Workers are restricted; applications relying on them may not work.", "保留浏览器隔离。Cookie 登录、浏览器存储和 Service Worker 受限，依赖这些能力的应用无法保证可用。", "保留瀏覽器隔離。Cookie 登入、瀏覽器儲存與 Service Worker 受限，依賴這些能力的應用無法保證可用。", "ブラウザー隔離を維持します。Cookieログイン、ストレージ、Service Workerは制限され、依存するアプリは動作しない場合があります。", "브라우저 격리를 유지합니다. Cookie 로그인, 저장소, Service Worker가 제한되어 의존하는 앱은 작동하지 않을 수 있습니다.", "Pengasingan pelayar dikekalkan. Log masuk kuki, storan dan Service Worker dihadkan; aplikasi yang bergantung padanya mungkin tidak berfungsi."],
   "acknowledgePublic": ["I understand that this preview is public and contains no sensitive data.", "我已了解此预览公开可访问，并确认其中不包含敏感数据。", "我已瞭解此預覽可公開存取，並確認不含敏感資料。", "このプレビューは公開され、機密データを含まないことを確認しました。", "이 미리보기가 공개되며 민감한 데이터를 포함하지 않음을 확인합니다.", "Saya memahami pratonton ini boleh diakses umum dan tidak mengandungi data sensitif."],
-  "settingsHelp": ["Default and enabled schemes apply to new entries and explicit switches. Existing entries stay active; revoke them individually to close access. Changing or clearing the root domain follows the existing domain-link rules.", "默认方案和启用选项用于新建及显式切换入口；不会自动撤销已有预览。关闭已有访问请单独撤销。修改或清空根域名仍按原有域名链接规则处理。", "預設方案與啟用選項用於新增及明確切換入口；不會自動撤銷現有預覽。關閉現有存取請個別撤銷。修改或清空根網域仍依原有網域連結規則處理。", "既定方式と有効化設定は新規入口と明示的な切替に適用されます。既存の入口を閉じるには個別に取り消してください。ルートドメイン変更時は従来の規則に従います。", "기본 방식과 활성화 옵션은 새 진입점과 명시적 전환에 적용됩니다. 기존 접근을 닫으려면 개별 취소하세요. 루트 도메인 변경은 기존 규칙을 따릅니다.", "Kaedah lalai dan pilihan yang didayakan terpakai kepada pintu masuk baharu dan pertukaran nyata. Batalkan pratonton sedia ada secara berasingan untuk menutup akses. Perubahan domain akar mengikut peraturan pautan sedia ada."]
+  "settingsHelp": ["Default and enabled schemes apply to new entries and explicit switches. Existing entries stay active; revoke them individually to close access. Changing or clearing the root domain follows the existing domain-link rules.", "默认方案和启用选项用于新建及显式切换入口；不会自动撤销已有预览。关闭已有访问请单独撤销。修改或清空根域名仍按原有域名链接规则处理。", "預設方案與啟用選項用於新增及明確切換入口；不會自動撤銷現有預覽。關閉現有存取請個別撤銷。修改或清空根網域仍依原有網域連結規則處理。", "既定方式と有効化設定は新規入口と明示的な切替に適用されます。既存の入口を閉じるには個別に取り消してください。ルートドメイン変更時は従来の規則に従います。", "기본 방식과 활성화 옵션은 새 진입점과 명시적 전환에 적용됩니다. 기존 접근을 닫으려면 개별 취소하세요. 루트 도메인 변경은 기존 규칙을 따릅니다.", "Kaedah lalai dan pilihan yang didayakan terpakai kepada pintu masuk baharu dan pertukaran nyata. Batalkan pratonton sedia ada secara berasingan untuk menutup akses. Perubahan domain akar mengikut peraturan pautan sedia ada."],
+  "target": ["Target", "目标", "目標", "ターゲット", "대상", "Sasaran"],
+  "targetHost": ["Target address", "目标地址", "目標位址", "ターゲットアドレス", "대상 주소", "Alamat sasaran"],
+  "targetHostHelp": ["Empty: this host's own 127.0.0.1. Or an IP/host name on the host's local network, e.g. 192.168.1.20 or nas.lan; the Runner resolves it and allows only loopback and private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, IPv6 ULA). Public and cloud metadata addresses are refused.", "留空为该主机本机 127.0.0.1；也可填该主机所在局域网的 IP 或主机名，如 192.168.1.20、nas.lan。由 Runner 解析，只允许回环和私有地址（10/8、172.16/12、192.168/16、100.64/10、IPv6 ULA），拒绝公网和云元数据地址。", "留空為該主機本機 127.0.0.1；也可填該主機所在區域網路的 IP 或主機名稱，如 192.168.1.20、nas.lan。由 Runner 解析，只允許迴環和私有位址（10/8、172.16/12、192.168/16、100.64/10、IPv6 ULA），拒絕公網和雲端中繼資料位址。", "空欄はホスト自身の 127.0.0.1。ホストのローカルネットワーク上の IP やホスト名（例：192.168.1.20、nas.lan）も指定できます。Runner が名前解決し、ループバックとプライベートアドレス（10/8、172.16/12、192.168/16、100.64/10、IPv6 ULA）のみ許可します。パブリックやクラウドメタデータのアドレスは拒否されます。", "비우면 호스트 자체의 127.0.0.1입니다. 호스트가 속한 로컬 네트워크의 IP나 호스트 이름(예: 192.168.1.20, nas.lan)도 입력할 수 있습니다. Runner가 확인하며 루프백과 사설 주소(10/8, 172.16/12, 192.168/16, 100.64/10, IPv6 ULA)만 허용하고 공인 및 클라우드 메타데이터 주소는 거부합니다.", "Kosong: 127.0.0.1 hos ini sendiri. Atau IP/nama hos pada rangkaian setempat hos, cth. 192.168.1.20 atau nas.lan; Runner menyelesaikannya dan hanya membenarkan loopback dan alamat persendirian (10/8, 172.16/12, 192.168/16, 100.64/10, IPv6 ULA). Alamat awam dan metadata awan ditolak."]
 }

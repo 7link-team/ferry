@@ -843,5 +843,8 @@
   "templates.examples.redisSentinelPort": "Sentinel listening and published port",
   "files.permissionInvalid": "Select a valid file path and permission bits from 000 to 777.",
   "files.permissionUnsupported": "POSIX permission editing is unavailable for Windows files and symbolic links.",
-  "cron.workflowRun": "Workflow execution {id}"
+  "cron.workflowRun": "Workflow execution {id}",
+  "marketplace.gitFailed": "Could not read the index over Git. Check the repository address, branch, index path and access token.",
+  "marketplace.gitUnavailable": "Git is not installed on the server, so Git sources cannot be read.",
+  "marketplace.gitTimeout": "Reading the index over Git timed out (2 minutes)."
 }

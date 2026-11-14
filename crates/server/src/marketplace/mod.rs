@@ -1,7 +1,8 @@
-//! Read external repository indexes; no Git hosting or local Git executable.
+//! Read external repository indexes through a hosting API, or directly over Git.
 pub mod catalog;
 #[cfg(test)]
 mod catalog_tests;
+pub(crate) mod git;
 pub(crate) mod index;
 pub mod platform;
 pub(crate) mod store;
@@ -43,8 +44,14 @@ impl Source {
                 crate::i18n::Message::new("marketplace.endpointFormatInvalid"),
             ));
         }
+        // A Git source is addressed by its clone URL alone.
+        let project = if self.provider == "git" {
+            "-".to_owned()
+        } else {
+            self.project.clone()
+        };
         for (value, limit) in [
-            (&self.project, 500),
+            (&project, 500),
             (&self.branch, 255),
             (&self.index_path, 500),
         ] {
@@ -76,6 +83,16 @@ impl Source {
             })?;
             path.pop_if_empty();
             match self.provider.as_str() {
+                "git" => {
+                    if !git::valid_branch(&self.branch) {
+                        return Err(ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("marketplace.sourceFieldsInvalid"),
+                        ));
+                    }
+                    drop(path);
+                    return Ok(url);
+                }
                 "github" | "gitee" => {
                     let parts: Vec<_> = self.project.split('/').collect();
                     if parts.len() != 2
@@ -170,6 +187,16 @@ async fn fetch(
     timeout: Duration,
 ) -> Result<String> {
     let mut url = source.url()?;
+    if source.provider == "git" {
+        return git::read_index(
+            url.as_str(),
+            &source.branch,
+            &source.index_path,
+            token,
+            MAX_INDEX_BYTES,
+        )
+        .await;
+    }
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(timeout.min(Duration::from_secs(20)))
@@ -803,7 +830,6 @@ pub async fn delete_source(
 }
 pub use catalog::{get, install, list};
 pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) -> Result<usize> {
-    let deadline = std::time::Instant::now() + timeout;
     scope.require("marketplace-sources.sync")?;
     scope.require("repositories.read")?;
     let row = {
@@ -880,6 +906,8 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
             &ferry_version(),
             "en-US",
         )?;
+        // The write budget starts after the fetch: a Git fetch may take minutes.
+        let deadline = std::time::Instant::now() + timeout;
         let fresh = Scope::for_actor(s, scope.workspace_id, scope.user.id).await?;
         fresh.require("marketplace-sources.sync")?;
         fresh.require("repositories.read")?;

@@ -5,6 +5,8 @@ export const marketProviders = [
   { value: "gitlab", label: "GitLab" },
   { value: "gitee", label: "Gitee" },
   { value: "codeup", label: "Codeup" },
+  // Reads the index by a shallow Git fetch: no hosting API, so no API rate limit.
+  { value: "git", label: "Git" },
 ];
 
 /** Source kind label shared by the platform sources page and the workspace market list. */

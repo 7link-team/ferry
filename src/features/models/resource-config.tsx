@@ -31,10 +31,12 @@ const newConnection = (): Omit<Provider, "id"> => ({
   version: 0,
 });
 function ModelConnection({
+  workspace,
   draft,
   readOnly,
   onPatch,
 }: {
+  workspace: string;
   draft: Partial<AnyRow>;
   readOnly: boolean;
   onPatch: (p: Partial<AnyRow>) => void;
@@ -46,7 +48,7 @@ function ModelConnection({
   const [preset, setPreset] = useState<ProviderPreset | undefined>(() =>
     matchPreset(draft.connection?.protocol, draft.connection?.base_url),
   );
-  if (draft.kind === "cli") return <CliConnection draft={draft} readOnly={readOnly} onPatch={onPatch} />;
+  if (draft.kind === "cli") return <CliConnection workspace={workspace} draft={draft} readOnly={readOnly} onPatch={onPatch} />;
   if (!draft.connection) return null;
   return (
     <div className="space-y-4">

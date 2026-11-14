@@ -200,6 +200,17 @@ impl Body {
             self.kind == "cli" && i64::from(id) != 0,
             &mut self.cli_options,
         )?;
+        if self.kind == "cli" && i64::from(id) != 0 {
+            // A referenced connection is never converted: its protocol must be the format.
+            let protocol = provider(conn, scope.workspace_id, id).await?.protocol;
+            let anthropic = self.cli_options["format"] == "anthropic";
+            if anthropic != (protocol == "anthropic") {
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("models.cliFormatUnsupported"),
+                ));
+            }
+        }
         self.provider_id = id.to_string();
         Ok(id)
     }

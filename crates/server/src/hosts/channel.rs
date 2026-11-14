@@ -95,8 +95,8 @@ pub trait HostChannel: Send + Sync {
             crate::i18n::Message::new("agents.probeUnsupported"),
         ))
     }
-    /// A byte pipe to a loopback port on the host, for preview holes.
-    async fn forward(&self, _port: u16) -> Result<crate::cluster::Socket> {
+    /// A byte pipe to a port on the host or its private network, for preview holes.
+    async fn forward(&self, _address: &str, _port: u16) -> Result<crate::cluster::Socket> {
         Err(ApiError::localized(
             axum::http::StatusCode::CONFLICT,
             crate::i18n::Message::new("holes.connectionUnsupported"),

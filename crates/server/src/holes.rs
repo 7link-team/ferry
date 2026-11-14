@@ -144,6 +144,7 @@ pub(crate) async fn views(
             "host_online": online.get(&row.host_id).copied().unwrap_or(false),
             "name": row.name,
             "target_port": row.target_port,
+            "target_host": row.target_host,
             "strip_prefix": row.strip_prefix,
             "url": url,
             "ingress_mode": mode,
@@ -270,6 +271,9 @@ pub struct CreateBody {
     name: String,
     host_id: Id,
     target_port: i64,
+    /// Empty: the Runner's own loopback. Otherwise a private-network IP or name.
+    #[serde(default)]
+    target_host: String,
     #[serde(default = "default_strip")]
     strip_prefix: bool,
     ttl_hours: i64,
@@ -299,6 +303,7 @@ pub async fn create(
     if !(1..=65535).contains(&body.target_port) {
         return Err(invalid());
     }
+    let target_host = checked_target_host(&body.target_host)?;
     let mut row = prepare_row(
         &s,
         &scope,
@@ -306,6 +311,7 @@ pub async fn create(
             host_id: body.host_id,
             name,
             target_port: body.target_port,
+            target_host,
             strip_prefix: body.strip_prefix,
             expires_at: db::now() + ttl,
             source: ("manual", 0, String::new()),
@@ -327,6 +333,7 @@ pub async fn create(
         "holes",
         &id,
         json!({"name": row.name, "host_id": body.host_id, "target_port": row.target_port,
+               "target_host": row.target_host,
                "strip_prefix": row.strip_prefix, "ttl_hours": body.ttl_hours,
                "ingress_mode": mode, "public_access_acknowledged":body.public_access_acknowledged}),
     )
@@ -336,11 +343,52 @@ pub async fn create(
     Ok((StatusCode::CREATED, Json(view(&s, &scope, id).await?)))
 }
 
+/// An IP literal or DNS name, without scheme, port or path. Public IP literals
+/// are refused here; names are resolved and checked by the Runner itself.
+fn checked_target_host(value: &str) -> Result<String> {
+    let host = value.trim().trim_start_matches('[').trim_end_matches(']');
+    if host.is_empty() || host.eq_ignore_ascii_case("localhost") {
+        return Ok(String::new());
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return if proxy::private_target(ip) {
+            Ok(if ip.is_loopback() {
+                String::new()
+            } else {
+                ip.to_string()
+            })
+        } else {
+            Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("holes.targetNotPrivate"),
+            ))
+        };
+    }
+    let valid = host.len() <= 253
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+    if !valid {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("holes.targetInvalid"),
+        ));
+    }
+    Ok(host.to_ascii_lowercase())
+}
+
 /// What differs between a manual preview and one a pipeline or workflow opens.
 pub(crate) struct NewHole {
     pub host_id: Id,
     pub name: String,
     pub target_port: i64,
+    pub target_host: String,
     pub strip_prefix: bool,
     pub expires_at: i64,
     /// kind, id, ref: see design section 3.
@@ -367,6 +415,7 @@ async fn prepare_row(s: &AppState, scope: &Scope, new: NewHole) -> Result<holes:
         host_id: new.host_id.into(),
         name: new.name,
         target_port: new.target_port,
+        target_host: new.target_host,
         strip_prefix: new.strip_prefix,
         token_hash: crate::hosts::runner::fingerprint(&token),
         token_sealed: String::new(),

@@ -1755,7 +1755,7 @@
     "source": "crates/server/src/holes.rs",
     "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<CreateBody>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct CreateBody {\n    name: String,\n    host_id: Id,\n    target_port: i64,\n    #[serde(default = \"default_strip\")]\n    strip_prefix: bool,\n    ttl_hours: i64,\n    ingress_mode: Option<String>,\n    #[serde(default)]\n    public_access_acknowledged: bool,\n}"
+      "struct CreateBody {\n    name: String,\n    host_id: Id,\n    target_port: i64,\n    /// Empty: the Runner's own loopback. Otherwise a private-network IP or name.\n    #[serde(default)]\n    target_host: String,\n    #[serde(default = \"default_strip\")]\n    strip_prefix: bool,\n    ttl_hours: i64,\n    ingress_mode: Option<String>,\n    #[serde(default)]\n    public_access_acknowledged: bool,\n}"
     ],
     "permission_checks": [
       "holes.create"

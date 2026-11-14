@@ -20,5 +20,8 @@
   "holes.entryPorts": "설정된 범위에 사용 가능한 포트가 없습니다.",
   "holes.entryBinary": "cloudflared를 시작할 수 없습니다. 이 노드의 실행 파일 경로와 권한을 확인하세요.",
   "holes.entryUnavailable": "진입점을 사용할 수 없습니다. 연결기와 네트워크를 확인한 후 수동으로 다시 시도하세요.",
-  "holes.entryTimeout": "임시 터널이 45초 안에 준비되지 않았습니다. 기존 진입점은 유지됩니다."
+  "holes.entryTimeout": "임시 터널이 45초 안에 준비되지 않았습니다. 기존 진입점은 유지됩니다.",
+  "holes.targetNotPrivate": "대상은 Runner 자체 또는 로컬 네트워크 주소(루프백, 10/8, 172.16/12, 192.168/16, 100.64/10, IPv6 ULA)만 가능합니다. 공인, 링크 로컬, 클라우드 메타데이터 주소는 허용되지 않습니다.",
+  "holes.targetInvalid": "프로토콜, 포트, 경로 없이 IP 주소나 호스트 이름을 입력하세요.",
+  "holes.targetRunnerUpgrade": "LAN 주소로 전달하려면 이 호스트의 Runner가 0.5.0-alpha 이상이어야 합니다. Runner를 업그레이드하거나 대상을 비워 호스트 자체 포트를 사용하세요."
 }

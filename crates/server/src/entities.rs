@@ -300,6 +300,7 @@ pub mod holes {
         pub host_id: i64,
         pub name: String,
         pub target_port: i64,
+        pub target_host: String,
         pub strip_prefix: bool,
         pub token_hash: String,
         pub token_sealed: String,

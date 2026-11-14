@@ -520,29 +520,32 @@ fn tokens_never_reach_request_logs() {
 fn redirects_from_the_local_service_stay_under_the_hole() {
     let prefix = "/holes/t";
     assert_eq!(
-        proxy::location("http://localhost:5173/login?x=1", prefix, 5173).as_deref(),
+        proxy::location("http://localhost:5173/login?x=1", prefix, "", 5173).as_deref(),
         Some("/holes/t/login?x=1")
     );
     assert_eq!(
-        proxy::location("http://127.0.0.1:5173", prefix, 5173).as_deref(),
+        proxy::location("http://127.0.0.1:5173", prefix, "", 5173).as_deref(),
         Some("/holes/t/")
     );
     assert_eq!(
-        proxy::location("/next", prefix, 5173).as_deref(),
+        proxy::location("/next", prefix, "", 5173).as_deref(),
         Some("/holes/t/next")
     );
     assert_eq!(
-        proxy::location("/holes/t/next", prefix, 5173).as_deref(),
+        proxy::location("/holes/t/next", prefix, "", 5173).as_deref(),
         Some("/holes/t/next"),
         "an app configured with the base path is left as it is"
     );
-    assert_eq!(proxy::location("https://example.com/", prefix, 5173), None);
-    assert_eq!(proxy::location("//evil.example/", prefix, 5173), None);
     assert_eq!(
-        proxy::location("http://localhost:9999/x", prefix, 5173),
+        proxy::location("https://example.com/", prefix, "", 5173),
         None
     );
-    assert_eq!(proxy::location("relative", prefix, 5173), None);
+    assert_eq!(proxy::location("//evil.example/", prefix, "", 5173), None);
+    assert_eq!(
+        proxy::location("http://localhost:9999/x", prefix, "", 5173),
+        None
+    );
+    assert_eq!(proxy::location("relative", prefix, "", 5173), None);
 }
 
 #[test]
@@ -771,6 +774,9 @@ async fn fake_runner(s: &AppState, address: SocketAddr, host: i64, key: &str, fo
     panic!("fake runner never came online");
 }
 
+/// Targets the fixture Runner was asked to reach, in order.
+static FORWARD_TARGETS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
 async fn forward_session(address: SocketAddr, session: String, host: i64, key: String) {
     let (mut socket, _) =
         tokio_tungstenite::connect_async(format!("ws://{address}/api/runners/sessions/{session}"))
@@ -788,9 +794,11 @@ async fn forward_session(address: SocketAddr, session: String, host: i64, key: S
     let Some(Ok(WsMessage::Text(text))) = socket.next().await else {
         return;
     };
-    let Ok(wire::Session::ForwardStart { port }) = serde_json::from_str(&text) else {
+    let Ok(wire::Session::ForwardStart { port, host: target }) = serde_json::from_str(&text) else {
         return;
     };
+    // The fixture stands in for a LAN service with its own loopback listener.
+    FORWARD_TARGETS.lock().unwrap().push(target);
     let tcp = match tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
         Ok(tcp) => tcp,
         Err(error) => {
@@ -1427,4 +1435,124 @@ async fn mode_snapshot_survives_default_changes_and_expired_public_entries_are_r
             .await
             .is_err()
     );
+}
+
+// ------------------------------------------------------- LAN targets
+
+#[tokio::test]
+async fn lan_targets_accept_private_addresses_and_names_and_refuse_public_ones() {
+    let (_dir, s) = setup().await;
+    add_host(&s, 11, 1, KEY).await;
+    let create_with = |target: &str| {
+        let s = s.clone();
+        let body = json!({"name":"LAN","host_id":"11","target_port":8080,"ttl_hours":24,"target_host":target});
+        async move { create(State(s), admin(1), Json(parse(body))).await }
+    };
+    for (input, stored) in [
+        ("", ""),
+        ("localhost", ""),
+        ("127.0.0.1", ""),
+        ("192.168.1.20", "192.168.1.20"),
+        ("10.0.0.5", "10.0.0.5"),
+        ("100.101.102.103", "100.101.102.103"),
+        ("[fd00::1]", "fd00::1"),
+        ("NAS.lan", "nas.lan"),
+    ] {
+        let (_, Json(created)) = create_with(input).await.unwrap();
+        assert_eq!(created["target_host"], stored, "{input}");
+    }
+    for refused in [
+        "8.8.8.8",
+        "169.254.169.254",
+        "fe80::1",
+        "2001:db8::1",
+        "http://192.168.1.2",
+        "192.168.1.2:80",
+        "a/b",
+        "-bad.lan",
+    ] {
+        let error = create_with(refused).await.unwrap_err();
+        assert_eq!(error.0, StatusCode::BAD_REQUEST, "{refused}");
+    }
+}
+
+#[test]
+fn lan_target_redirects_and_upgrade_gate() {
+    let prefix = "/holes/t";
+    assert_eq!(
+        proxy::location("http://192.168.1.20:8080/app", prefix, "192.168.1.20", 8080).as_deref(),
+        Some("/holes/t/app")
+    );
+    assert_eq!(
+        proxy::location("http://[fd00::1]:8080/", prefix, "fd00::1", 8080).as_deref(),
+        Some("/holes/t/")
+    );
+    assert_eq!(
+        proxy::location("http://192.168.1.21:8080/app", prefix, "192.168.1.20", 8080),
+        None
+    );
+    assert!(proxy::tests_target_supported("0.5.0-alpha"));
+    assert!(proxy::tests_target_supported("0.5.1"));
+    assert!(!proxy::tests_target_supported("0.4.0-alpha"));
+    assert!(!proxy::tests_target_supported("0.3.0-alpha.18"));
+    assert!(!proxy::tests_target_supported(""));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lan_targets_reach_the_runner_with_their_address_and_require_a_current_runner() {
+    // Drives the forward path directly: the shared HTTP pool stays with the proxy test.
+    let (_dir, s) = own_ids(setup().await);
+    add_host(&s, 31, 1, KEY).await;
+    let address = server(s.clone()).await;
+    fake_runner(&s, address, 31, KEY, true).await;
+    let port = upstream().await;
+    let (_, Json(hole)) = create(
+        State(s.clone()),
+        admin(1),
+        Json(parse(
+            json!({"name":"LAN","host_id":"31","target_port":port,"ttl_hours":24,
+                          "target_host":"192.168.77.5"}),
+        )),
+    )
+    .await
+    .unwrap();
+    let row = reload(&s, i64::from(hole_id(&hole))).await;
+    assert_eq!(row.target_host, "192.168.77.5");
+    // The fixture reports a pre-0.5 version: it would ignore the target, so it is never asked.
+    let error = proxy::reach(&s, &row).await.unwrap_err();
+    assert_eq!(error.2.unwrap().key, "holes.targetRunnerUpgrade");
+    assert!(
+        !FORWARD_TARGETS
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|t| t == "192.168.77.5")
+    );
+    hosts::Entity::update_many()
+        .col_expr(
+            hosts::Column::AgentVersion,
+            sea_orm::sea_query::Expr::value("0.5.0-alpha"),
+        )
+        .filter(hosts::Column::Id.eq(31))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    proxy::reach(&s, &row).await.unwrap();
+    assert!(
+        FORWARD_TARGETS
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|t| t == "192.168.77.5")
+    );
+    // The previewed service sees its own address as Host.
+    assert_eq!(
+        proxy::tests_upstream_authority("192.168.77.5", 8080),
+        "192.168.77.5:8080"
+    );
+    assert_eq!(
+        proxy::tests_upstream_authority("fd00::1", 8080),
+        "[fd00::1]:8080"
+    );
+    assert_eq!(proxy::tests_upstream_authority("", 5173), "localhost:5173");
 }

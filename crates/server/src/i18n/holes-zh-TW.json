@@ -20,5 +20,8 @@
   "holes.entryPorts": "設定的預覽連接埠範圍內沒有可用埠。",
   "holes.entryBinary": "無法啟動 cloudflared，請檢查此節點的執行檔路徑與權限。",
   "holes.entryUnavailable": "預覽入口無法使用，請檢查連接器與網路後手動重試。",
-  "holes.entryTimeout": "臨時通道未在 45 秒內就緒；現有入口保持不變。"
+  "holes.entryTimeout": "臨時通道未在 45 秒內就緒；現有入口保持不變。",
+  "holes.targetNotPrivate": "目標位址只能是 Runner 本機或其區域網路位址（迴環、10/8、172.16/12、192.168/16、100.64/10 或 IPv6 ULA），不允許公網、鏈路本地與雲端中繼資料位址。",
+  "holes.targetInvalid": "請輸入 IP 或主機名稱，不要包含協定、連接埠或路徑。",
+  "holes.targetRunnerUpgrade": "轉發到區域網路位址需要該主機的 Runner 為 0.5.0-alpha 或更新版本。請升級 Runner，或將目標位址留空以使用本機連接埠。"
 }

@@ -20,5 +20,8 @@
   "holes.entryPorts": "配置的预览端口范围内没有可用端口。",
   "holes.entryBinary": "无法启动 cloudflared，请检查此服务节点的可执行文件路径和权限。",
   "holes.entryUnavailable": "预览入口不可用，请检查连接器和网络后手动重试。",
-  "holes.entryTimeout": "临时隧道未在 45 秒内就绪；已有入口保持不变。"
+  "holes.entryTimeout": "临时隧道未在 45 秒内就绪；已有入口保持不变。",
+  "holes.targetNotPrivate": "目标地址只能是 Runner 本机或其局域网地址（回环、10/8、172.16/12、192.168/16、100.64/10 或 IPv6 ULA），不允许公网、链路本地和云元数据地址。",
+  "holes.targetInvalid": "请输入 IP 或主机名，不要包含协议、端口或路径。",
+  "holes.targetRunnerUpgrade": "转发到局域网地址需要该主机的 Runner 为 0.5.0-alpha 或更高版本。请升级 Runner，或将目标地址留空以使用本机端口。"
 }

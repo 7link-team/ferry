@@ -28,17 +28,17 @@ async fn bounded(reader: impl AsyncRead + Unpin) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-struct Authorization {
-    username: String,
-    secret: String,
-    key: Option<tempfile::NamedTempFile>,
+pub(crate) struct Authorization {
+    pub(crate) username: String,
+    pub(crate) secret: String,
+    pub(crate) key: Option<tempfile::NamedTempFile>,
 }
 
 fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn command(repository: &FilePath, auth: &Authorization) -> tokio::process::Command {
+pub(crate) fn command(repository: &FilePath, auth: &Authorization) -> tokio::process::Command {
     let mut command = tokio::process::Command::new("git");
     for (key, _) in std::env::vars_os() {
         let name = key.to_string_lossy().to_ascii_uppercase();

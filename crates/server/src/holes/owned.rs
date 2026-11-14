@@ -71,6 +71,7 @@ pub(crate) async fn open_owned(
             host_id: request.host_id,
             name,
             target_port: request.port,
+            target_host: String::new(),
             strip_prefix: request.strip_prefix,
             expires_at,
             source: (

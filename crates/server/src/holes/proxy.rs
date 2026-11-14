@@ -57,12 +57,48 @@ pub(super) const SANDBOX: &str =
 
 /// Everything a connection needs, carried in the pool key so the connector
 /// stays stateless and the pool never mixes two holes.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Target {
     hole: i64,
     workspace: i64,
     host: i64,
     port: u16,
+    /// Empty: the Runner's own loopback. Not carried in the pool authority;
+    /// a connection reloads it from the hole, which never changes it.
+    address: String,
+}
+
+/// Loopback or private-network addresses only; the Runner applies the same
+/// rule to whatever a name resolves to.
+pub(super) fn private_target(address: std::net::IpAddr) -> bool {
+    match address {
+        std::net::IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            v4.is_loopback() || v4.is_private() || (a == 100 && (64..=127).contains(&b))
+        }
+        std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => private_target(std::net::IpAddr::V4(v4)),
+            None => v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00,
+        },
+    }
+}
+
+/// The upstream authority the previewed service expects to see.
+fn upstream_authority(address: &str, port: u16) -> String {
+    if address.is_empty() {
+        format!("localhost:{port}")
+    } else if address.contains(':') {
+        format!("[{address}]:{port}")
+    } else {
+        format!("{address}:{port}")
+    }
+}
+
+/// Runners before 0.5.0-alpha ignore the forward target and would silently
+/// connect to their own loopback instead.
+fn target_supported(agent_version: &str) -> bool {
+    semver::Version::parse(agent_version.trim_start_matches('v'))
+        .is_ok_and(|v| v >= semver::Version::new(0, 5, 0) || (v.major, v.minor) >= (0, 5))
 }
 
 impl Target {
@@ -72,6 +108,7 @@ impl Target {
             workspace: row.workspace_id,
             host: row.host_id,
             port: u16::try_from(row.target_port).ok().filter(|p| *p != 0)?,
+            address: row.target_host.clone(),
         })
     }
     fn authority(&self) -> String {
@@ -88,6 +125,7 @@ impl Target {
             workspace: parts.next()?.parse().ok()?,
             host: parts.next()?.parse().ok()?,
             port: parts.next()?.parse().ok()?,
+            address: String::new(),
         };
         parts.next().is_none().then_some(target)
     }
@@ -208,12 +246,23 @@ pub(super) fn tests_registered(hole: i64) -> bool {
 }
 
 #[cfg(test)]
+pub(super) fn tests_upstream_authority(address: &str, port: u16) -> String {
+    upstream_authority(address, port)
+}
+
+#[cfg(test)]
+pub(super) fn tests_target_supported(version: &str) -> bool {
+    target_supported(version)
+}
+
+#[cfg(test)]
 pub(super) fn tests_hold(hole: i64, host: i64) -> Option<impl Drop> {
     hold(&Target {
         hole,
         workspace: 0,
         host,
         port: 1,
+        address: String::new(),
     })
     .map(|(held, _)| held)
 }
@@ -278,9 +327,21 @@ async fn record(s: &AppStateInner, hole: i64, outcome: (&str, String), always: b
 /// Opens one forward session. The channel, and with it the Runner upgrade
 /// reservation, is dropped as soon as the session exists.
 async fn open(s: &AppState, target: &Target) -> Result<Socket, ApiError> {
+    if !target.address.is_empty() {
+        let host = crate::entities::hosts::Entity::find_by_id(target.host)
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        if !target_supported(&host.agent_version) {
+            return Err(ApiError::localized(
+                StatusCode::CONFLICT,
+                crate::i18n::Message::new("holes.targetRunnerUpgrade"),
+            ));
+        }
+    }
     let channel =
         crate::hosts::remote::open(s, &Id::from(target.workspace), &Id::from(target.host)).await?;
-    channel.forward(target.port).await
+    channel.forward(&target.address, target.port).await
 }
 
 /// Checks that the local service accepts a connection and records the result.
@@ -378,11 +439,18 @@ impl tower_service::Service<Uri> for Connector {
 }
 
 async fn connect(uri: Uri) -> Result<Pipe, Refused> {
-    let target = Target::parse(&uri).ok_or(Refused::Unavailable)?;
+    let mut target = Target::parse(&uri).ok_or(Refused::Unavailable)?;
     let s = states()
         .get(&target.hole)
         .and_then(|(state, _)| state.upgrade())
         .ok_or(Refused::Unavailable)?;
+    target.address = holes::Entity::find_by_id(target.hole)
+        .one(&s.db)
+        .await
+        .ok()
+        .flatten()
+        .ok_or(Refused::Unavailable)?
+        .target_host;
     let (held, closing) = hold(&target).ok_or(Refused::Busy)?;
     let socket = match open(&s, &target).await {
         Ok(socket) => socket,
@@ -623,6 +691,7 @@ pub(super) async fn serve_entry(
     };
     rewrite_request(
         &mut parts.headers,
+        &target.address,
         target.port,
         &external_host,
         &prefix,
@@ -648,7 +717,7 @@ pub(super) async fn serve_entry(
         }
     }
     let (mut head, body) = response.into_parts();
-    rewrite_response(&mut head.headers, &prefix, target.port);
+    rewrite_response(&mut head.headers, &prefix, &target.address, target.port);
     Response::from_parts(head, Body::new(body))
 }
 
@@ -737,6 +806,7 @@ const HOP_BY_HOP: [&str; 6] = [
 /// Section 5: what the local service must and must not see.
 fn rewrite_request(
     headers: &mut HeaderMap,
+    address: &str,
     port: u16,
     external_host: &HeaderValue,
     prefix: &str,
@@ -752,7 +822,7 @@ fn rewrite_request(
         headers.remove(header::CONNECTION);
         headers.remove(header::UPGRADE);
     }
-    let local = format!("localhost:{port}");
+    let local = upstream_authority(address, port);
     if let Ok(value) = HeaderValue::from_str(&local) {
         headers.insert(header::HOST, value);
     }
@@ -775,7 +845,7 @@ fn rewrite_request(
 }
 
 /// Section 6: nothing the local service returns may act on the console origin.
-fn rewrite_response(headers: &mut HeaderMap, prefix: &str, port: u16) {
+fn rewrite_response(headers: &mut HeaderMap, prefix: &str, address: &str, port: u16) {
     for name in [
         header::SET_COOKIE,
         header::CONTENT_SECURITY_POLICY,
@@ -798,7 +868,7 @@ fn rewrite_response(headers: &mut HeaderMap, prefix: &str, port: u16) {
     if let Some(location) = headers
         .get(header::LOCATION)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| location(value, prefix, port))
+        .and_then(|value| location(value, prefix, address, port))
         && let Ok(value) = HeaderValue::from_str(&location)
     {
         headers.insert(header::LOCATION, value);
@@ -807,12 +877,15 @@ fn rewrite_response(headers: &mut HeaderMap, prefix: &str, port: u16) {
 
 /// Points a redirect from the local service back under the hole's prefix.
 /// Anything that is not the local origin or a root-relative path is left alone.
-pub(super) fn location(value: &str, prefix: &str, port: u16) -> Option<String> {
-    let local = [
+pub(super) fn location(value: &str, prefix: &str, address: &str, port: u16) -> Option<String> {
+    let mut local = vec![
         format!("http://127.0.0.1:{port}"),
         format!("http://localhost:{port}"),
         format!("http://[::1]:{port}"),
     ];
+    if !address.is_empty() {
+        local.push(format!("http://{}", upstream_authority(address, port)));
+    }
     let path = if let Some(rest) = local
         .iter()
         .find_map(|origin| value.strip_prefix(origin.as_str()))

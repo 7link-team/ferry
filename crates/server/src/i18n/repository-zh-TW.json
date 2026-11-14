@@ -843,5 +843,8 @@
   "templates.examples.redisSentinelPort": "Sentinel 監聽與發布連接埠",
   "files.permissionInvalid": "請選擇有效檔案路徑及000至777的權限。",
   "files.permissionUnsupported": "Windows 檔案與符號連結不支援此POSIX權限編輯。",
-  "cron.workflowRun": "工作流執行 {id}"
+  "cron.workflowRun": "工作流執行 {id}",
+  "marketplace.gitFailed": "無法透過 Git 讀取索引。請檢查倉庫位址、分支、索引路徑和存取權杖。",
+  "marketplace.gitUnavailable": "伺服器未安裝 Git，無法讀取 Git 來源。",
+  "marketplace.gitTimeout": "透過 Git 讀取索引逾時（2 分鐘）。"
 }

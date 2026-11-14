@@ -9,6 +9,11 @@ import { matchPreset, providerPresets } from "./ProviderPresets";
 let root: Root, host: HTMLDivElement;
 let requests: { url: string; method: string | undefined; body: string | undefined }[];
 let stored: Record<string, unknown>;
+const apiModels = [
+  { id: "5", name: "DeepSeek Anthropic", kind: "api", provider_id: "7", models: ["deepseek-pro"], default_model: "deepseek-pro" },
+  { id: "6", name: "OpenAI Chat", kind: "api", provider_id: "8", models: ["gpt-x"], default_model: "gpt-x" },
+];
+const providers = [{ id: "7", protocol: "anthropic" }, { id: "8", protocol: "openai" }];
 const permissions = new Set(["ai-models.read", "ai-models.create", "ai-models.update", "credentials.read"]);
 
 beforeEach(() => {
@@ -21,7 +26,8 @@ beforeEach(() => {
   requests = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => {
     requests.push({ url, method: init.method, body: init.body as string });
-    const body = stored;
+    const body = url.includes("ai-models?") ? { items: apiModels, total: apiModels.length, page: 1, page_size: 100 }
+      : url.endsWith("/ai-providers") ? { items: providers } : stored;
     return { ok: true, status: 200, json: async () => body };
   }));
 });
@@ -73,6 +79,9 @@ it("configures a CLI's own custom API with per-tool options instead of reusing a
   expect(host.textContent).toContain("Claude Code");
   const toggle = host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="使用自定义 API 连接"]')!;
   await act(async () => toggle.click());
+  // Existing API models come first; a separate connection is one click away.
+  expect(host.querySelector('[role="radio"][aria-checked="true"]')!.textContent).toBe("使用已有 API 模型");
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === "单独填写连接")!.click());
   await act(async () => type(host.querySelector<HTMLInputElement>('input[aria-label="接口地址"]')!, "https://api.deepseek.com/anthropic"));
   await act(async () => type(host.querySelector<HTMLInputElement>('input[aria-label="API Key"]')!, "sk-new"));
   await act(async () => type(host.querySelector<HTMLInputElement>('input[aria-label="Opus 模型"]')!, "deepseek-pro"));
@@ -90,7 +99,7 @@ it("configures a CLI's own custom API with per-tool options instead of reusing a
 it("edits a saved CLI connection, keeping the key unless replaced", async () => {
   history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-models/9/edit");
   stored = cli({
-    runtime: "codex", provider_id: "7", cli_options: { format: "openai_responses", reasoning_effort: "high" },
+    runtime: "codex", provider_id: "17", cli_options: { format: "openai_responses", reasoning_effort: "high" },
     connection: { name: "Codex", protocol: "openai", base_url: "https://gw.example/v1", credential_id: "3", qps: 1, concurrency: 1, version: 1 },
   });
   await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
@@ -101,6 +110,45 @@ it("edits a saved CLI connection, keeping the key unless replaced", async () => 
   expect(body.cli_options).toEqual({ format: "openai_responses", reasoning_effort: "high" });
   expect(body.connection).toMatchObject({ base_url: "https://gw.example/v1", credential_id: "3" });
   expect(body.connection.api_key).toBeUndefined();
+});
+
+const choose = async (name: string, value: string) => {
+  const select = host.querySelector<HTMLSelectElement>(`select[name="${name}"]`)!;
+  await act(async () => {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+};
+
+it("lets a CLI reuse only API models it can call directly, without resaving their connection", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-models/9/edit");
+  stored = cli({});
+  await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
+  await act(async () => host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="使用自定义 API 连接"]')!.click());
+  const options = [...host.querySelectorAll<HTMLOptionElement>('select[name="cli-api-model"] option')].map((o) => o.textContent);
+  expect(options).toContain("DeepSeek Anthropic");
+  // Claude Code speaks Anthropic only; an OpenAI connection would need conversion.
+  expect(options).not.toContain("OpenAI Chat");
+  await choose("cli-api-model", "5");
+  await submit();
+  const body = JSON.parse(requests.find((r) => r.method === "PATCH" || r.method === "PUT")!.body!);
+  expect(body).toMatchObject({ provider_id: "7", models: ["deepseek-pro"], default_model: "deepseek-pro", cli_options: { format: "anthropic" } });
+  expect(body.connection ?? null).toBeNull();
+});
+
+it("keeps a saved CLI linked to its API model when edited", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-models/9/edit");
+  stored = cli({
+    runtime: "codex", provider_id: "8", cli_options: { format: "openai_responses" },
+    connection: { name: "OpenAI Chat", protocol: "openai", base_url: "https://api.openai.com/v1", credential_id: "3", qps: 1, concurrency: 1, version: 1 },
+  });
+  await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
+  expect(host.querySelector('[role="radio"][aria-checked="true"]')!.textContent).toBe("使用已有 API 模型");
+  expect(host.querySelector('input[aria-label="接口地址"]')).toBeNull();
+  await submit();
+  const body = JSON.parse(requests.find((r) => r.method === "PATCH" || r.method === "PUT")!.body!);
+  expect(body).toMatchObject({ provider_id: "8", cli_options: { format: "openai_responses" } });
+  expect(body.connection ?? null).toBeNull();
 });
 
 it("keeps login-only CLIs on their own configuration", async () => {

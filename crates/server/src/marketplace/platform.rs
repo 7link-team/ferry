@@ -354,7 +354,6 @@ pub(crate) async fn synchronize_platform(s: &AppState, id: i64, actor: i64) -> R
         ));
     }
     let timeout = std::time::Duration::from_secs(20);
-    let deadline = std::time::Instant::now() + timeout;
     let row = scoped(&s.db, id.into()).await?;
     let interval = row.sync_interval.max(3600) * 1000;
     let result: Result<usize> = async {
@@ -362,6 +361,8 @@ pub(crate) async fn synchronize_platform(s: &AppState, id: i64, actor: i64) -> R
             serde_json::from_str(&row.config).map_err(|_| bad("marketplace.configCorrupt"))?;
         let text = super::fetch(&config, None, false, timeout).await?;
         let packages = super::index::parse_bundle(&text, &super::ferry_version(), "en-US")?;
+        // The write budget starts after the fetch: a Git fetch may take minutes.
+        let deadline = std::time::Instant::now() + timeout;
         commit_sync(s, id, actor, packages, interval, deadline).await
     }
     .await;

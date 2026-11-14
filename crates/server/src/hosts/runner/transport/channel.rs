@@ -303,12 +303,16 @@ impl HostChannel for RunnerChannel {
             _ => Err(garbled()),
         }
     }
-    async fn forward(&self, port: u16) -> Result<crate::cluster::Socket> {
-        // The runner tries IPv4 then IPv6 loopback, five seconds each.
+    async fn forward(&self, address: &str, port: u16) -> Result<crate::cluster::Socket> {
+        // The runner tries IPv4 then IPv6 loopback, five seconds each; a
+        // private-network target is resolved and checked on the runner.
         let (answer, socket) = self
             .ask(
                 wire::SessionKind::Forward,
-                wire::Session::ForwardStart { port },
+                wire::Session::ForwardStart {
+                    port,
+                    host: address.to_owned(),
+                },
                 Duration::from_secs(15),
             )
             .await?;

@@ -302,6 +302,10 @@ pub enum Session {
     /// `ForwardReady`; binary frames then carry the TCP bytes both ways.
     ForwardStart {
         port: u16,
+        /// Empty: the Runner's own loopback. Otherwise an IP or host name the
+        /// Runner resolves and accepts only on loopback/private networks.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        host: String,
     },
 
     // ---- runner -> server answers
@@ -472,13 +476,33 @@ mod tests {
             serde_json::from_str::<Report>(&text).unwrap();
         }
 
+        // A loopback forward keeps the old wire form; old frames still parse.
+        assert_eq!(
+            serde_json::to_string(&Session::ForwardStart {
+                port: 1,
+                host: String::new()
+            })
+            .unwrap(),
+            r#"{"type":"forward_start","port":1}"#
+        );
+        assert!(matches!(
+            serde_json::from_str::<Session>(r#"{"type":"forward_start","port":1}"#).unwrap(),
+            Session::ForwardStart { port: 1, host } if host.is_empty()
+        ));
         for frame in [
             Session::TerminalStart {
                 cols: 120,
                 rows: 40,
             },
             Session::TerminalResize { cols: 80, rows: 24 },
-            Session::ForwardStart { port: 5173 },
+            Session::ForwardStart {
+                port: 5173,
+                host: String::new(),
+            },
+            Session::ForwardStart {
+                port: 8080,
+                host: "192.168.1.20".into(),
+            },
             Session::ForwardReady,
             Session::ExecStart {
                 command: "echo hi".into(),

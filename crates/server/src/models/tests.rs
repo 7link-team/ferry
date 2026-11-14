@@ -397,6 +397,17 @@ async fn editing_a_cli_that_shares_an_api_connection_splits_it_instead_of_changi
     edit.version = 1;
     let error = save(&s, &admin(1), Some(id), edit).await.err().unwrap();
     assert!(format!("{error:?}").contains("sharedConnectionNeedsKey"));
+    // Referencing the shared OpenAI connection with an Anthropic format would need conversion.
+    let mut wrong = cli_body("claude", json!({"format":"anthropic"}), Value::Null);
+    wrong.connection = None;
+    wrong.provider_id = shared.clone();
+    assert!(save(&s, &admin(1), None, wrong).await.is_err());
+    // A CLI may reference the API model's connection as is.
+    let mut linked = cli_body("codex", json!({"format":"openai_responses"}), Value::Null);
+    linked.connection = None;
+    linked.provider_id = shared.clone();
+    let linked = save(&s, &admin(1), None, linked).await.unwrap();
+    assert_eq!(linked["provider_id"], json!(shared));
     let mut edit = cli_body(
         "codex",
         json!({"format":"openai_responses"}),

@@ -500,9 +500,12 @@ mod tests {
         session.next().await.unwrap().unwrap();
         session
             .send(Message::Text(
-                serde_json::to_string(&wire::Session::ForwardStart { port })
-                    .unwrap()
-                    .into(),
+                serde_json::to_string(&wire::Session::ForwardStart {
+                    port,
+                    host: String::new(),
+                })
+                .unwrap()
+                .into(),
             ))
             .await
             .unwrap();

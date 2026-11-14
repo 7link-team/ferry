@@ -18,6 +18,7 @@ mod chat_messages;
 mod conversations;
 mod deploy_specs;
 mod deployment_failover;
+mod hole_targets;
 mod holes;
 mod holes_sources;
 mod identity_avatars;
@@ -183,6 +184,7 @@ impl MigratorTrait for Migrator {
             Box::new(blueprint_deployments::Migration),
             Box::new(deploy_specs::Migration),
             Box::new(deployment_failover::Migration),
+            Box::new(hole_targets::Migration),
         ]
     }
 }

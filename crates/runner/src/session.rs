@@ -70,7 +70,7 @@ async fn dispatch(
         wire::Session::DeleteFile { path } => delete_file(socket, &path).await,
         wire::Session::Monitor => monitor(socket).await,
         wire::Session::AgentStart { request } => agent(socket, request, state_dir).await,
-        wire::Session::ForwardStart { port } => forward(socket, port).await,
+        wire::Session::ForwardStart { port, host } => forward(socket, &host, port).await,
         wire::Session::AgentProbe {
             runtime,
             cwd,
@@ -108,27 +108,81 @@ async fn dispatch(
 /// How long a preview may wait for the local service to accept.
 const FORWARD_CONNECT: Duration = Duration::from_secs(5);
 
-/// Pipes a loopback port through the session: TCP bytes become binary frames
+/// A preview may reach this host or its local network, never the internet,
+/// link-local/cloud-metadata addresses or multicast.
+pub(crate) fn forward_allowed(address: std::net::IpAddr) -> bool {
+    match address {
+        std::net::IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            v4.is_loopback()
+                || v4.is_private()
+                // Carrier-grade NAT, used by Tailscale and some LANs.
+                || (a == 100 && (64..=127).contains(&b))
+        }
+        std::net::IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return forward_allowed(std::net::IpAddr::V4(v4));
+            }
+            // Loopback and unique-local (fc00::/7).
+            v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00
+        }
+    }
+}
+
+/// Pipes a local port through the session: TCP bytes become binary frames
 /// and back. Either side ending ends both, so neither connection outlives the
-/// other.
-async fn forward(socket: &mut Socket, port: u16) -> anyhow::Result<()> {
+/// other. An empty `host` is this machine's loopback; otherwise it must
+/// resolve, on this Runner, only to loopback or private-network addresses.
+async fn forward(socket: &mut Socket, host: &str, port: u16) -> anyhow::Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     anyhow::ensure!(port != 0, "预览端口必须在 1-65535 之间");
     let connect = |address: std::net::SocketAddr| {
         tokio::time::timeout(FORWARD_CONNECT, tokio::net::TcpStream::connect(address))
     };
-    // A dev server that listens on "localhost" may have bound only one family.
-    let v4 = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port));
-    let v6 = std::net::SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, port));
-    let stream = match connect(v4).await {
-        Ok(Ok(stream)) => stream,
-        first => match connect(v6).await {
-            Ok(Ok(stream)) => stream,
-            _ => match first {
-                Ok(Err(error)) => anyhow::bail!("无法连接本机端口 {port}：{error}"),
-                _ => anyhow::bail!("连接本机端口 {port} 超时"),
-            },
-        },
+    let candidates: Vec<std::net::SocketAddr> = if host.is_empty() {
+        // A dev server that listens on "localhost" may have bound only one family.
+        vec![
+            (std::net::Ipv4Addr::LOCALHOST, port).into(),
+            (std::net::Ipv6Addr::LOCALHOST, port).into(),
+        ]
+    } else {
+        anyhow::ensure!(
+            host.len() <= 253
+                && host
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b".-:[]".contains(&b)),
+            "预览目标地址无效"
+        );
+        let name = host.trim_start_matches('[').trim_end_matches(']');
+        let resolved: Vec<_> =
+            tokio::time::timeout(FORWARD_CONNECT, tokio::net::lookup_host((name, port)))
+                .await
+                .map_err(|_| anyhow::anyhow!("解析预览目标 {host} 超时"))?
+                .map_err(|error| anyhow::anyhow!("无法解析预览目标 {host}：{error}"))?
+                .collect();
+        // Every address must be local: a name that also resolves publicly is refused.
+        anyhow::ensure!(
+            !resolved.is_empty() && resolved.iter().all(|a| forward_allowed(a.ip())),
+            "预览目标 {host} 不在本机或局域网地址范围内"
+        );
+        resolved
+    };
+    let mut last = None;
+    let mut stream = None;
+    for address in candidates {
+        match connect(address).await {
+            Ok(Ok(connected)) => {
+                stream = Some(connected);
+                break;
+            }
+            other => last = Some(other),
+        }
+    }
+    let target = if host.is_empty() { "本机" } else { host };
+    let stream = match (stream, last) {
+        (Some(stream), _) => stream,
+        (None, Some(Ok(Err(error)))) => anyhow::bail!("无法连接{target}端口 {port}：{error}"),
+        _ => anyhow::bail!("连接{target}端口 {port} 超时"),
     };
     let _ = stream.set_nodelay(true);
     crate::transport::send(socket, &wire::Session::ForwardReady).await?;
@@ -924,6 +978,16 @@ mod tests {
         crate::transport::Socket,
         tokio::task::JoinHandle<anyhow::Result<()>>,
     ) {
+        forward_session_to(port, "").await
+    }
+
+    async fn forward_session_to(
+        port: u16,
+        host: &str,
+    ) -> (
+        crate::transport::Socket,
+        tokio::task::JoinHandle<anyhow::Result<()>>,
+    ) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let served = tokio::spawn(async move {
@@ -936,9 +1000,15 @@ mod tests {
         let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
             .await
             .unwrap();
-        crate::transport::send(&mut client, &wire::Session::ForwardStart { port })
-            .await
-            .unwrap();
+        crate::transport::send(
+            &mut client,
+            &wire::Session::ForwardStart {
+                port,
+                host: host.to_owned(),
+            },
+        )
+        .await
+        .unwrap();
         (client, served)
     }
 
@@ -975,6 +1045,79 @@ mod tests {
             .expect("session must end when the local service closes")
             .unwrap()
             .unwrap();
+    }
+
+    #[test]
+    fn forward_targets_are_limited_to_this_host_and_private_networks() {
+        for allowed in [
+            "127.0.0.1",
+            "127.0.0.2",
+            "10.1.2.3",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.1.20",
+            "100.64.0.1",
+            "100.127.255.255",
+            "::1",
+            "fd12::1",
+            "::ffff:192.168.1.2",
+        ] {
+            assert!(forward_allowed(allowed.parse().unwrap()), "{allowed}");
+        }
+        for refused in [
+            "8.8.8.8",
+            "169.254.169.254",
+            "172.32.0.1",
+            "100.128.0.1",
+            "0.0.0.0",
+            "224.0.0.1",
+            "255.255.255.255",
+            "fe80::1",
+            "2001:db8::1",
+            "::",
+            "::ffff:8.8.8.8",
+        ] {
+            assert!(!forward_allowed(refused.parse().unwrap()), "{refused}");
+        }
+    }
+
+    #[tokio::test]
+    async fn forward_reaches_a_named_local_target_and_refuses_public_ones() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let local = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = local.local_addr().unwrap().port();
+        let service = tokio::spawn(async move {
+            let (mut stream, _) = local.accept().await.unwrap();
+            let mut request = [0u8; 4];
+            stream.read_exact(&mut request).await.unwrap();
+            stream.write_all(b"pong").await.unwrap();
+        });
+        // An explicit address goes through resolution and the private-range check.
+        let (mut client, served) = forward_session_to(port, "127.0.0.1").await;
+        let ready: wire::Session = crate::transport::next_frame(&mut client).await.unwrap();
+        assert!(matches!(ready, wire::Session::ForwardReady));
+        client
+            .send(Message::Binary(b"ping".to_vec().into()))
+            .await
+            .unwrap();
+        let mut received = Vec::new();
+        while let Some(Ok(message)) = client.next().await {
+            if let Message::Binary(bytes) = message {
+                received.extend_from_slice(&bytes);
+            }
+        }
+        assert_eq!(received, b"pong");
+        service.await.unwrap();
+        served.await.unwrap().unwrap();
+        for public in ["8.8.8.8", "169.254.169.254", "a b"] {
+            let (_client, served) = forward_session_to(port, public).await;
+            let error = tokio::time::timeout(Duration::from_secs(10), served)
+                .await
+                .expect("refusal is immediate")
+                .unwrap()
+                .unwrap_err();
+            assert!(error.to_string().contains("预览目标"), "{public}: {error}");
+        }
     }
 
     #[tokio::test]

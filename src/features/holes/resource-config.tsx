@@ -34,6 +34,8 @@ export interface Hole {
   host_online: boolean;
   name: string;
   target_port: number;
+  /** Empty: the Runner's own 127.0.0.1. */
+  target_host?: string;
   strip_prefix: boolean;
   /** Root-relative preview path, e.g. "/holes/<token>/". */
   url?: string | undefined;
@@ -437,11 +439,14 @@ export function holesLists({
         },
         {
           key: "target_port",
-          label: "Port",
-          labelKey: key("port"),
-          width: 100,
+          label: "Target",
+          labelKey: key("target"),
+          width: 160,
           align: "right",
-          render: (row) => String(row.target_port),
+          render: (row) =>
+            row.target_host
+              ? `${row.target_host.includes(":") ? `[${row.target_host}]` : row.target_host}:${row.target_port}`
+              : String(row.target_port),
         },
         {
           key: "state",
@@ -571,6 +576,7 @@ export function holesForms({
       blank: {
         name: "",
         host_id: "",
+        target_host: "",
         strip_prefix: true,
         ttl_hours: DEFAULT_TTL_HOURS,
       },
@@ -616,6 +622,15 @@ export function holesForms({
               options: runnerHosts(workspace),
               display: hostLabel,
               helpKey: key("hostHelp"),
+            },
+            {
+              key: "target_host",
+              label: "Target address",
+              labelKey: key("targetHost"),
+              type: "text",
+              immutable: true,
+              placeholder: "127.0.0.1",
+              helpKey: key("targetHostHelp"),
             },
             {
               key: "target_port",

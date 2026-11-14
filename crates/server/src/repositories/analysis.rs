@@ -34,6 +34,8 @@ mod sync;
 pub(crate) use identity::recover;
 pub use query::insight_report;
 pub use query::report;
+/// The hardened Git invocation, shared with marketplace Git sources.
+pub(crate) use sync::git::{Authorization, command as git_command};
 pub(crate) use sync::notification_diff_totals;
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Alias {

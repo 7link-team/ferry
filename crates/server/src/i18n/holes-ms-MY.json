@@ -20,5 +20,8 @@
   "holes.entryPorts": "Tiada port kosong dalam julat pratonton yang dikonfigurasikan.",
   "holes.entryBinary": "Tidak dapat memulakan cloudflared. Semak laluan fail dan kebenaran pada nod pelayan ini.",
   "holes.entryUnavailable": "Pintu masuk tidak tersedia. Semak penyambung dan rangkaian, kemudian cuba semula secara manual.",
-  "holes.entryTimeout": "Terowong sementara tidak sedia dalam 45 saat. Pintu masuk asal dikekalkan."
+  "holes.entryTimeout": "Terowong sementara tidak sedia dalam 45 saat. Pintu masuk asal dikekalkan.",
+  "holes.targetNotPrivate": "Sasaran mesti hos Runner ini atau alamat pada rangkaian setempatnya (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10 atau IPv6 ULA). Alamat awam, pautan setempat dan metadata awan tidak dibenarkan.",
+  "holes.targetInvalid": "Masukkan alamat IP atau nama hos tanpa skema, port atau laluan.",
+  "holes.targetRunnerUpgrade": "Pemajuan ke alamat LAN memerlukan Runner 0.5.0-alpha atau lebih baharu pada hos ini. Naik taraf Runner, atau biarkan sasaran kosong untuk menggunakan port hos ini."
 }

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "../../shared/api/api";
 import { AutoField, FieldControl } from "../../shared/forms/auto-form";
 import { commonText } from "../../shared/i18n/i18n";
 import { CLI_TOOL_LABELS } from "../../shared/forms/cli-tools";
@@ -97,33 +98,77 @@ export const newCliConnection = () => ({
   version: 0,
 });
 
+type ApiModel = { id: string; name: string; provider_id: string; models: string[]; default_model: string };
+type Source = "api" | "own";
+/** Formats an existing API connection can serve to this CLI without conversion. */
+const apiFormats = (protocol: string | undefined, formats: CliFormat[]): CliFormat[] =>
+  protocol === "anthropic"
+    ? formats.filter((f) => f === "anthropic")
+    : protocol === "openai"
+      ? formats.filter((f) => f === "openai_chat" || f === "openai_responses")
+      : [];
+
+/** API models (with their connection protocol) a CLI may reference. */
+function useApiModels(workspace: string, enabled: boolean) {
+  const [state, setState] = useState<{ models: (ApiModel & { protocol: string | undefined })[]; loaded: boolean }>({ models: [], loaded: false });
+  useEffect(() => {
+    if (!enabled || !workspace) return;
+    let alive = true;
+    const base = `/workspaces/${encodeURIComponent(workspace)}`;
+    Promise.all([
+      api<{ items: ApiModel[] }>(`${base}/ai-models?kind=api&page_size=100`),
+      api<{ items: { id: string; protocol: string }[] }>(`${base}/ai-providers`).catch(() => ({ items: [] })),
+    ])
+      .then(([models, providers]) => {
+        if (!alive) return;
+        const protocol = new Map(providers.items.map((p) => [String(p.id), p.protocol]));
+        setState({ models: models.items.map((m) => ({ ...m, protocol: protocol.get(String(m.provider_id)) })), loaded: true });
+      })
+      .catch(() => alive && setState({ models: [], loaded: true }));
+    return () => {
+      alive = false;
+    };
+  }, [workspace, enabled]);
+  return state;
+}
+
 type Props = {
+  workspace: string;
   draft: Partial<AnyRow>;
   readOnly: boolean;
   onPatch: (p: Partial<AnyRow>) => void;
 };
 
 /** Per-CLI upstream: off keeps the CLI's own login/configuration; on writes an isolated config on the Runner. */
-export function CliConnection({ draft, readOnly, onPatch }: Props) {
+export function CliConnection({ workspace, draft, readOnly, onPatch }: Props) {
   const tool = CLI_TOOLS[String(draft.runtime ?? "")];
-  const formats = tool?.formats ?? [];
-  const custom = !!draft.connection || (!!draft.provider_id && draft.provider_id !== "0");
+  const formats = useMemo(() => tool?.formats ?? [], [tool]);
+  const provider = String(draft.provider_id ?? "0");
+  const custom = !!draft.connection || provider !== "0" || !!draft.cliSource;
   const options: Record<string, unknown> = (draft.cli_options as Record<string, unknown>) ?? {};
-  const format = String(options.format ?? formats[0] ?? "");
   const [preset, setPreset] = useState<ProviderPreset | undefined>(() =>
     matchPreset(draft.connection?.protocol, draft.connection?.base_url),
   );
+  const { models: apiModels, loaded } = useApiModels(workspace, custom && formats.length > 0);
+  const usable = apiModels.filter((m) => apiFormats(m.protocol, formats).length);
+  const linked = apiModels.find((m) => String(m.provider_id) === provider && provider !== "0");
+  // A saved CLI that references an API model's connection keeps referencing it.
+  const source: Source = (draft.cliSource as Source) ?? (linked || (!draft.connection && provider !== "0") ? "api" : draft.connection ? "own" : usable.length ? "api" : "own");
+  const allowed = source === "api" ? (linked ? apiFormats(linked.protocol, formats) : formats) : formats;
+  const format = String(options.format ?? allowed[0] ?? "");
   // An existing connection loaded for editing keeps its stored key unless replaced.
-  const connection = draft.connection ?? (custom ? newCliConnection() : null);
+  const connection = source === "own" ? (draft.connection ?? newCliConnection()) : null;
   useEffect(() => {
     if (readOnly) return;
-    if (custom && !draft.connection) onPatch({ connection: newCliConnection() });
-    // A tool switch can leave a format (or a custom API) the new CLI cannot use.
-    else if (custom && !formats.length)
-      onPatch({ connection: null, cli_options: null, provider_id: "0", models: [], default_model: "" });
-    else if (custom && options.format !== undefined && !formats.includes(options.format as CliFormat))
-      onPatch({ cli_options: { ...options, format: formats[0] } });
-  }, [custom, draft.connection, readOnly, onPatch, formats, options]);
+    // A tool switch can leave a custom API the new CLI cannot use.
+    if (custom && !formats.length)
+      onPatch({ connection: null, cli_options: null, provider_id: "0", models: [], default_model: "", cliSource: undefined });
+    // Editing a CLI linked to an API model must never resave that model's connection.
+    else if (linked && !draft.cliSource) onPatch({ cliSource: "api", connection: null });
+    else if (custom && source === "own" && !draft.connection) onPatch({ connection: newCliConnection() });
+    else if (custom && options.format !== undefined && !allowed.includes(options.format as CliFormat) && allowed.length)
+      onPatch({ cli_options: { ...options, format: allowed[0] } });
+  }, [custom, draft.connection, draft.cliSource, readOnly, onPatch, formats, options, linked, source, allowed]);
   if (!tool) return null;
   const setOption = (key: string, value: unknown) => {
     const next: Record<string, unknown> = { ...options, format };
@@ -144,7 +189,7 @@ export function CliConnection({ draft, readOnly, onPatch }: Props) {
           <dl className="grid min-w-0 gap-3 sm:grid-cols-2">
             {[
               [t("cliFormat"), t(`format.${format}`)],
-              [t("cliBaseUrl"), connection?.base_url],
+              linked ? [t("apiModelSource"), linked.name] : [t("cliBaseUrl"), draft.connection?.base_url],
               ...Object.entries(options)
                 .filter(([k]) => k !== "format" && k !== "headers")
                 .map(([k, v]) => [t(`opt.${k}`), typeof v === "boolean" ? (v ? "✓" : "—") : String(v)]),
@@ -218,12 +263,15 @@ export function CliConnection({ draft, readOnly, onPatch }: Props) {
           onCheckedChange={(checked) =>
             onPatch(
               checked
-                ? {
-                    connection: { ...newCliConnection(), protocol: formats[0] === "anthropic" ? "anthropic" : "openai" },
-                    cli_options: { format: formats[0] },
-                    provider_id: "0",
-                  }
-                : { connection: null, cli_options: null, provider_id: "0", models: [], default_model: "" },
+                ? usable.length || !loaded
+                  ? { cliSource: "api", connection: null, cli_options: { format: formats[0] }, provider_id: "0" }
+                  : {
+                      cliSource: "own",
+                      connection: { ...newCliConnection(), protocol: formats[0] === "anthropic" ? "anthropic" : "openai" },
+                      cli_options: { format: formats[0] },
+                      provider_id: "0",
+                    }
+                : { connection: null, cli_options: null, provider_id: "0", models: [], default_model: "", cliSource: undefined },
             )
           }
         />
@@ -232,7 +280,35 @@ export function CliConnection({ draft, readOnly, onPatch }: Props) {
         <p className="text-sm text-muted-foreground">{t("cliNativeHelp", { tool: tool.label })}</p>
       ) : (
         <>
-          {!!presets.length && (
+          <div role="radiogroup" aria-label={t("cliSource")} className="flex min-w-0 flex-wrap gap-2">
+            {(["api", "own"] as const).map((value) => (
+              <Button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={source === value}
+                variant={source === value ? "default" : "outline"}
+                className="min-h-11"
+                onClick={() =>
+                  source !== value &&
+                  onPatch(
+                    value === "api"
+                      ? { cliSource: "api", connection: null, provider_id: "0", models: [], default_model: "" }
+                      : {
+                          cliSource: "own",
+                          connection: { ...newCliConnection(), protocol: format === "anthropic" ? "anthropic" : "openai" },
+                          provider_id: "0",
+                          models: [],
+                          default_model: "",
+                        },
+                  )
+                }
+              >
+                {t(value === "api" ? "cliSourceApi" : "cliSourceOwn")}
+              </Button>
+            ))}
+          </div>
+          {source === "own" && !!presets.length && (
             <ProviderPresetPicker
               selected={preset}
               presets={presets}
@@ -248,6 +324,63 @@ export function CliConnection({ draft, readOnly, onPatch }: Props) {
               }}
             />
           )}
+          {source === "api" ? (
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <div className="col-span-full">
+                <AutoField label={t("apiModelSource")} required help={t("apiModelSourceHelp")}>
+                  <div className="space-y-2">
+                    <FieldControl
+                      name="cli-api-model"
+                      field={{
+                        type: "select",
+                        name: t("apiModelSource"),
+                        width: "full",
+                        config: {
+                          placeholder: t("apiModelPlaceholder"),
+                          options: usable.map((m) => ({ value: m.id, label: m.name })),
+                        },
+                      }}
+                      value={linked?.id ?? ""}
+                      required
+                      onChange={(id) => {
+                        const picked = usable.find((m) => m.id === id);
+                        if (!picked) return;
+                        const fits = apiFormats(picked.protocol, formats);
+                        onPatch({
+                          cliSource: "api",
+                          provider_id: picked.provider_id,
+                          connection: null,
+                          models: [...picked.models],
+                          default_model: picked.default_model,
+                          cli_options: { ...options, format: fits.includes(format as CliFormat) ? format : fits[0] },
+                        });
+                      }}
+                    />
+                    {loaded && !usable.length && (
+                      <p className="text-sm text-muted-foreground">{t("apiModelNone", { tool: tool.label })}</p>
+                    )}
+                  </div>
+                </AutoField>
+              </div>
+              {allowed.length > 1 && (
+                <AutoField label={t("cliFormat")} required help={t("cliFormatHelp")}>
+                  <FieldControl
+                    name="cli-format"
+                    field={{
+                      type: "select",
+                      name: t("cliFormat"),
+                      width: "full",
+                      config: { options: allowed.map((f) => ({ value: f, label: t(`format.${f}`) })) },
+                    }}
+                    value={format}
+                    required
+                    onChange={(v) => onPatch({ cli_options: { ...options, format: String(v) } })}
+                  />
+                </AutoField>
+              )}
+              {main.map(field)}
+            </div>
+          ) : (
           <div className="grid min-w-0 gap-4 sm:grid-cols-2">
             <AutoField label={t("cliFormat")} required help={t("cliFormatHelp")}>
               <FieldControl
@@ -301,6 +434,7 @@ export function CliConnection({ draft, readOnly, onPatch }: Props) {
             </div>
             {main.map(field)}
           </div>
+          )}
           {(!!advanced.length || HEADERS[String(draft.runtime)]) && (
             <details className="rounded-lg border p-3" open={advanced.some((o) => options[o.key] !== undefined) || !!headers.length}>
               <summary className="min-h-11 cursor-pointer select-none py-2 text-sm font-medium">{t("cliAdvanced")}</summary>
