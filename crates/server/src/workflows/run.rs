@@ -75,6 +75,22 @@ fn error(key: &'static str, path: &str) -> ApiError {
 fn context_aad(workspace: i64, id: i64) -> String {
     format!("workflow:{workspace}:{id}:execution:context")
 }
+/// Whether this server has an executor for the node as configured. The node
+/// catalog uses the same test, so it never offers a node a run would reject.
+pub(crate) fn runnable(spec: &Value) -> bool {
+    matches!(
+        spec["type"].as_str(),
+        Some("core.trigger.manual" | "data.set" | "core.wait" | "core.stop" | "host.preview")
+    ) || super::transform::supports(spec)
+        || super::platform::supports(spec)
+        || super::agent::supports(spec)
+        || super::media::supports(spec)
+        || super::ai::supports(spec)
+        || super::integration::supports(spec)
+        || super::condition::supports(spec)
+        || (spec["type"] == "core.merge" && spec["params"]["mode"] == "append")
+}
+
 fn supported(graph: &Value, plan: &plan::Plan) -> Result<()> {
     if graph
         .pointer("/settings/timeout_seconds")
@@ -124,17 +140,7 @@ fn supported(graph: &Value, plan: &plan::Plan) -> Result<()> {
         {
             return Err(error("workflow.hostTargetRequired", &node.path));
         }
-        if (!matches!(
-            spec["type"].as_str(),
-            Some("core.trigger.manual" | "data.set" | "core.wait" | "core.stop" | "host.preview")
-        ) && !super::transform::supports(spec)
-            && !super::platform::supports(spec)
-            && !super::agent::supports(spec)
-            && !super::media::supports(spec)
-            && !super::ai::supports(spec)
-            && !super::integration::supports(spec)
-            && !super::condition::supports(spec)
-            && !(spec["type"] == "core.merge" && spec["params"]["mode"] == "append"))
+        if !runnable(spec)
             || (spec["type"] == "core.wait"
                 && !matches!(spec["params"]["mode"].as_str(), Some("duration" | "until")))
             || spec

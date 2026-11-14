@@ -223,6 +223,11 @@ pub(crate) fn pin_items(value: &Value) -> Result<Vec<ferry_protocol::sandbox::It
     serde_json::from_value(value).map_err(|_| invalid("/pin_data", "workflow.graphPin"))
 }
 
+/// Every bundled node contract, including planned ones without an executor.
+pub(crate) fn manifests() -> impl Iterator<Item = &'static Value> {
+    contracts().nodes.values().map(|contract| &contract.spec)
+}
+
 pub(crate) fn manifest(node: &Value) -> Option<&'static Value> {
     contracts()
         .nodes

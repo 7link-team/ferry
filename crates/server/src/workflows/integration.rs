@@ -6,7 +6,7 @@ use crate::{
     db,
     definitions::access::{self, Operation},
     entities::{credentials, workflow_executions, workflow_integration_calls as calls},
-    error::{ApiError, Json, Path, Result},
+    error::{ApiError, Json, Path, Query, Result},
     i18n::Message,
     snowflake::Id,
     state::AppState,
@@ -867,13 +867,43 @@ pub fn routes() -> Router<AppState> {
         .route("/{workspace}/workflow-integration-options", post(options))
         .route("/{workspace}/workflow-node-catalog", get(node_catalog))
 }
-async fn node_catalog(scope: Scope, Path(_): Path<String>) -> Result<Json<Value>> {
+async fn node_catalog(
+    scope: Scope,
+    Path(_): Path<String>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Value>> {
     // Scope verifies active membership. Only public declarations are returned;
     // tokens, workspace data and saved workflow definitions are never included.
     let _ = scope;
+    // The full response is near the Agent tool's 256 KiB limit; Agents ask for
+    // the built-in section alone.
+    if query.get("section").map(String::as_str) == Some("builtin") {
+        return Ok(Json(json!({"builtin_nodes":builtin_nodes()})));
+    }
     Ok(Json(
-        json!({"nodes":catalog()["nodes"],"packages":super::extensions::catalog().packages}),
+        // `nodes` stays the integration catalogue the editor installs; built-in
+        // nodes are listed separately for clients (e.g. Agents) that need them.
+        json!({"nodes":catalog()["nodes"],"builtin_nodes":builtin_nodes(),"packages":super::extensions::catalog().packages}),
     ))
+}
+
+/// Bundled non-integration contracts this server can execute (triggers, data,
+/// flow control, platform data, AI); planned contracts without an executor are omitted.
+pub(crate) fn builtin_nodes() -> Vec<Value> {
+    let integrations: std::collections::BTreeSet<String> = catalog()["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|node| node["type"].as_str().map(str::to_owned))
+        .collect();
+    super::graph::manifests()
+        .filter(|spec| {
+            let kind = spec["type"].as_str().unwrap_or_default();
+            let probe = json!({"type": kind, "type_version": spec["type_version"].clone(), "params": spec["example_params"].clone()});
+            !integrations.contains(kind) && super::run::runnable(&probe)
+        })
+        .cloned()
+        .collect()
 }
 async fn options(
     State(s): State<AppState>,

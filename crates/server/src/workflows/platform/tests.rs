@@ -503,3 +503,31 @@ async fn oversized_gateway_responses_fail_with_a_narrow_the_query_error() {
     assert_eq!(key(&error), "workflow.platformTooLarge");
     assert_eq!(error.0, StatusCode::PAYLOAD_TOO_LARGE);
 }
+
+#[test]
+fn node_catalog_lists_every_runnable_node_and_only_those() {
+    let nodes = crate::workflows::integration::builtin_nodes();
+    let types: std::collections::BTreeSet<&str> = nodes
+        .iter()
+        .filter_map(|node| node["type"].as_str())
+        .collect();
+    for required in [
+        "core.trigger.manual",
+        "data.set",
+        "ferry.request",
+        "ai.agent.run",
+        "core.sort",
+        "core.if",
+    ] {
+        assert!(types.contains(required), "catalog misses {required}");
+    }
+    assert_eq!(types.len(), nodes.len(), "a node type is listed twice");
+    for node in &nodes {
+        let probe = serde_json::json!({"type": node["type"], "type_version": node["type_version"], "params": node["example_params"]});
+        assert!(
+            crate::workflows::run::runnable(&probe),
+            "catalog offers {} which no executor runs",
+            node["type"]
+        );
+    }
+}
