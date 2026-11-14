@@ -71,7 +71,7 @@ try {
   // Both roles use the same independent create/join URL, including direct refresh and back.
   for(const [context,id] of [[admin,workspace.id],[regular,memberWorkspace.id]]){
     const p=await context.newPage();await p.goto(`${origin}/zh-CN/workspaces/${id}/repository-events`);
-    await p.getByRole('button',{name:/workspace|acceptance/i}).last().click();
+    await p.locator('[data-app-header]').getByRole('button',{name:'切换空间',exact:true}).click();
     await p.getByRole('menuitem',{name:'创建/加入工作空间',exact:true}).click();
     await p.getByText('创建工作空间',{exact:true}).waitFor();assert.equal(new URL(p.url()).pathname,'/zh-CN/workspaces');
     await p.reload();await p.getByText('创建工作空间',{exact:true}).waitFor();

@@ -107,6 +107,8 @@ try {
     else if (type === 'json') {
       await page.getByLabel('JSON 值', { exact: true }).fill('{bad');
       await page.getByRole('alert').filter({ hasText: 'JSON' }).waitFor();
+      // The error alert can render a frame before the validity state disables the submit button.
+      await page.locator('button:disabled').filter({ hasText: /^创建$/ }).waitFor({ timeout: 5000 }).catch(() => {});
       assert(await page.getByRole('button', { name: '创建', exact: true }).isDisabled());
       await page.getByLabel('JSON 值', { exact: true }).fill('{"enabled":true}');
     } else if (type === 'richtext') {
@@ -159,6 +161,8 @@ try {
   await page.getByRole('option', { name: 'JSON', exact: true }).click();
   await page.getByRole('button', { name: '搜索', exact: true }).click();
   await page.waitForURL(/value_type=json/);
+  // The URL updates before the filtered list response re-renders; wait for the stale row to leave before counting.
+  await page.getByRole('cell', { name: 'test-html', exact: true }).waitFor({ state: 'detached' });
   assert.equal(await page.getByRole('cell', { name: 'test-json', exact: true }).count(), 1);
   assert.equal(await page.getByRole('cell', { name: 'test-html', exact: true }).count(), 0);
   await page.setViewportSize({ width: 390, height: 844 });

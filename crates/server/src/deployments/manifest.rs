@@ -114,13 +114,24 @@ fn validate_placement(constraints: &[String], max: Option<u32>) -> Result<()> {
     Ok(())
 }
 
+fn empty_run_as_latest<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Option<String>, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.filter(|run| !run.trim().is_empty()))
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BuildArtifact {
     pub source: String,
     pub pipeline: String,
     pub path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// An empty run means "latest successful build", the same as omitting it.
+    #[serde(
+        default,
+        deserialize_with = "empty_run_as_latest",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub run: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -1923,6 +1934,20 @@ mod tests {
         assert!(parse_for(&v.to_string(), "native").is_err());
         v["services"][0].as_object_mut().unwrap().remove("image");
         v["services"][0]["artifact"]["path"] = json!("../server");
+        assert!(parse_for(&v.to_string(), "native").is_err());
+    }
+    #[test]
+    fn empty_artifact_run_means_latest_successful_build() {
+        let mut v = sample();
+        v["services"][0].as_object_mut().unwrap().remove("image");
+        v["services"][0]["ports"] = json!([]);
+        for run in [json!(""), json!("  ")] {
+            v["services"][0]["artifact"] =
+                json!({"source":"pipeline","pipeline":"build","path":"dist/server","run":run});
+            let m = parse_for(&v.to_string(), "native").unwrap();
+            assert_eq!(m.services[0].artifact.as_ref().unwrap().run, None);
+        }
+        v["services"][0]["artifact"]["run"] = json!("not-an-id");
         assert!(parse_for(&v.to_string(), "native").is_err());
     }
 }

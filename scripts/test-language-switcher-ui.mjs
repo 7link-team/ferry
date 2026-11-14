@@ -102,8 +102,8 @@ try {
       );
     assert(
       toolbarHeights.length >= 2 &&
-        toolbarHeights.every((height) => height === 32),
-      "toolbar controls share 32px height",
+        toolbarHeights.every((height) => height === 44),
+      "toolbar controls share 44px touch-target height",
     );
     for (const [locale, name] of locales) {
       const trigger = page

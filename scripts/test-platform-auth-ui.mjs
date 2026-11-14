@@ -123,7 +123,7 @@ try {
  await page.goto(origin+'/zh-CN/platform/settings/1/edit');
  report.checks.push('footer rich text and advanced HTML save; public allowlist response; admin-only write; limits/unknown-setting preservation; script removal; mobile/form/canvas layout');
  // Active logout clears the target and browser Back cannot expose a protected URL.
- await page.getByRole('button',{name:/ · Admin$/}).click();
+ await page.locator('[data-app-header]').getByRole('button',{name:'Admin',exact:true}).click();
  await page.getByRole('menuitem',{name:'退出登录',exact:true}).click();
  await page.waitForURL(origin+'/zh-CN/login');
  await footer.getByRole('link',{name:'示例备案号',exact:true}).waitFor();
@@ -161,14 +161,14 @@ try {
  assert.deepEqual(errors,[]);
  await page.goto(origin+'/zh-CN/platform/settings/1/edit');
  await patchSettings({footer_html:''});await page.reload();
- await page.getByRole('button',{name:/ · Admin$/}).waitFor();
+ await page.locator('[data-app-header]').getByRole('button',{name:'Admin',exact:true}).waitFor();
  assert.equal(await footer.count(),0,'empty footer must not consume layout space');
  assert.deepEqual(await api(anonymous,'/platform/footer'),{...publicSite,content:''});
  report.checks.push('configured footer remains on login; clearing footer removes its entire layout row');
  // Exercise a non-Google SDK, inline code, network reporting and GA loader under real CSP.
  await page.goto(origin+'/zh-CN/platform/settings/1/edit');
  await page.goto(origin+'/zh-CN/platform/settings/1/edit?section=site&form_tab=scripts');
- await page.getByRole('checkbox',{name:'启用页面脚本',exact:true}).check();
+ await page.getByRole('switch',{name:'启用页面脚本',exact:true}).check();
  await page.getByLabel('Google Analytics 测量 ID（可选）',{exact:true}).fill('G-TEST12345');
  await page.getByLabel('自定义 JavaScript',{exact:true}).fill('window.customScriptRuns=(window.customScriptRuns||0)+1;var sdk=document.createElement("script");sdk.src="https://analytics.example.com/sdk.js";document.head.appendChild(sdk);');
  await page.getByLabel('允许访问的域名',{exact:true}).fill('https://analytics.example.com');
@@ -186,7 +186,7 @@ try {
  await page.waitForFunction(()=>window.customScriptRuns===1&&window.otherSdkLoaded&&window.gaSdkLoaded);
  await page.waitForTimeout(200);assert.equal(collectRequests,1);assert.equal(gaRequests,1);assert.equal(sdkRequests,1);
  const nonce=await page.locator('script[data-platform-scripts]').evaluate(node=>node.nonce);assert(nonce.length>=32);
- await page.getByRole('button',{name:/ · Admin$/}).click();
+ await page.locator('[data-app-header]').getByRole('button',{name:'Admin',exact:true}).click();
  await page.getByRole('menuitem',{name:'退出登录',exact:true}).click();await page.waitForURL(/\/login$/);
  assert.equal(await page.evaluate(()=>window.customScriptRuns),1);assert.equal(sdkRequests,1,'SPA navigation must not reinject');
  await page.reload();await page.waitForFunction(()=>window.customScriptRuns===1&&window.otherSdkLoaded&&window.gaSdkLoaded);

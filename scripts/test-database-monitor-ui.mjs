@@ -73,7 +73,7 @@ try {
   }
   checks.push('numeric sorting in both directions');
   const paged = page.waitForResponse(tableResponse);
-  await page.locator('nav button').last().click();
+  await page.getByRole('button', { name: '下一页', exact: true }).click();
   assert.equal((await (await paged).json()).page, 2);
   checks.push('shared pagination');
   for (const width of [1440, 900, 390, 320]) {

@@ -598,8 +598,9 @@ E2E-FULL-REPORT-01交付记录：生产场景测试及HTML/截图证据已交付
 | PLATFORM-UX-02 | 待处理 | 设置页横向溢出定位公共保存栏负边距，移除；只读/禁用不显示通用填写提示，保留业务说明；系统信息从设置移除统一看节点列表，地址列限宽换行；平台右上角复用空间账号/语言/主题/切换操作；用户列表新增状态/角色后端组合筛选。待回归和再次更新4291。 |
 | PLATFORM-NAV-01 | 待验证 | 已更新4291/PID75204：顶部一级导航保持原位；服务器节点仅在平台设置左侧二级菜单，旧链接跳转settings/1/edit?section=server-nodes；系统监控左侧仅自身分项。Chrome刷新/组返回/无保存且不可误提交/1440与390px通过，待用户体验。 |
 | README-SHOTS-01 | 待处理 | 用户要求本轮完成后更新本地，再自行制作关键、吸引眼球的生产示例截图放README，图片集中单独目录并用Markdown相对引用。沿用现有截图/README结构，示例数据避免泄露凭据；不提交推送。 |
-| MON-ACTOR-01 | 进行中 | 用户确认（2026-11-14）：actor空时显示最新提交的提交者并标注“（提交者）”，悬停说明轮询无法识别推送人；Webhook真实actor不变，不改历史数据。event-config/repository.actorCommitter六语/测试已改，前端全量759PASS/1既有skip。并行Codex release040已按用户指示停止（其Kimi/avatar编译修复保留），由本会话发0.4.0-alpha。待cargo测试、4291更新、提交推送打tag。 |
-| AI-MODEL-FORM-01 | 进行中 | API类型：照搬CC Switch预设（claudeProviderPresets Anthropic格式124+OpenAI/Anthropic官方，去推广参数，MIT署名于provider-presets.json），分类/搜索/芯片选择填协议/地址/模型/名称+官网/API Key链接。CLI自定义API只能选已有API模型（引用provider_id，editValues清connection防覆盖共享连接）。测试3例PASS；随0.4.0-alpha发布，待4291浏览器验收。 |
+| MON-ACTOR-01 | 待验证 | 提交者标注回退已提交df3ee96并推main；4291已备份更新PID16908（release-040-local-update.json），真实浏览器列表无“未知”、显示“X（提交者）”1440/390无溢出（release040b-browser）。待用户刷新验收。 |
+| AI-MODEL-FORM-01 | 待验证 | CC Switch预设（126项，MIT署名）+CLI自定义API只选已有API模型，df3ee96已推main，4291已更新；真实浏览器预设分类/搜索/填充/链接、CLI无内联地址PASS。现有空间无API模型故下拉为空态，选择逻辑由单测覆盖。待用户验收。 |
+| REL-040-01 | 进行中 | v0.4.0-alpha tag在238e93e（release未发布）。main多日CI红均为测试过期：已修platform-ui/prefs/upgrade(avatar,官方市场源)/db-monitor/theme(44px,去粉色)/language/alpha2/theme-entry/workspace-admin/platform-auth/templates/workflow-editor/manifest/typed-values及启动60s、Windows桌面探测60s，本地逐个PASS。产品修复：Native固定构建默认“最新”存run空串被400拒绝→服务端空run视为最新（单测+浏览器3连PASS）。待CI全绿后移tag并核验Release；4291需再更新含此修复。遗留：模板选择分页“固定标题”检查在页面模式下不再有效；资料保存后回到基础资料组。 |
 | WF-LEGACY-01 | 待处理 | 用户询问旧流水线是否丢失；4291确认demo空间原流水线23及3次执行完整保留。核对工作流→构建流水线入口/权限，提供原详情链接，不重建或覆盖数据。 |
 | DICT-STATE-01 | 待处理 | 用户明确要求：固定流程/不可随意维护的状态不放字典，清掉数据库记录与子项/初始化/展示读取；只保留可维护业务选项（环境/分类等）。前端状态字典读取已移除，后端清理迁移已补，待回归/更新4291。 |
 | TYPED-UI-01 | 待处理 | 字典与配置项按8092/zh-CN/sys/dicts/1001/edit参考：基本信息/值类型在前→类型约束→匹配类型的值编辑器（富文本/Monaco/图片文件等），控件联动、校验/保存/重开全验证。已用参考公开原型账号登录查看；不照搬原型源码。 |

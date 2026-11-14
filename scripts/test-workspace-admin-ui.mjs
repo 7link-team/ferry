@@ -66,7 +66,13 @@ try {
   const workspace_guest_home = (await post(guest,'/workspaces',{name:'Guest home',slug:'guest-home'})).id;
   const g = await guest.newPage();
   await g.goto(`${origin}/zh-CN/workspaces/${workspace_guest_home}/dashboard`);
-  await g.getByRole('button',{name:'Guest home · Guest',exact:true}).click();
+  await g.locator('[data-app-header]').getByRole('button',{name:'Guest',exact:true}).waitFor();
+  const switcher = g.getByRole('button',{name:'切换空间',exact:true});
+  await switcher.filter({hasText:'Guest home'}).waitFor();
+  await switcher.click();
+  const guestHome = g.getByRole('menuitemradio').filter({hasText:'Guest home'});
+  assert.equal(await guestHome.getAttribute('aria-checked'),'true');
+  assert.match(await guestHome.innerText(),/^Guest home\s*拥有者（我创建的）$/);
   await g.getByRole('menuitem',{name:'创建/加入工作空间',exact:true}).click();
   await g.getByPlaceholder('邀请码',{exact:true}).fill(code);
   await g.getByRole('button',{name:'加入',exact:true}).click();

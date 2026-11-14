@@ -282,7 +282,10 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             print('PASS: alert rules and event history schemas work after upgrade')
             source=create('marketplace-sources',{'name':'Migrated source','repository_id':repository,'provider':'github','api_base':'https://example.invalid/api','project':'owner/repository','branch':'main','index_path':'marketplace.json'})
             assert api('/workspaces/upgrade/marketplace-sources/'+source)['state']=='idle'
-            assert api('/workspaces/upgrade/marketplace')['items']==[]
+            # The built-in official source may sync when the network is available;
+            # the never-synced migrated source must contribute nothing.
+            listed=api('/workspaces/upgrade/marketplace')['items']
+            assert not [row for row in listed if row['source_id']==source], listed
             assert {row['provider'] for row in api('/workspaces/upgrade/repository-auth')['items']}=={'github','gitlab','gitee','gitea','codeup'}
             print('PASS: market catalog and web authorization schemas work after upgrade')
             for resource, content in [('app-templates', {'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'nginx:alpine'}]}), ('pipeline-templates', {'workdir':'/tmp/upgrade','steps':[{'name':'test','run':'true'}]})]:

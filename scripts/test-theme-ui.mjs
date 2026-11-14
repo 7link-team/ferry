@@ -36,7 +36,7 @@ try {
   assert.equal(await page.locator('html').evaluate(node => node.classList.contains('dark')), true);
   const palettes = [
     { value: 'modern', label: '现代简约' }, { value: 'business', label: '商务渐变' },
-    { value: 'eyeCare', label: '护眼模式' }, { value: 'pinkKawaii', label: '粉色可爱' },
+    { value: 'eyeCare', label: '护眼模式' },
     { value: 'neoBrutalism', label: '新粗野主义' }, { value: 'custom', label: '自定义' },
   ];
   mkdirSync('data/maintenance', { recursive: true });
@@ -84,7 +84,7 @@ try {
         const css = getComputedStyle(node);
         return { height: css.height, radius: css.borderRadius };
       });
-      assert.equal(triggerStyle.height, '32px');
+      assert.equal(triggerStyle.height, '44px', 'header controls use 44px touch targets');
       if (palette.value !== 'custom') assert.equal(triggerStyle.radius, { modern: '11.2px', business: '9.6px', eyeCare: '6.4px', pinkKawaii: '19.2px', neoBrutalism: '8px' }[palette.value], 'reference trigger uses the palette control shape');
       await page.mouse.move(0, 0);
       const shellStyles = await page.evaluate(async () => {
@@ -234,7 +234,7 @@ try {
     }
   }
   await themeButton.click();
-  assert.equal(await page.getByRole('menuitem').filter({ has: page.locator('span[style*="background"]') }).count(), 6);
+  assert.equal(await page.getByRole('menuitem').filter({ has: page.locator('span[style*="background"]') }).count(), palettes.length);
   const modeGroup = page.getByRole('group', { name: '外观', exact: true });
   assert.equal(await modeGroup.getByRole('menuitem').count(), 3);
   const segments = await modeGroup.getByRole('menuitem').evaluateAll(items => items.map(item => ({ x: item.getBoundingClientRect().x, y: item.getBoundingClientRect().y, width: item.getBoundingClientRect().width })));
@@ -369,5 +369,5 @@ try {
     await page.setViewportSize({ width: 1366, height: 900 });
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: 6 palettes x light/dark, actual top/sidebar/group selected colors, header/sidebar surfaces, sticky+regular table normal/hover/selected backgrounds, real forms, six button variants, utility precedence, bundled fonts, ERP migration/removal, custom editing/persistence/import/random/reset, mobile dialog, all six translated dialogs, no page errors');
+  console.log('PASS: ' + palettes.length + ' palettes x light/dark, actual top/sidebar/group selected colors, header/sidebar surfaces, sticky+regular table normal/hover/selected backgrounds, real forms, six button variants, utility precedence, bundled fonts, ERP migration/removal, custom editing/persistence/import/random/reset, mobile dialog, all six translated dialogs, no page errors');
 } finally { await browser.close(); }

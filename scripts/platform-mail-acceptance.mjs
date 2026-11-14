@@ -26,7 +26,7 @@ export async function verifyMail({browser,admin,regular,page,origin,api,patchSet
   await api(regular,'/platform/mail-test',{email:'test@example.invalid'},'POST',403);
   await patchSettings({mail_port:0},400);await patchSettings({mail_host:'bad\r\nhost'},400);await patchSettings({mail_security:'invalid'},400);
   await page.goto(origin+'/zh-CN/platform/settings/1/edit');await page.getByRole('button',{name:'邮箱配置',exact:true}).click();
-  await page.getByRole('checkbox',{name:'启用邮箱',exact:true}).check();
+  await page.getByRole('switch',{name:'启用邮箱',exact:true}).check();
   await page.getByLabel('SMTP 服务器',{exact:true}).fill('127.0.0.1');await page.getByLabel('SMTP 端口',{exact:true}).fill(String(port));
   await page.getByRole('combobox',{name:'传输加密',exact:true}).click();await page.getByRole('option',{name:'不加密（仅可信网络）',exact:true}).click();
   await page.getByLabel('发件人邮箱',{exact:true}).fill('noreply@example.invalid');

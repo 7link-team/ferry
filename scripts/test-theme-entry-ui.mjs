@@ -30,12 +30,17 @@ try{
     const response=await context.request.fetch(origin+'/api'+path,{method:data?'POST':'GET',headers:{'X-Ferry-Request':'1'},...(data?{data}:{})});
     assert(response.ok(),await response.text());return response.json();
   };
-  const theme=()=>page.getByRole('button',{name:'主题',exact:true});
+  // The account page deliberately embeds a second theme/language switcher in its 偏好设置 section (src/app/Account.tsx);
+  // the single global entry asserted below is the one outside that section.
+  let scope=()=>page;
+  const theme=()=>scope().getByRole('button',{name:'主题',exact:true});
   const check=async(name,path)=>{
+    scope=()=>name==='account'?page.locator('[data-app-header]'):page;
     const ready=()=>name==='platform-forbidden'?page.getByText('当前账号没有平台管理权限。',{exact:true}).waitFor():page.locator('header,h1').first().waitFor();
     await page.goto(origin+'/zh-CN'+path);await ready();if(path.endsWith('/new'))await startBlank(page);await theme().waitFor();
     assert.equal(await theme().count(),1,name+' must have exactly one theme entry');
-    assert.equal(await page.getByRole('button',{name:'语言',exact:true}).count(),1);
+    assert.equal(await scope().getByRole('button',{name:'语言',exact:true}).count(),1);
+    if(name==='account'){const prefs=page.getByRole('region',{name:'偏好设置'});assert.equal(await prefs.getByRole('button',{name:'主题',exact:true}).count(),1);assert.equal(await prefs.getByRole('button',{name:'语言',exact:true}).count(),1);}
     await theme().click();await page.getByRole('menuitem',{name:'深色',exact:true}).click();
     assert(await page.locator('html').evaluate(el=>el.classList.contains('dark')),name);
     await page.reload();await ready();if(path.endsWith('/new'))await startBlank(page);await theme().waitFor();assert(await page.locator('html').evaluate(el=>el.classList.contains('dark')));

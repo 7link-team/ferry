@@ -107,7 +107,7 @@ $result = [System.Collections.Generic.List[object]]::new()
 ConvertTo-Json -InputObject @($result.ToArray()) -Compress
 `;
   const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
-    { windowsHide: true, encoding: 'utf8', timeout: 15000 });
+    { windowsHide: true, encoding: 'utf8', timeout: 60000 }); // cold Add-Type compiles can exceed 15s on CI
   return JSON.parse(output.trim());
 }
 try {
