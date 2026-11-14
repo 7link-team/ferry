@@ -5,13 +5,21 @@ import { commonText } from "../../shared/i18n/i18n";
 import { CLI_TOOL_LABELS } from "../../shared/forms/cli-tools";
 import type { AnyRow } from "../../shared/resources/config";
 import { Button } from "../../shared/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "../../shared/ui/tabs";
 import { Input } from "../../shared/ui/input";
 import { Switch } from "../../shared/ui/switch";
-import { ProviderPresetPicker, matchPreset, providerPresets, type ProviderPreset } from "./ProviderPresets";
+import {
+  ProviderPresetPicker,
+  matchPreset,
+  providerPresets,
+  type ProviderPreset,
+} from "./ProviderPresets";
 
-const t = (s: string, values?: Record<string, unknown>) => commonText(`models:${s}`, values);
+const t = (s: string, values?: Record<string, unknown>) =>
+  commonText(`models:${s}`, values);
 
-export type CliFormat = "anthropic" | "openai_chat" | "openai_responses" | "gemini";
+export type CliFormat =
+  "anthropic" | "openai_chat" | "openai_responses" | "gemini";
 type Option =
   | { key: string; kind: "text" | "number"; advanced?: boolean }
   | { key: string; kind: "switch"; advanced?: boolean }
@@ -23,7 +31,12 @@ const TOOLS: Record<string, { formats: CliFormat[]; options: Option[] }> = {
   claude: {
     formats: ["anthropic"],
     options: [
-      { key: "auth_field", kind: "select", values: ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"], advanced: true },
+      {
+        key: "auth_field",
+        kind: "select",
+        values: ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"],
+        advanced: true,
+      },
       { key: "sonnet_model", kind: "text", advanced: true },
       { key: "opus_model", kind: "text", advanced: true },
       { key: "haiku_model", kind: "text", advanced: true },
@@ -40,7 +53,12 @@ const TOOLS: Record<string, { formats: CliFormat[]; options: Option[] }> = {
       { key: "context_window", kind: "number", advanced: true },
       { key: "auto_compact_limit", kind: "number", advanced: true },
       { key: "subagent_model", kind: "text", advanced: true },
-      { key: "subagent_reasoning_effort", kind: "select", values: efforts, advanced: true },
+      {
+        key: "subagent_reasoning_effort",
+        kind: "select",
+        values: efforts,
+        advanced: true,
+      },
     ],
   },
   gemini: { formats: ["gemini"], options: [] },
@@ -76,17 +94,32 @@ const TOOLS: Record<string, { formats: CliFormat[]; options: Option[] }> = {
   copilot: { formats: [], options: [] },
   codebuddy: { formats: [], options: [] },
 };
-const HEADERS: Record<string, boolean> = { claude: true, codex: true, opencode: true, pi: true, kimi: true };
+const HEADERS: Record<string, boolean> = {
+  claude: true,
+  codex: true,
+  opencode: true,
+  pi: true,
+  kimi: true,
+};
 
 export const CLI_TOOLS = Object.fromEntries(
-  Object.entries(TOOLS).map(([id, tool]) => [id, { ...tool, label: CLI_TOOL_LABELS[id] ?? id }]),
+  Object.entries(TOOLS).map(([id, tool]) => [
+    id,
+    { ...tool, label: CLI_TOOL_LABELS[id] ?? id },
+  ]),
 );
-export const cliToolOptions = Object.entries(CLI_TOOLS).map(([value, tool]) => ({ value, label: tool.label }));
+export const cliToolOptions = Object.entries(CLI_TOOLS).map(
+  ([value, tool]) => ({ value, label: tool.label }),
+);
 
-const presetFormat = (preset: ProviderPreset, formats: CliFormat[]): CliFormat | undefined =>
+const presetFormat = (
+  preset: ProviderPreset,
+  formats: CliFormat[],
+): CliFormat | undefined =>
   preset.protocol === "anthropic"
     ? formats.find((f) => f === "anthropic")
-    : formats.find((f) => f === "openai_chat") ?? formats.find((f) => f === "openai_responses");
+    : (formats.find((f) => f === "openai_chat") ??
+      formats.find((f) => f === "openai_responses"));
 
 export const newCliConnection = () => ({
   name: "",
@@ -98,10 +131,19 @@ export const newCliConnection = () => ({
   version: 0,
 });
 
-type ApiModel = { id: string; name: string; provider_id: string; models: string[]; default_model: string };
+type ApiModel = {
+  id: string;
+  name: string;
+  provider_id: string;
+  models: string[];
+  default_model: string;
+};
 type Source = "api" | "own";
 /** Formats an existing API connection can serve to this CLI without conversion. */
-const apiFormats = (protocol: string | undefined, formats: CliFormat[]): CliFormat[] =>
+const apiFormats = (
+  protocol: string | undefined,
+  formats: CliFormat[],
+): CliFormat[] =>
   protocol === "anthropic"
     ? formats.filter((f) => f === "anthropic")
     : protocol === "openai"
@@ -110,19 +152,32 @@ const apiFormats = (protocol: string | undefined, formats: CliFormat[]): CliForm
 
 /** API models (with their connection protocol) a CLI may reference. */
 function useApiModels(workspace: string, enabled: boolean) {
-  const [state, setState] = useState<{ models: (ApiModel & { protocol: string | undefined })[]; loaded: boolean }>({ models: [], loaded: false });
+  const [state, setState] = useState<{
+    models: (ApiModel & { protocol: string | undefined })[];
+    loaded: boolean;
+  }>({ models: [], loaded: false });
   useEffect(() => {
     if (!enabled || !workspace) return;
     let alive = true;
     const base = `/workspaces/${encodeURIComponent(workspace)}`;
     Promise.all([
       api<{ items: ApiModel[] }>(`${base}/ai-models?kind=api&page_size=100`),
-      api<{ items: { id: string; protocol: string }[] }>(`${base}/ai-providers`).catch(() => ({ items: [] })),
+      api<{ items: { id: string; protocol: string }[] }>(
+        `${base}/ai-providers`,
+      ).catch(() => ({ items: [] })),
     ])
       .then(([models, providers]) => {
         if (!alive) return;
-        const protocol = new Map(providers.items.map((p) => [String(p.id), p.protocol]));
-        setState({ models: models.items.map((m) => ({ ...m, protocol: protocol.get(String(m.provider_id)) })), loaded: true });
+        const protocol = new Map(
+          providers.items.map((p) => [String(p.id), p.protocol]),
+        );
+        setState({
+          models: models.items.map((m) => ({
+            ...m,
+            protocol: protocol.get(String(m.provider_id)),
+          })),
+          loaded: true,
+        });
       })
       .catch(() => alive && setState({ models: [], loaded: true }));
     return () => {
@@ -145,41 +200,96 @@ export function CliConnection({ workspace, draft, readOnly, onPatch }: Props) {
   const formats = useMemo(() => tool?.formats ?? [], [tool]);
   const provider = String(draft.provider_id ?? "0");
   const custom = !!draft.connection || provider !== "0" || !!draft.cliSource;
-  const options: Record<string, unknown> = (draft.cli_options as Record<string, unknown>) ?? {};
+  const options: Record<string, unknown> =
+    (draft.cli_options as Record<string, unknown>) ?? {};
   const [preset, setPreset] = useState<ProviderPreset | undefined>(() =>
     matchPreset(draft.connection?.protocol, draft.connection?.base_url),
   );
-  const { models: apiModels, loaded } = useApiModels(workspace, custom && formats.length > 0);
-  const usable = apiModels.filter((m) => apiFormats(m.protocol, formats).length);
-  const linked = apiModels.find((m) => String(m.provider_id) === provider && provider !== "0");
+  const { models: apiModels, loaded } = useApiModels(
+    workspace,
+    custom && formats.length > 0,
+  );
+  const usable = apiModels.filter(
+    (m) => apiFormats(m.protocol, formats).length,
+  );
+  const linked = apiModels.find(
+    (m) => String(m.provider_id) === provider && provider !== "0",
+  );
   // A saved CLI that references an API model's connection keeps referencing it.
-  const source: Source = (draft.cliSource as Source) ?? (linked || (!draft.connection && provider !== "0") ? "api" : draft.connection ? "own" : usable.length ? "api" : "own");
-  const allowed = source === "api" ? (linked ? apiFormats(linked.protocol, formats) : formats) : formats;
+  const source: Source =
+    (draft.cliSource as Source) ??
+    (linked || (!draft.connection && provider !== "0")
+      ? "api"
+      : draft.connection
+        ? "own"
+        : usable.length
+          ? "api"
+          : "own");
+  const allowed =
+    source === "api"
+      ? linked
+        ? apiFormats(linked.protocol, formats)
+        : formats
+      : formats;
   const format = String(options.format ?? allowed[0] ?? "");
   // An existing connection loaded for editing keeps its stored key unless replaced.
-  const connection = source === "own" ? (draft.connection ?? newCliConnection()) : null;
+  const connection =
+    source === "own" ? (draft.connection ?? newCliConnection()) : null;
   useEffect(() => {
     if (readOnly) return;
     // A tool switch can leave a custom API the new CLI cannot use.
     if (custom && !formats.length)
-      onPatch({ connection: null, cli_options: null, provider_id: "0", models: [], default_model: "", cliSource: undefined });
+      onPatch({
+        connection: null,
+        cli_options: null,
+        provider_id: "0",
+        models: [],
+        default_model: "",
+        cliSource: undefined,
+      });
     // Editing a CLI linked to an API model must never resave that model's connection.
-    else if (linked && !draft.cliSource) onPatch({ cliSource: "api", connection: null });
-    else if (custom && source === "own" && !draft.connection) onPatch({ connection: newCliConnection() });
-    else if (custom && options.format !== undefined && !allowed.includes(options.format as CliFormat) && allowed.length)
+    else if (linked && !draft.cliSource)
+      onPatch({ cliSource: "api", connection: null });
+    else if (custom && source === "own" && !draft.connection)
+      onPatch({ connection: newCliConnection() });
+    else if (
+      custom &&
+      options.format !== undefined &&
+      !allowed.includes(options.format as CliFormat) &&
+      allowed.length
+    )
       onPatch({ cli_options: { ...options, format: allowed[0] } });
-  }, [custom, draft.connection, draft.cliSource, readOnly, onPatch, formats, options, linked, source, allowed]);
+  }, [
+    custom,
+    draft.connection,
+    draft.cliSource,
+    readOnly,
+    onPatch,
+    formats,
+    options,
+    linked,
+    source,
+    allowed,
+  ]);
   if (!tool) return null;
   const setOption = (key: string, value: unknown) => {
     const next: Record<string, unknown> = { ...options, format };
-    if (value === "" || value === false || value === undefined || (typeof value === "number" && !value)) delete next[key];
+    if (
+      value === "" ||
+      value === false ||
+      value === undefined ||
+      (typeof value === "number" && !value)
+    )
+      delete next[key];
     else next[key] = value;
     onPatch({ cli_options: next });
   };
   if (!formats.length)
     return (
       <AutoField label={t("cliConnection")}>
-        <p className="text-sm text-muted-foreground">{t("cliNativeOnly", { tool: tool.label })}</p>
+        <p className="text-sm text-muted-foreground">
+          {t("cliNativeOnly", { tool: tool.label })}
+        </p>
       </AutoField>
     );
   if (readOnly)
@@ -189,10 +299,15 @@ export function CliConnection({ workspace, draft, readOnly, onPatch }: Props) {
           <dl className="grid min-w-0 gap-3 sm:grid-cols-2">
             {[
               [t("cliFormat"), t(`format.${format}`)],
-              linked ? [t("apiModelSource"), linked.name] : [t("cliBaseUrl"), draft.connection?.base_url],
+              linked
+                ? [t("apiModelSource"), linked.name]
+                : [t("cliBaseUrl"), draft.connection?.base_url],
               ...Object.entries(options)
                 .filter(([k]) => k !== "format" && k !== "headers")
-                .map(([k, v]) => [t(`opt.${k}`), typeof v === "boolean" ? (v ? "✓" : "—") : String(v)]),
+                .map(([k, v]) => [
+                  t(`opt.${k}`),
+                  typeof v === "boolean" ? (v ? "✓" : "—") : String(v),
+                ]),
             ].map(([k, v]) => (
               <div key={String(k)} className="min-w-0">
                 <dt className="text-sm text-muted-foreground">{k}</dt>
@@ -212,7 +327,11 @@ export function CliConnection({ workspace, draft, readOnly, onPatch }: Props) {
     if (option.kind === "switch")
       return (
         <AutoField key={option.key} label={label} help={help}>
-          <Switch aria-label={label} checked={value === true} onCheckedChange={(v) => setOption(option.key, v)} />
+          <Switch
+            aria-label={label}
+            checked={value === true}
+            onCheckedChange={(v) => setOption(option.key, v)}
+          />
         </AutoField>
       );
     if (option.kind === "select")
@@ -224,7 +343,10 @@ export function CliConnection({ workspace, draft, readOnly, onPatch }: Props) {
               type: "select",
               name: label,
               width: "full",
-              config: { placeholder: t("cliDefault"), options: option.values.map((v) => ({ value: v, label: v })) },
+              config: {
+                placeholder: t("cliDefault"),
+                options: option.values.map((v) => ({ value: v, label: v })),
+              },
             }}
             value={String(value ?? "")}
             onChange={(v) => setOption(option.key, String(v ?? ""))}
@@ -242,13 +364,20 @@ export function CliConnection({ workspace, draft, readOnly, onPatch }: Props) {
           placeholder={t("cliDefault")}
           value={value === undefined ? "" : String(value)}
           onChange={(e) =>
-            setOption(option.key, option.kind === "number" ? Math.max(0, Math.floor(Number(e.target.value) || 0)) : e.target.value)
+            setOption(
+              option.key,
+              option.kind === "number"
+                ? Math.max(0, Math.floor(Number(e.target.value) || 0))
+                : e.target.value,
+            )
           }
         />
       </AutoField>
     );
   };
-  const headers = Object.entries((options.headers as Record<string, string>) ?? {});
+  const headers = Object.entries(
+    (options.headers as Record<string, string>) ?? {},
+  );
   const setHeaders = (rows: [string, string][]) =>
     setOption("headers", rows.length ? Object.fromEntries(rows) : undefined);
   const presets = providerPresets.filter((p) => presetFormat(p, formats));
@@ -264,208 +393,352 @@ export function CliConnection({ workspace, draft, readOnly, onPatch }: Props) {
             onPatch(
               checked
                 ? usable.length || !loaded
-                  ? { cliSource: "api", connection: null, cli_options: { format: formats[0] }, provider_id: "0" }
-                  : {
-                      cliSource: "own",
-                      connection: { ...newCliConnection(), protocol: formats[0] === "anthropic" ? "anthropic" : "openai" },
+                  ? {
+                      cliSource: "api",
+                      connection: null,
                       cli_options: { format: formats[0] },
                       provider_id: "0",
                     }
-                : { connection: null, cli_options: null, provider_id: "0", models: [], default_model: "", cliSource: undefined },
+                  : {
+                      cliSource: "own",
+                      connection: {
+                        ...newCliConnection(),
+                        protocol:
+                          formats[0] === "anthropic" ? "anthropic" : "openai",
+                      },
+                      cli_options: { format: formats[0] },
+                      provider_id: "0",
+                    }
+                : {
+                    connection: null,
+                    cli_options: null,
+                    provider_id: "0",
+                    models: [],
+                    default_model: "",
+                    cliSource: undefined,
+                  },
             )
           }
         />
       </AutoField>
       {!custom ? (
-        <p className="text-sm text-muted-foreground">{t("cliNativeHelp", { tool: tool.label })}</p>
+        <p className="text-sm text-muted-foreground">
+          {t("cliNativeHelp", { tool: tool.label })}
+        </p>
       ) : (
         <>
-          <div role="radiogroup" aria-label={t("cliSource")} className="flex min-w-0 flex-wrap gap-2">
-            {(["api", "own"] as const).map((value) => (
-              <Button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={source === value}
-                variant={source === value ? "default" : "outline"}
-                className="min-h-11"
-                onClick={() =>
-                  source !== value &&
-                  onPatch(
-                    value === "api"
-                      ? { cliSource: "api", connection: null, provider_id: "0", models: [], default_model: "" }
-                      : {
-                          cliSource: "own",
-                          connection: { ...newCliConnection(), protocol: format === "anthropic" ? "anthropic" : "openai" },
-                          provider_id: "0",
-                          models: [],
-                          default_model: "",
-                        },
-                  )
-                }
-              >
-                {t(value === "api" ? "cliSourceApi" : "cliSourceOwn")}
-              </Button>
-            ))}
-          </div>
-          {source === "own" && !!presets.length && (
-            <ProviderPresetPicker
-              selected={preset}
-              presets={presets}
-              onSelect={(next) => {
-                setPreset(next ?? undefined);
-                if (!next || !connection) return;
-                onPatch({
-                  connection: { ...connection, base_url: next.base_url, protocol: next.protocol },
-                  cli_options: { ...options, format: presetFormat(next, formats) },
-                  ...(next.models.length ? { models: [...next.models], default_model: next.models[0] } : {}),
-                  ...(!String(draft.name ?? "").trim() ? { name: `${tool.label} · ${next.name}` } : {}),
-                });
-              }}
-            />
-          )}
-          {source === "api" ? (
-            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-              <div className="col-span-full">
-                <AutoField label={t("apiModelSource")} required help={t("apiModelSourceHelp")}>
-                  <div className="space-y-2">
+          <Tabs
+            value={source}
+            onValueChange={(value) =>
+              value !== source &&
+              onPatch(
+                value === "api"
+                  ? {
+                      cliSource: "api",
+                      connection: null,
+                      provider_id: "0",
+                      models: [],
+                      default_model: "",
+                    }
+                  : {
+                      cliSource: "own",
+                      connection: {
+                        ...newCliConnection(),
+                        protocol:
+                          format === "anthropic" ? "anthropic" : "openai",
+                      },
+                      provider_id: "0",
+                      models: [],
+                      default_model: "",
+                    },
+              )
+            }
+            className="min-w-0 gap-0 overflow-hidden rounded-lg border bg-card"
+          >
+            <TabsList
+              variant="line"
+              aria-label={t("cliSource")}
+              className="h-auto w-full justify-start overflow-x-auto border-b px-2"
+            >
+              {(["api", "own"] as const).map((value) => (
+                <TabsTrigger
+                  key={value}
+                  value={value}
+                  className="min-h-11 flex-none px-3"
+                >
+                  {t(value === "api" ? "cliSourceApi" : "cliSourceOwn")}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            <div className="min-w-0 space-y-4 p-3 sm:p-4">
+              {source === "own" && !!presets.length && (
+                <ProviderPresetPicker
+                  selected={preset}
+                  presets={presets}
+                  onSelect={(next) => {
+                    setPreset(next ?? undefined);
+                    if (!next || !connection) return;
+                    onPatch({
+                      connection: {
+                        ...connection,
+                        base_url: next.base_url,
+                        protocol: next.protocol,
+                      },
+                      cli_options: {
+                        ...options,
+                        format: presetFormat(next, formats),
+                      },
+                      ...(next.models.length
+                        ? {
+                            models: [...next.models],
+                            default_model: next.models[0],
+                          }
+                        : {}),
+                      ...(!String(draft.name ?? "").trim()
+                        ? { name: `${tool.label} · ${next.name}` }
+                        : {}),
+                    });
+                  }}
+                />
+              )}
+              {source === "api" ? (
+                <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                  <div className="col-span-full">
+                    <AutoField
+                      label={t("apiModelSource")}
+                      required
+                      help={t("apiModelSourceHelp")}
+                    >
+                      <div className="space-y-2">
+                        <FieldControl
+                          name="cli-api-model"
+                          field={{
+                            type: "select",
+                            name: t("apiModelSource"),
+                            width: "full",
+                            config: {
+                              placeholder: t("apiModelPlaceholder"),
+                              options: usable.map((m) => ({
+                                value: m.id,
+                                label: m.name,
+                              })),
+                            },
+                          }}
+                          value={linked?.id ?? ""}
+                          required
+                          onChange={(id) => {
+                            const picked = usable.find((m) => m.id === id);
+                            if (!picked) return;
+                            const fits = apiFormats(picked.protocol, formats);
+                            onPatch({
+                              cliSource: "api",
+                              provider_id: picked.provider_id,
+                              connection: null,
+                              models: [...picked.models],
+                              default_model: picked.default_model,
+                              cli_options: {
+                                ...options,
+                                format: fits.includes(format as CliFormat)
+                                  ? format
+                                  : fits[0],
+                              },
+                            });
+                          }}
+                        />
+                        {loaded && !usable.length && (
+                          <p className="text-sm text-muted-foreground">
+                            {t("apiModelNone", { tool: tool.label })}
+                          </p>
+                        )}
+                      </div>
+                    </AutoField>
+                  </div>
+                  {allowed.length > 1 && (
+                    <AutoField
+                      label={t("cliFormat")}
+                      required
+                      help={t("cliFormatHelp")}
+                    >
+                      <FieldControl
+                        name="cli-format"
+                        field={{
+                          type: "select",
+                          name: t("cliFormat"),
+                          width: "full",
+                          config: {
+                            options: allowed.map((f) => ({
+                              value: f,
+                              label: t(`format.${f}`),
+                            })),
+                          },
+                        }}
+                        value={format}
+                        required
+                        onChange={(v) =>
+                          onPatch({
+                            cli_options: { ...options, format: String(v) },
+                          })
+                        }
+                      />
+                    </AutoField>
+                  )}
+                  {main.map(field)}
+                </div>
+              ) : (
+                <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                  <AutoField
+                    label={t("cliFormat")}
+                    required
+                    help={t("cliFormatHelp")}
+                  >
                     <FieldControl
-                      name="cli-api-model"
+                      name="cli-format"
                       field={{
                         type: "select",
-                        name: t("apiModelSource"),
+                        name: t("cliFormat"),
                         width: "full",
                         config: {
-                          placeholder: t("apiModelPlaceholder"),
-                          options: usable.map((m) => ({ value: m.id, label: m.name })),
+                          options: formats.map((f) => ({
+                            value: f,
+                            label: t(`format.${f}`),
+                          })),
                         },
                       }}
-                      value={linked?.id ?? ""}
+                      value={format}
                       required
-                      onChange={(id) => {
-                        const picked = usable.find((m) => m.id === id);
-                        if (!picked) return;
-                        const fits = apiFormats(picked.protocol, formats);
+                      onChange={(v) =>
                         onPatch({
-                          cliSource: "api",
-                          provider_id: picked.provider_id,
-                          connection: null,
-                          models: [...picked.models],
-                          default_model: picked.default_model,
-                          cli_options: { ...options, format: fits.includes(format as CliFormat) ? format : fits[0] },
-                        });
-                      }}
+                          cli_options: { ...options, format: String(v) },
+                          connection: {
+                            ...connection,
+                            protocol:
+                              v === "anthropic" ? "anthropic" : "openai",
+                          },
+                        })
+                      }
                     />
-                    {loaded && !usable.length && (
-                      <p className="text-sm text-muted-foreground">{t("apiModelNone", { tool: tool.label })}</p>
-                    )}
+                  </AutoField>
+                  <div className="hidden sm:block" />
+                  <div className="col-span-full">
+                    <AutoField
+                      label={t("cliBaseUrl")}
+                      required
+                      help={t(`baseUrlHelp.${format}`)}
+                    >
+                      <Input
+                        aria-label={t("cliBaseUrl")}
+                        className="min-h-11"
+                        required
+                        type="url"
+                        placeholder={t(`baseUrlPlaceholder.${format}`)}
+                        value={connection?.base_url ?? ""}
+                        onChange={(e) =>
+                          onPatch({
+                            connection: {
+                              ...connection,
+                              base_url: e.target.value,
+                            },
+                          })
+                        }
+                      />
+                    </AutoField>
                   </div>
-                </AutoField>
-              </div>
-              {allowed.length > 1 && (
-                <AutoField label={t("cliFormat")} required help={t("cliFormatHelp")}>
-                  <FieldControl
-                    name="cli-format"
-                    field={{
-                      type: "select",
-                      name: t("cliFormat"),
-                      width: "full",
-                      config: { options: allowed.map((f) => ({ value: f, label: t(`format.${f}`) })) },
-                    }}
-                    value={format}
-                    required
-                    onChange={(v) => onPatch({ cli_options: { ...options, format: String(v) } })}
-                  />
-                </AutoField>
+                  <div className="col-span-full">
+                    <AutoField
+                      label="API Key"
+                      required={!draft.provider_id || draft.provider_id === "0"}
+                      help={
+                        draft.provider_id && draft.provider_id !== "0"
+                          ? t("cliKeyKeep")
+                          : t("cliKeyHelp")
+                      }
+                    >
+                      <Input
+                        aria-label="API Key"
+                        className="min-h-11"
+                        type="password"
+                        autoComplete="new-password"
+                        required={
+                          !draft.provider_id || draft.provider_id === "0"
+                        }
+                        value={connection?.api_key ?? ""}
+                        onChange={(e) =>
+                          onPatch({
+                            connection: {
+                              ...connection,
+                              api_key: e.target.value,
+                            },
+                          })
+                        }
+                      />
+                    </AutoField>
+                  </div>
+                  {main.map(field)}
+                </div>
               )}
-              {main.map(field)}
             </div>
-          ) : (
-          <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-            <AutoField label={t("cliFormat")} required help={t("cliFormatHelp")}>
-              <FieldControl
-                name="cli-format"
-                field={{
-                  type: "select",
-                  name: t("cliFormat"),
-                  width: "full",
-                  config: { options: formats.map((f) => ({ value: f, label: t(`format.${f}`) })) },
-                }}
-                value={format}
-                required
-                onChange={(v) =>
-                  onPatch({
-                    cli_options: { ...options, format: String(v) },
-                    connection: { ...connection, protocol: v === "anthropic" ? "anthropic" : "openai" },
-                  })
-                }
-              />
-            </AutoField>
-            <div className="hidden sm:block" />
-            <div className="col-span-full">
-              <AutoField label={t("cliBaseUrl")} required help={t(`baseUrlHelp.${format}`)}>
-                <Input
-                  aria-label={t("cliBaseUrl")}
-                  className="min-h-11"
-                  required
-                  type="url"
-                  placeholder={t(`baseUrlPlaceholder.${format}`)}
-                  value={connection?.base_url ?? ""}
-                  onChange={(e) => onPatch({ connection: { ...connection, base_url: e.target.value } })}
-                />
-              </AutoField>
-            </div>
-            <div className="col-span-full">
-              <AutoField
-                label="API Key"
-                required={!draft.provider_id || draft.provider_id === "0"}
-                help={draft.provider_id && draft.provider_id !== "0" ? t("cliKeyKeep") : t("cliKeyHelp")}
-              >
-                <Input
-                  aria-label="API Key"
-                  className="min-h-11"
-                  type="password"
-                  autoComplete="new-password"
-                  required={!draft.provider_id || draft.provider_id === "0"}
-                  value={connection?.api_key ?? ""}
-                  onChange={(e) => onPatch({ connection: { ...connection, api_key: e.target.value } })}
-                />
-              </AutoField>
-            </div>
-            {main.map(field)}
-          </div>
-          )}
+          </Tabs>
           {(!!advanced.length || HEADERS[String(draft.runtime)]) && (
-            <details className="rounded-lg border p-3" open={advanced.some((o) => options[o.key] !== undefined) || !!headers.length}>
-              <summary className="min-h-11 cursor-pointer select-none py-2 text-sm font-medium">{t("cliAdvanced")}</summary>
+            <details
+              className="rounded-lg border p-3"
+              open={
+                advanced.some((o) => options[o.key] !== undefined) ||
+                !!headers.length
+              }
+            >
+              <summary className="min-h-11 cursor-pointer select-none py-2 text-sm font-medium">
+                {t("cliAdvanced")}
+              </summary>
               <div className="mt-3 grid min-w-0 gap-4 sm:grid-cols-2">
                 {advanced.map(field)}
                 {HEADERS[String(draft.runtime)] && (
                   <div className="col-span-full">
-                    <AutoField label={t("opt.headers")} help={t("optHelp.headers")}>
+                    <AutoField
+                      label={t("opt.headers")}
+                      help={t("optHelp.headers")}
+                    >
                       <div className="space-y-2">
                         {headers.map(([name, value], index) => (
-                          <div key={index} className="flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap">
+                          <div
+                            key={index}
+                            className="flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap"
+                          >
                             <Input
                               aria-label={`${t("headerName")} ${index + 1}`}
                               placeholder={t("headerName")}
                               className="min-h-11 min-w-0 flex-1"
                               value={name}
-                              onChange={(e) => setHeaders(headers.map((h, i) => (i === index ? [e.target.value, h[1]] : h)))}
+                              onChange={(e) =>
+                                setHeaders(
+                                  headers.map((h, i) =>
+                                    i === index ? [e.target.value, h[1]] : h,
+                                  ),
+                                )
+                              }
                             />
                             <Input
                               aria-label={`${t("headerValue")} ${index + 1}`}
                               placeholder={t("headerValue")}
                               className="min-h-11 min-w-0 flex-1"
                               value={value}
-                              onChange={(e) => setHeaders(headers.map((h, i) => (i === index ? [h[0], e.target.value] : h)))}
+                              onChange={(e) =>
+                                setHeaders(
+                                  headers.map((h, i) =>
+                                    i === index ? [h[0], e.target.value] : h,
+                                  ),
+                                )
+                              }
                             />
                             <Button
                               type="button"
                               variant="outline"
                               className="min-h-11 shrink-0"
                               aria-label={`${commonText("common.delete")} ${index + 1}`}
-                              onClick={() => setHeaders(headers.filter((_, i) => i !== index))}
+                              onClick={() =>
+                                setHeaders(
+                                  headers.filter((_, i) => i !== index),
+                                )
+                              }
                             >
                               {commonText("common.delete")}
                             </Button>
@@ -475,7 +748,12 @@ export function CliConnection({ workspace, draft, readOnly, onPatch }: Props) {
                           type="button"
                           variant="outline"
                           className="min-h-11"
-                          onClick={() => setHeaders([...headers, [`X-Header-${headers.length + 1}`, ""]])}
+                          onClick={() =>
+                            setHeaders([
+                              ...headers,
+                              [`X-Header-${headers.length + 1}`, ""],
+                            ])
+                          }
                         >
                           {commonText("common.add")}
                         </Button>

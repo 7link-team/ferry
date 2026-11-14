@@ -44,7 +44,7 @@ pub(crate) async fn role(s: &AppState, workspace: i64, permissions: Vec<&str>) -
     serde_json::from_value(value["id"].clone()).unwrap()
 }
 pub(crate) async fn agent(s: &AppState, role: Id) -> ai_agents::Model {
-    let body=serde_json::from_value(json!({"name":"Platform assistant","role":"Test","platform_role_id":role.to_string(),"owner_id":"1","host_id":"1","runtime":"codex","permission":"read_only","visibility":"workspace","state":"enabled"})).unwrap();
+    let body=serde_json::from_value(json!({"name":"Platform assistant","role":"Test","platform_role_id":role.to_string(),"owner_id":"1","model_profile_id":crate::agents::tests::test_cli_model(1,"codex").to_string(),"host_id":"1","runtime":"codex","permission":"read_only","visibility":"workspace","state":"enabled"})).unwrap();
     let (_, Json(value)) = agents::create(State(s.clone()), admin(1), Json(body))
         .await
         .unwrap();

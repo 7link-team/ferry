@@ -874,6 +874,7 @@ pub(super) fn failure_reason(error: &ApiError) -> &'static str {
             | "workflow.agentApproval"
             | "workflow.agentFailed" => return "agent_failed",
             "workflow.agentUnavailable"
+            | "agents.modelRequired"
             | "workflow.agentApiModel"
             | "workflow.agentReadOnly"
             | "workflow.agentPrompt"

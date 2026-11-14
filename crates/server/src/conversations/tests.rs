@@ -819,7 +819,7 @@ pub(super) async fn seeded() -> (tempfile::TempDir, AppState, Id) {
     .exec(&s.db)
     .await
     .unwrap();
-    let data = json!({"name":"Test Agent","runtime":"claude","host_id":"1","owner_id":"1","cwd":dir.path().to_string_lossy(),"system_prompt":"Original instructions","permission":"on_request","visibility":"workspace","state":"enabled"});
+    let data = json!({"name":"Test Agent","runtime":"claude","model_profile_id":crate::agents::tests::test_cli_model(1,"claude").to_string(),"host_id":"1","owner_id":"1","cwd":dir.path().to_string_lossy(),"system_prompt":"Original instructions","permission":"on_request","visibility":"workspace","state":"enabled"});
     let (_, Json(created)) = crate::agents::create(
         State(s.clone()),
         admin(1),

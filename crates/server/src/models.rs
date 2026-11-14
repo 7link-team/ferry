@@ -603,8 +603,9 @@ async fn discover(
     ))
 }
 
-/// The custom upstream for a CLI execution, or None when the CLI keeps its own
-/// login/configuration. Resolved from the Agent's current model profile.
+/// The custom upstream for a CLI execution, or None when the Agent's CLI model
+/// deliberately keeps the CLI's own login/configuration. An Agent without an
+/// enabled, matching CLI model is refused. Resolved from its current profile.
 pub(crate) async fn cli_provider(
     s: &AppState,
     workspace: Id,
@@ -618,17 +619,23 @@ pub(crate) async fn cli_provider(
     else {
         return Ok(None);
     };
+    // Re-checked on every run: a conversation created earlier must not keep
+    // running once its Agent has no usable model.
     let Some(profile) = profiles::Entity::find_by_id(agent.model_profile_id)
         .filter(profiles::Column::WorkspaceId.eq(workspace))
         .one(&s.db)
         .await?
     else {
-        return Ok(None);
+        return Err(crate::agents::model_required());
     };
-    if profile.kind != "cli"
-        || profile.provider_id == 0
+    if profile.state != "enabled"
+        || profile.kind != "cli"
         || ferry_protocol::agent::Runtime::parse(&profile.runtime) != Some(runtime)
     {
+        return Err(crate::agents::model_required());
+    }
+    // A CLI model without a custom API uses that CLI's own configuration on the host.
+    if profile.provider_id == 0 {
         return Ok(None);
     }
     let connection = provider(&s.db, workspace, Id::from(profile.provider_id)).await?;

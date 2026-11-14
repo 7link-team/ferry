@@ -2,6 +2,29 @@ use super::*;
 use sea_orm::{QueryOrder, Set};
 use std::sync::Arc;
 
+const TEST_RUNTIMES: [&str; 11] = [
+    "codex",
+    "claude",
+    "gemini",
+    "qwen",
+    "opencode",
+    "pi",
+    "dsh",
+    "kimi",
+    "grok",
+    "copilot",
+    "codebuddy",
+];
+
+/// The seeded native CLI model for `runtime` in `workspace` (see `setup`).
+pub(crate) fn test_cli_model(workspace: i64, runtime: &str) -> i64 {
+    let index = TEST_RUNTIMES
+        .iter()
+        .position(|r| *r == runtime)
+        .expect("test runtime") as i64;
+    7_000_000 + workspace * 100 + index
+}
+
 pub(crate) async fn setup() -> (tempfile::TempDir, AppState) {
     let (dir, db) = crate::lock::tests::database().await;
     let s = Arc::new(crate::state::State {
@@ -100,6 +123,35 @@ pub(crate) async fn setup() -> (tempfile::TempDir, AppState) {
         .await
         .unwrap();
     }
+    // Agents run only through a configured model: every workspace gets one CLI
+    // model per CLI that keeps that CLI's own configuration (no custom API).
+    for workspace in [1, 2] {
+        for runtime in TEST_RUNTIMES {
+            crate::entities::ai_model_profiles::Entity::insert(
+                crate::entities::ai_model_profiles::Model {
+                    id: test_cli_model(workspace, runtime),
+                    workspace_id: workspace,
+                    name: format!("{runtime} (native)"),
+                    kind: "cli".into(),
+                    runtime: runtime.into(),
+                    provider_id: 0,
+                    models: "[]".into(),
+                    default_model: String::new(),
+                    tool_version: String::new(),
+                    state: "enabled".into(),
+                    cli_options: None,
+                    revision_id: 0,
+                    version: 1,
+                    created_at: 0,
+                    updated_at: 0,
+                }
+                .into_active_model(),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
+        }
+    }
     (dir, s)
 }
 pub(crate) fn admin(workspace: i64) -> Scope {
@@ -118,7 +170,7 @@ pub(crate) fn admin(workspace: i64) -> Scope {
     }
 }
 fn body() -> Value {
-    json!({"name":"Agent A","role":"Code review","description":"User text","runtime":"codex","model":"","host_id":"1","owner_id":"1","cwd":if cfg!(windows){"C:/agent-tests"}else{"/tmp/agent-tests"},"system_prompt":"Original instructions","permission":"read_only","visibility":"owner","state":"enabled"})
+    json!({"name":"Agent A","role":"Code review","description":"User text","runtime":"codex","model_profile_id":test_cli_model(1,"codex").to_string(),"model":"","host_id":"1","owner_id":"1","cwd":if cfg!(windows){"C:/agent-tests"}else{"/tmp/agent-tests"},"system_prompt":"Original instructions","permission":"read_only","visibility":"owner","state":"enabled"})
 }
 fn parse(v: Value) -> Body {
     serde_json::from_value(v).unwrap()
@@ -394,7 +446,9 @@ async fn workspace_visibility_and_permissions_cannot_be_bypassed() {
     for change in [
         json!({"host_id":"2"}),
         json!({"owner_id":"2"}),
-        json!({"runtime":"other"}),
+        // The CLI comes from the model: none, or another workspace's, is refused.
+        json!({"model_profile_id":"0"}),
+        json!({"model_profile_id":test_cli_model(2, "codex").to_string()}),
         json!({"cwd":"relative"}),
         json!({"reasoning_effort":"high"}),
         json!({"workspace_id":"2"}),

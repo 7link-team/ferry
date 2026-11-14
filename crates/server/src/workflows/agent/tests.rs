@@ -618,8 +618,13 @@ async fn runner_problems_name_the_host_and_the_cli() {
 async fn read_only_incapable_clis_and_unusable_agents_are_rejected_at_save_and_execution() {
     let fixture = Fixture::new().await;
     for runtime in ["kimi", "grok"] {
+        // The CLI comes from the Agent's model.
         ai_agents::Entity::update_many()
             .col_expr(ai_agents::Column::Runtime, Expr::value(runtime))
+            .col_expr(
+                ai_agents::Column::ModelProfileId,
+                Expr::value(crate::agents::tests::test_cli_model(1, runtime)),
+            )
             .filter(ai_agents::Column::Id.eq(fixture.agent.id))
             .exec(&fixture.s.db)
             .await
@@ -642,8 +647,23 @@ async fn read_only_incapable_clis_and_unusable_agents_are_rejected_at_save_and_e
         .await
         .unwrap_err();
     assert_eq!(key(&error), "workflow.agentUnavailable");
+    // An Agent without a model is never run, not even by the host's own CLI.
+    ai_agents::Entity::update_many()
+        .col_expr(ai_agents::Column::ModelProfileId, Expr::value(0_i64))
+        .filter(ai_agents::Column::Id.eq(fixture.agent.id))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    let error = fixture.execute().await.unwrap_err();
+    assert_eq!(key(&error), "agents.modelRequired");
+    assert_eq!(super::super::run::failure_reason(&error), "agent_invalid");
+    assert!(fixture.requests().is_empty());
     ai_agents::Entity::update_many()
         .col_expr(ai_agents::Column::Runtime, Expr::value("codex"))
+        .col_expr(
+            ai_agents::Column::ModelProfileId,
+            Expr::value(crate::agents::tests::test_cli_model(1, "codex")),
+        )
         .col_expr(ai_agents::Column::State, Expr::value("disabled"))
         .filter(ai_agents::Column::Id.eq(fixture.agent.id))
         .exec(&fixture.s.db)

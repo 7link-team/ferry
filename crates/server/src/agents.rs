@@ -163,7 +163,10 @@ impl Body {
         }
         let profile_id = Id::reference(&self.model_profile_id)?;
         self.model_profile_id = profile_id.to_string();
-        if i64::from(profile_id) != 0 {
+        if i64::from(profile_id) == 0 {
+            return Err(model_required());
+        }
+        {
             scope.require("ai-models.read")?;
             let profile = model_profile(conn, scope.workspace_id, profile_id).await?;
             if profile.state != "enabled" {
@@ -182,9 +185,13 @@ impl Body {
             } else {
                 profile.runtime
             };
-            self.host_id = 0.into();
-            self.cwd.clear();
-            self.permission = default_permission();
+            // A CLI model may still be pinned to one Runner host and directory;
+            // otherwise each conversation chooses its host.
+            if profile.kind == "api" || i64::from(self.host_id) == 0 {
+                self.host_id = 0.into();
+                self.cwd.clear();
+                self.permission = default_permission();
+            }
         }
         if self.name.is_empty()
             || self.name.len() > 128
@@ -227,10 +234,11 @@ impl Body {
                 || o.visibility != self.visibility
                 || o.owner_id != i64::from(self.owner_id)
         });
-        if execution_changed && i64::from(profile_id) == 0 {
+        let pinned = i64::from(self.host_id) != 0;
+        if execution_changed && pinned {
             scope.require("hosts.update")?;
         }
-        if i64::from(profile_id) == 0 {
+        if pinned {
             hosts::Entity::find_by_id(self.host_id)
                 .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
                 .filter(hosts::Column::Connection.eq("runner"))
@@ -360,12 +368,24 @@ pub(crate) async fn model_profile(
         .ok_or_else(ApiError::missing)
 }
 
+/// An Agent runs only through a model configured on the models page: never a
+/// host's own CLI configuration that nobody configured in this workspace.
+pub(crate) fn model_required() -> ApiError {
+    ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new("agents.modelRequired"),
+    )
+}
+
 pub(crate) async fn resolve_model(
     conn: &impl ConnectionTrait,
     agent: &agents::Model,
 ) -> Result<agents::Model> {
     let mut resolved = agent.clone();
-    if agent.model_profile_id != 0 {
+    if agent.model_profile_id == 0 {
+        return Err(model_required());
+    }
+    {
         let profile = model_profile(
             conn,
             agent.workspace_id.into(),
@@ -382,17 +402,17 @@ pub(crate) async fn resolve_model(
         {
             return Err(invalid());
         }
-        resolved.runtime = if profile.kind == "api" {
-            "api".into()
-        } else {
-            profile.runtime
-        };
+        let api = profile.kind == "api";
+        resolved.runtime = if api { "api".into() } else { profile.runtime };
         if resolved.model.is_empty() {
             resolved.model = profile.default_model;
         }
-        resolved.host_id = 0;
-        resolved.cwd.clear();
-        resolved.permission = default_permission();
+        // A CLI Agent pinned to a host keeps its host, directory and permission.
+        if api || resolved.host_id == 0 {
+            resolved.host_id = 0;
+            resolved.cwd.clear();
+            resolved.permission = default_permission();
+        }
     }
     Ok(resolved)
 }

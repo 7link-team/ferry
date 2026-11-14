@@ -349,13 +349,12 @@ async fn cli_custom_api_is_its_own_connection_and_reaches_the_runner_request() {
     assert_eq!(provider.base_url, "https://gw.example.invalid/anthropic");
     assert_eq!(provider.options["opus_model"], "big");
     assert!(!format!("{provider:?}").contains("cli-private-key"));
-    // Another runtime, or a native CLI, keeps its own configuration.
-    assert!(
-        cli_provider(&s, 1.into(), 777, ferry_protocol::agent::Runtime::Codex)
-            .await
-            .unwrap()
-            .is_none()
-    );
+    // A conversation whose CLI no longer matches the Agent's model is refused,
+    // never run on the host's own configuration.
+    let error = cli_provider(&s, 1.into(), 777, ferry_protocol::agent::Runtime::Codex)
+        .await
+        .unwrap_err();
+    assert_eq!(error.2.unwrap().key, "agents.modelRequired");
 }
 
 #[tokio::test]

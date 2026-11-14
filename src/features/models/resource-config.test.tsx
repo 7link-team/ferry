@@ -80,8 +80,13 @@ it("configures a CLI's own custom API with per-tool options instead of reusing a
   const toggle = host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="使用自定义 API 连接"]')!;
   await act(async () => toggle.click());
   // Existing API models come first; a separate connection is one click away.
-  expect(host.querySelector('[role="radio"][aria-checked="true"]')!.textContent).toBe("使用已有 API 模型");
-  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === "单独填写连接")!.click());
+  expect(host.querySelector('[role="tab"][aria-selected="true"]')!.textContent).toBe("使用已有 API 模型");
+  const own = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((b) => b.textContent === "单独填写连接")!;
+  // Radix tabs switch on pointer down / keyboard, not a synthetic click.
+  await act(async () => {
+    own.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    own.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+  });
   await act(async () => type(host.querySelector<HTMLInputElement>('input[aria-label="接口地址"]')!, "https://api.deepseek.com/anthropic"));
   await act(async () => type(host.querySelector<HTMLInputElement>('input[aria-label="API Key"]')!, "sk-new"));
   await act(async () => type(host.querySelector<HTMLInputElement>('input[aria-label="Opus 模型"]')!, "deepseek-pro"));
@@ -143,7 +148,7 @@ it("keeps a saved CLI linked to its API model when edited", async () => {
     connection: { name: "OpenAI Chat", protocol: "openai", base_url: "https://api.openai.com/v1", credential_id: "3", qps: 1, concurrency: 1, version: 1 },
   });
   await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
-  expect(host.querySelector('[role="radio"][aria-checked="true"]')!.textContent).toBe("使用已有 API 模型");
+  expect(host.querySelector('[role="tab"][aria-selected="true"]')!.textContent).toBe("使用已有 API 模型");
   expect(host.querySelector('input[aria-label="接口地址"]')).toBeNull();
   await submit();
   const body = JSON.parse(requests.find((r) => r.method === "PATCH" || r.method === "PUT")!.body!);
