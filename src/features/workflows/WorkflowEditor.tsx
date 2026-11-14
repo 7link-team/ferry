@@ -1024,11 +1024,11 @@ export function WorkflowEditor({
         )}
         {tab === "canvas" && (
           <div
-            className={`grid min-h-[560px] flex-1 overflow-hidden rounded-xl border bg-background lg:min-h-0 ${node ? "lg:grid-cols-[minmax(0,1fr)_360px]" : "grid-cols-1"}`}
+            className={`grid min-h-[560px] flex-1 overflow-hidden rounded-xl border bg-background lg:min-h-0 ${node ? "grid-rows-[minmax(0,2fr)_minmax(0,3fr)] lg:grid-cols-[minmax(0,1fr)_360px] lg:grid-rows-[minmax(0,1fr)]" : "grid-cols-1"}`}
           >
             <ContextMenu.Root>
             <ContextMenu.Trigger asChild disabled={readOnly}>
-            <div className="relative min-h-[480px] min-w-0 bg-muted/10 lg:min-h-0" tabIndex={0}>
+            <div className={`relative min-w-0 bg-muted/10 lg:min-h-0 ${node ? "min-h-0" : "min-h-[480px]"}`} tabIndex={0}>
               <ReactFlow
                 nodes={nodes}
                 edges={edges}
@@ -1148,7 +1148,7 @@ export function WorkflowEditor({
               <aside
                 data-workflow-parameters
                 aria-label={t("parameters")}
-                className="max-h-[70dvh] overflow-y-auto border-t bg-background p-4 lg:border-l lg:border-t-0"
+                className="relative h-full min-h-0 overflow-y-auto border-t bg-background p-4 lg:border-l lg:border-t-0"
               >
                 {
                   <div key={node.id} className="space-y-4">

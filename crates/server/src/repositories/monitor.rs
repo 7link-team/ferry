@@ -926,6 +926,23 @@ fn normalize(provider: &str, headers: &HeaderMap, payload: &Value) -> Option<Eve
         detail: detail::webhook(event, payload),
     })
 }
+/// Sending happens right after an event is recorded; a placeholder that is still
+/// there minutes later was never sent (channels disabled or the process stopped).
+const PENDING_DELIVERY_GRACE_MS: i64 = 10 * 60 * 1000;
+
+fn stale_pending_as_not_delivered(mut row: events::Model, now: i64) -> events::Model {
+    if now - row.created_at > PENDING_DELIVERY_GRACE_MS
+        && row
+            .delivery
+            .contains("\"repository.monitor.pendingDelivery\"")
+    {
+        row.delivery = crate::i18n::store_message(&crate::i18n::Message::new(
+            "repository.monitor.notDelivered",
+        ));
+    }
+    row
+}
+
 fn event_json(row: events::Model) -> Value {
     let detail = row
         .detail
@@ -935,6 +952,7 @@ fn event_json(row: events::Model) -> Value {
     let detail = detail::display(&detail);
     let mut delivery_details =
         serde_json::from_str::<Vec<ChannelDelivery>>(&row.delivery).unwrap_or_default();
+    let row = stale_pending_as_not_delivered(row, db::now());
     for delivery in &mut delivery_details {
         delivery.result = crate::i18n::display_stored(&delivery.result);
     }
@@ -1299,7 +1317,20 @@ async fn deliver(
             });
         }
     }
-    if !deliveries.is_empty() {
+    if deliveries.is_empty() {
+        // Every configured channel is disabled: record that, not a pending placeholder.
+        events::Entity::update_many()
+            .col_expr(
+                events::Column::Delivery,
+                Expr::value(crate::i18n::store_message(&crate::i18n::Message::new(
+                    "repository.monitor.notificationsOff",
+                ))),
+            )
+            .filter(events::Column::WorkspaceId.eq(connection.workspace_id))
+            .filter(events::Column::Id.eq(event_id))
+            .exec(&s.db)
+            .await?;
+    } else {
         // Keep the legacy single-channel representation for old consumers.
         let result = if config.notification_channels.is_none()
             && config.notification_channel_ids.is_none()
@@ -1735,6 +1766,42 @@ mod tests {
         assert_eq!(value["action"], raw);
         assert_eq!(value["detail"]["note"], raw);
         assert_eq!(detail::view(&value["detail"])["note"], raw);
+    }
+
+    #[test]
+    fn a_stale_pending_delivery_is_shown_as_not_sent() {
+        let pending = crate::i18n::store_message(&crate::i18n::Message::new(
+            "repository.monitor.pendingDelivery",
+        ));
+        let row = events::Model {
+            id: 1,
+            workspace_id: 1,
+            connection_id: 1,
+            delivery_key: "k".into(),
+            event: "push".into(),
+            repository: "r".into(),
+            reference: "main".into(),
+            actor: String::new(),
+            action: String::new(),
+            delivery: pending.clone(),
+            created_at: 1_000,
+            detail: None,
+        };
+        let fresh = stale_pending_as_not_delivered(row.clone(), 1_000 + 60_000);
+        assert_eq!(
+            fresh.delivery, pending,
+            "a just-recorded event is still sending"
+        );
+        let stale =
+            stale_pending_as_not_delivered(row.clone(), 1_000 + PENDING_DELIVERY_GRACE_MS + 1);
+        assert!(stale.delivery.contains("repository.monitor.notDelivered"));
+        let mut sent = row;
+        sent.delivery = "[{\"name\":\"Webhook\",\"language\":\"zh-CN\",\"result\":\"ok\"}]".into();
+        let kept = stale_pending_as_not_delivered(sent.clone(), i64::MAX / 2);
+        assert_eq!(
+            kept.delivery, sent.delivery,
+            "real results are never rewritten"
+        );
     }
 
     fn headers(name: &str, value: &str) -> HeaderMap {
