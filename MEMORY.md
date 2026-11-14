@@ -1,10 +1,9 @@
-## ACTIVE - v0.5.0-alpha：CLI逐工具自定义API + 去价格 (2026-11-14)
-- v0.4.0-alpha 已发布（tag 108ee36，Build and release success，21 assets）。
-- AI-MODEL-CLI-PARITY 待验证：CLI模型独立连接+cli_options(格式/逐工具选项，参照cc-switch 8c76bfe)；关=用CLI自身登录/配置(或用户自装cc-switch)，失败只报错；开=服务端解密随请求下发，Runner写隔离HOME，密钥仅子进程env。不做格式转换/OAuth。共用API连接的旧CLI编辑时须填Key拆分。新CLI：Grok Build/Copilot CLI/CodeBuddy(后两者仅自身登录)，Kimi→Kimi Code。未接入：omp(需Bun)/Qoder/Cursor。设计见docs/ai-model-cli-boundaries.md。
-- MODEL-PRICE-REMOVE 待验证：表单去价格/币种/时区/预算；无价格连接不计费，旧有价格连接照计费。
-- 提交 a9fbf23 已推 main（含版本号0.5.0-alpha、platform_tools_catalog）。验证：真实8 CLI对模拟上游E2E PASS（data/maintenance/cli-e2e/e2e-result.log,e2e-requests.jsonl）；server950/runner71+5/protocol8 PASS；前端96文件762PASS/1skip；tsc/build/fmt/generator check PASS；浏览器23项(5191预览与4291实例，3宽度，无写入) PASS。
-- 本地4291已守护更新：PID46368 ferry-server-release-050.exe，备份data/backups/pre-release-050-20261114-204047，回执release-050-local-update.json，仅新增ai_model_profiles.cli_options列。
-- 发版：与会话ferry-52约定，等其ferry.request平台节点+Dockerfile logo修复提交后，对该SHA的main CI全绿再打 v0.5.0-alpha（我负责打tag）。下一步：监控CI→等ferry-52 SHA→CI绿→tag→监控release资产。Copilot/CodeBuddy登录后的ACP mode未验证；未做商业模型推理验收。
+## DELIVERED - v0.5.0-alpha 已发布 (2026-11-15)
+- tag v0.5.0-alpha → a2036c7（main Build and release 绿；tag 的 Build and release 与 Server container 均 success；Release 预发布 21 个资产，含 ferry-52 的 logo 镜像冒烟检查）。包含：a9fbf23 CLI 逐工具自定义 API/新增 Grok·Copilot·CodeBuddy/Kimi Code/去价格；9713267 ferry.request 平台数据节点 + 镜像打包 logo（ferry-52）；08abcc0 预览穿透局域网目标、CLI 复用已有 API 模型、Git 市场源；a2036c7 测试连接池修复 + 端口标签。
+- 验证证据：data/maintenance/cli-e2e（8 个真实 CLI 对模拟上游 E2E、浏览器 26 项、cargo/前端门禁日志）。Application deployment acceptance 在 a2036c7 的模板市场步骤失败一次，本地重跑 test-marketplace-ui.mjs 通过，08abcc0 同工作流通过，判为偶发。
+- 4291：a2036c7 构建（PID43492，ferry-server-release-050c.exe，备份 pre-release-050c-20261115-004755，结构未变）；之后交由 ferry-52 更新到 6720958（含 ai.agent.run，未发版）。演示 Runner 已换 0.5.0-alpha 构建。
+- 待用户验收：AI-MODEL-CLI-PARITY、CLI-API-REUSE、MODEL-PRICE-REMOVE、HOLE-LAN-TARGET、MARKET-GIT。未覆盖：Copilot/CodeBuddy 登录后的 ACP 模式；商业模型真实推理；真实局域网预览（4291 上未在用户空间建测试预览）。
+- 注意：D 盘曾两次写满，已删 target/debug/incremental（62GB）；共享更新脚本 release-040-update.py 会被他人改，我用自己的 release-050*-update.py 副本。
 
 ## DONE - RELEASE v0.4.0-alpha PUBLISHED (2026-11-14; tag 108ee36, 21 assets; details below historical)
 - User explicitly authorized publishing; final version decision v0.4.0-alpha (supersedes v0.3.0 and alpha19 discussion). Version bumped in root npm/Cargo lockfiles and desktop config/Cargo. Current main matches origin1e09bf8 before release; large earlier user-requested uncommitted batch must be reviewed/tested and explicitly staged; exclude conversation export and local maintenance artifacts. No blind git add.
@@ -610,12 +609,13 @@ E2E-FULL-REPORT-01交付记录：生产场景测试及HTML/截图证据已交付
 | AI-MODEL-FORM-01 | 进行中（2026-11-14用户重开：表单与cc-switch不一致，见顶部AI-MODEL-CLI-PARITY） | CC Switch预设（126项，MIT署名）+CLI自定义API只选已有API模型，df3ee96已推main，4291已更新；真实浏览器预设分类/搜索/填充/链接、CLI无内联地址PASS。现有空间无API模型故下拉为空态，选择逻辑由单测覆盖。待用户验收。 |
 | REL-040-01 | 已完成 | v0.4.0-alpha预发布：tag→108ee36（与6ce85e4产品代码相同，仅CI/测试/文档差异），build.yml 29作业全绿，Release 21个附件已恢复，latest.json HTTP200含5平台；ghcr v0.4.0-alpha=latest=b95e6b6b266c（amd64+arm64，revision 6d1f340），server-image重跑保留不覆盖。中途重推tag致附件被删空约2小时，已恢复；教训见memory release-tag-after-green。4291运行同产品代码。 |
 | IMG-TAG-ONLY-01 | 已完成 | 仅v*标签打镜像、无sha推送、保留latest（server-image.yml fbe8d2f/6d1f340）。tag v0.4.0-alpha→6d1f340实跑：ghcr ferry-server:v0.4.0-alpha=latest=b95e6b6b266c，linux amd64+arm64，revision 6d1f340；prune后标签713→179，剩余132个sha为旧48个版本条目自带别名（GHCR不能单独去标签）。 |
-| WIN-HOST-FILES-01 | 待处理 | Windows主机文件列表（默认隐藏文件过滤）经HostAgent启动powershell判断隐藏属性，在ferry-runner→cmd下挂起15s超时（直接运行210ms）；Linux不走此路径。候选修复：HostAgent目录列表直接读取hidden/system属性，不起PowerShell。 |
-| UI-FOLLOWUP-01 | 待处理 | 390px顶栏44px控件换成三行高153px，表格数据区仅约162px；模板选择分页“固定标题”检查在页面模式下不再有效（需改为滚动页面验证）。 |
+| WIN-HOST-FILES-01 | 待验证 | 根因：HostAgent下powershell -EncodedCommand永不退出（-Command正常，-InputFormat None/<NUL/管道均无效）。改为-Command执行base64解码的scriptblock（路径不进cmd/PS解析）。4b14a62；4291真实Windows runner隐藏过滤列表15.2s超时→364ms。 |
+| UI-FOLLOWUP-01 | 待验证 | 手机顶栏一行：品牌仅图标、账号仅头像(名称sr-only)、平台管理移入账号菜单、空间切换截断；390/320高61px(原153px)无溢出，桌面不变；7个顶栏相关浏览器验收PASS。9249a38。模板选择分页“固定标题”检查页面模式无效仍待改。 |
 | REPO-DELIVERY-01 | 待验证 | 通知结果“投递中；服务中断不会自动重发”误导：渠道全禁用时记“通知未开启，未发送”；占位改“待发送”；超10分钟仍占位显示“未发送（未开启通知或发送被中断）”，不改历史数据。0ad9de3已推，4291实测89条→未发送、11条未配置。待用户验收。 |
 | WF-PANEL-SCROLL-01 | 待验证 | 工作流节点面板：表单内绝对定位控件逃出面板裁剪导致外层11k空白滚动→面板relative；桌面填满画布框，窄屏画布/面板2:3。0ad9de3已推，4291实测1440/390无溢出。待用户验收。 |
-| WF-NODE-UX-01 | 待处理 | 用户问：节点面板大对象JSON表单过长，YAML是否更好；以及“设置字段”节点看不出靠什么/在哪执行。已答复（data.set在平台服务器内工作流引擎执行，值为常量/表达式，该草稿为早前会话验收数据）。改进方案（执行位置标识、大对象YAML编辑）待用户确认。 |
-| WF-PIPELINE-SOURCE-01 | 进行中 | ①ferry.request平台数据节点完成：干净worktree(a9fbf23+本会话文件)fmt/生成器/tsc/前端763/服务端960+全部通过；4291已备份更新PID21788。②样例113479187989270528已升级（保留原执行）：手动触发仅insight_id/since/until→ferry.request读取贡献者报表(全部分页)→按提交数排序→data.set整理；真实执行115071248182022144成功，3名贡献者12/5/3。面板显示执行位置/GET接口/所需权限，1440/390无溢出无写入。待：提交推送；③ai.agent.run（runner/ai.rs已由ferry-9e提交，可开始）④样例AI分支⑤会话代理规则。差异：响应上限256KiB；详细错误仅服务端日志。 |
+| WF-NODE-UX-01 | 待验证 | 执行位置：ferry.request/ai.agent.run面板已显示。大对象值：对象/列表值新增“表单/YAML”切换，>2KB默认YAML，YAML仅在解析为同类值时应用，错误不改值；只读按大小选视图且所有控件禁用。2534b57已推main；前端771PASS，新增3测。待用户在4291体验（需部署2534b57构建）。 |
+| WF-PIPELINE-SOURCE-01 | 待验证 | ①ferry.request(v0.5.0-alpha)；③ai.agent.run、⑤会话规则、节点目录修复已合main f194fd8（未发版）。4291运行f194fd8构建(PID55332)。样例113479187989270528五节点真实执行成功(115131757346426880)。会话验收：首轮代理因/workflow-node-catalog只列集成节点而如实拒建；修复后新增builtin_nodes与?section=builtin(34KB)，第二轮会话115137856564891648自建trigger→ferry.request×2→data.set(纯表达式)→ai.agent.run，无写死数据；代理触发的执行在AI节点被拒(代理角色缺hosts.terminal/ai-agents.use，属正确越权防护，但原因显示permission_revoked易误导)；用户身份直跑115139580117651456五节点全成功。测试工作流115138277404577792已归档。待：用户验收；可选：代理角色授权以便代理试跑AI节点、改进失败原因文案。 |
+| REL-060-01 | 进行中 | v0.6.0-alpha（用户选定，alpha后不加.n）。main：a9d2f7f版本号 + 266e600（ferry-9e：智能体必须绑定模型，保存/resolve_model/每次会话运行均校验，AI节点映射agent_invalid；CLI连接来源分页签；其全量门禁PASS）+ 本MEMORY提交。待：该最终head的main CI全绿后打tag并核验Release附件与v0.6.0-alpha镜像；不重打已发布tag。4291 demo两个智能体(113467678009593856、113478763215327232)model_profile_id=0需用户先建CLI模型并绑定，之后再做AI节点真实复验。 |
 | WF-LEGACY-01 | 待处理 | 用户询问旧流水线是否丢失；4291确认demo空间原流水线23及3次执行完整保留。核对工作流→构建流水线入口/权限，提供原详情链接，不重建或覆盖数据。 |
 | DICT-STATE-01 | 待处理 | 用户明确要求：固定流程/不可随意维护的状态不放字典，清掉数据库记录与子项/初始化/展示读取；只保留可维护业务选项（环境/分类等）。前端状态字典读取已移除，后端清理迁移已补，待回归/更新4291。 |
 | TYPED-UI-01 | 待处理 | 字典与配置项按8092/zh-CN/sys/dicts/1001/edit参考：基本信息/值类型在前→类型约束→匹配类型的值编辑器（富文本/Monaco/图片文件等），控件联动、校验/保存/重开全验证。已用参考公开原型账号登录查看；不照搬原型源码。 |
