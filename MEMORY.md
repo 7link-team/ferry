@@ -619,6 +619,8 @@ E2E-FULL-REPORT-01交付记录：生产场景测试及HTML/截图证据已交付
 | SAMPLE-DEFAULTS-01 | 待验证 | 用户问为何手动填insight_id和日期：样例v6触发改为可选since/until（留空=本月1日至今天，按$today计算），洞察固定在ferry.request节点；空输入执行115257264700395520成功(2026-11-01至11-15，3人)。AI节点因智能体无模型保存被拒，再次暂存于data/maintenance/platform-node/ai-node-parked.json，待用户绑定CLI模型后恢复。 |
 | PLATFORM-FIELD-UI-01 | 待验证 | 用户反馈平台数据节点接口占位像已填、且未标必填：占位改为本地化说明“搜索或选择接口，例如 code-insights”，编辑态显示必填*，共享Input占位色改muted/70。3085234已推main，前端771PASS+新断言；4291已守护更新PID52044(备份pre-ui-fix-20261115-091855)。待用户体验。 |
 | PLATFORM-QUERY-01 | 待验证 | 用户问平台数据节点只能填路径参数、拿不到query：生成器从handler提取ListQuery/Query<T>/HashMap键，58/134个GET带query清单；节点按名列出可选查询字段(sort为下拉)，未声明键留在“其他查询参数”并提示。5cbbb61已推main，生成器check+tsc+vitest771PASS+Rust platform10PASS；4291守护更新PID33196(备份pre-query-params-20261115-100742)，浏览器只读核对样例节点显示since/until/page_size，截图data/maintenance/platform-node/query-params.png。待用户体验；未发版。 |
+| REL-070 | 已完成 | v0.7.0-alpha=46ef315(含5cbbb61+3085234)：main CI绿后打tag；首次release job runner失联未建Release，重推同commit tag后run 43695211610成功，Release 21资产+runner-update签名目录0.7.0-alpha，ghcr v0.7.0-alpha=latest(d1a75a30…,amd64+arm64)。待用户服务器--upgrade确认。 |
+| CI-RELEASE-RETRY-01 | 待处理 | 建议release job加timeout 15min+tag run仅release失败时自动重跑一次；待用户确认。 |
 | WF-LEGACY-01 | 待处理 | 用户询问旧流水线是否丢失；4291确认demo空间原流水线23及3次执行完整保留。核对工作流→构建流水线入口/权限，提供原详情链接，不重建或覆盖数据。 |
 | DICT-STATE-01 | 待处理 | 用户明确要求：固定流程/不可随意维护的状态不放字典，清掉数据库记录与子项/初始化/展示读取；只保留可维护业务选项（环境/分类等）。前端状态字典读取已移除，后端清理迁移已补，待回归/更新4291。 |
 | TYPED-UI-01 | 待处理 | 字典与配置项按8092/zh-CN/sys/dicts/1001/edit参考：基本信息/值类型在前→类型约束→匹配类型的值编辑器（富文本/Monaco/图片文件等），控件联动、校验/保存/重开全验证。已用参考公开原型账号登录查看；不照搬原型源码。 |

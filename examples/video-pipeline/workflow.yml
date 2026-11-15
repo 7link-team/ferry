@@ -1,0 +1,33 @@
+name: Portable video example
+on: workflow_dispatch
+jobs:
+  generate:
+    runs-on: self-hosted
+    defaults:
+      run:
+        shell: sh
+    env:
+      VIDEO_BACKEND: https://lightricks-ltx-video-distilled.hf.space
+    steps:
+      - id: source
+        name: Check out versioned source
+        uses: actions/checkout@v4
+      - name: Prepare pinned media tools
+        run: python examples/video-pipeline/video.py prepare
+      - name: Generate five-second video
+        run: python examples/video-pipeline/video.py generate
+      - name: Verify generated video
+        run: python examples/video-pipeline/video.py verify
+      - name: Upload video and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: video
+          path: examples/video-pipeline/output/video/
+          if-no-files-found: error
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-diagnostics
+          path: examples/video-pipeline/output/video/result.json
+          if-no-files-found: ignore
