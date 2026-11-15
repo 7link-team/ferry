@@ -84,10 +84,10 @@ function matchesShape(value: unknown, schema: Shape): boolean {
   }
   return true;
 }
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, required = false, children }: { label: string; required?: boolean; children: ReactNode }) {
   return (
     <label className="block min-w-0 space-y-2 text-sm">
-      <span className="block font-medium"><FieldCaption label={<>{label}</>} /></span>
+      <span className="block font-medium"><FieldCaption label={<>{label}</>} required={required} /></span>
       {children}
     </label>
   );
@@ -886,9 +886,9 @@ export function WorkflowNodeParameters({
       const pathParams = (p.path_params ?? {}) as Params;
       fields = <>
         <p className="text-sm leading-6 text-muted-foreground">{t("platform.location")}</p>
-        <Field label={t("platform.operation")}>
+        <Field label={t("platform.operation")} required={!readOnly}>
           <ComboInput aria-label={t("platform.operation")} options={platformPaths} value={operation} readOnly={readOnly} required
-            placeholder="/code-insights/{id}/reports/{kind}"
+            placeholder={t("platform.operationPlaceholder")}
             onValueChange={(next) => patch({
               operation: next,
               // Keep values of placeholders that still exist; drop the rest.

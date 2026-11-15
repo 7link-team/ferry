@@ -6156,5 +6156,6 @@
   "valueModeYaml": ["YAML", "YAML", "YAML", "YAML", "YAML", "YAML"],
   "yamlInvalid": ["Invalid YAML; the value was not changed.", "YAML 格式错误，值未修改。", "YAML 格式錯誤，值未修改。", "YAML が無効です。値は変更されていません。", "YAML이 올바르지 않아 값이 변경되지 않았습니다.", "YAML tidak sah; nilai tidak diubah."],
   "yamlExpectObject": ["The YAML must be an object (key: value); the value was not changed.", "YAML 必须是对象（键: 值），值未修改。", "YAML 必須是物件（鍵: 值），值未修改。", "YAML はオブジェクト（キー: 値）である必要があります。値は変更されていません。", "YAML은 객체(키: 값)여야 하며 값이 변경되지 않았습니다.", "YAML mesti objek (kunci: nilai); nilai tidak diubah."],
-  "yamlExpectList": ["The YAML must be a list (- item); the value was not changed.", "YAML 必须是列表（- 项），值未修改。", "YAML 必須是清單（- 項），值未修改。", "YAML はリスト（- 項目）である必要があります。値は変更されていません。", "YAML은 목록(- 항목)이어야 하며 값이 변경되지 않았습니다.", "YAML mesti senarai (- item); nilai tidak diubah."]
+  "yamlExpectList": ["The YAML must be a list (- item); the value was not changed.", "YAML 必须是列表（- 项），值未修改。", "YAML 必須是清單（- 項），值未修改。", "YAML はリスト（- 項目）である必要があります。値は変更されていません。", "YAML은 목록(- 항목)이어야 하며 값이 변경되지 않았습니다.", "YAML mesti senarai (- item); nilai tidak diubah."],
+  "platform.operationPlaceholder": ["Search or choose an endpoint, e.g. code-insights", "搜索或选择接口，例如 code-insights", "搜尋或選擇介面，例如 code-insights", "エンドポイントを検索または選択（例：code-insights）", "엔드포인트 검색 또는 선택(예: code-insights)", "Cari atau pilih titik akhir, cth. code-insights"]
 }

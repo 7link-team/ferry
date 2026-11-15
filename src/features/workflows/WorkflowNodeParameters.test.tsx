@@ -60,6 +60,12 @@ it("generates platform data path parameters from the selected GET operation and 
   await act(async () => root.render(<Harness />));
   expect(host.textContent).toContain("执行位置：平台服务器内（不经主机）");
   const operation = host.querySelector<HTMLInputElement>(`input[aria-label="${t("platform.operation")}"]`)!;
+  // A new node shows an instruction, never a real path that reads like a filled-in value,
+  // and the required endpoint is marked as such.
+  expect(operation.value).toBe("");
+  expect(operation.placeholder).toBe(t("platform.operationPlaceholder"));
+  expect(operation.placeholder.startsWith("/")).toBe(false);
+  expect(operation.closest("label")!.querySelector('[aria-hidden="true"]')?.textContent).toBe("*");
   await act(async () => operation.focus());
   const options = [...host.querySelectorAll('[role="option"]')].map(option => option.textContent);
   expect(options).toContain("/code-insights/{id}/reports/{kind}");
