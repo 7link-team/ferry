@@ -675,6 +675,8 @@ async fn on_runner(
     if provider.is_none() && !config.authentication_usable(&probe.authentication) {
         return Err(runner_error("workflow.agentLoginRequired", &row, &cli));
     }
+    let timezone =
+        crate::models::cli_timezone(s, Id::from(run.workspace_id), agent.id, &row).await?;
     let binding = Binding {
         execution_user: probe.execution_user,
         execution_identity: probe.execution_identity,
@@ -710,6 +712,16 @@ async fn on_runner(
         )
         .as_bytes(),
     );
+    if let Some(zone) = &timezone {
+        let caveat = if crate::models::windows_timezone_caveat(zone, &row) {
+            " (Windows host in another zone: some Windows tools ignore TZ)"
+        } else {
+            ""
+        };
+        session
+            .log
+            .push("agent", format!("time zone {zone}{caveat}").as_bytes());
+    }
     let request = |prompt: String, native_session_id: Option<String>| Request {
         binding: Some(binding.clone()),
         runtime: config.runtime,
@@ -724,6 +736,7 @@ async fn on_runner(
             .clamp(1, 3600),
         platform_tools: true,
         provider: provider.clone(),
+        timezone: timezone.clone(),
     };
     let result = async {
         let answer = session.turn(request(prompt, None)).await?;

@@ -338,6 +338,7 @@ pub(crate) fn shell_command(command: &str) -> tokio::process::Command {
         process
     };
     process.stdin(std::process::Stdio::null());
+    crate::timezone::apply(&mut process, None);
     process
 }
 
@@ -770,7 +771,7 @@ mod tests {
         crate::transport::send(&mut client, &wire::Session::AgentStart { request: Request {
             binding: None,
             runtime, cwd: dir.path().to_string_lossy().into_owned(), model: None,
-            native_session_id: None, permission: Permission::OnRequest, timeout_seconds: 120, platform_tools: false, provider: None,
+            native_session_id: None, permission: Permission::OnRequest, timeout_seconds: 120, platform_tools: false, provider: None, timezone: None,
             prompt: if runtime == Runtime::Claude {
                 "Use only the Write tool to create wire-marker.txt containing CANCELLED.".into()
             } else {

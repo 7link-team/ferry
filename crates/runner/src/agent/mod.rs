@@ -202,6 +202,8 @@ fn command_with(request: &Request, environment: &provision::Environment) -> Comm
         _ => unreachable!("every runtime has a protocol"),
     };
     environment.apply(&mut command);
+    // After env_clear: the model's zone, else this host's setting.
+    crate::timezone::apply(&mut command, request.timezone.as_deref());
     command
 }
 

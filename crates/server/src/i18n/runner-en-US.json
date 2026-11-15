@@ -90,5 +90,7 @@
   "runner.release.payloadOversize": "The update file exceeds its signed manifest size.",
   "runner.release.payloadIncomplete": "The update file was not fully downloaded.",
   "runner.release.payloadHash": "The update file hash does not match.",
-  "runner.release.urlControl": "The download URL contains control characters."
+  "runner.release.urlControl": "The download URL contains control characters.",
+  "runner.timezoneInvalid": "Unknown time zone. Use an IANA name such as Asia/Shanghai, or leave it empty.",
+  "runner.timezoneUpgrade": "This model requires the time zone {timezone}, but the Runner on this host is too old to apply it. Upgrade the Runner and try again."
 }

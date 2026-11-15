@@ -481,6 +481,9 @@ fn host_json(row: &hosts::Model) -> Value {
         "agent_update_available": row.connection == "runner" && runner::older_version(&row.agent_version, env!("CARGO_PKG_VERSION")),
         "agent_update_state": row.agent_update.as_deref().and_then(|value| serde_json::from_str::<Value>(value).ok()).and_then(|value| value.get("state").cloned()),
         "runner_auto_update": row.runner_auto_update,
+        "timezone": row.timezone,
+        "detected_timezone": row.detected_timezone,
+        "timezone_supported": row.timezone_supported != 0,
         "state": row.state,
         "group_id": Id::from(row.group_id),
         "credential_id": Id::from(row.credential_id),
@@ -500,6 +503,10 @@ pub struct HostBody {
     execution: Option<execution::Policy>,
     #[serde(default)]
     runner_auto_update: Option<String>,
+    /// IANA zone for processes the runner starts; "" keeps the host's own.
+    /// Absent leaves the stored setting unchanged.
+    #[serde(default)]
+    timezone: Option<String>,
     #[serde(default)]
     tag_ids: Option<Vec<Id>>,
     #[serde(default)]
@@ -537,6 +544,9 @@ fn check_host(body: &HostBody, creating: bool) -> Result<(String, String)> {
     }
     if let Some(policy) = &body.execution {
         policy.validate()?;
+    }
+    if let Some(zone) = &body.timezone {
+        runner::check_timezone(zone)?;
     }
     let name = check_name(&body.name)?;
     let connection = if creating { body.connection.trim() } else { "" };
@@ -715,6 +725,9 @@ pub(crate) async fn create_host_in(
             .runner_auto_update
             .clone()
             .unwrap_or_else(|| "inherit".into())),
+        timezone: Set(runner::check_timezone(
+            body.timezone.as_deref().unwrap_or_default(),
+        )?),
         state: Set("unknown".to_owned()),
         group_id: Set(i64::from(Id::reference(&body.group_id)?)),
         credential_id: Set(i64::from(Id::reference(&body.credential_id)?)),
@@ -787,6 +800,10 @@ pub async fn update_host(
             crate::i18n::Message::new("hosts.jumpInUseCannotChain"),
         ));
     }
+    let timezone = match &body.timezone {
+        Some(zone) => runner::check_timezone(zone)?,
+        None => existing.timezone.clone(),
+    };
     let mut update = hosts::Entity::update_many()
         .col_expr(
             hosts::Column::RunnerAutoUpdate,
@@ -796,6 +813,7 @@ pub async fn update_host(
                     .unwrap_or(&existing.runner_auto_update),
             ),
         )
+        .col_expr(hosts::Column::Timezone, Expr::value(timezone.clone()))
         .col_expr(hosts::Column::Name, Expr::value(name.clone()))
         .col_expr(hosts::Column::Port, Expr::value(body.port))
         .col_expr(hosts::Column::Username, Expr::value(body.username.trim()))
@@ -857,6 +875,10 @@ pub async fn update_host(
     )
     .await?;
     tx.commit().await?;
+    // New processes on a connected runner use it at once; no restart.
+    if timezone != existing.timezone {
+        runner::push_timezone(id, &timezone);
+    }
     Ok(Json(json!({"ok": true})))
 }
 

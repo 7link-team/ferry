@@ -86,6 +86,27 @@ fn concurrent_child_before_exec_cannot_extend_a_released_directory_lock() {
     );
 }
 
+#[test]
+fn the_model_time_zone_reaches_the_cli_process_only() {
+    let tz = |command: &Command| {
+        command
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == "TZ")
+            .and_then(|(_, value)| value.map(|v| v.to_string_lossy().into_owned()))
+    };
+    let _serial = crate::timezone::TEST_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let mut zoned = request(Runtime::Codex);
+    zoned.timezone = Some("Pacific/Chatham".into());
+    if !(cfg!(windows) && crate::timezone::detected() == "Pacific/Chatham") {
+        assert_eq!(tz(&command(&zoned)).as_deref(), Some("Pacific/Chatham"));
+    }
+    // A model without a zone and no host setting leaves TZ alone (env is cleared).
+    assert_eq!(tz(&command(&request(Runtime::Codex))), None);
+}
+
 fn request(runtime: Runtime) -> Request {
     Request {
         binding: None,
@@ -98,6 +119,7 @@ fn request(runtime: Runtime) -> Request {
         timeout_seconds: 10,
         platform_tools: false,
         provider: None,
+        timezone: None,
     }
 }
 

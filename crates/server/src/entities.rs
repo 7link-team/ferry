@@ -70,6 +70,8 @@ pub mod ai_model_profiles {
         pub state: String,
         #[sea_orm(column_type = "Text", nullable)]
         pub cli_options: Option<String>,
+        /// IANA zone a CLI model's executions run in; empty follows the runner.
+        pub timezone: String,
         pub revision_id: i64,
         pub version: i64,
         pub created_at: i64,
@@ -616,6 +618,12 @@ pub mod hosts {
         pub runner_auto_update: String,
         pub metrics: String,
         pub credential_id: i64,
+        /// IANA zone for processes the runner starts; empty keeps the host's own.
+        pub timezone: String,
+        /// The host's own zone as last reported by its runner.
+        pub detected_timezone: String,
+        /// 1 when the connected runner can apply a time zone.
+        pub timezone_supported: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

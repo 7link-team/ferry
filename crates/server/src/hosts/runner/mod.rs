@@ -23,6 +23,8 @@ pub(crate) mod reservations;
 mod enrollment;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod timezone_tests;
 mod transport;
 mod updates;
 
@@ -89,6 +91,8 @@ struct Live {
     supports_agent: bool,
     supports_agent_probe: bool,
     supports_forward: bool,
+    /// Understands `Control::Settings`; older runners reject unknown frames.
+    supports_timezone: bool,
     version: String,
     ready: std::sync::atomic::AtomicBool,
     failed_version: Mutex<Option<String>>,
@@ -103,4 +107,36 @@ static LIVE: LazyLock<Mutex<HashMap<String, Arc<Live>>>> = LazyLock::new(Default
 
 fn live() -> MutexGuard<'static, HashMap<String, Arc<Live>>> {
     LIVE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// A configured IANA zone, trimmed; empty is allowed and means "not set".
+pub(crate) fn check_timezone(zone: &str) -> Result<String> {
+    let zone = zone.trim();
+    if zone.is_empty() || (zone.len() <= 64 && zone.parse::<chrono_tz::Tz>().is_ok()) {
+        Ok(zone.to_owned())
+    } else {
+        Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.timezoneInvalid"),
+        ))
+    }
+}
+
+/// A host's stored zone as a runner setting: empty keeps the host's own zone.
+pub(crate) fn timezone_setting(zone: &str) -> Option<String> {
+    (!zone.is_empty()).then(|| zone.to_owned())
+}
+
+/// Applies a changed host time zone at once when its runner is connected to
+/// this process. A runner owned by another replica gets it from that replica's
+/// next heartbeat, which re-reads the setting (see `pump_control`).
+pub(crate) fn push_timezone(host_id: Id, zone: &str) {
+    let Some(registration) = live().get(&host_id.to_string()).cloned() else {
+        return;
+    };
+    if registration.supports_timezone {
+        let _ = registration.control.try_send(wire::Control::Settings {
+            timezone: timezone_setting(zone),
+        });
+    }
 }

@@ -412,6 +412,9 @@ mod tests {
         // No Runner is connected: a query cannot accidentally rely on remote::open.
         hosts::Entity::insert(hosts::ActiveModel {
             runner_auto_update: Set("inherit".into()),
+            timezone: Set(String::new()),
+            detected_timezone: Set(String::new()),
+            timezone_supported: Set(0),
             id: Set(2),
             workspace_id: Set(1),
             name: Set("disconnected".into()),

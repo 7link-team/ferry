@@ -438,3 +438,97 @@ async fn editing_a_cli_that_shares_an_api_connection_splits_it_instead_of_changi
         .unwrap();
     assert_eq!(original.base_url, "https://api.example.invalid/v1");
 }
+
+#[tokio::test]
+async fn a_cli_model_time_zone_is_validated_and_api_models_cannot_set_one() {
+    let (_dir, s) = setup().await;
+    let mut b = body();
+    b.timezone = " Asia/Shanghai ".into();
+    b.validate(&s.db, &admin(1)).await.unwrap();
+    assert_eq!(b.timezone, "Asia/Shanghai");
+    assert_eq!(
+        serde_json::to_value(&b).unwrap()["timezone"],
+        "Asia/Shanghai"
+    );
+    // An unset zone stays out of the recorded definition.
+    assert!(
+        serde_json::to_value(body())
+            .unwrap()
+            .get("timezone")
+            .is_none()
+    );
+    let mut b = body();
+    b.timezone = "Mars/Olympus".into();
+    let error = b.validate(&s.db, &admin(1)).await.unwrap_err();
+    assert!(format!("{error:?}").contains("runner.timezoneInvalid"));
+    let mut b = body();
+    b.kind = "api".into();
+    b.runtime.clear();
+    b.default_model = "m".into();
+    b.timezone = "UTC".into();
+    let error = b.validate(&s.db, &admin(1)).await.unwrap_err();
+    assert!(format!("{error:?}").contains("models.timezoneCliOnly"));
+}
+
+fn host(os: &str, detected: &str, supported: bool) -> crate::entities::hosts::Model {
+    crate::entities::hosts::Model {
+        id: 1,
+        workspace_id: 1,
+        name: "h".into(),
+        address: String::new(),
+        port: 0,
+        username: String::new(),
+        connection: "runner".into(),
+        state: "online".into(),
+        group_id: 0,
+        description: String::new(),
+        host_key: String::new(),
+        runner_key_hash: String::new(),
+        enroll_token: String::new(),
+        enroll_token_hash: String::new(),
+        jump_host_id: 0,
+        seen_at: 0,
+        created_at: 0,
+        updated_at: 0,
+        version: 1,
+        os: os.into(),
+        arch: "x86_64".into(),
+        agent_version: String::new(),
+        agent_update: None,
+        runner_auto_update: "inherit".into(),
+        metrics: String::new(),
+        credential_id: 0,
+        timezone: String::new(),
+        detected_timezone: detected.into(),
+        timezone_supported: i64::from(supported),
+    }
+}
+
+#[test]
+fn a_required_zone_refuses_runners_that_cannot_apply_it() {
+    assert_eq!(
+        timezone_for(String::new(), &host("linux", "", false)).unwrap(),
+        None
+    );
+    let error = timezone_for("Asia/Tokyo".into(), &host("linux", "", false)).unwrap_err();
+    assert_eq!(error.0, StatusCode::CONFLICT);
+    assert!(format!("{error:?}").contains("runner.timezoneUpgrade"));
+    assert_eq!(
+        timezone_for("Asia/Tokyo".into(), &host("linux", "UTC", true))
+            .unwrap()
+            .as_deref(),
+        Some("Asia/Tokyo")
+    );
+    assert!(windows_timezone_caveat(
+        "Asia/Tokyo",
+        &host("windows", "Asia/Shanghai", true)
+    ));
+    assert!(!windows_timezone_caveat(
+        "Asia/Tokyo",
+        &host("windows", "Asia/Tokyo", true)
+    ));
+    assert!(!windows_timezone_caveat(
+        "Asia/Tokyo",
+        &host("linux", "UTC", true)
+    ));
+}

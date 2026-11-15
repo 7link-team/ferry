@@ -90,5 +90,7 @@
   "runner.release.payloadOversize": "更新文件超过签名清单大小。",
   "runner.release.payloadIncomplete": "更新文件未完整下载。",
   "runner.release.payloadHash": "更新文件哈希不匹配。",
-  "runner.release.urlControl": "下载地址包含控制字符。"
+  "runner.release.urlControl": "下载地址包含控制字符。",
+  "runner.timezoneInvalid": "无法识别的时区。请使用 IANA 名称（如 Asia/Shanghai），或留空。",
+  "runner.timezoneUpgrade": "该模型要求时区 {timezone}，但此主机的 Runner 版本过旧，无法应用。请升级 Runner 后重试。"
 }

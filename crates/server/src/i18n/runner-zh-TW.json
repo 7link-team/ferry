@@ -90,5 +90,7 @@
   "runner.release.payloadOversize": "更新檔案超過簽章資訊清單大小。",
   "runner.release.payloadIncomplete": "更新檔案未完整下載。",
   "runner.release.payloadHash": "更新檔案雜湊不符。",
-  "runner.release.urlControl": "下載位址包含控制字元。"
+  "runner.release.urlControl": "下載位址包含控制字元。",
+  "runner.timezoneInvalid": "無法識別的時區。請使用 IANA 名稱（如 Asia/Shanghai），或留空。",
+  "runner.timezoneUpgrade": "此模型要求時區 {timezone}，但此主機的 Runner 版本過舊，無法套用。請升級 Runner 後重試。"
 }

@@ -30,6 +30,8 @@ portable-pty = "0.9"
 # Load, memory and disk without three per-OS parsers in this crate.
 sysinfo = { version = "0.39", default-features = false, features = ["system", "disk", "network"] }
 local-ip-address = "0.6.13"
+# The host's IANA time zone, reported to the platform (already used by chrono).
+iana-time-zone = "0.1.65"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

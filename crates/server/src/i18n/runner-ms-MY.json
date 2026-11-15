@@ -90,5 +90,7 @@
   "runner.release.payloadOversize": "Fail kemas kini melebihi saiz manifes bertandatangan.",
   "runner.release.payloadIncomplete": "Fail kemas kini tidak dimuat turun sepenuhnya.",
   "runner.release.payloadHash": "Cincangan fail kemas kini tidak sepadan.",
-  "runner.release.urlControl": "URL muat turun mengandungi aksara kawalan."
+  "runner.release.urlControl": "URL muat turun mengandungi aksara kawalan.",
+  "runner.timezoneInvalid": "Zon waktu tidak dikenali. Gunakan nama IANA seperti Asia/Shanghai, atau biarkan kosong.",
+  "runner.timezoneUpgrade": "Model ini memerlukan zon waktu {timezone}, tetapi Runner pada hos ini terlalu lama untuk menggunakannya. Naik taraf Runner dan cuba lagi."
 }

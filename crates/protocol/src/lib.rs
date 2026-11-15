@@ -83,6 +83,12 @@ pub struct Hello {
     /// Byte forwarding to a loopback port for preview holes.
     #[serde(default)]
     pub supports_forward: bool,
+    /// Understands `Control::Settings` and `agent::Request::timezone`.
+    #[serde(default)]
+    pub supports_timezone: bool,
+    /// The host's own IANA time zone as detected by the runner; empty if unknown.
+    #[serde(default)]
+    pub timezone: String,
 }
 
 /// Runner -> server, first frame on a session connection. The session id is in
@@ -118,6 +124,10 @@ pub enum Control {
     },
     /// Server-side liveness probe; the runner answers `Report::Pong`.
     Ping,
+    /// Host settings for processes the runner starts. Sent only to runners that
+    /// announced `supports_timezone`: older runners reject unknown frames.
+    /// `timezone: None` keeps the host's own time zone.
+    Settings { timezone: Option<String> },
     /// Refused for good: wrong protocol version, bad token, unknown key. The
     /// runner reports this and stops rather than retrying forever.
     Rejected { reason: String },
@@ -390,6 +400,8 @@ mod tests {
             supports_agent: true,
             supports_agent_probe: false,
             supports_forward: true,
+            supports_timezone: true,
+            timezone: "Asia/Shanghai".into(),
         };
         let text = serde_json::to_string(&hello).unwrap();
         assert!(text.contains(r#""type":"enroll""#), "{text}");
@@ -407,6 +419,13 @@ mod tests {
             .unwrap()
             .remove("supports_agent_probe");
         legacy.as_object_mut().unwrap().remove("supports_forward");
+        assert_eq!(back.timezone, "Asia/Shanghai");
+        assert!(back.supports_timezone);
+        legacy.as_object_mut().unwrap().remove("supports_timezone");
+        legacy.as_object_mut().unwrap().remove("timezone");
+        let old: Hello = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(!old.supports_timezone);
+        assert_eq!(old.timezone, "");
         assert!(
             !serde_json::from_value::<Hello>(legacy.clone())
                 .unwrap()
@@ -448,6 +467,10 @@ mod tests {
                 kind: SessionKind::Forward,
             },
             Control::Ping,
+            Control::Settings {
+                timezone: Some("Asia/Shanghai".into()),
+            },
+            Control::Settings { timezone: None },
             Control::Rejected {
                 reason: "版本不匹配".into(),
             },
@@ -555,6 +578,7 @@ mod tests {
                     timeout_seconds: 60,
                     platform_tools: false,
                     provider: None,
+                    timezone: None,
                 },
             },
             Session::AgentInput {
@@ -637,5 +661,39 @@ mod tests {
         ));
         // A token with no host_id cannot be read as a key.
         assert!(serde_json::from_str::<Auth>(r#"{"type":"key","key":"k"}"#).is_err());
+    }
+
+    /// Agent requests are `deny_unknown_fields`: an unset time zone must not
+    /// appear on the wire, so older runners keep accepting them.
+    #[test]
+    fn agent_request_time_zone_is_optional_on_the_wire() {
+        let request = agent::Request {
+            binding: None,
+            runtime: agent::Runtime::Codex,
+            cwd: "/tmp".into(),
+            prompt: "p".into(),
+            model: None,
+            native_session_id: None,
+            permission: agent::Permission::ReadOnly,
+            timeout_seconds: 5,
+            platform_tools: false,
+            provider: None,
+            timezone: None,
+        };
+        let text = serde_json::to_string(&request).unwrap();
+        assert!(!text.contains("timezone"), "{text}");
+        assert!(
+            serde_json::from_str::<agent::Request>(&text)
+                .unwrap()
+                .timezone
+                .is_none()
+        );
+        let zoned = agent::Request {
+            timezone: Some("Europe/Berlin".into()),
+            ..request
+        };
+        let back: agent::Request =
+            serde_json::from_str(&serde_json::to_string(&zoned).unwrap()).unwrap();
+        assert_eq!(back.timezone.as_deref(), Some("Europe/Berlin"));
     }
 }

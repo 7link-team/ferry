@@ -64,6 +64,9 @@ struct Body {
     /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.
     #[serde(default)]
     cli_options: Value,
+    /// CLI-only IANA zone its executions run in; empty follows the runner.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    timezone: String,
 }
 /// The format a profile saved before formats existed implies: the connection's
 /// protocol, narrowed to what this CLI can call (Codex only speaks Responses).
@@ -153,6 +156,13 @@ impl Body {
                 Message::new("models.defaultModelRequired"),
             ));
         }
+        self.timezone = crate::hosts::runner::check_timezone(&self.timezone)?;
+        if self.kind == "api" && !self.timezone.is_empty() {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("models.timezoneCliOnly"),
+            ));
+        }
         if self.name.is_empty()
             || self.name.len() > 128
             || self.name.chars().any(char::is_control)
@@ -222,7 +232,7 @@ impl Body {
     }
 }
 fn view(p: &profiles::Model) -> Value {
-    json!({"cli_options":p.cli_options.as_deref().and_then(|v|serde_json::from_str::<Value>(v).ok()).unwrap_or(Value::Null),"id":Id::from(p.id),"name":p.name,"kind":p.kind,"runtime":p.runtime,"provider_id":Id::from(p.provider_id),"models":serde_json::from_str::<Value>(&p.models).unwrap_or(json!([])),"default_model":p.default_model,"tool_version":p.tool_version,"state":p.state,"revision_id":Id::from(p.revision_id),"version":p.version,"created_at":p.created_at,"updated_at":p.updated_at})
+    json!({"cli_options":p.cli_options.as_deref().and_then(|v|serde_json::from_str::<Value>(v).ok()).unwrap_or(Value::Null),"id":Id::from(p.id),"name":p.name,"kind":p.kind,"runtime":p.runtime,"provider_id":Id::from(p.provider_id),"models":serde_json::from_str::<Value>(&p.models).unwrap_or(json!([])),"default_model":p.default_model,"tool_version":p.tool_version,"timezone":p.timezone,"state":p.state,"revision_id":Id::from(p.revision_id),"version":p.version,"created_at":p.created_at,"updated_at":p.updated_at})
 }
 async fn find(conn: &impl ConnectionTrait, scope: &Scope, id: Id) -> Result<profiles::Model> {
     scope.require("ai-models.read")?;
@@ -376,6 +386,7 @@ async fn save(s: &AppState, scope: &Scope, id: Option<Id>, mut body: Body) -> Re
         tool_version: body.tool_version,
         state: body.state,
         cli_options: (!body.cli_options.is_null()).then(|| body.cli_options.to_string()),
+        timezone: body.timezone,
         revision_id: revision.id,
         version: old
             .as_ref()
@@ -607,6 +618,50 @@ async fn discover(
     Ok(Json(
         json!({"models":models,"has_more":data["has_more"].as_bool().unwrap_or(false)}),
     ))
+}
+
+/// The time zone an Agent's CLI model requires on `host`, or None to follow
+/// the runner. A model that requires one refuses a runner that cannot apply
+/// it rather than silently running in another zone.
+pub(crate) async fn cli_timezone(
+    s: &AppState,
+    workspace: Id,
+    agent_id: i64,
+    host: &crate::entities::hosts::Model,
+) -> Result<Option<String>> {
+    let Some(agent) = crate::entities::ai_agents::Entity::find_by_id(agent_id)
+        .filter(crate::entities::ai_agents::Column::WorkspaceId.eq(workspace))
+        .one(&s.db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let zone = profiles::Entity::find_by_id(agent.model_profile_id)
+        .filter(profiles::Column::WorkspaceId.eq(workspace))
+        .one(&s.db)
+        .await?
+        .map(|profile| profile.timezone)
+        .unwrap_or_default();
+    timezone_for(zone, host)
+}
+
+fn timezone_for(zone: String, host: &crate::entities::hosts::Model) -> Result<Option<String>> {
+    if zone.is_empty() {
+        return Ok(None);
+    }
+    if host.timezone_supported == 0 {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            Message::new("runner.timezoneUpgrade").with("timezone", zone),
+        ));
+    }
+    Ok(Some(zone))
+}
+
+/// Some Windows tools read `TZ` as a POSIX rule or ignore it, so a zone that
+/// differs from a Windows host's own is applied but worth a warning.
+pub(crate) fn windows_timezone_caveat(zone: &str, host: &crate::entities::hosts::Model) -> bool {
+    host.os.to_ascii_lowercase().contains("windows") && host.detected_timezone != zone
 }
 
 /// The custom upstream for a CLI execution, or None when the Agent's CLI model

@@ -201,4 +201,24 @@ it("requires a default model for an API model before it can be saved", async () 
   await submit();
   const body = JSON.parse(requests.find((r) => r.method === "PATCH" || r.method === "PUT")!.body!);
   expect(body.default_model).toBe("gpt-5-codex");
+  // An API model runs on the server: it has no time zone to set.
+  expect(host.querySelector('input[aria-label="时区"]')).toBeNull();
+});
+
+it("lets a CLI model require a time zone for its executions, checked before saving", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-models/9/edit");
+  stored = cli({ runtime: "codex" });
+  await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
+  const zone = host.querySelector<HTMLInputElement>('input[aria-label="时区"]')!;
+  expect(zone.value).toBe("");
+  expect(zone.placeholder).toBe("跟随执行器");
+  expect(host.textContent).toContain("TZ 变量");
+  const save = host.querySelector<HTMLButtonElement>('form button[type="submit"]')!;
+  await act(async () => type(zone, "Mars/Olympus"));
+  expect(save.disabled).toBe(true);
+  await act(async () => type(zone, "Asia/Shanghai"));
+  expect(save.disabled).toBe(false);
+  await submit();
+  const body = JSON.parse(requests.find((r) => r.method === "PATCH" || r.method === "PUT")!.body!);
+  expect(body.timezone).toBe("Asia/Shanghai");
 });

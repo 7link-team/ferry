@@ -139,6 +139,10 @@ pub struct Request {
     /// None keeps the CLI's own login and configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<Provider>,
+    /// IANA time zone the model requires for this execution; overrides the
+    /// runner's setting. Absent for older servers and models without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

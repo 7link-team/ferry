@@ -1,5 +1,6 @@
 import { TagBadge } from "../tags/TagBadge";
 import { HostAgentVersion } from "./RunnerConnection";
+import { HostTimezone } from "./HostTimezone";
 import { defaultExecutionPolicy, ExecutionPolicyFields, type ExecutionPolicy, type ExecutionStatus } from "./ExecutionPolicy";
 import { FolderOpen, SquareTerminal } from "lucide-react";
 import {
@@ -48,6 +49,12 @@ export interface Host {
   username: string;
   connection: string;
   runner_auto_update: "inherit" | "on" | "off";
+  /** IANA zone for processes the Runner starts; "" keeps the host's own. */
+  timezone?: string;
+  /** The host's own zone as reported by its Runner. */
+  detected_timezone?: string;
+  /** Whether the connected Runner can apply a time zone. */
+  timezone_supported?: boolean;
   state: string;
   group_id: string;
   tag_ids: string[];
@@ -422,6 +429,7 @@ export function hostsForms({
         name: "",
         connection: "runner",
         runner_auto_update: "inherit",
+        timezone: "",
         address: "",
         port: 22,
         username: "",
@@ -491,6 +499,21 @@ export function hostsForms({
               when: (row: Partial<Host>) => row.connection === "runner",
               help: "等待完整任务结束后升级到当前服务版本，期间暂停新任务。",
               helpKey: "resource-domain:runner.updateWaitHelp",
+            },
+            {
+              key: "timezone",
+              label: "时区",
+              labelKey: "resource-domain:timezone.label",
+              type: "custom",
+              when: (row: Partial<Host>) => row.connection === "runner",
+              render: ({ draft, readOnly, onPatch, onValidityChange }) => (
+                <HostTimezone
+                  host={draft as Partial<Host>}
+                  readOnly={readOnly}
+                  onChange={(timezone) => onPatch({ timezone } as Partial<AnyRow>)}
+                  onValidityChange={onValidityChange}
+                />
+              ),
             },
             {
               key: "tag_ids",

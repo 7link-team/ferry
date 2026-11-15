@@ -146,6 +146,7 @@ async fn control(s: AppState, mut socket: Socket) {
         supports_agent: hello.supports_agent,
         supports_agent_probe: hello.supports_agent_probe,
         supports_forward: hello.supports_forward,
+        supports_timezone: hello.supports_timezone,
         version: hello.agent_version.clone(),
         ready: std::sync::atomic::AtomicBool::new(!hello.managed_updates),
         failed_version: Mutex::new(None),
@@ -170,6 +171,29 @@ async fn control(s: AppState, mut socket: Socket) {
         if let Some(address) = reported_address(&hello.ip_address) {
             update = update.col_expr(hosts::Column::Address, Expr::value(address));
         }
+        if let Some(owner) = &registration.owner {
+            update = update.filter(crate::cluster::fence_condition(&host_id, &owner.fence));
+        }
+        let _ = update
+            .filter(hosts::Column::RunnerKeyHash.eq(&registration.key_hash))
+            .filter(hosts::Column::Id.eq(row_id))
+            .exec(&s.db)
+            .await;
+    }
+    // Enrolment and reconnects alike: what this runner can do with time zones.
+    {
+        let detected = hello.timezone.trim();
+        let detected = if detected.len() <= 64 && detected.parse::<chrono_tz::Tz>().is_ok() {
+            detected
+        } else {
+            ""
+        };
+        let mut update = hosts::Entity::update_many()
+            .col_expr(hosts::Column::DetectedTimezone, Expr::value(detected))
+            .col_expr(
+                hosts::Column::TimezoneSupported,
+                Expr::value(i64::from(hello.supports_timezone)),
+            );
         if let Some(owner) = &registration.owner {
             update = update.filter(crate::cluster::fence_condition(&host_id, &owner.fence));
         }
@@ -269,6 +293,8 @@ async fn pump_control(
         .flatten()
         .map(|h| Id::from(h.workspace_id));
     let mut unanswered = 0;
+    // The host time zone last sent to this runner; None until the first send.
+    let mut timezone_sent: Option<Option<String>> = None;
     let mut renew = tokio::time::interval(Duration::from_secs(5));
     let mut revoked = if let Some(cluster) = &s.cluster {
         match cluster.subscribe_revoke(host_id).await {
@@ -297,9 +323,14 @@ async fn pump_control(
                 break;
             },
             outgoing = inbox.recv() => match outgoing {
-                Some(frame) => if let Err(error) = send_frame(&mut socket, &frame).await {
-                    tracing::info!(%host_id, %error, "runner 控制帧发送失败");
-                    break;
+                Some(frame) => {
+                    if let wire::Control::Settings { timezone } = &frame {
+                        timezone_sent = Some(timezone.clone());
+                    }
+                    if let Err(error) = send_frame(&mut socket, &frame).await {
+                        tracing::info!(%host_id, %error, "runner 控制帧发送失败");
+                        break;
+                    }
                 },
                 // Dropped sender: this connection was replaced.
                 None => {
@@ -368,6 +399,22 @@ async fn pump_control(
                     break;
                 }
                 unanswered += 1;
+                // The first tick fires at once, so a connecting runner gets its
+                // setting right after Welcome; later ticks pick up a change made
+                // through another replica. Never sent to runners that would
+                // reject the frame.
+                if registration.supports_timezone {
+                    if let Ok(Some(row)) = hosts::Entity::find_by_id(i64::from(row_id)).one(&s.db).await {
+                        let wanted = crate::hosts::runner::timezone_setting(&row.timezone);
+                        if timezone_sent.as_ref() != Some(&wanted) {
+                            if let Err(error) = send_frame(&mut socket, &wire::Control::Settings { timezone: wanted.clone() }).await {
+                                tracing::info!(%host_id, %error, "runner 设置帧发送失败");
+                                break;
+                            }
+                            timezone_sent = Some(wanted);
+                        }
+                    }
+                }
                 if let Err(error) = send_frame(&mut socket, &wire::Control::Ping).await {
                     tracing::info!(%host_id, %error, "runner 心跳发送失败");
                     break;

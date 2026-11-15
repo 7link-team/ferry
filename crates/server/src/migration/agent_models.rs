@@ -120,6 +120,7 @@ impl MigrationTrait for Migration {
                         tool_version: String::new(),
                         state: "enabled".into(),
                         cli_options: None,
+                        timezone: String::new(),
                         revision_id: agent.id,
                         version: 1,
                         created_at: agent.created_at,

@@ -440,6 +440,8 @@ mod tests {
                 supports_agent: false,
                 supports_agent_probe: false,
                 supports_forward: false,
+                supports_timezone: false,
+                timezone: String::new(),
             })
             .unwrap();
             let expected = crate::i18n::Message::new("runnerExtra.protocolMismatch")
@@ -528,6 +530,8 @@ mod tests {
             supports_agent: false,
             supports_agent_probe: false,
             supports_forward: false,
+            supports_timezone: false,
+            timezone: String::new(),
         })
         .unwrap();
         tokio::time::timeout(

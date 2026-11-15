@@ -90,5 +90,7 @@
   "runner.release.payloadOversize": "更新ファイルが署名済みサイズを超えています。",
   "runner.release.payloadIncomplete": "更新ファイルのダウンロードが完了していません。",
   "runner.release.payloadHash": "更新ファイルのハッシュが一致しません。",
-  "runner.release.urlControl": "ダウンロードURLに制御文字が含まれています。"
+  "runner.release.urlControl": "ダウンロードURLに制御文字が含まれています。",
+  "runner.timezoneInvalid": "認識できないタイムゾーンです。Asia/Shanghai のような IANA 名を使うか、空欄にしてください。",
+  "runner.timezoneUpgrade": "このモデルはタイムゾーン {timezone} を必要としますが、このホストの Runner は古いため適用できません。Runner をアップグレードしてから再試行してください。"
 }

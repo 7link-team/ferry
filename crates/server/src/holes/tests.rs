@@ -742,6 +742,8 @@ async fn fake_runner(s: &AppState, address: SocketAddr, host: i64, key: &str, fo
             supports_agent: false,
             supports_agent_probe: false,
             supports_forward: forward,
+            supports_timezone: false,
+            timezone: String::new(),
         },
     )
     .await;

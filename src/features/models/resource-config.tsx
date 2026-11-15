@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Eye, Pencil } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
 import { AutoField, FieldControl } from "../../shared/forms/auto-form";
+import { TimezoneField } from "../../shared/forms/TimezoneField";
 import { commonText } from "../../shared/i18n/i18n";
 import {
   form,
@@ -346,6 +347,7 @@ export function modelsForms({
         tool_version: "",
         state: "enabled",
         cli_options: null,
+        timezone: "",
       },
       sections: [
         {
@@ -392,6 +394,7 @@ export function modelsForms({
                         connection: kind === "api" ? newConnection() : null,
                         models: [],
                         default_model: "",
+                        timezone: "",
                       })
                     }
                   />
@@ -414,6 +417,26 @@ export function modelsForms({
               labelKey: key("toolVersion"),
               type: "text",
               when: (r) => r.kind === "cli",
+            },
+            {
+              key: "timezone",
+              label: "Time zone",
+              labelKey: key("timezone"),
+              type: "custom",
+              width: "full",
+              // Only a CLI model runs on a Runner; an API model runs on the server.
+              when: (r) => r.kind === "cli",
+              render: ({ draft, readOnly, onPatch, onValidityChange }) => (
+                <TimezoneField
+                  label={t("timezone")}
+                  value={draft.timezone ?? ""}
+                  emptyLabel={t("timezoneEmpty")}
+                  help={t("timezoneHelp")}
+                  readOnly={readOnly}
+                  onChange={(timezone) => onPatch({ timezone })}
+                  onValidityChange={onValidityChange}
+                />
+              ),
             },
             {
               key: "provider_id",

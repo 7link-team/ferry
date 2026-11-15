@@ -213,6 +213,8 @@ async fn hold(
             supports_agent: true,
             supports_agent_probe: true,
             supports_forward: true,
+            supports_timezone: true,
+            timezone: crate::timezone::detected(),
         },
     )
     .await?;
@@ -278,6 +280,8 @@ async fn hold(
                 match message? {
                     Message::Text(text) => match serde_json::from_str::<wire::Control>(&text)? {
                         wire::Control::Ping => send(&mut socket, &wire::Report::Pong).await?,
+                        // Applies to processes started from now on; nothing restarts.
+                        wire::Control::Settings { timezone } => crate::timezone::pin(timezone),
                         wire::Control::Update { request, version, manifest, signature } => {
                             if !cfg.managed || !preparing.is_empty() {
                                 send(&mut socket, &wire::Report::UpdateFailed { request, error: "代理不是托管服务或已有升级进行中".into(), message: Some(wire::SystemMessage::new("runner.updateUnavailable")) }).await?;

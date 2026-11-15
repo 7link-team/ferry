@@ -461,6 +461,8 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
         }
         let provider =
             crate::models::cli_provider(&s, scope.workspace_id, c.agent_id, config.runtime).await?;
+        let timezone =
+            crate::models::cli_timezone(&s, scope.workspace_id, c.agent_id, &host).await?;
         // A custom upstream replaces the CLI's own login for this execution.
         if provider.is_none() && !config.authentication_usable(&probe.authentication) {
             return Err(error(StatusCode::CONFLICT, "conversations.loginRequired"));
@@ -532,6 +534,7 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
                 timeout_seconds: 3600,
                 platform_tools: true,
                 provider,
+                timezone,
             },
         ))
     };

@@ -29,6 +29,7 @@ mod notification_center;
 mod platform_monitor;
 mod platform_storage;
 mod preview_ingress;
+mod runner_timezones;
 mod workflow_node_logs;
 
 // Keep names alongside builders for existence checks; no SQL parsing is needed.
@@ -167,6 +168,8 @@ impl MigratorTrait for Migrator {
             Box::new(chat::Migration),
             Box::new(ai_models::Migration),
             Box::new(ai_model_cli_options::Migration),
+            // Before agent_models: it reads every ai_model_profiles column.
+            Box::new(runner_timezones::Migration),
             Box::new(chat_messages::Migration),
             Box::new(agent_models::Migration),
             Box::new(chat_interactions::Migration),
