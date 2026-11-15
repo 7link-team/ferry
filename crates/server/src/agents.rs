@@ -87,7 +87,8 @@ pub struct Body {
     #[serde(default)]
     model: String,
     #[serde(default)]
-    host_id: Id,
+    /// Omitted (as by the Agent form) keeps the stored pin; see `validate`.
+    host_id: Option<Id>,
     owner_id: Id,
     #[serde(default)]
     cwd: String,
@@ -104,6 +105,10 @@ fn default_permission() -> String {
     "read_only".into()
 }
 impl Body {
+    /// The pinned host, 0 when none.
+    fn host(&self) -> Id {
+        self.host_id.unwrap_or_default()
+    }
     fn definition(&self) -> Result<String> {
         let mut value = serde_json::to_value(self).map_err(|_| invalid())?;
         value.as_object_mut().unwrap().remove("version");
@@ -165,6 +170,15 @@ impl Body {
                 .await?
                 .ok_or_else(invalid)?;
         }
+        // The Agent form never sends the legacy pin: an omitted host keeps the
+        // stored host, directory and permission. Only `unpin` removes a pin.
+        if self.host_id.is_none() {
+            if let Some(old) = old {
+                self.host_id = Some(old.host_id.into());
+                self.cwd = old.cwd.clone();
+                self.permission = old.permission.clone();
+            }
+        }
         let profile_id = Id::reference(&self.model_profile_id)?;
         self.model_profile_id = profile_id.to_string();
         if i64::from(profile_id) == 0 {
@@ -191,8 +205,8 @@ impl Body {
             };
             // A CLI model may still be pinned to one Runner host and directory;
             // otherwise each conversation chooses its host.
-            if profile.kind == "api" || i64::from(self.host_id) == 0 {
-                self.host_id = 0.into();
+            if profile.kind == "api" || i64::from(self.host()) == 0 {
+                self.host_id = Some(0.into());
                 self.cwd.clear();
                 self.permission = default_permission();
             }
@@ -230,7 +244,7 @@ impl Body {
         // Delegating an executable identity requires host administration, even
         // though later Agent use never grants an interactive terminal.
         let execution_changed = old.is_none_or(|o| {
-            o.host_id != i64::from(self.host_id)
+            o.host_id != i64::from(self.host())
                 || o.cwd != self.cwd
                 || o.runtime != self.runtime
                 || o.permission != self.permission
@@ -238,12 +252,12 @@ impl Body {
                 || o.visibility != self.visibility
                 || o.owner_id != i64::from(self.owner_id)
         });
-        let pinned = i64::from(self.host_id) != 0;
+        let pinned = i64::from(self.host()) != 0;
         if execution_changed && pinned {
             scope.require("hosts.update")?;
         }
         if pinned {
-            hosts::Entity::find_by_id(self.host_id)
+            hosts::Entity::find_by_id(self.host())
                 .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
                 .filter(hosts::Column::Connection.eq("runner"))
                 .one(conn)
@@ -280,7 +294,7 @@ impl Body {
             description: self.description.clone(),
             runtime: self.runtime.clone(),
             model: self.model.clone(),
-            host_id: self.host_id.into(),
+            host_id: self.host().into(),
             owner_id: self.owner_id.into(),
             cwd: self.cwd.clone(),
             system_prompt: self.system_prompt.clone(),

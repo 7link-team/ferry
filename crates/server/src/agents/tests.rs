@@ -237,6 +237,84 @@ async fn a_legacy_host_pin_is_shown_and_removed_with_host_administration_only() 
 }
 
 #[tokio::test]
+async fn saving_without_a_host_keeps_a_legacy_pin_until_it_is_removed() {
+    let (_dir, s) = setup().await;
+    let mut input = body();
+    input["permission"] = json!("on_request");
+    let (_, Json(created)) = create(State(s.clone()), admin(1), Json(parse(input)))
+        .await
+        .unwrap();
+    let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let current = || async {
+        detail(State(s.clone()), admin(1), Path(("1".into(), id)))
+            .await
+            .unwrap()
+            .0
+    };
+    let pinned = current().await;
+    // What the Agent form sends: no host, directory or permission.
+    let form = |row: &Value, name: &str| {
+        let mut sent = json!({});
+        for field in [
+            "name",
+            "role",
+            "description",
+            "platform_role_id",
+            "owner_id",
+            "model_profile_id",
+            "model",
+            "system_prompt",
+            "visibility",
+            "state",
+            "version",
+        ] {
+            sent[field] = row[field].clone();
+        }
+        sent["name"] = json!(name);
+        parse(sent)
+    };
+    update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id)),
+        Json(form(&pinned, "Renamed")),
+    )
+    .await
+    .unwrap();
+    let saved = current().await;
+    assert_eq!(saved["name"], "Renamed");
+    for field in ["host_id", "cwd", "permission"] {
+        assert_eq!(saved[field], pinned[field], "{field}");
+    }
+    // Only the explicit removal clears it.
+    unpin(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id)),
+        Query(Unpin {
+            version: saved["version"].as_i64().unwrap(),
+        }),
+    )
+    .await
+    .unwrap();
+    let unpinned = current().await;
+    assert_eq!(unpinned["host_id"], "0");
+    // An unpinned Agent saved from the form stays unpinned, with the default permission.
+    update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id)),
+        Json(form(&unpinned, "Again")),
+    )
+    .await
+    .unwrap();
+    let again = current().await;
+    assert_eq!(again["host_id"], "0");
+    assert_eq!(again["cwd"], "");
+    assert_eq!(again["permission"], "read_only");
+}
+
+#[tokio::test]
 async fn avatar_update_preserves_omitted_value_and_respects_workspace() {
     let (_dir, s) = setup().await;
     let mut input = body();

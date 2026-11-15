@@ -67,3 +67,22 @@ it("only shows the pin without host administration, and nothing for an unpinned 
   expect(host.textContent).toContain("Legacy");
   expect(host.textContent).not.toContain("固定主机");
 });
+
+it("saving the edit form keeps a legacy pin", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    if (init?.method === "PATCH" || init?.method === "PUT") bodies.push(JSON.parse(String(init.body)));
+    if (String(url).includes("/ai-models?"))
+      return { ok: true, status: 200, json: async () => ({ items: [{ id: "5", name: "Codex", models: [], default_model: "", state: "enabled" }], total: 1, page: 1, page_size: 200 }) } as Response;
+    return original(url, init);
+  });
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-agents/7/edit");
+  await render(["ai-agents.read", "ai-agents.update", "hosts.update", "ai-models.read"]);
+  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(bodies).toHaveLength(1);
+  // Either the pin is sent as stored, or omitted (the server then keeps it); never cleared.
+  for (const body of bodies) {
+    if ("host_id" in body) expect(body).toMatchObject({ host_id: "31", cwd: "/srv/work", permission: "read_only" });
+  }
+});
