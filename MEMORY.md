@@ -626,7 +626,7 @@ E2E-FULL-REPORT-01交付记录：生产场景测试及HTML/截图证据已交付
 | CONV-HOST-01 | 待验证 | 创建会话只创建，成员首条消息懒绑定；CLI模型“执行主机”有序列表(空=自动)；会话与流水线AI节点共用分配顺序(创建指定>Agent旧固定>模型列表>任一在线)，全失败逐主机列原因；故障迁移带Ferry历史+会话提示，固定目录不自动迁移给“改用其他主机”；会话头显示主机；Agent页显示旧固定主机可“取消固定”，保存Agent不再丢固定。4ccc189+a4e30b4，合并a947659已推main：全量server1002PASS、vitest785PASS。4291守护更新PID56304(备份pre-conv-host-20261115-225538，新增列hosts.timezone/detected_timezone/timezone_supported、ai_model_profiles.timezone/hosts，数据保留)；浏览器只读核对截图data/maintenance/conv-host/：会话头“执行主机 AI 洞察验收·临时Runner”、Agent固定主机+取消固定按钮、CLI模型执行主机/时区字段。未用真实Runner演练故障迁移。 |
 | NAV-HOSTS-01 | 待验证 | 一级“主机”已移入“维护”，位于“模型服务”下方(节点/凭据/标签/定时任务)，旧链接可用；a947659，4291浏览器确认。 |
 | NOTIFY-ECHO-01 | 待验证 | 用户要求通知地址回显：详情返回脱敏地址(查询值/长路径段仅留末4位)，有notifications.update者可“查看明文(记录审计)”(POST .../webhook-reveals,no-store)，留空保持原地址。ec5794d已推main，server38+vitest2新用例PASS；4291企业微信渠道显示…key=••••e5d4。可发送角色为空=不限(已答复)。 |
-| REL-080 | 进行中 | v0.8.0-alpha：含0aba2af默认模型、5ab1ead时区、ec5794d通知回显、a947659会话主机+菜单。版本已改，待main CI绿后打tag。 |
+| REL-080 | 已完成 | v0.8.0-alpha=123aa42(含0aba2af默认模型、5ab1ead时区、ec5794d通知回显、a947659会话主机+菜单、123aa42升级测试补时区字段)。首次main CI因test-upgrade未预期新增hosts时区字段失败→已修；首次tag run Windows runner服务作业偶发失败、未建Release，重推同commit tag后43750230861成功：Release 21资产、runner-update签名目录0.8.0-alpha、ghcr v0.8.0-alpha=latest(a5183e12…,amd64+arm64)。待用户服务器--upgrade；生产Runner需升级到0.8.0才支持时区。 |
 | WF-LEGACY-01 | 待处理 | 用户询问旧流水线是否丢失；4291确认demo空间原流水线23及3次执行完整保留。核对工作流→构建流水线入口/权限，提供原详情链接，不重建或覆盖数据。 |
 | DICT-STATE-01 | 待处理 | 用户明确要求：固定流程/不可随意维护的状态不放字典，清掉数据库记录与子项/初始化/展示读取；只保留可维护业务选项（环境/分类等）。前端状态字典读取已移除，后端清理迁移已补，待回归/更新4291。 |
 | TYPED-UI-01 | 待处理 | 字典与配置项按8092/zh-CN/sys/dicts/1001/edit参考：基本信息/值类型在前→类型约束→匹配类型的值编辑器（富文本/Monaco/图片文件等），控件联动、校验/保存/重开全验证。已用参考公开原型账号登录查看；不照搬原型源码。 |
