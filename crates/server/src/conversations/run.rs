@@ -1,11 +1,42 @@
 use super::*;
-use ferry_protocol::agent::{Binding, Event, Input, Outcome, Request};
+use ferry_protocol::agent::{Event, Input, Outcome, Request};
 use std::time::Duration;
 use tokio::{
     sync::{mpsc, watch},
     task::JoinSet,
 };
 const LEASE: i64 = 30_000;
+/// Longest admission, including choosing a host among several Runners.
+const ADMISSION: Duration = Duration::from_secs(390);
+
+/// Runs admission while keeping the turn's lease, which lasts only `LEASE`.
+/// Renewal runs beside the work, never inside it, so a transaction the work
+/// holds cannot block it. A requested stop is acted on right after admission.
+async fn renewing<T>(
+    s: &AppState,
+    row: &turns::Model,
+    owner: &str,
+    work: impl std::future::Future<Output = Result<T>>,
+) -> Result<T> {
+    let renew = {
+        let (s, row, owner) = (s.clone(), row.clone(), owner.to_owned());
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_millis((LEASE / 3) as u64));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            tick.tick().await;
+            loop {
+                tick.tick().await;
+                if heartbeat(&s, &row, &owner).await.is_err() {
+                    break;
+                }
+            }
+        })
+    };
+    let result = work.await;
+    renew.abort();
+    let _ = renew.await;
+    result
+}
 /// Standing guidance for every turn: a workflow the user asks for must fetch and
 /// process its own data, so it keeps working without the conversation.
 const WORKFLOW_RULES: &str = "<platform_workflow_rules>\nWhen the user asks you to build or change a workflow/pipeline: discover the built-in node types (core.trigger.manual, data.set, ferry.request, ai.agent.run, flow control) with GET /workflow-node-catalog?section=builtin; GET /workflow-node-catalog lists the integration nodes. Data must be fetched by workflow nodes at run time: use ferry.request (platform data, read-only) to read workspace data and ai.agent.run when AI analysis must produce structured JSON. Never query data in this conversation and copy the results into data.set fields or trigger inputs. Manual triggers declare only run parameters (IDs, date ranges). If no available node can do a step, tell the user instead of faking it with constants. When reporting, state what each node actually does at run time.\n</platform_workflow_rules>\n\n";
@@ -426,47 +457,36 @@ pub(super) async fn finish(
     tx.commit().await?;
     Ok(())
 }
-async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result<()> {
+pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result<()> {
     let Some((row, c, owner)) = claim(&s, id).await? else {
         return Ok(());
     };
     let prepare = async {
         let scope = actor(&s, &row, &c).await?;
-        let config: Configuration = serde_json::from_str(&c.config).map_err(|_| invalid())?;
-        let binding: Binding = serde_json::from_str(&c.binding).map_err(|_| invalid())?;
-        let host = crate::entities::hosts::Entity::find_by_id(config.host_id)
-            .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
-            .one(&s.db)
-            .await?
-            .ok_or_else(ApiError::missing)?;
-        if host.runner_key_hash != config.runner_key_hash || config.runner_key_hash.is_empty() {
-            return Err(error(StatusCode::CONFLICT, "conversations.bindingChanged"));
-        }
-        let channel = crate::hosts::remote::open(&s, &scope.workspace_id, &config.host_id).await?;
-        let probe = channel
-            .agent_probe(config.runtime, &config.cwd, Some(&binding))
-            .await?;
-        if !probe.platform_tools {
-            return Err(error(
-                StatusCode::CONFLICT,
-                "conversations.runnerUpgradeRequired",
-            ));
-        }
-        if probe.execution_user != binding.execution_user
-            || probe.canonical_directory.as_deref() != Some(&binding.canonical_directory)
-            || probe.execution_identity != binding.execution_identity
-            || probe.executable.as_deref() != Some(&binding.executable)
-        {
-            return Err(error(StatusCode::CONFLICT, "conversations.bindingChanged"));
-        }
+        let agent = available(&s.db, &scope, c.agent_id.into()).await?;
+        let stored: Configuration = serde_json::from_str(&c.config).map_err(|_| invalid())?;
         let provider =
-            crate::models::cli_provider(&s, scope.workspace_id, c.agent_id, config.runtime).await?;
+            crate::models::cli_provider(&s, scope.workspace_id, c.agent_id, stored.runtime).await?;
+        let custom_upstream = provider.is_some();
+        // A custom upstream replaces the CLI's own login for this execution.
+        let login_usable =
+            |authentication: &str| custom_upstream || stored.authentication_usable(authentication);
+        let placement::Placement {
+            config,
+            binding,
+            host,
+            channel,
+            fresh,
+        } = placement::place(&s, &scope, &row, &c, &agent, login_usable).await?;
+        // A new host or binding cannot resume the old native session; the
+        // conversation's history in Ferry is sent instead.
+        let native_session_id = if fresh {
+            String::new()
+        } else {
+            row.native_session_id.clone()
+        };
         let timezone =
             crate::models::cli_timezone(&s, scope.workspace_id, c.agent_id, &host).await?;
-        // A custom upstream replaces the CLI's own login for this execution.
-        if provider.is_none() && !config.authentication_usable(&probe.authentication) {
-            return Err(error(StatusCode::CONFLICT, "conversations.loginRequired"));
-        }
         let mut prompt = String::from(WORKFLOW_RULES);
         if !config.system_prompt.is_empty() {
             prompt.push_str(&config.system_prompt);
@@ -509,7 +529,7 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
         if !context.is_empty() {
             prompt = format!("{context}{prompt}");
         }
-        if row.native_session_id.is_empty() && !groups::is_group(&s.db, c.id.into()).await? {
+        if native_session_id.is_empty() && !groups::is_group(&s.db, c.id.into()).await? {
             let history = messages::recovery_context(
                 &s.db,
                 &row,
@@ -528,8 +548,7 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
                 cwd: config.cwd,
                 prompt,
                 model: (!config.model.is_empty()).then_some(config.model),
-                native_session_id: (!row.native_session_id.is_empty())
-                    .then_some(row.native_session_id.clone()),
+                native_session_id: (!native_session_id.is_empty()).then_some(native_session_id),
                 permission: config.permission,
                 timeout_seconds: 3600,
                 platform_tools: true,
@@ -538,8 +557,9 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
             },
         ))
     };
-    // Keep admission bounded so it cannot dispatch after its lease expires.
-    let prepared = tokio::time::timeout(Duration::from_secs(20), prepare).await;
+    // Admission is bounded; choosing a host may probe several Runners, so the
+    // lease is renewed meanwhile and it cannot dispatch after losing it.
+    let prepared = tokio::time::timeout(ADMISSION, renewing(&s, &row, &owner, prepare)).await;
     let (channel, request) = match prepared {
         Ok(Ok(value)) => value,
         Ok(Err(e)) => {

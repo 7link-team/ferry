@@ -19,6 +19,7 @@ import {
 } from "../../shared/forms/ai-provider-fields";
 import { matchPreset, ProviderPresetPicker, type ProviderPreset } from "./ProviderPresets";
 import { CLI_TOOLS, CliConnection, cliToolOptions } from "./CliConnection";
+import { ModelHosts } from "./ModelHosts";
 
 const key = (s: string) => `models:${s}`;
 const t = (s: string) => commonText(key(s));
@@ -348,6 +349,7 @@ export function modelsForms({
         state: "enabled",
         cli_options: null,
         timezone: "",
+        hosts: [],
       },
       sections: [
         {
@@ -395,6 +397,7 @@ export function modelsForms({
                         models: [],
                         default_model: "",
                         timezone: "",
+                        hosts: [],
                       })
                     }
                   />
@@ -435,6 +438,24 @@ export function modelsForms({
                   readOnly={readOnly}
                   onChange={(timezone) => onPatch({ timezone })}
                   onValidityChange={onValidityChange}
+                />
+              ),
+            },
+            {
+              key: "hosts",
+              label: "Execution hosts",
+              labelKey: key("executionHosts"),
+              type: "custom",
+              width: "full",
+              span: 2,
+              // Where the CLI runs; an API model runs on the server.
+              when: (r) => r.kind === "cli",
+              render: ({ workspace, draft, readOnly, onPatch }) => (
+                <ModelHosts
+                  workspace={workspace}
+                  value={draft.hosts ?? []}
+                  readOnly={readOnly}
+                  onChange={(hosts) => onPatch({ hosts })}
                 />
               ),
             },

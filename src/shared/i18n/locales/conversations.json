@@ -1237,5 +1237,29 @@
     "モデル",
     "모델",
     "Model"
+  ],
+  "executionHost": [
+    "Host",
+    "执行主机",
+    "執行主機",
+    "実行ホスト",
+    "실행 호스트",
+    "Hos"
+  ],
+  "hostPending": [
+    "assigned at the first message",
+    "待分配",
+    "待分配",
+    "最初のメッセージで割り当て",
+    "첫 메시지에서 배정",
+    "ditetapkan pada mesej pertama"
+  ],
+  "useAnotherHost": [
+    "Use another host",
+    "改用其他主机",
+    "改用其他主機",
+    "別のホストを使う",
+    "다른 호스트 사용",
+    "Guna hos lain"
   ]
 }

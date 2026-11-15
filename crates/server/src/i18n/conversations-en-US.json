@@ -20,5 +20,8 @@
   "conversations.apiPending": "API conversation execution is not available yet.",
   "conversations.noRunner": "No available Runner can execute this model.",
   "conversations.cliPermissionUnsupported": "This CLI supports read-only conversations only. Choose read-only access.",
-  "conversations.runnerUpgradeRequired": "Upgrade the host Runner to enable platform tools before starting this conversation."
+  "conversations.runnerUpgradeRequired": "Upgrade the host Runner to enable platform tools before starting this conversation.",
+  "conversations.hostSwitched": "Switched execution from host {from} to {to}. The CLI session was rebuilt from this conversation's history in Ferry; files in {from}'s working directory were not carried over.",
+  "conversations.hostReleased": "Released host {host}. The next message is assigned to another host; the CLI session will be rebuilt from this conversation's history in Ferry, and files in {host}'s working directory are not carried over.",
+  "conversations.hostUnavailable": "Execution host {host} cannot run this now: {reason}. This conversation has a fixed working directory, so it does not move to another host by itself; choose \"Use another host\" to switch."
 }

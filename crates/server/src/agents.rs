@@ -28,6 +28,10 @@ pub fn routes() -> Router<AppState> {
         .route("/{workspace}/ai-agents", get(list).post(create))
         .route("/{workspace}/ai-agents/{id}", get(detail).patch(update))
         .route("/{workspace}/ai-agents/{id}/probes", post(probe))
+        .route(
+            "/{workspace}/ai-agents/{id}/host-pin",
+            axum::routing::delete(unpin),
+        )
         .route("/{workspace}/ai-agents/{id}/revisions", get(revisions))
 }
 const SPEC: Spec = Spec {
@@ -541,6 +545,38 @@ pub async fn update(
     .await?;
     tx.commit().await?;
     Ok(Json(json!({"ok":true})))
+}
+#[derive(Deserialize)]
+pub struct Unpin {
+    version: i64,
+}
+/// Removes a host and directory pinned on an Agent before hosts were chosen
+/// per model: it then runs on the model's hosts. Other settings are kept; the
+/// directory permission goes with the pin, as for any unpinned Agent. Pins are
+/// no longer created, only shown and removed.
+async fn unpin(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((workspace, id)): Path<(String, Id)>,
+    Query(query): Query<Unpin>,
+) -> Result<Json<Value>> {
+    scope.require("ai-agents.update")?;
+    // Changing where an Agent executes is host administration, as pinning was.
+    scope.require("hosts.update")?;
+    let old = find(&s.db, &scope, id).await?;
+    if old.version != query.version {
+        return Err(changed());
+    }
+    if old.host_id == 0 && old.cwd.is_empty() {
+        return Ok(Json(json!({"ok":true})));
+    }
+    let role = crate::platform_tools::role_id(&s.db, &old).await?;
+    let mut value = json(old);
+    value["platform_role_id"] = json!(role);
+    value["host_id"] = json!(Id::from(0));
+    value["cwd"] = json!("");
+    let body: Body = serde_json::from_value(value).map_err(|_| invalid())?;
+    update(State(s), scope, Path((workspace, id)), Json(body)).await
 }
 async fn revisions(
     State(s): State<AppState>,

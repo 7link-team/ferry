@@ -72,8 +72,6 @@ pub(super) async fn prepare(
     body: &Create,
     first: &ai_agents::Model,
     config: &Configuration,
-    binding: &ferry_protocol::agent::Binding,
-    conversation_id: Id,
 ) -> Result<Vec<agents::Model>> {
     if body.kind != "group" {
         if !body.agent_ids.is_empty() || !body.member_ids.is_empty() {
@@ -98,10 +96,11 @@ pub(super) async fn prepare(
                 "conversations.groupAgentPrivate",
             ));
         }
-        let (config, binding) = if agent.id == first.id {
-            (config.clone(), binding.clone())
+        // Each Agent gets its own host at its first reply; none is chosen here.
+        let config = if agent.id == first.id {
+            config.clone()
         } else {
-            prepare_execution(s, scope, &agent, body, conversation_id).await?
+            prepare_execution(s, scope, &agent, body).await?
         };
         result.push(agents::Model {
             id: s.next_id()?.into(),
@@ -110,7 +109,7 @@ pub(super) async fn prepare(
             agent_id: agent.id,
             revision_id: agent.revision_id,
             config: serde_json::to_string(&config).unwrap(),
-            binding: serde_json::to_string(&binding).unwrap(),
+            binding: super::placement::UNBOUND.into(),
             native_session_id: String::new(),
             state: "active".into(),
         });
@@ -224,17 +223,28 @@ pub(super) async fn detail(
             .and_then(|v| serde_json::from_str::<Value>(v).ok())
     };
     value["agent_avatar"] = json!(avatar(c.agent_id));
-    value["agents"] = json!(snapshots.iter().filter(|a| a.state != "removed").map(|a| {
+    let mut listed = vec![];
+    for a in snapshots.iter().filter(|a| a.state != "removed") {
         let config: Value = serde_json::from_str(&a.config).unwrap_or(Value::Null);
-        json!({"id":Id::from(a.agent_id),"name":config["name"],"state":a.state,
-            "runtime":config["runtime"],"model":config["model"],"revision_id":Id::from(a.revision_id),"avatar":avatar(a.agent_id)})
-    }).collect::<Vec<_>>());
+        let host = super::placement::host_view(conn, &a.config, &a.binding).await?;
+        listed.push(json!({"id":Id::from(a.agent_id),"name":config["name"],"state":a.state,
+            "runtime":config["runtime"],"model":config["model"],"revision_id":Id::from(a.revision_id),"avatar":avatar(a.agent_id),"host":host}));
+    }
+    value["agents"] = json!(listed);
     let chat = messages::Entity::find()
         .filter(messages::Column::ConversationId.eq(c.id))
         .order_by_asc(messages::Column::Id)
         .all(conn)
         .await?;
-    value["messages"]=json!(chat.iter().map(|m|json!({"id":Id::from(m.id),"owner_id":Id::from(m.owner_id),"role":m.role,"turn_id":m.turn_id.map(Id::from),"reply_to":m.reply_to.map(Id::from),"agent_id":Id::from(m.agent_id),"sender_name":m.sender_name,"prompt":m.prompt,"attachments":serde_json::from_str::<Value>(&m.attachments).unwrap_or(json!([])),"targets":serde_json::from_str::<Value>(&m.targets).unwrap_or(json!([])),"created_at":m.created_at})).collect::<Vec<_>>());
+    // Platform notices are stored as messages and read in the reader's language.
+    let text = |m: &messages::Model| {
+        if m.role == "notice" {
+            crate::i18n::render_stored(crate::i18n::current_locale(), &m.prompt)
+        } else {
+            m.prompt.clone()
+        }
+    };
+    value["messages"]=json!(chat.iter().map(|m|json!({"id":Id::from(m.id),"owner_id":Id::from(m.owner_id),"role":m.role,"turn_id":m.turn_id.map(Id::from),"reply_to":m.reply_to.map(Id::from),"agent_id":Id::from(m.agent_id),"sender_name":m.sender_name,"prompt":text(m),"attachments":serde_json::from_str::<Value>(&m.attachments).unwrap_or(json!([])),"targets":serde_json::from_str::<Value>(&m.targets).unwrap_or(json!([])),"created_at":m.created_at})).collect::<Vec<_>>());
     let links = links::Entity::find()
         .filter(links::Column::ConversationId.eq(c.id))
         .all(conn)

@@ -17,7 +17,7 @@ export { useQueryValue,useScrollSync } from "../shared/routing/url-state";
 import { resourceName } from "../shared/api/resource";
 import { currentLocale,localizedPath,pathLocale,stripLocalePrefix } from "../shared/i18n/locale";
 import type { Route } from "../shared/routing/types";
-import { nav } from "./nav";
+import { movedGroups, nav } from "./nav";
 import { commitRoute } from "../shared/api/progress";
 
 export type { Route } from "../shared/routing/types";
@@ -71,17 +71,20 @@ function parseRoute(pathname: string, search: string): Route {
   }
   if (group === "workflow" && item === "credentials") return {workspace,group:"ops",item:"ai-models",mode:third === "new" ? "new" : "list"};
   const fallback = nav[0]!;
-  const groupKey = group === "build" && movedRepositoryItems.has(item) ? "repository" : group === "build" ? "workflow" : group === "infrastructure" ? "host" : group === "monitoring" ? "deploy" : group;
+  const legacyGroup = group === "build" && movedRepositoryItems.has(item) ? "repository" : group === "build" ? "workflow" : group === "infrastructure" ? "host" : group === "monitoring" ? "deploy" : group;
+  const hostItems = legacyGroup === "host";
+  const groupKey = movedGroups[legacyGroup] ?? legacyGroup;
   const resolved = nav.find((g) => g.key === groupKey) ?? fallback;
   const legacyRepository = ["repository-auth", "api-tokens"].includes(item);
   const pipelineGroups = group === "build" && item === "pipelines" && third === "groups";
   const resolvedItem = groupKey === "deploy" && item === "overview" ? "overview" : pipelineGroups ? "pipeline-groups" : legacyRepository ? "repositories" :
-    resolved.key === "host" && item === "nodes" ? "hosts" :
+    hostItems && item === "nodes" ? "hosts" :
+    hostItems && !resolved.items.some((i) => i.key === item) ? "hosts" :
     resolved.items.find((i) => i.key === item)?.key ?? resolved.items[0]!.key;
   const detail = pipelineGroups ? fourth : third;
   const action = pipelineGroups ? fifth : fourth;
   const mode = legacyRepository ? "list" :
-    detail === "new" ? "new" : detail ? (resolved.key === "host" && resolvedItem === "hosts" && action === "workspace" ? "workspace" : action === "edit" ? "edit" : "view") : "list";
+    detail === "new" ? "new" : detail ? (resolvedItem === "hosts" && action === "workspace" ? "workspace" : action === "edit" ? "edit" : "view") : "list";
   return {
     workspace,
     group: resolved.key,
@@ -101,7 +104,7 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
   const params = new URLSearchParams(query ? "" : location.search);
   for (const [key, value] of Object.entries(query ?? {})) if (value) params.set(key, value);
   if (legacyHealth && r.id) params.set("tab", "health");
-  const groupKey = r.group === "build" && movedRepositoryItems.has(r.item) ? "repository" : r.group === "build" ? "workflow" : r.group === "monitoring" ? "deploy" : r.group;
+  const groupKey = r.group === "build" && movedRepositoryItems.has(r.item) ? "repository" : r.group === "build" ? "workflow" : r.group === "monitoring" ? "deploy" : movedGroups[r.group] ?? r.group;
   const item = nav.find(group => group.key === groupKey)?.items.find(item => item.key === r.item);
   for (const [key, value] of Object.entries(item?.params ?? {})) if (!query?.[key]) params.set(key, value);
   if (["_login","_register","_initialize"].includes(r.workspace)) return localizedPath(`/${r.workspace.slice(1)}`, r.locale ?? currentLocale());

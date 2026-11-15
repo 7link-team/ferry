@@ -64,7 +64,7 @@ export function App() {
     if (!identity) return;
     if (isPublicEntryPath() && !(route.workspace === "_initialize" && setupRequired && !deferredSetup)) {
       const target = safeLoginRedirect(new URLSearchParams(location.search).get("redirect"));
-      replacePath(target ?? href(identity.workspaces[0] ? {workspace:identity.workspaces[0].id,group:"host",item:"hosts",mode:"list"} : {workspace:identity.user.is_superadmin?"_platform":"_workspaces",group:"platform",item:"workspaces",mode:"list"}, {}));
+      replacePath(target ?? href(identity.workspaces[0] ? {workspace:identity.workspaces[0].id,group:"ops",item:"hosts",mode:"list"} : {workspace:identity.user.is_superadmin?"_platform":"_workspaces",group:"platform",item:"workspaces",mode:"list"}, {}));
       return;
     }
     const current = identity.workspaces.find(workspace => workspace.id === route.workspace)
@@ -132,11 +132,11 @@ export function App() {
   if (!identity?.workspaces) return <><AppearanceActions floating /><Entry onReady={reload} error={error} /></>;
   if (setupRequired && !deferredSetup)
     return <><AppearanceActions floating /><Entry signedIn initialize onReady={() => { setDeferredSetup(true); reload(); }} error={error} /></>;
-  if (route.workspace === "_workspaces") return <div className="h-full overflow-auto"><AppearanceActions floating />{(identity.workspaces.length > 0 || identity.user.is_superadmin) && <Button className="absolute top-4 left-4" variant="outline" onClick={() => navigate(identity.workspaces.length ? {workspace:identity.workspaces[0]!.id,group:"host",item:"hosts",mode:"list"} : {workspace:"_platform",group:"platform",item:"workspaces",mode:"list"}, {})}>{commonText("shell.backWorkspace")}</Button>}<Entry signedIn onReady={reload} error={error} /></div>;
+  if (route.workspace === "_workspaces") return <div className="h-full overflow-auto"><AppearanceActions floating />{(identity.workspaces.length > 0 || identity.user.is_superadmin) && <Button className="absolute top-4 left-4" variant="outline" onClick={() => navigate(identity.workspaces.length ? {workspace:identity.workspaces[0]!.id,group:"ops",item:"hosts",mode:"list"} : {workspace:"_platform",group:"platform",item:"workspaces",mode:"list"}, {})}>{commonText("shell.backWorkspace")}</Button>}<Entry signedIn onReady={reload} error={error} /></div>;
   if (route.workspace === "_account") return <Account identity={identity} reload={reload} headerActions={<WorkspaceHeaderActions identity={identity} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={signedOut} />} />;
   if (route.workspace === "_platform" || (identity.user.is_superadmin && !route.workspace))
     return <Platform identity={identity} reload={reload} onSignedOut={signedOut} headerActions={<WorkspaceHeaderActions identity={identity} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={signedOut} />} />;
-  if (route.group === "host" && route.item === "hosts" && route.mode === "workspace" && route.id) {
+  if (route.group === "ops" && route.item === "hosts" && route.mode === "workspace" && route.id) {
     const current = identity.workspaces.find(workspace => workspace.id === route.workspace)
       ?? identity.workspaces.find(workspace => workspace.slug === route.workspace);
     if (current) return <HostWorkspace key={`${route.workspace}/${route.id}`} workspace={current.id} hostId={route.id} permissions={new Set(current.permissions)} headerActions={<AppearanceActions />} />;
@@ -208,7 +208,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
   }, [forms, route.group, route.item]);
 
   // Nothing to show yet: send the user through workspace creation/joining.
-  if (!current) return <><AppearanceActions floating />{identity.workspaces.length ? <UnavailablePage onBack={()=>navigate({workspace:identity.workspaces[0]!.id,group:"host",item:"hosts",mode:"list"}, {})} /> : <Entry onReady={reload} error="" signedIn />}</>;
+  if (!current) return <><AppearanceActions floating />{identity.workspaces.length ? <UnavailablePage onBack={()=>navigate({workspace:identity.workspaces[0]!.id,group:"ops",item:"hosts",mode:"list"}, {})} /> : <Entry onReady={reload} error="" signedIn />}</>;
 
   const group = findGroup(route.group)!;
   const item = findItem(route.group, route.item)!;

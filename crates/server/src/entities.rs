@@ -70,6 +70,8 @@ pub mod ai_model_profiles {
         pub state: String,
         #[sea_orm(column_type = "Text", nullable)]
         pub cli_options: Option<String>,
+        /// Ordered Runner host ids (JSON); empty = any ready Runner.
+        pub hosts: String,
         /// IANA zone a CLI model's executions run in; empty follows the runner.
         pub timezone: String,
         pub revision_id: i64,

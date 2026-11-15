@@ -1,4 +1,5 @@
 mod accounts;
+mod agent_hosts;
 mod agents;
 mod avatar;
 mod conversations;

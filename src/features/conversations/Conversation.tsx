@@ -49,12 +49,19 @@ interface Turn {
   prompt: string;
   attachments: Attachment[];
   error: string;
+  /** Identity of the error message, for the action that answers it. */
+  error_key?: string | null;
   usage: { input_tokens: number; output_tokens: number } | null;
   decisions: Record<string, Decision>;
 }
+interface BoundHost {
+  id: string;
+  name: string;
+}
 interface ChatMessage {
   id: string;
-  role: "user" | "assistant";
+  /** "notice" lines come from the platform itself, e.g. a host switch. */
+  role: "user" | "assistant" | "notice";
   turn_id: string | null;
   reply_to: string | null;
   agent_id: string;
@@ -78,14 +85,16 @@ interface ConversationData {
   agent_id: string;
   agent_avatar?: AvatarValue;
   members: { id: string; name: string; avatar?: AvatarValue }[];
-  agents: { id: string; name: string; state: string; avatar?: AvatarValue; runtime?: string; model?: string; revision_id?: string }[];
+  agents: { id: string; name: string; state: string; avatar?: AvatarValue; runtime?: string; model?: string; revision_id?: string; host?: BoundHost | null }[];
   messages: ChatMessage[];
   id: string;
   title: string;
   state: string;
   revision_id: string;
   config: { name: string; runtime: string; model: string; cwd: string; appearance?: ChatAppearance };
-  binding: { execution_user: string; canonical_directory: string };
+  /** Null until the first message chooses a host. */
+  binding: { execution_user: string; canonical_directory: string } | null;
+  host?: BoundHost | null;
   turns: Turn[];
   version: number;
   owner_id: string;
@@ -567,8 +576,8 @@ export function Conversation({
               <h2 className="truncate text-base font-semibold">{data.title}</h2>
               <p className="mt-0.5 truncate text-xs text-muted-foreground">
                 {data.kind === "group"
-                  ? `${t("group")} · ${data.members.length + data.agents.length} ${t("participants")}`
-                  : `${data.config.name} · ${data.config.model || t("nativeModel")}`}
+                  ? `${t("group")} · ${data.members.length + data.agents.length} ${t("participants")}${data.agents.length ? ` · ${t("executionHost")} ${data.agents.map(agent => `${agent.name}: ${agent.host?.name || t("hostPending")}`).join(", ")}` : ""}`
+                  : `${data.config.name} · ${data.config.model || t("nativeModel")} · ${t("executionHost")} ${data.host?.name || t("hostPending")}`}
               </p>
             </div>
           </button>
@@ -674,7 +683,7 @@ export function Conversation({
       <ConversationMembers open={infoOpen} onOpenChange={setInfoOpen} selected={selectedMember} onSelect={setSelectedMember}
         title={data.title} workspace={workspace} permissions={permissions} members={[
           ...data.members.map(member => ({ ...member, kind: "user" as const })),
-          ...(data.kind === "group" ? data.agents : [{ id: data.agent_id, name: data.config.name, avatar: data.agent_avatar, runtime: data.config.runtime, model: data.config.model, revision_id: data.revision_id }]).map(agent => ({ ...agent, kind: "agent" as const })),
+          ...(data.kind === "group" ? data.agents : [{ id: data.agent_id, name: data.config.name, avatar: data.agent_avatar, runtime: data.config.runtime, model: data.config.model, revision_id: data.revision_id, host: data.host }]).map(agent => ({ ...agent, host: agent.host?.name || t("hostPending"), kind: "agent" as const })),
         ] satisfies ConversationMember[]} turns={data.turns} connected={!connection} ownerId={data.owner_id} viewerId={data.viewer_id} primaryAgentId={data.agent_id}
         onOpenConversation={onOpenConversation}
         manage={data.kind === "group" && data.can_manage ? <Button variant="outline" disabled={busy || data.turns.some(turn => active(turn.state))} onClick={() => { setInfoOpen(false); void openMembers(); }}>{t("manageMembers")}</Button> : null}
@@ -690,9 +699,11 @@ export function Conversation({
                 </dd>
                 <dt>{t("revision")}</dt>
                 <dd className="break-all">{data.revision_id}</dd>
+                <dt>{t("executionHost")}</dt>
+                <dd className="break-all">{data.host?.name || t("hostPending")}</dd>
                 <dt>{t("directory")}</dt>
                 <dd className="break-all">
-                  {data.binding.canonical_directory}
+                  {data.binding?.canonical_directory || "—"}
                 </dd>
               </dl>
             </details>
@@ -765,6 +776,13 @@ export function Conversation({
             .map((entry, index, entries) => {
               const m = entry.message;
               const turn = entry.turn;
+              // A platform notice (e.g. the execution host changed) is a line, not a message bubble.
+              if (m?.role === "notice")
+                return (
+                  <p key={m.id} role="note" data-conversation-notice className="mx-auto my-2 max-w-xl rounded-2xl border bg-card/90 px-3 py-1.5 text-center text-xs text-muted-foreground">
+                    {m.prompt}
+                  </p>
+                );
               const own = m?.role === "user" && m.owner_id === data.viewer_id;
               const name =
                 m?.role === "user"
@@ -1036,6 +1054,12 @@ export function Conversation({
                                 <p role="status" className="break-words text-sm text-destructive">
                                   {turn.error || t(turn.state)}
                                 </p>
+                                {/* A conversation in a chosen directory does not move by itself; the user may. */}
+                                {turn.error_key === "conversations.hostUnavailable" && permissions.has("conversations.run") && turn.id === (data.kind === "group" ? data.turns.filter(item => item.agent_id === turn.agent_id).at(-1)?.id : lastTurn?.id) && (
+                                  <Button type="button" variant="outline" size="sm" className="min-h-11" disabled={busy || data.turns.some(item => active(item.state))} onClick={() => void act("/host-releases", data.kind === "group" ? { agent_id: turn.agent_id } : {})}>
+                                    {t("useAnotherHost")}
+                                  </Button>
+                                )}
                                 {data.kind === "private" && runnable && retryable && turn.id === lastTurn?.id && (
                                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                                     <Button type="button" variant="ghost" size="sm" className="min-h-11 px-2 text-foreground" disabled={busy || !!current} onClick={() => void send(turn)}>

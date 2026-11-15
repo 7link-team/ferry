@@ -20,5 +20,8 @@
   "conversations.apiPending": "API 会話の実行はまだ利用できません。",
   "conversations.noRunner": "このモデルを実行できる Runner がありません。",
   "conversations.cliPermissionUnsupported": "このCLIは読み取り専用の会話にのみ対応しています。",
-  "conversations.runnerUpgradeRequired": "プラットフォームツールを有効にするには、ホストの Runner を更新してください。"
+  "conversations.runnerUpgradeRequired": "プラットフォームツールを有効にするには、ホストの Runner を更新してください。",
+  "conversations.hostSwitched": "実行をホスト {from} から {to} に切り替えました。CLI セッションは Ferry の会話履歴から再構築されました。{from} の作業ディレクトリのファイルは引き継がれません。",
+  "conversations.hostReleased": "ホスト {host} の割り当てを解除しました。次のメッセージは別のホストで実行され、CLI セッションは Ferry の会話履歴から再構築されます。{host} の作業ディレクトリのファイルは引き継がれません。",
+  "conversations.hostUnavailable": "実行ホスト {host} は現在実行できません：{reason}。この会話は作業ディレクトリが固定されているため自動ではホストを変更しません。「別のホストを使う」で切り替えてください。"
 }

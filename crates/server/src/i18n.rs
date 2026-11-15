@@ -967,7 +967,13 @@ mod tests {
                 // "Platform" and "item" also use the same spelling in Malay.
                 let language_neutral = matches!(
                     key.as_str(),
-                    "webhook.http" | "webhook.httpDetail" | "repository.monitor.notes"
+                    "webhook.http"
+                        | "webhook.httpDetail"
+                        | "repository.monitor.notes"
+                        // Compositions of other messages (a host list and its reasons).
+                        | "models.reasonError"
+                        | "models.hostReason"
+                        | "models.hostReasonList"
                 ) || (Locale::ALL[index] == Locale::MsMy
                     && matches!(
                         key.as_str(),

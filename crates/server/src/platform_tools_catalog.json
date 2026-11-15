@@ -75,6 +75,23 @@
     "permission": "ai-agents.update"
   },
   {
+    "path": "/ai-agents/{id}/host-pin",
+    "method": "DELETE",
+    "handler": "unpin",
+    "source": "crates/server/src/agents.rs",
+    "signature": "async fn unpin(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((workspace, id)): Path<(String, Id)>,\n    Query(query): Query<Unpin>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Unpin {\n    version: i64,\n}"
+    ],
+    "permission_checks": [
+      "ai-agents.read",
+      "ai-agents.update",
+      "hosts.update"
+    ],
+    "documentation": "Removes a host and directory pinned on an Agent before hosts were chosen\nper model: it then runs on the model's hosts. Other settings are kept; the\ndirectory permission goes with the pin, as for any unpinned Agent. Pins are\nno longer created, only shown and removed.",
+    "permission": "ai-agents.update"
+  },
+  {
     "path": "/ai-agents/{id}/probes",
     "method": "POST",
     "handler": "probe",
@@ -143,7 +160,7 @@
     "source": "crates/server/src/models.rs",
     "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n    /// CLI-only IANA zone its executions run in; empty follows the runner.\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    timezone: String,\n}"
+      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n    /// CLI-only IANA zone its executions run in; empty follows the runner.\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    timezone: String,\n    /// CLI-only: Runner hosts to use, first preferred; empty = any ready Runner.\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    hosts: Vec<Id>,\n}"
     ],
     "permission_checks": [
       "ai-models.create",
@@ -158,7 +175,7 @@
     "signature": "async fn discover(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Discovery>,\n) -> Result<Json<Value>>",
     "definitions": [
       "struct Discovery {\n    #[serde(default)]\n    provider_id: Id,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    host_id: Id,\n    #[serde(default)]\n    connection: Option<crate::workflows::ai::Body>,\n}",
-      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n    /// CLI-only IANA zone its executions run in; empty follows the runner.\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    timezone: String,\n}"
+      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n    /// CLI-only IANA zone its executions run in; empty follows the runner.\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    timezone: String,\n    /// CLI-only: Runner hosts to use, first preferred; empty = any ready Runner.\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    hosts: Vec<Id>,\n}"
     ],
     "permission_checks": [
       "ai-agents.probe",
@@ -188,7 +205,7 @@
     "source": "crates/server/src/models.rs",
     "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Body>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n    /// CLI-only IANA zone its executions run in; empty follows the runner.\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    timezone: String,\n}"
+      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n    /// CLI-only IANA zone its executions run in; empty follows the runner.\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    timezone: String,\n    /// CLI-only: Runner hosts to use, first preferred; empty = any ready Runner.\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    hosts: Vec<Id>,\n}"
     ],
     "permission_checks": [
       "ai-models.create",
@@ -975,6 +992,21 @@
       "struct Download {\n    #[serde(default)]\n    download: bool,\n}"
     ],
     "permission_checks": []
+  },
+  {
+    "path": "/conversations/{id}/host-releases",
+    "method": "POST",
+    "handler": "placement::rebind",
+    "source": "crates/server/src/conversations.rs",
+    "signature": "async fn rebind(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Rebind>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Rebind {\n    /// The room Agent to move; omitted for a private conversation.\n    #[serde(default)]\n    agent_id: Option<Id>,\n}"
+    ],
+    "permission_checks": [
+      "conversations.run"
+    ],
+    "documentation": "Releases the current host so the next message runs on another one, in a\nRunner-managed directory there (a chosen directory's files stay behind).",
+    "permission": "conversations.run"
   },
   {
     "path": "/conversations/{id}/members",

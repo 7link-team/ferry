@@ -303,7 +303,10 @@ it("opens a preview tunnel detail by direct link under hosts", async () => {
   await act(async () => root.render(<App />));
   expect(host.querySelector('nav[aria-label="主机页面"]')).toBeNull();
   expect(host.querySelector("h1")?.textContent).toBe("预览穿透");
-  expect(host.querySelector('[aria-current="page"]')?.textContent).toBe("主机");
+  // Hosts live under maintenance: the module and the hosts entry are both current.
+  const current = [...host.querySelectorAll('[aria-current="page"]')].map(item => item.textContent);
+  expect(current[0]).toBe("维护");
+  expect(current).toContain("节点");
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url) === "/api/workspaces/2/holes/9")).toBe(true);
 });
 
@@ -455,7 +458,7 @@ it("scopes credential menus, lists and create payloads to the current module", a
   for (const scope of ["host", "build", "deploy"] as const) {
     history.replaceState({}, "", `/zh-CN/workspaces/2/credentials?scope=${scope}`);
     await act(async () => { window.dispatchEvent(new PopStateEvent("popstate")); root.render(<App />); });
-    const moduleName = { host: "主机", build: "仓库", deploy: "应用" }[scope];
+    const moduleName = { host: "维护", build: "仓库", deploy: "应用" }[scope];
     const credentialLink = host.querySelector(`nav[aria-label="${moduleName}"] a[aria-current="page"]`);
     expect(credentialLink?.textContent).toBe("凭据");
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/credentials?") && new URL(String(url), location.origin).searchParams.get("scope") === scope)).toBe(true);

@@ -567,7 +567,7 @@ pub(super) async fn execute_with(
         return Err(invalid("workflow.agentPrompt", "/params/prompt".into()));
     }
     let scope = super::integration::execution_scope(s, run).await?;
-    let (_, resolved) = usable(
+    let (agent, resolved) = usable(
         &s.db,
         &scope,
         agent_id(params, "/params/agent_id")?,
@@ -581,39 +581,92 @@ pub(super) async fn execute_with(
         items,
         &params["output_schema"],
     )?;
-    // An explicit node (or workflow default) target wins over the Agent's own host.
-    let target = host::target(node)
-        .or_else(|| (resolved.host_id > 0).then_some((resolved.host_id, false)))
-        .ok_or_else(|| invalid("workflow.agentHostRequired", "/settings/target_ref".into()))?;
     let deadline = Instant::now() + limits.timeout;
     let node_run = (node_run > 0).then_some(node_run);
     let paired: Vec<Paired> = items
         .iter()
         .flat_map(|item| item.paired.iter().cloned())
         .collect();
-    host::on_host(s, run, node, target, |row, lease| async move {
-        let object = on_runner(
-            s,
-            run,
-            node_run,
-            &resolved,
-            &config,
-            row,
-            lease,
-            prompt,
-            &validator,
-            max_calls,
-            deadline,
-            limits.timeout,
-        )
-        .await?;
-        Ok(vec![Item {
+    let attempt = |target: (i64, bool)| {
+        let prompt = prompt.clone();
+        let (resolved, config, validator) = (&resolved, &config, &validator);
+        host::on_host(s, run, node, target, move |row, lease| async move {
+            on_runner(
+                s,
+                run,
+                node_run,
+                resolved,
+                config,
+                row,
+                lease,
+                prompt,
+                validator,
+                max_calls,
+                deadline,
+                limits.timeout,
+            )
+            .await
+        })
+    };
+    let item = |object| {
+        vec![Item {
             json: object,
             binary: Default::default(),
-            paired,
-        }])
-    })
-    .await
+            paired: paired.clone(),
+        }]
+    };
+    // An explicit node (or workflow default) target is used as is.
+    if let Some(target) = host::target(node) {
+        return match attempt(target).await? {
+            OnHost::Done(object) => Ok(item(object)),
+            OnHost::Unusable(error) => Err(error),
+        };
+    }
+    // Otherwise the same hosts, in the same order, a conversation would use.
+    let cli = resolved.runtime.clone();
+    let mut reasons = crate::agent_hosts::Reasons::default();
+    let mut last = None;
+    for row in
+        crate::agent_hosts::candidates(&s.db, Id::from(run.workspace_id), None, &agent, &[]).await?
+    {
+        if row.state != "online" {
+            reasons.push(&row, Message::new("models.reasonOffline"));
+            continue;
+        }
+        match attempt((row.id, false)).await? {
+            OnHost::Done(object) => return Ok(item(object)),
+            OnHost::Unusable(error) => {
+                reasons.push(&row, unusable_reason(&error, &cli));
+                last = Some(error);
+            }
+        }
+    }
+    // One host tried: its own error already names the host and the CLI.
+    match last {
+        Some(error) if reasons.len() == 1 => Err(error),
+        _ => Err(reasons.into_error()),
+    }
+}
+
+/// What one candidate host did with the node.
+enum OnHost {
+    Done(Map<String, Value>),
+    /// The host cannot run this CLI (offline, missing, not signed in...); the
+    /// next candidate is tried. Failures after the CLI started are errors.
+    Unusable(ApiError),
+}
+
+/// The host-list reason for a host that could not run the CLI.
+fn unusable_reason(error: &ApiError, cli: &str) -> Message {
+    use crate::agent_hosts::reason;
+    match error.2.as_ref().map(|message| message.key.as_str()) {
+        Some("workflow.agentNotRunner") => Message::new("models.reasonNotRunner"),
+        Some("workflow.agentDirectoryMissing") => Message::new("models.reasonDirectory"),
+        Some("workflow.agentCliMissing") => reason("models.reasonCliMissing", cli),
+        Some("workflow.agentRunnerUpgrade") => Message::new("models.reasonRunnerOld"),
+        Some("workflow.agentLoginRequired") => reason("models.reasonLogin", cli),
+        _ => crate::agent_hosts::reason_from(error),
+    }
 }
 
 fn runner_error(key: &'static str, host: &hosts::Model, cli: &str) -> ApiError {
@@ -639,44 +692,53 @@ async fn on_runner(
     max_calls: usize,
     deadline: Instant,
     timeout: Duration,
-) -> Result<Map<String, Value>> {
+) -> Result<OnHost> {
     // The resolved CLI (a model profile may select another one than the Agent row).
     let cli = agent.runtime.clone();
-    if row.connection != "runner" && !(cfg!(test) && row.connection == "fake") {
-        return Err(runner_error("workflow.agentNotRunner", &row, &cli));
+    let unusable = |key| Ok(OnHost::Unusable(runner_error(key, &row, &cli)));
+    if !crate::models::runner_connections().contains(&row.connection.as_str()) {
+        return unusable("workflow.agentNotRunner");
     }
     let channel =
-        crate::hosts::remote::open(s, &Id::from(run.workspace_id), &Id::from(row.id)).await?;
+        match crate::hosts::remote::open(s, &Id::from(run.workspace_id), &Id::from(row.id)).await {
+            Ok(channel) => channel,
+            Err(error) => return Ok(OnHost::Unusable(error)),
+        };
     // A managed workspace per workflow and Agent; keys are numeric IDs.
     let probe = if config.cwd.is_empty() {
         channel
             .agent_workspace(config.runtime, &format!("{}-{}", run.workflow_id, agent.id))
-            .await?
+            .await
     } else {
-        channel
-            .agent_probe(config.runtime, &config.cwd, None)
-            .await?
+        channel.agent_probe(config.runtime, &config.cwd, None).await
+    };
+    let probe = match probe {
+        Ok(probe) => probe,
+        Err(error) => return Ok(OnHost::Unusable(error)),
     };
     let Some(directory) = probe.canonical_directory.filter(|_| probe.directory_exists) else {
-        return Err(runner_error("workflow.agentDirectoryMissing", &row, &cli));
+        return unusable("workflow.agentDirectoryMissing");
     };
     let Some(executable) = probe.executable.filter(|_| probe.error.is_none()) else {
-        return Err(runner_error("workflow.agentCliMissing", &row, &cli));
+        return unusable("workflow.agentCliMissing");
     };
     if !probe.platform_tools
         || probe.execution_user.is_empty()
         || probe.execution_identity.is_empty()
     {
-        return Err(runner_error("workflow.agentRunnerUpgrade", &row, &cli));
+        return unusable("workflow.agentRunnerUpgrade");
     }
     let provider =
         crate::models::cli_provider(s, Id::from(run.workspace_id), agent.id, config.runtime)
             .await?;
     if provider.is_none() && !config.authentication_usable(&probe.authentication) {
-        return Err(runner_error("workflow.agentLoginRequired", &row, &cli));
+        return unusable("workflow.agentLoginRequired");
     }
     let timezone =
-        crate::models::cli_timezone(s, Id::from(run.workspace_id), agent.id, &row).await?;
+        match crate::models::cli_timezone(s, Id::from(run.workspace_id), agent.id, &row).await {
+            Ok(timezone) => timezone,
+            Err(error) => return Ok(OnHost::Unusable(error)),
+        };
     let binding = Binding {
         execution_user: probe.execution_user,
         execution_identity: probe.execution_identity,
@@ -772,7 +834,7 @@ async fn on_runner(
             .push("agent", format!("failed: {}", error.1).as_bytes()),
     }
     let _ = session.log.flush(s, node_run).await;
-    result
+    result.map(OnHost::Done)
 }
 
 #[cfg(test)]

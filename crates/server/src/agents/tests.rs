@@ -140,6 +140,7 @@ pub(crate) async fn setup() -> (tempfile::TempDir, AppState) {
                     tool_version: String::new(),
                     state: "enabled".into(),
                     cli_options: None,
+                    hosts: "[]".into(),
                     timezone: String::new(),
                     revision_id: 0,
                     version: 1,
@@ -175,6 +176,64 @@ fn body() -> Value {
 }
 fn parse(v: Value) -> Body {
     serde_json::from_value(v).unwrap()
+}
+
+#[tokio::test]
+async fn a_legacy_host_pin_is_shown_and_removed_with_host_administration_only() {
+    let (_dir, s) = setup().await;
+    let mut input = body();
+    input["permission"] = json!("on_request");
+    let (_, Json(created)) = create(State(s.clone()), admin(1), Json(parse(input)))
+        .await
+        .unwrap();
+    let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let Json(before) = detail(State(s.clone()), admin(1), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert_eq!(before["host_id"], "1");
+    assert_eq!(before["host_name"], "Host 1");
+    let version = before["version"].as_i64().unwrap();
+    let unpinning = |scope: Scope, version: i64| {
+        unpin(
+            State(s.clone()),
+            scope,
+            Path(("1".into(), id)),
+            Query(Unpin { version }),
+        )
+    };
+    let mut no_hosts = admin(1);
+    no_hosts.permissions.remove("hosts.update");
+    assert_eq!(
+        unpinning(no_hosts, version).await.unwrap_err().0,
+        StatusCode::FORBIDDEN
+    );
+    assert!(unpinning(admin(1), version - 1).await.is_err());
+    unpinning(admin(1), version).await.unwrap();
+    let Json(after) = detail(State(s.clone()), admin(1), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert_eq!(after["host_id"], "0");
+    assert_eq!(after["cwd"], "");
+    // Everything else is kept in a new revision; the permission belonged to the
+    // pinned directory and returns to the default, as for any unpinned Agent.
+    for field in [
+        "name",
+        "role",
+        "system_prompt",
+        "visibility",
+        "model_profile_id",
+    ] {
+        assert_eq!(after[field], before[field], "{field}");
+    }
+    assert_eq!(after["permission"], "read_only");
+    assert_ne!(after["revision_id"], before["revision_id"]);
+    // Removing it again changes nothing.
+    let version = after["version"].as_i64().unwrap();
+    unpinning(admin(1), version).await.unwrap();
+    let Json(again) = detail(State(s.clone()), admin(1), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert_eq!(again["revision_id"], after["revision_id"]);
 }
 
 #[tokio::test]
@@ -237,6 +296,7 @@ async fn model_profile_agents_need_no_host_and_resolve_only_the_selected_catalog
                 tool_version: String::new(),
                 state: state.into(),
                 cli_options: None,
+                hosts: "[]".into(),
                 timezone: String::new(),
                 revision_id: 0,
                 version: 1,

@@ -24,6 +24,7 @@ mod holes_sources;
 mod identity_avatars;
 mod login_guard;
 mod marketplace_platform;
+mod model_hosts;
 mod monitoring;
 mod notification_center;
 mod platform_monitor;
@@ -170,6 +171,8 @@ impl MigratorTrait for Migrator {
             Box::new(ai_model_cli_options::Migration),
             // Before agent_models: it reads every ai_model_profiles column.
             Box::new(runner_timezones::Migration),
+            // Also before agent_models, for the same reason.
+            Box::new(model_hosts::Migration),
             Box::new(chat_messages::Migration),
             Box::new(agent_models::Migration),
             Box::new(chat_interactions::Migration),

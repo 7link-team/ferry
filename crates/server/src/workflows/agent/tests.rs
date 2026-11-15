@@ -8,7 +8,9 @@ use crate::{
 };
 use axum::extract::State;
 use ferry_protocol::agent::Usage;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, sea_query::Expr};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, sea_query::Expr,
+};
 use std::sync::atomic::Ordering;
 
 fn schema() -> Value {
@@ -777,9 +779,23 @@ async fn no_host_and_oversized_prompts_fail_before_the_runner_is_used() {
         .exec(&fixture.s.db)
         .await
         .unwrap();
+    // Without a pinned host the model's hosts (here: any online Runner) are used.
+    let set_state = |state: &'static str| {
+        crate::entities::hosts::Entity::update_many()
+            .col_expr(crate::entities::hosts::Column::State, Expr::value(state))
+            .filter(crate::entities::hosts::Column::Id.eq(fixture.host))
+            .exec(&fixture.s.db)
+    };
+    set_state("offline").await.unwrap();
     assert_eq!(
         key(&fixture.execute().await.unwrap_err()),
-        "workflow.agentHostRequired"
+        "models.noRunner"
+    );
+    set_state("online").await.unwrap();
+    fixture.script(answer(r#"{"summary":"automatic"}"#));
+    assert_eq!(
+        fixture.execute().await.unwrap()[0].json["summary"],
+        "automatic"
     );
     // An explicit target is used instead.
     fixture.script(answer(r#"{"summary":"targeted"}"#));
@@ -818,5 +834,56 @@ async fn no_host_and_oversized_prompts_fail_before_the_runner_is_used() {
     .await
     .unwrap();
     assert!(none.is_empty());
-    assert_eq!(fixture.requests().len(), 1);
+    assert_eq!(fixture.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn model_hosts_are_tried_in_order_and_every_failure_is_named() {
+    let fixture = Fixture::new().await;
+    // A second Runner listed first on the model; the Agent is no longer pinned.
+    let first = i64::from(rand::random::<u32>()) + 1_000_000;
+    crate::entities::hosts::Entity::insert(
+        fake::host_row(1, first, "Preferred runner", "online").into_active_model(),
+    )
+    .exec(&fixture.s.db)
+    .await
+    .unwrap();
+    let preferred = fake::register(first);
+    ai_agents::Entity::update_many()
+        .col_expr(ai_agents::Column::HostId, Expr::value(0))
+        .filter(ai_agents::Column::Id.eq(fixture.agent.id))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    crate::entities::ai_model_profiles::Entity::update_many()
+        .col_expr(
+            crate::entities::ai_model_profiles::Column::Hosts,
+            Expr::value(json!([first.to_string(), fixture.host.to_string()]).to_string()),
+        )
+        .filter(crate::entities::ai_model_profiles::Column::Id.eq(fixture.agent.model_profile_id))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    // The preferred host cannot run the CLI, so the next one does.
+    let mut missing = fake::probe_answer(Runtime::Codex, "/w");
+    missing.executable = None;
+    *preferred.agent_probe.lock().unwrap() = Some(missing.clone());
+    fixture.script(answer(r#"{"summary":"second"}"#));
+    assert_eq!(
+        fixture.execute().await.unwrap()[0].json["summary"],
+        "second"
+    );
+    assert!(preferred.agent_requests.lock().unwrap().is_empty());
+    // Both failing: one error names each host and its reason, in order.
+    *fixture.fake.agent_probe.lock().unwrap() = Some(missing);
+    let error = fixture.execute().await.unwrap_err();
+    assert_eq!(key(&error), "models.noHost");
+    assert_eq!(super::super::run::failure_reason(&error), "agent_failed");
+    let text = crate::i18n::render(crate::i18n::Locale::EnUs, error.2.as_ref().unwrap());
+    let (a, b) = (
+        text.find("Preferred runner").unwrap(),
+        text.find("Build runner").unwrap(),
+    );
+    assert!(a < b, "{text}");
+    assert!(text.contains("codex"), "{text}");
 }
