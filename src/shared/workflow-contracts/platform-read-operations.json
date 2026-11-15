@@ -1,24 +1,188 @@
 [
   {
     "path": "/activity",
-    "permission": "activity.read"
+    "permission": "activity.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "created_at",
+          "-created_at"
+        ]
+      },
+      {
+        "name": "resource",
+        "kind": "filter"
+      },
+      {
+        "name": "action",
+        "kind": "filter"
+      },
+      {
+        "name": "actor_id",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/ai-agents",
-    "permission": "ai-agents.read"
+    "permission": "ai-agents.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "runtime",
+        "kind": "filter"
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      },
+      {
+        "name": "visibility",
+        "kind": "filter"
+      },
+      {
+        "name": "host_id",
+        "kind": "filter"
+      },
+      {
+        "name": "owner_id",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/ai-agents/{id}"
   },
   {
-    "path": "/ai-agents/{id}/revisions"
+    "path": "/ai-agents/{id}/revisions",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "runtime",
+        "kind": "filter"
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      },
+      {
+        "name": "visibility",
+        "kind": "filter"
+      },
+      {
+        "name": "host_id",
+        "kind": "filter"
+      },
+      {
+        "name": "owner_id",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/ai-calls"
   },
   {
     "path": "/ai-models",
-    "permission": "ai-models.read"
+    "permission": "ai-models.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "kind",
+        "kind": "filter"
+      },
+      {
+        "name": "runtime",
+        "kind": "filter"
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/ai-models/{id}"
@@ -29,7 +193,49 @@
   },
   {
     "path": "/alert-events",
-    "permission": "alerts.read"
+    "permission": "alerts.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "created_at",
+          "-created_at",
+          "triggered_at",
+          "-triggered_at",
+          "recovered_at",
+          "-recovered_at"
+        ]
+      },
+      {
+        "name": "rule_id",
+        "kind": "filter"
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      },
+      {
+        "name": "target_kind",
+        "kind": "filter"
+      },
+      {
+        "name": "target_ref",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/alert-events/{id}",
@@ -37,7 +243,43 @@
   },
   {
     "path": "/alert-rules",
-    "permission": "alerts.read"
+    "permission": "alerts.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at"
+        ]
+      },
+      {
+        "name": "target_kind",
+        "kind": "filter"
+      },
+      {
+        "name": "target_ref",
+        "kind": "filter"
+      },
+      {
+        "name": "metric",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/alert-rules/{id}",
@@ -45,7 +287,13 @@
   },
   {
     "path": "/app-templates",
-    "permission": "app-templates.read"
+    "permission": "app-templates.read",
+    "query": [
+      {
+        "name": "workflow_kind",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/app-templates/{id}",
@@ -53,10 +301,66 @@
   },
   {
     "path": "/application-health",
-    "permission": "alerts.read"
+    "permission": "alerts.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at"
+        ]
+      },
+      {
+        "name": "id",
+        "kind": "filter"
+      }
+    ]
   },
   {
-    "path": "/application-health/{id}"
+    "path": "/application-health/{id}",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at"
+        ]
+      },
+      {
+        "name": "id",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/code-connection-analyses/{id}"
@@ -79,23 +383,165 @@
   },
   {
     "path": "/code-connections/{id}/branches",
-    "permission": "repositories.read"
+    "permission": "repositories.read",
+    "query": [
+      {
+        "name": "url",
+        "kind": "param"
+      },
+      {
+        "name": "page",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/code-connections/{id}/events",
-    "permission": "repositories.read"
+    "permission": "repositories.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "created_at",
+          "-created_at",
+          "repository",
+          "-repository",
+          "event",
+          "-event"
+        ]
+      },
+      {
+        "name": "event",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/code-connections/{id}/repositories",
-    "permission": "repositories.read"
+    "permission": "repositories.read",
+    "query": [
+      {
+        "name": "page",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/code-contributions/{kind}",
-    "permission": "repositories.read"
+    "permission": "repositories.read",
+    "query": [
+      {
+        "name": "connection_id",
+        "kind": "param"
+      },
+      {
+        "name": "period",
+        "kind": "param"
+      },
+      {
+        "name": "history",
+        "kind": "param"
+      },
+      {
+        "name": "commitHash",
+        "kind": "param"
+      },
+      {
+        "name": "page",
+        "kind": "param"
+      },
+      {
+        "name": "page_size",
+        "kind": "param"
+      },
+      {
+        "name": "limit",
+        "kind": "param"
+      },
+      {
+        "name": "offset",
+        "kind": "param"
+      },
+      {
+        "name": "repos",
+        "kind": "param"
+      },
+      {
+        "name": "branches",
+        "kind": "param"
+      },
+      {
+        "name": "isMerge",
+        "kind": "param"
+      },
+      {
+        "name": "messageType",
+        "kind": "param"
+      },
+      {
+        "name": "authors",
+        "kind": "param"
+      },
+      {
+        "name": "since",
+        "kind": "param"
+      },
+      {
+        "name": "until",
+        "kind": "param"
+      },
+      {
+        "name": "geEffective",
+        "kind": "param"
+      },
+      {
+        "name": "leEffective",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/code-insights",
-    "permission": "code-insights.read"
+    "permission": "code-insights.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      }
+    ]
   },
   {
     "path": "/code-insights/{id}",
@@ -103,11 +549,83 @@
   },
   {
     "path": "/code-insights/{id}/reports/{kind}",
-    "permission": "code-insights.read"
+    "permission": "code-insights.read",
+    "query": [
+      {
+        "name": "period",
+        "kind": "param"
+      },
+      {
+        "name": "history",
+        "kind": "param"
+      },
+      {
+        "name": "commitHash",
+        "kind": "param"
+      },
+      {
+        "name": "page",
+        "kind": "param"
+      },
+      {
+        "name": "page_size",
+        "kind": "param"
+      },
+      {
+        "name": "limit",
+        "kind": "param"
+      },
+      {
+        "name": "offset",
+        "kind": "param"
+      },
+      {
+        "name": "repos",
+        "kind": "param"
+      },
+      {
+        "name": "branches",
+        "kind": "param"
+      },
+      {
+        "name": "isMerge",
+        "kind": "param"
+      },
+      {
+        "name": "messageType",
+        "kind": "param"
+      },
+      {
+        "name": "authors",
+        "kind": "param"
+      },
+      {
+        "name": "since",
+        "kind": "param"
+      },
+      {
+        "name": "until",
+        "kind": "param"
+      },
+      {
+        "name": "geEffective",
+        "kind": "param"
+      },
+      {
+        "name": "leEffective",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/config-templates",
-    "permission": "config-templates.read"
+    "permission": "config-templates.read",
+    "query": [
+      {
+        "name": "workflow_kind",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/config-templates/{id}",
@@ -124,21 +642,99 @@
     "path": "/conversations/{id}"
   },
   {
-    "path": "/conversations/{id}/events"
+    "path": "/conversations/{id}/events",
+    "query": [
+      {
+        "name": "after",
+        "kind": "param"
+      }
+    ]
   },
   {
-    "path": "/conversations/{id}/files/{file}"
+    "path": "/conversations/{id}/files/{file}",
+    "query": [
+      {
+        "name": "download",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/credentials",
-    "permission": "credentials.read"
+    "permission": "credentials.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "kind",
+        "kind": "filter"
+      },
+      {
+        "name": "scope",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/credentials/{id}"
   },
   {
     "path": "/cron-jobs",
-    "permission": "cron-jobs.read"
+    "permission": "cron-jobs.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "next_run_at",
+          "-next_run_at",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "scope",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/cron-jobs/{id}",
@@ -146,11 +742,87 @@
   },
   {
     "path": "/cron-jobs/{id}/runs",
-    "permission": "cron-jobs.read"
+    "permission": "cron-jobs.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "created_at",
+          "-created_at",
+          "scheduled_at",
+          "-scheduled_at",
+          "started_at",
+          "-started_at"
+        ]
+      },
+      {
+        "name": "job_id",
+        "kind": "filter"
+      },
+      {
+        "name": "scope",
+        "kind": "filter"
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/cron-runs",
-    "permission": "cron-jobs.read"
+    "permission": "cron-jobs.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "created_at",
+          "-created_at",
+          "scheduled_at",
+          "-scheduled_at",
+          "started_at",
+          "-started_at"
+        ]
+      },
+      {
+        "name": "job_id",
+        "kind": "filter"
+      },
+      {
+        "name": "scope",
+        "kind": "filter"
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/cron-runs/{id}",
@@ -162,7 +834,43 @@
   },
   {
     "path": "/deployment-revisions",
-    "permission": "deployments.read"
+    "permission": "deployments.read",
+    "query": [
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "number",
+          "-number",
+          "created_at",
+          "-created_at"
+        ]
+      },
+      {
+        "name": "deployment_id",
+        "kind": "filter"
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      },
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "category",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/deployment-revisions/{id}",
@@ -170,7 +878,41 @@
   },
   {
     "path": "/deployments",
-    "permission": "deployments.read"
+    "permission": "deployments.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      },
+      {
+        "name": "category",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/deployments/{id}",
@@ -178,15 +920,119 @@
   },
   {
     "path": "/deployments/{id}/events",
-    "permission": "deployments.read"
+    "permission": "deployments.read",
+    "query": [
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "created_at",
+          "-created_at"
+        ]
+      },
+      {
+        "name": "deployment_id",
+        "kind": "filter"
+      },
+      {
+        "name": "kind",
+        "kind": "filter"
+      },
+      {
+        "name": "instance",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/deployments/{id}/revisions",
-    "permission": "deployments.read"
+    "permission": "deployments.read",
+    "query": [
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "number",
+          "-number",
+          "created_at",
+          "-created_at"
+        ]
+      },
+      {
+        "name": "deployment_id",
+        "kind": "filter"
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      },
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "category",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/dictionaries",
-    "permission": "dictionaries.read"
+    "permission": "dictionaries.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "key",
+          "-key",
+          "name",
+          "-name",
+          "category",
+          "-category",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "category",
+        "kind": "filter"
+      },
+      {
+        "name": "value_type",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/dictionaries/categories",
@@ -198,7 +1044,47 @@
   },
   {
     "path": "/health-checks",
-    "permission": "alerts.read"
+    "permission": "alerts.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at"
+        ]
+      },
+      {
+        "name": "kind",
+        "kind": "filter"
+      },
+      {
+        "name": "role",
+        "kind": "filter"
+      },
+      {
+        "name": "deployment_id",
+        "kind": "filter"
+      },
+      {
+        "name": "host_id",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/health-checks/{id}",
@@ -206,22 +1092,150 @@
   },
   {
     "path": "/health-observations",
-    "permission": "alerts.read"
+    "permission": "alerts.read",
+    "query": [
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "observed_at",
+          "-observed_at"
+        ]
+      },
+      {
+        "name": "check_id",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/holes",
-    "permission": "holes.read"
+    "permission": "holes.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "expires_at",
+          "-expires_at"
+        ]
+      },
+      {
+        "name": "host_id",
+        "kind": "filter"
+      },
+      {
+        "name": "source_kind",
+        "kind": "filter"
+      },
+      {
+        "name": "source_id",
+        "kind": "filter"
+      },
+      {
+        "name": "source_ref",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/holes/{id}"
   },
   {
     "path": "/marketplace",
-    "permission": "marketplace.read"
+    "permission": "marketplace.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "source_id",
+        "kind": "filter"
+      },
+      {
+        "name": "package_version",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/marketplace-sources",
-    "permission": "marketplace-sources.read"
+    "permission": "marketplace-sources.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      },
+      {
+        "name": "repository_id",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/marketplace-sources/{id}",
@@ -233,7 +1247,37 @@
   },
   {
     "path": "/members",
-    "permission": "members.read"
+    "permission": "members.read",
+    "query": [
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "created_at",
+          "-created_at"
+        ]
+      },
+      {
+        "name": "role_id",
+        "kind": "filter"
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      },
+      {
+        "name": "q",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/members/invitation",
@@ -249,14 +1293,88 @@
   },
   {
     "path": "/node-groups",
-    "permission": "host-groups.read"
+    "permission": "host-groups.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "position",
+          "-position",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "parent_id",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/node-groups/{id}"
   },
   {
     "path": "/nodes",
-    "permission": "hosts.read"
+    "permission": "hosts.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "address",
+          "-address",
+          "state",
+          "-state",
+          "seen_at",
+          "-seen_at",
+          "created_at",
+          "-created_at"
+        ]
+      },
+      {
+        "name": "group_id",
+        "kind": "filter"
+      },
+      {
+        "name": "connection",
+        "kind": "filter"
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/nodes/{id}"
@@ -269,25 +1387,99 @@
     "permission": "hosts.files"
   },
   {
-    "path": "/nodes/{id}/files"
+    "path": "/nodes/{id}/files",
+    "query": [
+      {
+        "name": "path",
+        "kind": "param"
+      },
+      {
+        "name": "show_hidden",
+        "kind": "param"
+      }
+    ]
   },
   {
-    "path": "/nodes/{id}/files/content"
+    "path": "/nodes/{id}/files/content",
+    "query": [
+      {
+        "name": "path",
+        "kind": "param"
+      },
+      {
+        "name": "show_hidden",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/nodes/{id}/metrics",
-    "permission": "hosts.read"
+    "permission": "hosts.read",
+    "query": [
+      {
+        "name": "window_seconds",
+        "kind": "param"
+      },
+      {
+        "name": "step_seconds",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/nodes/{id}/runner-updates",
     "permission": "hosts.read"
   },
   {
-    "path": "/nodes/{id}/terminal-sessions"
+    "path": "/nodes/{id}/terminal-sessions",
+    "query": [
+      {
+        "name": "cols",
+        "kind": "param"
+      },
+      {
+        "name": "rows",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/notification-channels",
-    "permission": "notifications.read"
+    "permission": "notifications.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "provider",
+        "kind": "filter"
+      },
+      {
+        "name": "enabled",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/notification-channels/{id}",
@@ -295,7 +1487,55 @@
   },
   {
     "path": "/notification-deliveries",
-    "permission": "notifications.read"
+    "permission": "notifications.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "channel_id",
+        "kind": "filter"
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      },
+      {
+        "name": "source",
+        "kind": "filter"
+      },
+      {
+        "name": "agent_id",
+        "kind": "filter"
+      },
+      {
+        "name": "provider",
+        "kind": "filter"
+      },
+      {
+        "name": "enabled",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/notification-deliveries/{id}",
@@ -303,14 +1543,88 @@
   },
   {
     "path": "/notification-templates",
-    "permission": "notifications.read"
+    "permission": "notifications.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "language",
+        "kind": "filter"
+      },
+      {
+        "name": "format",
+        "kind": "filter"
+      },
+      {
+        "name": "provider",
+        "kind": "filter"
+      },
+      {
+        "name": "enabled",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/notification-templates/{id}",
     "permission": "notifications.read"
   },
   {
-    "path": "/pipeline-artifacts"
+    "path": "/pipeline-artifacts",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "created_at",
+          "-created_at",
+          "size",
+          "-size"
+        ]
+      },
+      {
+        "name": "pipeline_id",
+        "kind": "filter"
+      },
+      {
+        "name": "run_id",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/pipeline-artifacts/{id}/content"
@@ -336,7 +1650,41 @@
   },
   {
     "path": "/pipeline-runs",
-    "permission": "pipelines.read"
+    "permission": "pipelines.read",
+    "query": [
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "number",
+          "-number",
+          "created_at",
+          "-created_at",
+          "state",
+          "-state"
+        ]
+      },
+      {
+        "name": "pipeline_id",
+        "kind": "filter"
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      },
+      {
+        "name": "environment_id",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/pipeline-runs/{id}",
@@ -348,7 +1696,13 @@
   },
   {
     "path": "/pipeline-templates",
-    "permission": "pipeline-templates.read"
+    "permission": "pipeline-templates.read",
+    "query": [
+      {
+        "name": "workflow_kind",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/pipeline-templates/{id}",
@@ -356,7 +1710,49 @@
   },
   {
     "path": "/pipelines",
-    "permission": "pipelines.read"
+    "permission": "pipelines.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "repository_id",
+        "kind": "filter"
+      },
+      {
+        "name": "target_kind",
+        "kind": "filter"
+      },
+      {
+        "name": "group_id",
+        "kind": "filter"
+      },
+      {
+        "name": "application_id",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/pipelines/{id}"
@@ -379,14 +1775,70 @@
   },
   {
     "path": "/repositories",
-    "permission": "repositories.read"
+    "permission": "repositories.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      }
+    ]
   },
   {
     "path": "/repositories/{id}"
   },
   {
     "path": "/repository-events",
-    "permission": "repositories.read"
+    "permission": "repositories.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "created_at",
+          "-created_at",
+          "repository",
+          "-repository",
+          "event",
+          "-event"
+        ]
+      },
+      {
+        "name": "event",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/repository-events/{id}",
@@ -398,11 +1850,41 @@
   },
   {
     "path": "/repository-providers/{provider}/repositories",
-    "permission": "credentials.read"
+    "permission": "credentials.read",
+    "query": [
+      {
+        "name": "page",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/roles",
-    "permission": "roles.read"
+    "permission": "roles.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at"
+        ]
+      }
+    ]
   },
   {
     "path": "/roles/{id}",
@@ -414,7 +1896,43 @@
   },
   {
     "path": "/settings",
-    "permission": "settings.read"
+    "permission": "settings.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "key",
+          "-key",
+          "name",
+          "-name",
+          "category",
+          "-category",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "category",
+        "kind": "filter"
+      },
+      {
+        "name": "value_type",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/settings/categories",
@@ -426,7 +1944,35 @@
   },
   {
     "path": "/tags",
-    "permission": "tags.read"
+    "permission": "tags.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at"
+        ]
+      },
+      {
+        "name": "color",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/tags/{id}"
@@ -436,7 +1982,41 @@
   },
   {
     "path": "/variables",
-    "permission": "variables.read"
+    "permission": "variables.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "scope",
+        "kind": "filter"
+      },
+      {
+        "name": "kind",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/variables/{id}",
@@ -470,11 +2050,51 @@
     "path": "/workflow-groups/{id}/acl"
   },
   {
-    "path": "/workflow-node-catalog"
+    "path": "/workflow-node-catalog",
+    "query": [
+      {
+        "name": "section",
+        "kind": "param"
+      }
+    ]
   },
   {
     "path": "/workflows",
-    "permission": "workflows.read"
+    "permission": "workflows.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "group_id",
+        "kind": "filter"
+      },
+      {
+        "name": "lifecycle",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/workflows/{id}",
@@ -488,14 +2108,112 @@
     "permission": "workflows.read"
   },
   {
-    "path": "/workflows/{id}/executions"
+    "path": "/workflows/{id}/executions",
+    "query": [
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "number",
+          "-number",
+          "created_at",
+          "-created_at",
+          "started_at",
+          "-started_at",
+          "finished_at",
+          "-finished_at"
+        ]
+      },
+      {
+        "name": "state",
+        "kind": "filter"
+      },
+      {
+        "name": "mode",
+        "kind": "filter"
+      }
+    ]
   },
   {
-    "path": "/workflows/{id}/publications"
+    "path": "/workflows/{id}/publications",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "created_at",
+          "-created_at",
+          "name",
+          "-name"
+        ]
+      },
+      {
+        "name": "revision_id",
+        "kind": "filter"
+      },
+      {
+        "name": "run_as",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/workflows/{id}/revisions",
-    "permission": "workflows.read"
+    "permission": "workflows.read",
+    "query": [
+      {
+        "name": "q",
+        "kind": "search"
+      },
+      {
+        "name": "page",
+        "kind": "page"
+      },
+      {
+        "name": "page_size",
+        "kind": "page_size"
+      },
+      {
+        "name": "sort",
+        "kind": "sort",
+        "options": [
+          "name",
+          "-name",
+          "created_at",
+          "-created_at",
+          "updated_at",
+          "-updated_at"
+        ]
+      },
+      {
+        "name": "group_id",
+        "kind": "filter"
+      },
+      {
+        "name": "lifecycle",
+        "kind": "filter"
+      }
+    ]
   },
   {
     "path": "/workflows/{id}/revisions/{revision}",

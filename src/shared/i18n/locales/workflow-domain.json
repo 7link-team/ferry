@@ -6157,5 +6157,15 @@
   "yamlInvalid": ["Invalid YAML; the value was not changed.", "YAML 格式错误，值未修改。", "YAML 格式錯誤，值未修改。", "YAML が無効です。値は変更されていません。", "YAML이 올바르지 않아 값이 변경되지 않았습니다.", "YAML tidak sah; nilai tidak diubah."],
   "yamlExpectObject": ["The YAML must be an object (key: value); the value was not changed.", "YAML 必须是对象（键: 值），值未修改。", "YAML 必須是物件（鍵: 值），值未修改。", "YAML はオブジェクト（キー: 値）である必要があります。値は変更されていません。", "YAML은 객체(키: 값)여야 하며 값이 변경되지 않았습니다.", "YAML mesti objek (kunci: nilai); nilai tidak diubah."],
   "yamlExpectList": ["The YAML must be a list (- item); the value was not changed.", "YAML 必须是列表（- 项），值未修改。", "YAML 必須是清單（- 項），值未修改。", "YAML はリスト（- 項目）である必要があります。値は変更されていません。", "YAML은 목록(- 항목)이어야 하며 값이 변경되지 않았습니다.", "YAML mesti senarai (- item); nilai tidak diubah."],
-  "platform.operationPlaceholder": ["Search or choose an endpoint, e.g. code-insights", "搜索或选择接口，例如 code-insights", "搜尋或選擇介面，例如 code-insights", "エンドポイントを検索または選択（例：code-insights）", "엔드포인트 검색 또는 선택(예: code-insights)", "Cari atau pilih titik akhir, cth. code-insights"]
+  "platform.operationPlaceholder": ["Search or choose an endpoint, e.g. code-insights", "搜索或选择接口，例如 code-insights", "搜尋或選擇介面，例如 code-insights", "エンドポイントを検索または選択（例：code-insights）", "엔드포인트 검색 또는 선택(예: code-insights)", "Cari atau pilih titik akhir, cth. code-insights"],
+  "platform.queryParams": ["Query parameters", "查询参数", "查詢參數", "クエリパラメーター", "쿼리 매개변수", "Parameter pertanyaan"],
+  "platform.queryParam": ["Query", "查询", "查詢", "クエリ", "쿼리", "Pertanyaan"],
+  "platform.queryExtra": ["Other query parameters", "其他查询参数", "其他查詢參數", "その他のクエリパラメーター", "기타 쿼리 매개변수", "Parameter pertanyaan lain"],
+  "platform.queryDefault": ["Default", "默认", "預設", "既定", "기본값", "Lalai"],
+  "platform.queryHintFilter": ["Optional; separate several values with commas", "可选；多个值用逗号分隔", "可選；多個值用逗號分隔", "任意。複数の値はカンマ区切り", "선택 사항, 여러 값은 쉼표로 구분", "Pilihan; asingkan beberapa nilai dengan koma"],
+  "platform.queryHintSearch": ["Optional search text", "可选，搜索关键字", "可選，搜尋關鍵字", "任意の検索文字列", "선택 사항, 검색어", "Teks carian pilihan"],
+  "platform.queryHintNumber": ["Optional number", "可选，数字", "可選，數字", "任意の数値", "선택 사항, 숫자", "Nombor pilihan"],
+  "platform.queryHintParam": ["Optional; a value or an expression like ={{ $json.since }}", "可选；填写值或表达式，如 ={{ $json.since }}", "可選；填寫值或運算式，如 ={{ $json.since }}", "任意。値または ={{ $json.since }} のような式", "선택 사항, 값 또는 ={{ $json.since }} 같은 표현식", "Pilihan; nilai atau ungkapan seperti ={{ $json.since }}"],
+  "platform.queryHelp": ["Empty fields are not sent. Parameters are read from this endpoint's server code; the endpoint still validates every value.", "留空的参数不会发送。参数列表来自该接口的服务端代码，取值仍由接口校验。", "留空的參數不會傳送。參數清單來自該介面的伺服器程式碼，取值仍由介面驗證。", "空欄のパラメーターは送信されません。一覧はこのエンドポイントのサーバーコードから取得し、値はエンドポイントが検証します。", "비어 있는 매개변수는 전송되지 않습니다. 목록은 이 엔드포인트의 서버 코드에서 가져오며 값은 엔드포인트가 검증합니다.", "Medan kosong tidak dihantar. Senarai diambil daripada kod pelayan titik akhir ini; titik akhir masih mengesahkan setiap nilai."],
+  "platform.queryUndeclared": ["Not declared by this endpoint (still sent):", "该接口未声明以下参数（仍会发送）：", "該介面未宣告以下參數（仍會傳送）：", "このエンドポイントで宣言されていません（送信はされます）：", "이 엔드포인트에 선언되지 않음(전송은 됨):", "Tidak diisytiharkan oleh titik akhir ini (masih dihantar):"]
 }

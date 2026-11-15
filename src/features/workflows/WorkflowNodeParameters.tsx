@@ -33,6 +33,7 @@ import platformOperations from "../../shared/workflow-contracts/platform-read-op
 /** Placeholders of a catalogue path template, in path order. */
 export const platformPathParams = (operation: string) =>
   [...operation.matchAll(/\{(\w+)\}/g)].map((match) => match[1]!);
+type PlatformOperation = { path: string; permission?: string; query?: { name: string; kind: string; options?: string[] }[] };
 const platformPaths = platformOperations.map((row) => row.path);
 
 const control =
@@ -882,8 +883,20 @@ export function WorkflowNodeParameters({
       break;
     case "ferry.request": {
       const operation = String(p.operation ?? "");
-      const known = (platformOperations as { path: string; permission?: string }[]).find((row) => row.path === operation);
+      const known = (platformOperations as PlatformOperation[]).find((row) => row.path === operation);
       const pathParams = (p.path_params ?? {}) as Params;
+      // Declared query parameters get named fields; other keys stay in the free-form editor.
+      const declared = known?.query ?? [];
+      const query = (p.query ?? {}) as Params;
+      const named = new Set(declared.map((param) => param.name));
+      const extra = Object.fromEntries(Object.entries(query).filter(([key]) => !named.has(key)));
+      const setQuery = (name: string, value: string) => {
+        const next = { ...query };
+        if (value === "") delete next[name];
+        else next[name] = value;
+        patch({ query: next });
+      };
+      const undeclared = declared.length ? Object.keys(extra) : [];
       fields = <>
         <p className="text-sm leading-6 text-muted-foreground">{t("platform.location")}</p>
         <Field label={t("platform.operation")} required={!readOnly}>
@@ -904,7 +917,28 @@ export function WorkflowNodeParameters({
               onChange={(event) => patch({ path_params: { ...pathParams, [name]: event.target.value } })} />
           </Field>
         ))}
-        <StructuredValue label={t("platform.query")} value={p.query ?? {}} readOnly={readOnly} change={(query) => patch({ query })} />
+        {declared.length > 0 && <section aria-label={t("platform.queryParams")} className="space-y-3 rounded-md border p-3">
+          <p className="text-sm font-medium">{t("platform.queryParams")}</p>
+          {declared.map((param) => {
+            const label = `${t("platform.queryParam")} · ${param.name}`;
+            const value = String(query[param.name] ?? "");
+            return <Field key={param.name} label={label}>
+              {param.kind === "sort" && param.options
+                ? <select aria-label={label} className={control} disabled={readOnly} value={value} onChange={(event) => setQuery(param.name, event.target.value)}>
+                    <option value="">{t("platform.queryDefault")}</option>
+                    {param.options.map((option) => <option key={option} value={option}>{option}</option>)}
+                    {value && !param.options.includes(value) && <option value={value}>{value}</option>}
+                  </select>
+                : <Input aria-label={label} readOnly={readOnly} value={value}
+                    placeholder={t(param.kind === "filter" ? "platform.queryHintFilter" : param.kind === "search" ? "platform.queryHintSearch" : param.kind === "page" || param.kind === "page_size" ? "platform.queryHintNumber" : "platform.queryHintParam")}
+                    onChange={(event) => setQuery(param.name, event.target.value)} />}
+            </Field>;
+          })}
+          <p className="text-xs leading-5 text-muted-foreground">{t("platform.queryHelp")}</p>
+        </section>}
+        <StructuredValue label={t(declared.length ? "platform.queryExtra" : "platform.query")} value={extra} readOnly={readOnly}
+          change={(next) => patch({ query: { ...Object.fromEntries(Object.entries(query).filter(([key]) => named.has(key))), ...(next as Params) } })} />
+        {undeclared.length > 0 && <p className="text-xs leading-5 text-amber-700 dark:text-amber-400">{t("platform.queryUndeclared")} {undeclared.join(", ")}</p>}
         <Check label={t("platform.splitItems")} value={p.split_items !== false} readOnly={readOnly} change={(split_items) => patch({ split_items })} />
         <Check label={t("platform.allPages")} value={p.all_pages === true} readOnly={readOnly} change={(all_pages) => patch({ all_pages })} />
         {p.all_pages === true && number("max_pages", "platform.maxPages", 1)}

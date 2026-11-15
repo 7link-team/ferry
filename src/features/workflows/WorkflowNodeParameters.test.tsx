@@ -77,14 +77,29 @@ it("generates platform data path parameters from the selected GET operation and 
   await input(`${t("platform.pathParam")} · id`, "42");
   await input(`${t("platform.pathParam")} · kind`, "contributors");
   expect(current.path_params).toEqual({ id: "42", kind: "contributors" });
+  // Declared query parameters get named optional fields; empty ones are not sent.
+  const queryField = (name: string) => `${t("platform.queryParam")} · ${name}`;
+  expect(host.querySelector(`input[aria-label="${queryField("since")}"]`)).toBeTruthy();
+  expect(host.querySelector(`input[aria-label="${queryField("until")}"]`)).toBeTruthy();
+  await input(queryField("since"), "={{ $json.since }}");
+  await input(queryField("page_size"), "100");
+  expect(current.query).toEqual({ since: "={{ $json.since }}", page_size: "100" });
+  await input(queryField("page_size"), "");
+  expect(current.query).toEqual({ since: "={{ $json.since }}" });
+  // Keys the endpoint does not declare stay in the free-form editor with a note.
+  await click(`${t("addRow")} ${t("platform.queryExtra")}`);
+  expect(current.query).toEqual({ since: "={{ $json.since }}", field: "" });
+  expect(host.textContent).toContain(`${t("platform.queryUndeclared")} field`);
   // Switching operation keeps placeholders that still exist and clears the rest.
   await input(t("platform.operation"), "/code-insights/{id}");
   expect(current.path_params).toEqual({ id: "42" });
   expect(host.querySelector(`input[aria-label="${t("platform.pathParam")} · kind"]`)).toBeNull();
   await input(t("platform.operation"), "/code-insights/{id}/nope");
   expect(host.querySelector('[role="alert"]')?.textContent).toBe(t("platform.unknownOperation"));
+  // On an unknown operation every key is free-form; adding a row keeps existing values.
   await click(`${t("addRow")} ${t("platform.query")}`);
-  expect(current.query).toEqual({ field: "" });
+  expect(current.query).toMatchObject({ since: "={{ $json.since }}", field: "" });
+  expect(Object.keys(current.query as object)).toHaveLength(3);
   expect(host.querySelector(`input[aria-label="${t("platform.maxPages")}"]`)).toBeNull();
   await act(async () => root.render(<Harness readOnly />));
   expect(host.textContent).toContain("执行位置：平台服务器内（不经主机）");

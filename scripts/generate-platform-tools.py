@@ -46,6 +46,45 @@ def declaration(text,name,kind='struct'):
             if depth==0:return text[match.start():end+1]
     return None
 
+QUERY_MAP=r'(?:raw|query|params|filters)'
+def query_parameters(text,body,signature,definitions):
+    """Query keys a GET handler reads: list specs, typed Query<T> fields and raw map keys."""
+    names={}
+    def add(name,kind,**extra):
+        if name not in names:names[name]={'name':name,'kind':kind,**extra}
+    # Walk the handler and the same-file helpers it calls (transitively, bounded).
+    bodies=[body];seen=set();pending=re.findall(r'\b([a-z_]\w*)\(',body)
+    while pending and len(seen)<60:
+        helper=pending.pop(0)
+        if helper in seen:continue
+        seen.add(helper)
+        found=re.search(r'\b(?:async\s+)?fn\s+'+re.escape(helper)+r'\s*[<(]',text)
+        if found and '{' in text[found.end():]:
+            inner=block(text,text.find('{',found.end()))
+            bodies.append(inner);pending+=re.findall(r'\b([a-z_]\w*)\(',inner)
+    code='\n'.join(bodies)
+    for spec in re.findall(r'ListQuery::parse\(\s*&\s*(\w+)',code):
+        declared=re.search(r'const\s+'+re.escape(spec)+r'\s*:\s*Spec\s*=\s*Spec\s*\{(.*?)\};',text,re.S)
+        if not declared:continue
+        def field(key):
+            found=re.search(key+r'\s*:\s*&\[(.*?)\]',declared.group(1),re.S)
+            return re.findall(r'"([^"]+)"',found.group(1)) if found else []
+        if field('search'):add('q','search')
+        add('page','page');add('page_size','page_size')
+        sortable=field('sortable')
+        if sortable:add('sort','sort',options=[value for name in sortable for value in (name,'-'+name)])
+        for name in field('filters'):add(name,'filter')
+    if 'Query<' in signature:
+        for definition in definitions:
+            if definition.lstrip().startswith(('pub struct','struct')):
+                for name in re.findall(r'^\s*(?:pub(?:\([^)]*\))?\s+)?([a-z_][a-z0-9_]*)\s*:',definition.split('{',1)[-1],re.M):add(name,'param')
+    if re.search(r'Query<\s*[\w:]*HashMap',signature) or 'ListQuery' in code:
+        for name in re.findall(QUERY_MAP+r'\s*\.get\(\s*"([A-Za-z_]\w*)"\s*\)',code):add(name,'param')
+        for name in re.findall(r'\b\w+\(\s*&?'+QUERY_MAP+r'\s*,\s*"([A-Za-z_]\w*)"',code):add(name,'param')
+        for group in re.findall(r'for\s*\(\s*key\s*,[^)]*\)\s*in\s*\[(.*?)\]\s*\{[^}]*?'+QUERY_MAP+r'\s*\.get\(\s*key\s*\)',code,re.S):
+            for name in re.findall(r'\(\s*"([A-Za-z_]\w*)"',group):add(name,'param')
+    return list(names.values())
+
 def contract(handler,file):
     *modules,name=handler.split('::')
     candidates=[file]
@@ -100,7 +139,8 @@ def contract(handler,file):
                 helper_body=block(text,text.find('{',found.end()))
                 checks.update(re.findall(r'scope\.require\("([^"]+)"\)',helper_body))
                 checks.update(value for value in re.findall(r'"([a-z][a-z-]*\.[a-z_]+)"',helper_body) if value in known)
-        return {'signature':signature,'definitions':definitions,'permission_checks':sorted(checks),**({'documentation':'\n'.join(docs)} if docs else {}),**({'permission':permission.group(1)} if permission else {})}
+        query=query_parameters(text,body,signature,definitions)
+        return {'signature':signature,'definitions':definitions,'permission_checks':sorted(checks),'_query':query,**({'documentation':'\n'.join(docs)} if docs else {}),**({'permission':permission.group(1)} if permission else {})}
     return {}
 for file in source.rglob('*.rs'):
     if 'tests' in file.parts or file.name=='platform_tools.rs': continue
@@ -123,9 +163,10 @@ for file in source.rglob('*.rs'):
         for method,handler in re.findall(r'\b(get|post|put|patch|delete|any)\(\s*([\w:]+)\s*\)',text[start:end]):
             operations[(route,method)]={'path':route,'method':method.upper(),'handler':handler,'source':str(file.relative_to(root)).replace('\\','/'),**contract(handler,file)}
 rows=sorted(operations.values(),key=lambda v:(v['path'],v['method']))
-output=json.dumps(rows,ensure_ascii=False,indent=2)+'\n'
+# Query parameters are for the workflow editor; the Agent catalogue keeps its shape.
+output=json.dumps([{k:v for k,v in row.items() if k!='_query'} for row in rows],ensure_ascii=False,indent=2)+'\n'
 # The workflow editor only needs the read-only templates a platform data node may call.
-reads=json.dumps([{'path':v['path'],**({'permission':v['permission']} if 'permission' in v else {})} for v in rows if v['method']=='GET'],ensure_ascii=False,indent=2)+'\n'
+reads=json.dumps([{'path':v['path'],**({'permission':v['permission']} if 'permission' in v else {}),**({'query':v['_query']} if v.get('_query') else {})} for v in rows if v['method']=='GET'],ensure_ascii=False,indent=2)+'\n'
 for target,text in [(source/'platform_tools_catalog.json',output),(root/'src/shared/workflow-contracts/platform-read-operations.json',reads)]:
     if '--check' in sys.argv:
         assert target.read_text(encoding='utf8')==text,'Run python scripts/generate-platform-tools.py after changing workspace routes'
