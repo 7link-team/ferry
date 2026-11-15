@@ -621,6 +621,8 @@ E2E-FULL-REPORT-01交付记录：生产场景测试及HTML/截图证据已交付
 | PLATFORM-QUERY-01 | 待验证 | 用户问平台数据节点只能填路径参数、拿不到query：生成器从handler提取ListQuery/Query<T>/HashMap键，58/134个GET带query清单；节点按名列出可选查询字段(sort为下拉)，未声明键留在“其他查询参数”并提示。5cbbb61已推main，生成器check+tsc+vitest771PASS+Rust platform10PASS；4291守护更新PID33196(备份pre-query-params-20261115-100742)，浏览器只读核对样例节点显示since/until/page_size，截图data/maintenance/platform-node/query-params.png。待用户体验；未发版。 |
 | REL-070 | 已完成 | v0.7.0-alpha=46ef315(含5cbbb61+3085234)：main CI绿后打tag；首次release job runner失联未建Release，重推同commit tag后run 43695211610成功，Release 21资产+runner-update签名目录0.7.0-alpha，ghcr v0.7.0-alpha=latest(d1a75a30…,amd64+arm64)。待用户服务器--upgrade确认。 |
 | CI-RELEASE-RETRY-01 | 待处理 | 建议release job加timeout 15min+tag run仅release失败时自动重跑一次；待用户确认。 |
+| MODEL-DEFAULT-REQ-01 | 待验证 | 用户创建API模型报“模型配置无效”：原因默认模型为空(服务端必填,UI未标)。默认模型对API标必填*并禁用创建；服务端改报models.defaultModelRequired(6语)。0aba2af已推main，vitest772PASS+新用例(去掉修复即失败)，Rust models/i18n 24PASS。未部署4291/未发版。另：模型列表返回Claude系因用户填了Claude分组key(已确认非bug)。 |
+| TZ-01 | 待验证 | CLI模型可选时区(IANA校验，仅CLI)；Runner/主机时区设置(默认自动并显示检测值)。优先级模型>主机设置>系统，以子进程TZ下发，不改系统不重启；设置变更即时下发(跨副本≤1心跳)；旧Runner遇模型时区拒绝并提示升级；Windows同区不设TZ、异区提示部分工具忽略。5ab1ead已推main：protocol9/runner tz4/server48+agent报告219PASS，tsc，vitest776PASS。未在真实Runner/Windows CLI、4291、浏览器验证；需Runner≥下个版本。 |
 | WF-LEGACY-01 | 待处理 | 用户询问旧流水线是否丢失；4291确认demo空间原流水线23及3次执行完整保留。核对工作流→构建流水线入口/权限，提供原详情链接，不重建或覆盖数据。 |
 | DICT-STATE-01 | 待处理 | 用户明确要求：固定流程/不可随意维护的状态不放字典，清掉数据库记录与子项/初始化/展示读取；只保留可维护业务选项（环境/分类等）。前端状态字典读取已移除，后端清理迁移已补，待回归/更新4291。 |
 | TYPED-UI-01 | 待处理 | 字典与配置项按8092/zh-CN/sys/dicts/1001/edit参考：基本信息/值类型在前→类型约束→匹配类型的值编辑器（富文本/Monaco/图片文件等），控件联动、校验/保存/重开全验证。已用参考公开原型账号登录查看；不照搬原型源码。 |
