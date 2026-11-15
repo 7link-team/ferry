@@ -213,6 +213,10 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     for key, default in {
                         'execution': {'enabled': True, 'shared': False, 'capacity': 1},
                         'execution_status': {'active': 0, 'capacity': 1, 'state': 'available', 'running_jobs': []},
+                        # Time zone: automatic, nothing detected or supported until a runner reports it.
+                        'timezone': '',
+                        'detected_timezone': '',
+                        'timezone_supported': False,
                     }.items():
                         assert after[key] == before[path].get(key, default), (key, after[key])
                         before[path].setdefault(key, default)
