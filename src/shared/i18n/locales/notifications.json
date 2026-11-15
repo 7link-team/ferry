@@ -238,6 +238,8 @@
     "{{variable_name}} 자리 표시자를 사용하세요. 전송 시 별도로 입력하며 HTML 값은 이스케이프됩니다.",
     "Gunakan ruang letak {{variable_name}}. Nilai dimasukkan secara berasingan semasa menghantar; nilai HTML dilepaskan."
   ],
+  "webhookCurrent": ["Current address", "当前地址", "目前位址", "現在のアドレス", "현재 주소", "Alamat semasa"],
+  "webhookKeep": ["Leave empty to keep the current address; enter a new one to replace it", "留空则保持当前地址；填写新地址即替换", "留空則保留目前位址；填寫新位址即取代", "空欄のままなら現在のアドレスを維持し、新しいアドレスを入力すると置き換えます", "비워 두면 현재 주소가 유지되고, 새 주소를 입력하면 교체됩니다", "Biarkan kosong untuk mengekalkan alamat semasa; masukkan alamat baharu untuk menggantikannya"],
   "webhook": [
     "Webhook URL",
     "Webhook 地址",

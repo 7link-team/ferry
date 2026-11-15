@@ -2481,6 +2481,19 @@
     "permission": "notifications.read"
   },
   {
+    "path": "/notification-channels/{id}/webhook-reveals",
+    "method": "POST",
+    "handler": "notifications::center::reveal_webhook",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn reveal_webhook(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<(\n    [(axum::http::header::HeaderName, &'static str); 1],\n    Json<Value>,\n)>",
+    "definitions": [],
+    "permission_checks": [
+      "notifications.update"
+    ],
+    "documentation": "The saved address in plain text, for someone allowed to change it; audited.",
+    "permission": "notifications.update"
+  },
+  {
     "path": "/notification-deliveries",
     "method": "GET",
     "handler": "notifications::center::list_deliveries",

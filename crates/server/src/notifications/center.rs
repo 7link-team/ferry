@@ -220,8 +220,64 @@ pub(crate) async fn import_channel(
     .await?;
     Ok(id)
 }
+/// The address with its secret parts hidden, so a saved channel stays
+/// recognisable: query values and long path segments keep only their last 4
+/// characters. The plain address needs `reveal_webhook`.
+pub(crate) fn mask_webhook(address: &str) -> String {
+    let hide = |value: &str| {
+        let chars: Vec<char> = value.chars().collect();
+        let tail: String = chars[chars.len().saturating_sub(4)..].iter().collect();
+        format!("••••{tail}")
+    };
+    let Ok(mut url) = reqwest::Url::parse(address) else {
+        return if address.is_empty() {
+            String::new()
+        } else {
+            hide(address)
+        };
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    let path: Vec<String> = url
+        .path_segments()
+        .map(|segments| {
+            segments
+                .map(|segment| {
+                    if segment.len() > 16 {
+                        hide(segment)
+                    } else {
+                        segment.to_owned()
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .map(|(key, value)| (key.into_owned(), hide(&value)))
+        .collect();
+    let mut shown = format!("{}://{}", url.scheme(), url.host_str().unwrap_or_default());
+    if let Some(port) = url.port() {
+        shown.push_str(&format!(":{port}"));
+    }
+    if !path.is_empty() {
+        shown.push('/');
+        shown.push_str(&path.join("/"));
+    }
+    if !pairs.is_empty() {
+        shown.push('?');
+        shown.push_str(
+            &pairs
+                .iter()
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect::<Vec<_>>()
+                .join("&"),
+        );
+    }
+    shown
+}
 fn public(row: &channels::Model, transport: &Transport) -> Value {
-    json!({"id":Id::from(row.id),"name":row.name,"description":row.description,"provider":row.provider,"language":transport.language,"recipients":transport.recipients,"enabled":row.enabled==1,"role_ids":serde_json::from_str::<Value>(&row.role_ids).unwrap_or(json!([])),"host":transport.host,"port":transport.port,"security":transport.security,"username":transport.username,"from":transport.from,"chat_id":transport.options.chat_id,"thread_id":transport.options.thread_id,"sms_access_key":transport.sms.sms_access_key,"sms_region":transport.sms.sms_region,"sms_app_id":transport.sms.sms_app_id,"sms_sign_name":transport.sms.sms_sign_name,"sms_template_code":transport.sms.sms_template_code,"sms_parameter_names":transport.sms.sms_parameter_names,"has_sms_secret":!transport.sms.sms_secret_key.is_empty(),"has_webhook":!transport.webhook.is_empty(),"has_secret":!transport.password.is_empty()||!transport.options.bot_token.is_empty()||!transport.options.signing_secret.is_empty()||!transport.options.bearer_token.is_empty(),"version":row.version,"created_at":row.created_at,"updated_at":row.updated_at})
+    json!({"webhook_masked":mask_webhook(&transport.webhook),"id":Id::from(row.id),"name":row.name,"description":row.description,"provider":row.provider,"language":transport.language,"recipients":transport.recipients,"enabled":row.enabled==1,"role_ids":serde_json::from_str::<Value>(&row.role_ids).unwrap_or(json!([])),"host":transport.host,"port":transport.port,"security":transport.security,"username":transport.username,"from":transport.from,"chat_id":transport.options.chat_id,"thread_id":transport.options.thread_id,"sms_access_key":transport.sms.sms_access_key,"sms_region":transport.sms.sms_region,"sms_app_id":transport.sms.sms_app_id,"sms_sign_name":transport.sms.sms_sign_name,"sms_template_code":transport.sms.sms_template_code,"sms_parameter_names":transport.sms.sms_parameter_names,"has_sms_secret":!transport.sms.sms_secret_key.is_empty(),"has_webhook":!transport.webhook.is_empty(),"has_secret":!transport.password.is_empty()||!transport.options.bot_token.is_empty()||!transport.options.signing_secret.is_empty()||!transport.options.bearer_token.is_empty(),"version":row.version,"created_at":row.created_at,"updated_at":row.updated_at})
 }
 pub(crate) async fn channel(s: &AppState, workspace: Id, id: Id) -> Result<channels::Model> {
     channel_in(&s.db, workspace, id).await
@@ -447,6 +503,33 @@ pub async fn update(
     let old = channel(&s, scope.workspace_id, id).await?;
     save(&s, &scope, id, body, Some(old)).await?;
     get(State(s), scope, Path((String::new(), id))).await
+}
+/// The saved address in plain text, for someone allowed to change it; audited.
+pub async fn reveal_webhook(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, Id)>,
+) -> Result<(
+    [(axum::http::header::HeaderName, &'static str); 1],
+    Json<Value>,
+)> {
+    scope.require("notifications.update")?;
+    let row = channel(&s, scope.workspace_id, id).await?;
+    let transport = decode(&s, &row)?;
+    // No plaintext response without a successful audit write.
+    crate::hosts::activity(
+        &s,
+        &scope,
+        "reveal",
+        "notification-channels",
+        &id,
+        json!({"name":row.name,"field":"webhook"}),
+    )
+    .await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(json!({"webhook":transport.webhook})),
+    ))
 }
 pub async fn delete(
     State(s): State<AppState>,

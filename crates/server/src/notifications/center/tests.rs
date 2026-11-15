@@ -567,3 +567,65 @@ async fn disabled_channels_and_explicit_provider_failure_are_not_replayed() {
     assert_eq!(count.load(Ordering::SeqCst), 1);
     task.abort();
 }
+
+#[test]
+fn webhook_addresses_are_shown_with_their_secrets_hidden() {
+    assert_eq!(
+        mask_webhook(
+            "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=693a91f6-7xxx-4bc4-97a0-0ec2sifa5aaa"
+        ),
+        "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=••••5aaa"
+    );
+    assert_eq!(
+        mask_webhook(
+            "https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz"
+        ),
+        "https://discord.com/api/webhooks/••••5678/••••wxyz"
+    );
+    assert_eq!(
+        mask_webhook("https://user:pw@hooks.example.com:8443/notify"),
+        "https://hooks.example.com:8443/notify"
+    );
+    assert_eq!(mask_webhook(""), "");
+    assert_eq!(mask_webhook("not a url but secret"), "••••cret");
+}
+
+#[tokio::test]
+async fn the_saved_webhook_is_echoed_masked_and_revealed_only_to_editors_with_audit() {
+    let (_dir, s) = setup().await;
+    let scope = admin(1);
+    let address = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=private-fixture-key-1234";
+    let (_, Json(created)) = create(State(s.clone()), scope.clone(), Json(channel_body(address)))
+        .await
+        .unwrap();
+    let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let Json(view) = get(State(s.clone()), scope.clone(), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert_eq!(
+        view["webhook_masked"],
+        "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=••••1234"
+    );
+    assert!(!view.to_string().contains("private-fixture-key"));
+    let mut reader = scope.clone();
+    reader.permissions.retain(|p| p == "notifications.read");
+    assert_eq!(
+        reveal_webhook(State(s.clone()), reader, Path(("1".into(), id)))
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let (headers, Json(plain)) = reveal_webhook(State(s.clone()), scope, Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert_eq!(plain["webhook"], address);
+    assert_eq!(headers[0].1, "no-store");
+    let audited = crate::entities::activity::Entity::find()
+        .all(&s.db)
+        .await
+        .unwrap()
+        .into_iter()
+        .any(|a| a.action == "reveal" && a.resource == "notification-channels");
+    assert!(audited);
+}

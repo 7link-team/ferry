@@ -9,6 +9,7 @@ import type { FormConfig, FormField, ListConfig, Option, RowAction } from "../..
 import { isSms, SmsParameters } from "./SmsParameters";
 import { NotificationBody } from "./NotificationBody";
 import { NotificationVariables } from "./NotificationVariables";
+import { WebhookAddress } from "./WebhookAddress";
 
 const key = (name: string) => `notifications:${name}`;
 const field = (name: string, type: FormField<AnyRow>["type"] = "text", more: Partial<FormField<AnyRow>> = {}): FormField<AnyRow> => ({ key: name, label: "", labelKey: key(name), type, ...more });
@@ -96,7 +97,7 @@ export function notificationForms({ workspace, navigate, permissions }: Resource
       viewActions: [sendAction(workspace, navigate)],
       sections: [{ titleKey: key("basics"), fields: [field("name", "text", { required: true, max: 120 }), field("enabled", "switch"), field("provider", "select", { required: true, options: notificationProviders, resetOnChange: ["webhook", "signing_secret", "bot_token", "bearer_token", "chat_id", "thread_id"] }), field("description", "textarea", { span: 2, max: 2048 })] },
         { titleKey: key("connection"), fields: [
-          field("webhook", "password", { when: r => notSmtp(r) && r.provider !== "Telegram", stored: "has_webhook", width: "full", span: 2 }),
+          field("webhook", "custom", { when: r => notSmtp(r) && r.provider !== "Telegram", width: "full", span: 2, render: (p) => <WebhookAddress {...p} canReveal={!!permissions?.has("notifications.update")} /> }),
           field("bot_token", "password", { when: r => r.provider === "Telegram", stored: "has_secret" }), field("chat_id", "text", { when: r => r.provider === "Telegram", required: true }), field("thread_id", "text", { when: r => r.provider === "Telegram" }),
           field("signing_secret", "password", { when: r => ["DingTalk", "Feishu", "Lark"].includes(r.provider), stored: "has_secret" }), field("bearer_token", "password", { when: r => r.provider === "Webhook", stored: "has_secret" }),
           field("host", "text", { when: smtp, required: true }), field("port", "number", { when: smtp, min: 1, max: 65535, required: true }), field("security", "select", { when: smtp, options: ["tls", "starttls", "none"].map(value => ({ value, label: value === "none" ? "" : value.toUpperCase(), ...(value === "none" ? { labelKey: key("noTls") } : {}) })) }), field("from", "text", { when: smtp, required: true }), field("username", "text", { when: smtp }), field("password", "password", { when: smtp, stored: "has_secret" }), field("recipients", "custom", { when: r => smtp(r) || isSms(r.provider), span: 2, helpKey: key("smsDefaultRecipientsHelp"), render: ({draft,readOnly,onPatch}) => <AutoField label={t(key("recipients"))} help={t(isSms(draft.provider) ? key("smsRecipientsHelp") : key("recipientsHelp"))}>{readOnly ? <div className="whitespace-pre-wrap text-sm">{(draft.recipients ?? []).join("\n") || "—"}</div> : <textarea aria-label={t(key("recipients"))} className="min-h-24 w-full rounded-md border bg-background p-3 text-sm" value={(draft.recipients ?? []).join("\n")} onChange={event => onPatch({recipients:event.target.value.split("\n")})} />}</AutoField> }),
