@@ -147,6 +147,12 @@ impl Body {
         if !self.default_model.is_empty() && !self.models.contains(&self.default_model) {
             self.models.push(self.default_model.clone());
         }
+        if self.kind == "api" && self.default_model.is_empty() {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("models.defaultModelRequired"),
+            ));
+        }
         if self.name.is_empty()
             || self.name.len() > 128
             || self.name.chars().any(char::is_control)

@@ -225,6 +225,21 @@ async fn api_connection_saves_without_metering_fields() {
     .unwrap();
     let input = json!({"name":"Unmetered","kind":"api","state":"enabled","default_model":"m","models":["m"],"connection":{
         "name":"Unmetered","api_key":"unmetered-token","protocol":"openai","base_url":"https://api.example.invalid/v1","qps":1,"concurrency":1}});
+    // Without a default model the API model is refused with a message naming the
+    // field, and its connection is not left behind.
+    let mut missing = input.clone();
+    missing["default_model"] = json!("");
+    missing["models"] = json!([]);
+    let error = save(
+        &s,
+        &admin(1),
+        None,
+        serde_json::from_value(missing).unwrap(),
+    )
+    .await
+    .unwrap_err();
+    assert!(format!("{error:?}").contains("defaultModelRequired"));
+    assert_eq!(providers::Entity::find().count(&s.db).await.unwrap(), 0);
     let created = save(&s, &admin(1), None, serde_json::from_value(input).unwrap())
         .await
         .unwrap();

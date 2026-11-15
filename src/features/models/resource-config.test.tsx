@@ -181,3 +181,24 @@ it("shows no pricing, currency, timezone or budget fields and keeps stored meter
   const body = JSON.parse(requests.find((r) => r.method === "PATCH" || r.method === "PUT")!.body!);
   expect(body.connection).toMatchObject({ currency: "EUR", timezone: "Asia/Shanghai", monthly_limit_micros: 50, prices });
 });
+
+it("requires a default model for an API model before it can be saved", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-models/12/edit");
+  stored = {
+    id: "12", name: "sub2api#codex", kind: "api", runtime: "", provider_id: "8", models: [], default_model: "", tool_version: "",
+    state: "enabled", version: 1,
+    connection: { name: "sub2api#codex", protocol: "openai", base_url: "https://gw.example.com/v1", credential_id: "3", qps: 35, concurrency: 7, version: 1 },
+  };
+  await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
+  const field = host.querySelector<HTMLInputElement>('input[aria-label="默认模型"]')!;
+  expect(field.closest("label, [data-field], div")!.parentElement!.textContent).toContain("*");
+  const save = host.querySelector<HTMLButtonElement>('form button[type="submit"]')!;
+  expect(save.disabled).toBe(true);
+  await submit();
+  expect(requests.some((r) => r.method === "PATCH" || r.method === "PUT")).toBe(false);
+  await act(async () => type(field, "gpt-5-codex"));
+  expect(save.disabled).toBe(false);
+  await submit();
+  const body = JSON.parse(requests.find((r) => r.method === "PATCH" || r.method === "PUT")!.body!);
+  expect(body.default_model).toBe("gpt-5-codex");
+});

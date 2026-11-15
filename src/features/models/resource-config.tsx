@@ -231,7 +231,10 @@ function DefaultModel({
   onPatch: (p: Partial<AnyRow>) => void;
 }) {
   return (
-    <AutoField label={t("defaultModel")}>
+    <AutoField
+      label={t("defaultModel")}
+      required={!readOnly && draft.kind === "api"}
+    >
       <div>
         {readOnly ? (
           <p className="break-words text-sm">
@@ -440,6 +443,8 @@ export function modelsForms({
               label: "Default model",
               labelKey: key("defaultModel"),
               type: "custom",
+              // An API model calls one concrete model; the server rejects an empty one.
+              required: (draft) => draft.kind === "api",
               render: (p) => <DefaultModel {...p} />,
             },
             {
