@@ -184,3 +184,64 @@ it("allows typing in an interrupted conversation and explicitly retries without 
     await act(async()=>root.unmount());host.remove();mocked.mockRestore();
   }
 });
+
+it("shows the bound host, platform notices, and offers another host when a chosen directory's host is down", async () => {
+  Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT:true});
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  const failed = {...turn("10"),state:"failed",prompt:"build it",error:"Execution host alpha cannot run this now: offline or unreachable.",error_key:"conversations.hostUnavailable"};
+  const notice = {...message("12","notice"),prompt:"Switched execution from host alpha to beta."};
+  let row: Record<string, unknown> = {
+    id:"2",title:"Pinned dir",kind:"private",state:"active",viewer_id:"2",owner_id:"2",
+    can_manage:true,members:[],agents:[],messages:[notice],turns:[failed],version:2,revision_id:"1",members_version:"1",
+    config:{name:"Agent",runtime:"codex",model:"",cwd:"/srv/repo"},binding:{execution_user:"user",canonical_directory:"/srv/repo"},
+    host:{id:"31",name:"alpha"},
+  };
+  const posts: {path:string;body:unknown}[] = [];
+  const mocked = vi.spyOn(apiModule,"api").mockImplementation(async (path, options) => {
+    if (String(path).includes("/events?")) return {items:[],next:0,has_more:false} as never;
+    if (options?.method === "POST") {
+      posts.push({path:String(path),body:JSON.parse(String(options.body))});
+      row = {...row,binding:null,host:null};
+      return {ok:true} as never;
+    }
+    return structuredClone(row) as never;
+  });
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+  try {
+    await act(async()=>root.render(<Conversation workspace="1" id="2" permissions={new Set(["conversations.read","conversations.run"])} />));
+    expect(host.querySelector("header")?.textContent).toContain(`${conversationText("executionHost")} alpha`);
+    const shown = host.querySelector("[data-conversation-notice]");
+    expect(shown?.textContent).toBe("Switched execution from host alpha to beta.");
+    const another = [...host.querySelectorAll("button")].find(b=>b.textContent===conversationText("useAnotherHost"));
+    expect(another).toBeDefined();
+    await act(async()=>another!.click());
+    expect(posts).toEqual([{path:"/workspaces/1/conversations/2/host-releases",body:{}}]);
+    // Released: no host until the next message chooses one.
+    expect(host.querySelector("header")?.textContent).toContain(`${conversationText("executionHost")} ${conversationText("hostPending")}`);
+  } finally {
+    await act(async()=>root.unmount());host.remove();mocked.mockRestore();vi.unstubAllGlobals();
+  }
+});
+
+it("offers another host only for that failure", async () => {
+  Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT:true});
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  const failed = {...turn("10"),state:"failed",prompt:"x",error:"No execution host can run this now",error_key:"models.noHost"};
+  const row = {
+    id:"2",title:"Auto",kind:"private",state:"active",viewer_id:"2",owner_id:"2",
+    can_manage:true,members:[],agents:[],messages:[],turns:[failed],version:2,revision_id:"1",members_version:"1",
+    config:{name:"Agent",runtime:"codex",model:"",cwd:""},binding:null,host:null,
+  };
+  const mocked = vi.spyOn(apiModule,"api").mockImplementation(async (path) => {
+    if (String(path).includes("/events?")) return {items:[],next:0,has_more:false} as never;
+    return structuredClone(row) as never;
+  });
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+  try {
+    await act(async()=>root.render(<Conversation workspace="1" id="2" permissions={new Set(["conversations.read","conversations.run"])} />));
+    expect(host.textContent).toContain("No execution host can run this now");
+    expect([...host.querySelectorAll("button")].some(b=>b.textContent===conversationText("useAnotherHost"))).toBe(false);
+  } finally {
+    await act(async()=>root.unmount());host.remove();mocked.mockRestore();vi.unstubAllGlobals();
+  }
+});

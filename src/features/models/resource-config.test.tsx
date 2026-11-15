@@ -222,3 +222,49 @@ it("lets a CLI model require a time zone for its executions, checked before savi
   const body = JSON.parse(requests.find((r) => r.method === "PATCH" || r.method === "PUT")!.body!);
   expect(body.timezone).toBe("Asia/Shanghai");
 });
+
+it("orders a CLI model's execution hosts, empty meaning any ready Runner", async () => {
+  const runners = [
+    { id: "21", name: "build-a", state: "online" },
+    { id: "22", name: "build-b", state: "offline" },
+    { id: "23", name: "build-c", state: "online" },
+  ];
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    if (String(url).includes("/nodes?")) {
+      requests.push({ url: String(url), method: init?.method, body: init?.body as string });
+      return { ok: true, status: 200, json: async () => ({ items: runners, total: runners.length, page: 1, page_size: 200 }) } as Response;
+    }
+    return original(url, init);
+  });
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-models/9/edit");
+  stored = cli({ runtime: "codex", hosts: [] });
+  await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
+  expect(host.textContent).toContain("自动（任一在线且 CLI 就绪的 Runner）");
+  // Only Runner hosts are offered.
+  expect(requests.some((r) => r.url.includes("/nodes?") && r.url.includes("connection=runner"))).toBe(true);
+  const add = () => host.querySelector<HTMLSelectElement>('select[aria-label="添加主机"]')!;
+  const choose = (id: string) => act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(add(), id);
+    add().dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await choose("23");
+  await choose("22");
+  const order = () => [...host.querySelectorAll('ol[aria-label="执行主机"] li')].map((li) => li.textContent);
+  expect(order()[0]).toContain("build-c");
+  expect(order()[1]).toContain("build-b");
+  expect(order()[1]).toContain("离线");
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="上移 build-b"]')!.click());
+  expect(order()[0]).toContain("build-b");
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="移除 build-c"]')!.click());
+  expect(order()).toHaveLength(1);
+  await submit();
+  const body = JSON.parse(requests.find((r) => r.method === "PATCH" || r.method === "PUT")!.body!);
+  expect(body.hosts).toEqual(["22"]);
+});
+
+it("offers execution hosts only on CLI models", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-models/new");
+  await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
+  expect(host.textContent).not.toContain("执行主机");
+});

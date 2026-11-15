@@ -39,7 +39,7 @@ export function HostDetail({
   const [tab, setTab] = useQueryValue("tab", "info");
   const [alertView, setAlertView] = useState<"rules" | "events">("rules");
   useEffect(() => {
-    if (tab === "terminal" || tab === "files") location.replace(href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: tab }));
+    if (tab === "terminal" || tab === "files") location.replace(href({ workspace, group: "ops", item: "hosts", id: hostId, mode: "workspace" }, { tool: tab }));
   }, [tab, workspace, hostId]);
   const canEnroll = permissions.has("hosts.enroll");
   const [connection, setConnection] = useState<{ workspace: string; hostId: string; kind: string; name: string }>();
@@ -67,15 +67,15 @@ export function HostDetail({
         {permissions.has("holes.read") && <Button type="button" role="tab" title={commonText("holes:title")} aria-selected={tab === "holes"} variant="ghost" size="sm" className={cn("rounded-none border-b-2", tab === "holes" ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab("holes")}><Link2 className="size-4" />{commonText("holes:title")}</Button>}
       </div>
       <div className="flex items-center gap-2">
-      {permissions.has("hosts.terminal") && <a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: "terminal" })} target="_blank" rel="noopener noreferrer" className="inline-flex size-8 items-center justify-center rounded border hover:bg-accent" aria-label={commonText("shell.openTerminal")} title={commonText("shell.openTerminal")}><SquareTerminal className="size-4" /></a>}
-      {permissions.has("hosts.files") && <a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: "files" })} target="_blank" rel="noopener noreferrer" className="inline-flex size-8 items-center justify-center rounded border hover:bg-accent" aria-label={commonText("shell.openFiles")} title={commonText("shell.openFiles")}><FolderOpen className="size-4" /></a>}
-      {permissions.has("hosts.update") && <Button asChild variant="outline" size="sm"><a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "edit" }, {})}><Pencil className="size-4" />{commonText("common.edit")}</a></Button>}
+      {permissions.has("hosts.terminal") && <a href={href({ workspace, group: "ops", item: "hosts", id: hostId, mode: "workspace" }, { tool: "terminal" })} target="_blank" rel="noopener noreferrer" className="inline-flex size-8 items-center justify-center rounded border hover:bg-accent" aria-label={commonText("shell.openTerminal")} title={commonText("shell.openTerminal")}><SquareTerminal className="size-4" /></a>}
+      {permissions.has("hosts.files") && <a href={href({ workspace, group: "ops", item: "hosts", id: hostId, mode: "workspace" }, { tool: "files" })} target="_blank" rel="noopener noreferrer" className="inline-flex size-8 items-center justify-center rounded border hover:bg-accent" aria-label={commonText("shell.openFiles")} title={commonText("shell.openFiles")}><FolderOpen className="size-4" /></a>}
+      {permissions.has("hosts.update") && <Button asChild variant="outline" size="sm"><a href={href({ workspace, group: "ops", item: "hosts", id: hostId, mode: "edit" }, {})}><Pencil className="size-4" />{commonText("common.edit")}</a></Button>}
       </div>
     </div>
       <div role="tabpanel" aria-label={tab === "monitor" ? commonText("shell.monitor") : tab === "alerts" ? commonText("shell.alerts") : tab === "holes" ? commonText("holes:title") : commonText("common.basic")} className={cn("min-h-0 min-w-0 overflow-auto pt-5", (tab === "alerts" || tab === "holes") && "flex flex-1 flex-col")}>
         {tab === "monitor" ? <HostMonitor workspace={workspace} hostId={hostId} /> : tab === "holes" && holes && permissions.has("holes.read") ? <div className="flex min-h-[32rem] min-w-0 flex-1 flex-col gap-3">
-          {holeForm && permissions.has("holes.create") && <div className="flex justify-end"><Button asChild size="sm"><a href={href({workspace,group:"host",item:"holes",mode:"new"},{host_id:hostId,return_to:location.pathname+location.search+location.hash})}><Plus className="size-4" />{commonText("holes:create")}</a></Button></div>}
-          <ResourceTable key={`${hostId}/holes`} config={{ ...holes, fixed: { host_id: hostId }, filters: (holes.filters ?? []).filter(filter => filter.key !== "host_id"), toolbar: { ...holes.toolbar, create: false }, actions: holes.actions?.map(action => action.to ? { ...action, to: (row: Parameters<NonNullable<typeof action.to>>[0]) => ({ group: "host", item: "holes", ...action.to!(row) }) } : action) ?? [] }} workspace={workspace} permissions={permissions} />
+          {holeForm && permissions.has("holes.create") && <div className="flex justify-end"><Button asChild size="sm"><a href={href({workspace,group:"ops",item:"holes",mode:"new"},{host_id:hostId,return_to:location.pathname+location.search+location.hash})}><Plus className="size-4" />{commonText("holes:create")}</a></Button></div>}
+          <ResourceTable key={`${hostId}/holes`} config={{ ...holes, fixed: { host_id: hostId }, filters: (holes.filters ?? []).filter(filter => filter.key !== "host_id"), toolbar: { ...holes.toolbar, create: false }, actions: holes.actions?.map(action => action.to ? { ...action, to: (row: Parameters<NonNullable<typeof action.to>>[0]) => ({ group: "ops", item: "holes", ...action.to!(row) }) } : action) ?? [] }} workspace={workspace} permissions={permissions} />
         </div> : tab === "alerts" && alerts && alertEvents ? <div className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="flex items-center gap-2">
             <div role="tablist" aria-label={commonText("shell.hostAlerts")} className="flex gap-1">

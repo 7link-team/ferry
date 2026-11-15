@@ -871,6 +871,8 @@ pub(super) fn failure_reason(error: &ApiError) -> &'static str {
             | "workflow.agentCliMissing"
             | "workflow.agentRunnerUpgrade"
             | "workflow.agentLoginRequired"
+            | "models.noHost"
+            | "models.noRunner"
             | "workflow.agentApproval"
             | "workflow.agentFailed" => return "agent_failed",
             "workflow.agentUnavailable"

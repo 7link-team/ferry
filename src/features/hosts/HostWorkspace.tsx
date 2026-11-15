@@ -114,7 +114,7 @@ export function HostWorkspace({ navigation, workspace, hostId, permissions, head
   if (!canTerminal && !canFiles) return <p role="alert" className="p-6">{hostRepositoryText("host.080")}</p>;
   return <HostTelemetry workspace={workspace} hostId={hostId} enabled={tabs.some(tab => tab.id === activeTab && hasTerminal(tab.root))}><div className="flex h-dvh min-h-[420px] min-w-0 flex-col bg-background text-foreground">
     <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-3 border-b px-3">
-      <a href={navigation.href({ workspace, group: "host", item: "hosts", id: hostId, mode: "view" }, {})} className="inline-flex size-8 items-center justify-center rounded hover:bg-accent" aria-label={hostRepositoryText("host.081")} title={hostRepositoryText("host.081")}><ArrowLeft className="size-4" /></a>
+      <a href={navigation.href({ workspace, group: "ops", item: "hosts", id: hostId, mode: "view" }, {})} className="inline-flex size-8 items-center justify-center rounded hover:bg-accent" aria-label={hostRepositoryText("host.081")} title={hostRepositoryText("host.081")}><ArrowLeft className="size-4" /></a>
       <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" title={hostName || hostRepositoryText("host.070")}>{hostName || hostRepositoryText("host.070")}</h1>
       <HostLatency workspace={workspace} hostId={hostId} />
       {canTerminal && <Button variant="outline" size="icon" aria-label={hostRepositoryText("host.082")} title={hostRepositoryText("host.082")} onClick={() => addTab("terminal")}><SquareTerminal className="size-4" /></Button>}

@@ -20,5 +20,8 @@
   "conversations.apiPending": "Pelaksanaan perbualan API belum tersedia.",
   "conversations.noRunner": "Tiada Runner tersedia untuk melaksanakan model ini.",
   "conversations.cliPermissionUnsupported": "CLI ini hanya menyokong perbualan baca sahaja. Pilih akses baca sahaja.",
-  "conversations.runnerUpgradeRequired": "Naik taraf Runner hos untuk mendayakan alat platform sebelum menjalankan perbualan ini."
+  "conversations.runnerUpgradeRequired": "Naik taraf Runner hos untuk mendayakan alat platform sebelum menjalankan perbualan ini.",
+  "conversations.hostSwitched": "Pelaksanaan ditukar daripada hos {from} ke {to}. Sesi CLI dibina semula daripada sejarah perbualan dalam Ferry; fail dalam direktori kerja {from} tidak dibawa.",
+  "conversations.hostReleased": "Hos {host} dilepaskan. Mesej seterusnya dijalankan pada hos lain; sesi CLI akan dibina semula daripada sejarah perbualan dalam Ferry, dan fail dalam direktori kerja {host} tidak dibawa.",
+  "conversations.hostUnavailable": "Hos pelaksanaan {host} tidak dapat menjalankannya sekarang: {reason}. Perbualan ini mempunyai direktori kerja tetap, jadi ia tidak berpindah hos sendiri; pilih \"Guna hos lain\" untuk bertukar."
 }

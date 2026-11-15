@@ -532,3 +532,44 @@ fn a_required_zone_refuses_runners_that_cannot_apply_it() {
         &host("linux", "UTC", true)
     ));
 }
+
+#[tokio::test]
+async fn cli_hosts_are_ordered_deduplicated_runner_hosts_of_the_workspace() {
+    let (_dir, s) = setup().await;
+    manager(&s).await;
+    for (id, workspace) in [(501, 1), (502, 1), (503, 2)] {
+        crate::entities::hosts::Entity::insert(
+            crate::hosts::fake::host_row(workspace, id, &format!("h{id}"), "offline")
+                .into_active_model(),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+    }
+    let mut b = body();
+    b.hosts = vec![Id::from(502), Id::from(501), Id::from(502)];
+    b.validate(&s.db, &admin(1)).await.unwrap();
+    assert_eq!(b.hosts, vec![Id::from(502), Id::from(501)]);
+    let saved = save(&s, &admin(1), None, b).await.unwrap();
+    assert_eq!(saved["hosts"], json!(["502", "501"]));
+    // Another workspace's host, or a host that is not a Runner, is refused.
+    for host in [503, 999] {
+        let mut b = body();
+        b.hosts = vec![Id::from(host)];
+        let error = b.validate(&s.db, &admin(1)).await.unwrap_err();
+        assert!(format!("{error:?}").contains("models.hostInvalid"));
+    }
+    // An API model runs on the server: it has no execution hosts.
+    let mut b = body();
+    b.kind = "api".into();
+    b.runtime.clear();
+    b.default_model = "m".into();
+    b.hosts = vec![Id::from(501)];
+    let error = b.validate(&s.db, &admin(1)).await.unwrap_err();
+    assert!(format!("{error:?}").contains("models.hostsCliOnly"));
+    // Duplicates collapse before the limit is applied.
+    let mut b = body();
+    b.hosts = (0..21).map(|_| Id::from(501)).collect();
+    b.validate(&s.db, &admin(1)).await.unwrap();
+    assert_eq!(b.hosts.len(), 1);
+}

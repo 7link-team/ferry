@@ -582,5 +582,37 @@
     "エージェントの実行環境を準備できません。Runner のインストール方針、Node/npm、ネットワーク、バージョン設定を確認してください。設定の分離には既定の管理対象作業ディレクトリが必要です。",
     "에이전트 실행 환경을 준비할 수 없습니다. Runner 설치 정책, Node/npm, 네트워크 및 버전 설정을 확인하세요. 설정 격리에는 기본 관리 작업 디렉터리가 필요합니다.",
     "Persekitaran ejen tidak dapat disediakan. Semak dasar pemasangan Runner, Node/npm, rangkaian dan tetapan versi. Pengasingan konfigurasi memerlukan direktori kerja terurus lalai."
+  ],
+  "pinnedHost": [
+    "Pinned host: {{host}} · Directory: {{cwd}}",
+    "固定主机：{{host}} · 目录：{{cwd}}",
+    "固定主機：{{host}} · 目錄：{{cwd}}",
+    "固定ホスト：{{host}} · ディレクトリ：{{cwd}}",
+    "고정 호스트: {{host}} · 디렉터리: {{cwd}}",
+    "Hos tetap: {{host}} · Direktori: {{cwd}}"
+  ],
+  "pinnedHostHelp": [
+    "Set before hosts were chosen per model: this Agent always runs on that host and directory. Unpin it to use its model's execution hosts.",
+    "这是按模型选择主机之前的设置：此智能体始终在该主机和目录运行。取消固定后改用模型的执行主机。",
+    "這是按模型選擇主機之前的設定：此智慧體始終在該主機和目錄執行。取消固定後改用模型的執行主機。",
+    "モデルごとにホストを選ぶ前の設定です。このエージェントは常にそのホストとディレクトリで実行されます。固定を解除するとモデルの実行ホストを使います。",
+    "모델별 호스트 선택 이전의 설정입니다. 이 에이전트는 항상 해당 호스트와 디렉터리에서 실행됩니다. 고정을 해제하면 모델의 실행 호스트를 사용합니다.",
+    "Ditetapkan sebelum hos dipilih mengikut model: Ejen ini sentiasa berjalan pada hos dan direktori itu. Nyahsemat untuk menggunakan hos pelaksanaan modelnya."
+  ],
+  "unpinHost": [
+    "Unpin",
+    "取消固定",
+    "取消固定",
+    "固定を解除",
+    "고정 해제",
+    "Nyahsemat"
+  ],
+  "unpinnedHost": [
+    "Unpinned. This Agent now runs on its model's execution hosts.",
+    "已取消固定，此智能体改用模型的执行主机。",
+    "已取消固定，此智慧體改用模型的執行主機。",
+    "固定を解除しました。このエージェントはモデルの実行ホストを使います。",
+    "고정을 해제했습니다. 이 에이전트는 모델의 실행 호스트를 사용합니다.",
+    "Dinyahsemat. Ejen ini kini berjalan pada hos pelaksanaan modelnya."
   ]
 }

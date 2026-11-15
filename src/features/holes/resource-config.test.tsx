@@ -39,12 +39,12 @@ afterEach(async () => { if (mounted) await act(async () => mounted?.unmount()); 
 async function mount(node: ReactNode) { container = document.createElement("div"); document.body.append(container); mounted = createRoot(container); await act(async () => mounted!.render(node)); }
 
 it("keeps holes out of the menu but routable under hosts for list, create, detail and edit", () => {
-  const host = nav.find((group) => group.key === "host")!;
+  const host = nav.find((group) => group.key === "ops")!;
   expect(host.items.filter((item) => !item.hidden).map((item) => item.key)).not.toContain("holes");
   expect(host.items.find((item) => item.key === "holes")).toMatchObject({ resource: "holes", permission: "holes.read", hidden: true, parent: "hosts" });
   for (const suffix of ["", "/new", "/9", "/9/edit"]) {
     const path = `/workspaces/ops/holes${suffix}`;
-    expect(parse(path, "")).toMatchObject({ group: "host", item: "holes" });
+    expect(parse(path, "")).toMatchObject({ group: "ops", item: "holes" });
     expect(href(parse(path, ""), {})).toBe(`/en-US${path}`);
   }
 });

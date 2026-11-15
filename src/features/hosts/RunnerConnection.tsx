@@ -334,7 +334,7 @@ function ConnectionFlow({ navigation, workspace, hostId, onConnected, autoGenera
     {token && <div role="status" className="rounded-md border bg-muted/30 p-4">
       <div className="flex items-center gap-2 font-medium">{connected ? <CheckCircle2 className="size-4"/> : !expired ? <Loader2 className="size-4 motion-safe:animate-spin"/> : null}{connected ? commonText("resource-domain:runner.hostConnected") : expired ? commonText("resource-domain:runner.commandExpired") : used ? commonText("resource-domain:runner.waitOnline") : commonText("resource-domain:runner.waitHost")}</div>
       <p className="mt-1 text-xs text-muted-foreground">{connected ? commonText("resource-domain:runner.connectedHelp") : expired ? commonText("resource-domain:runner.expiredHelp") : used ? commonText("resource-domain:runner.usedHelp") : commonText("resource-domain:runner.pendingHelp")}</p>
-      {connected && status?.host_id && <a className="mt-3 inline-block underline underline-offset-4" href={navigation.href({workspace, group:"host", item:"hosts", mode:"view", id:status.host_id}, {})}>{commonText("resource-domain:runner.hostDetails")}</a>}
+      {connected && status?.host_id && <a className="mt-3 inline-block underline underline-offset-4" href={navigation.href({workspace, group:"ops", item:"hosts", mode:"view", id:status.host_id}, {})}>{commonText("resource-domain:runner.hostDetails")}</a>}
       {expired && <Button className="mt-3" variant="outline" onClick={generate} disabled={busy || !!serverError}>{commonText("resource-domain:runner.regenerate")}</Button>}
     </div>}
     {pollError && <p role="alert" className="text-destructive">{pollError} {commonText("resource-domain:runner.pollRetry")}</p>}

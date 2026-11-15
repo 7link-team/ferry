@@ -18,7 +18,8 @@ use axum::{
     routing::{get, post},
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
+    QueryFilter,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -67,6 +68,19 @@ struct Body {
     /// CLI-only IANA zone its executions run in; empty follows the runner.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     timezone: String,
+    /// CLI-only: Runner hosts to use, first preferred; empty = any ready Runner.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    hosts: Vec<Id>,
+}
+/// At most this many preferred hosts on one CLI model.
+const MAX_HOSTS: usize = 20;
+/// Connections an Agent's CLI can run on (tests also use in-memory hosts).
+pub(crate) fn runner_connections() -> &'static [&'static str] {
+    if cfg!(test) {
+        &["runner", "fake"]
+    } else {
+        &["runner"]
+    }
 }
 /// The format a profile saved before formats existed implies: the connection's
 /// protocol, narrowed to what this CLI can call (Codex only speaks Responses).
@@ -163,6 +177,34 @@ impl Body {
                 Message::new("models.timezoneCliOnly"),
             ));
         }
+        let mut seen = HashSet::new();
+        self.hosts
+            .retain(|host| i64::from(*host) > 0 && seen.insert(*host));
+        if self.kind == "api" && !self.hosts.is_empty() {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("models.hostsCliOnly"),
+            ));
+        }
+        if self.hosts.len() > MAX_HOSTS {
+            return Err(invalid());
+        }
+        for host in &self.hosts {
+            let found = crate::entities::hosts::Entity::find_by_id(*host)
+                .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
+                .filter(
+                    crate::entities::hosts::Column::Connection
+                        .is_in(runner_connections().iter().copied()),
+                )
+                .count(conn)
+                .await?;
+            if found == 0 {
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("models.hostInvalid"),
+                ));
+            }
+        }
         if self.name.is_empty()
             || self.name.len() > 128
             || self.name.chars().any(char::is_control)
@@ -232,7 +274,7 @@ impl Body {
     }
 }
 fn view(p: &profiles::Model) -> Value {
-    json!({"cli_options":p.cli_options.as_deref().and_then(|v|serde_json::from_str::<Value>(v).ok()).unwrap_or(Value::Null),"id":Id::from(p.id),"name":p.name,"kind":p.kind,"runtime":p.runtime,"provider_id":Id::from(p.provider_id),"models":serde_json::from_str::<Value>(&p.models).unwrap_or(json!([])),"default_model":p.default_model,"tool_version":p.tool_version,"timezone":p.timezone,"state":p.state,"revision_id":Id::from(p.revision_id),"version":p.version,"created_at":p.created_at,"updated_at":p.updated_at})
+    json!({"cli_options":p.cli_options.as_deref().and_then(|v|serde_json::from_str::<Value>(v).ok()).unwrap_or(Value::Null),"id":Id::from(p.id),"name":p.name,"kind":p.kind,"runtime":p.runtime,"provider_id":Id::from(p.provider_id),"models":serde_json::from_str::<Value>(&p.models).unwrap_or(json!([])),"default_model":p.default_model,"tool_version":p.tool_version,"timezone":p.timezone,"hosts":host_ids(p).into_iter().map(Id::from).collect::<Vec<_>>(),"state":p.state,"revision_id":Id::from(p.revision_id),"version":p.version,"created_at":p.created_at,"updated_at":p.updated_at})
 }
 async fn find(conn: &impl ConnectionTrait, scope: &Scope, id: Id) -> Result<profiles::Model> {
     scope.require("ai-models.read")?;
@@ -387,6 +429,7 @@ async fn save(s: &AppState, scope: &Scope, id: Option<Id>, mut body: Body) -> Re
         state: body.state,
         cli_options: (!body.cli_options.is_null()).then(|| body.cli_options.to_string()),
         timezone: body.timezone,
+        hosts: serde_json::to_string(&body.hosts).map_err(|_| invalid())?,
         revision_id: revision.id,
         version: old
             .as_ref()
@@ -618,6 +661,31 @@ async fn discover(
     Ok(Json(
         json!({"models":models,"has_more":data["has_more"].as_bool().unwrap_or(false)}),
     ))
+}
+
+/// A profile's stored preferred hosts, in order.
+fn host_ids(p: &profiles::Model) -> Vec<i64> {
+    serde_json::from_str::<Vec<Id>>(&p.hosts)
+        .unwrap_or_default()
+        .into_iter()
+        .map(i64::from)
+        .collect()
+}
+
+/// The Runner hosts an Agent's current CLI model prefers, first preferred;
+/// empty means any Runner that has the CLI ready.
+pub(crate) async fn cli_hosts(
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+    agent: &crate::entities::ai_agents::Model,
+) -> Result<Vec<i64>> {
+    Ok(profiles::Entity::find_by_id(agent.model_profile_id)
+        .filter(profiles::Column::WorkspaceId.eq(workspace))
+        .one(conn)
+        .await?
+        .filter(|profile| profile.kind == "cli")
+        .map(|profile| host_ids(&profile))
+        .unwrap_or_default())
 }
 
 /// The time zone an Agent's CLI model requires on `host`, or None to follow

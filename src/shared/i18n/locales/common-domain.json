@@ -2,6 +2,7 @@
   "en-US": {
     "nav.sections.access": "Identity & permissions",
     "nav.sections.models": "Model services",
+    "nav.sections.hosts": "Hosts",
     "nav.sections.configuration": "Configuration & audit",
     "field.text": "Enter the text value for this field.",
     "field.select": "Choose a value from the available options.",
@@ -417,6 +418,7 @@
   "zh-CN": {
     "nav.sections.access": "身份与权限",
     "nav.sections.models": "模型服务",
+    "nav.sections.hosts": "主机",
     "nav.sections.configuration": "配置与审计",
     "field.text": "填写此字段的文本值。",
     "field.select": "从下拉列表中选择一个可用值。",
@@ -832,6 +834,7 @@
   "zh-TW": {
     "nav.sections.access": "身分與權限",
     "nav.sections.models": "模型服務",
+    "nav.sections.hosts": "主機",
     "nav.sections.configuration": "設定與稽核",
     "field.text": "填寫此欄位的文字值。",
     "field.select": "從下拉清單中選擇可用值。",
@@ -1247,6 +1250,7 @@
   "ja-JP": {
     "nav.sections.access": "IDと権限",
     "nav.sections.models": "モデルサービス",
+    "nav.sections.hosts": "ホスト",
     "nav.sections.configuration": "設定と監査",
     "field.text": "この項目のテキストを入力します。",
     "field.select": "一覧から値を選択します。",
@@ -1662,6 +1666,7 @@
   "ko-KR": {
     "nav.sections.access": "ID 및 권한",
     "nav.sections.models": "모델 서비스",
+    "nav.sections.hosts": "호스트",
     "nav.sections.configuration": "설정 및 감사",
     "field.text": "이 필드의 텍스트 값을 입력하세요.",
     "field.select": "목록에서 사용 가능한 값을 선택하세요.",
@@ -2077,6 +2082,7 @@
   "ms-MY": {
     "nav.sections.access": "Identiti & kebenaran",
     "nav.sections.models": "Perkhidmatan model",
+    "nav.sections.hosts": "Hos",
     "nav.sections.configuration": "Konfigurasi & audit",
     "field.text": "Masukkan nilai teks untuk medan ini.",
     "field.select": "Pilih nilai daripada pilihan tersedia.",

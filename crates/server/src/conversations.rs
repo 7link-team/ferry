@@ -4,6 +4,7 @@ mod files;
 mod groups;
 mod interactions;
 pub(crate) mod messages;
+mod placement;
 pub(crate) mod run;
 #[cfg(test)]
 mod tests;
@@ -46,6 +47,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/{workspace}/conversations/{id}/appearance",
             axum::routing::put(appearance::update),
+        )
+        .route(
+            "/{workspace}/conversations/{id}/host-releases",
+            post(placement::rebind),
         )
         .route("/{workspace}/conversations/{id}/events", get(history))
         .route("/{workspace}/conversations/{id}/turns", post(send))
@@ -144,6 +149,20 @@ pub(crate) struct Configuration {
     pub name: String,
     #[serde(default)]
     pub runner_key_hash: String,
+    /// The host asked for when the conversation was created; 0 = automatic.
+    #[serde(default, skip_serializing_if = "is_zero_id")]
+    pub requested_host: Id,
+    /// The directory was chosen (on the Agent or at creation), so the
+    /// conversation never moves to another host by itself. Absent on
+    /// conversations created before hosts were assigned at the first message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_directory: Option<bool>,
+    /// The host released by the user, not to be chosen again for the next turn.
+    #[serde(default, skip_serializing_if = "is_zero_id")]
+    pub previous_host: Id,
+}
+fn is_zero_id(id: &Id) -> bool {
+    i64::from(*id) == 0
 }
 impl Configuration {
     pub(crate) fn authentication_usable(&self, authentication: &str) -> bool {
@@ -182,6 +201,9 @@ impl Configuration {
         if !config.cwd.is_empty() {
             crate::hosts::channel::check_path(&config.cwd)?;
         }
+        // No host until the first message; the Agent's legacy pin is read then.
+        config.host_id = Id::from(0);
+        config.pinned_directory = Some(!config.cwd.is_empty());
         Ok(config)
     }
     pub(crate) fn from_agent(a: &ai_agents::Model) -> Result<Self> {
@@ -198,6 +220,9 @@ impl Configuration {
             },
             name: a.name.clone(),
             runner_key_hash: String::new(),
+            requested_host: Id::from(0),
+            pinned_directory: None,
+            previous_host: Id::from(0),
         })
     }
 }
@@ -220,8 +245,10 @@ pub(super) fn view_turn(t: &turns::Model) -> Value {
             }
         }
     }
+    // The message identity lets the page offer the matching action (e.g. another host).
+    let error_key = crate::i18n::decode_stored(&t.error).map(|message| message.key);
     json!({"id":Id::from(t.id),"state":t.state,"prompt":t.prompt,"attachments":serde_json::from_str::<Value>(&t.attachments).unwrap_or(json!([])),
-        "error":crate::i18n::render_stored(crate::i18n::current_locale(),&t.error),"usage":serde_json::from_str::<Value>(&t.usage).unwrap_or(Value::Null),"decisions":decisions,
+        "error":crate::i18n::render_stored(crate::i18n::current_locale(),&t.error),"error_key":error_key,"usage":serde_json::from_str::<Value>(&t.usage).unwrap_or(Value::Null),"decisions":decisions,
         "owner_id":Id::from(t.owner_id),"created_at":t.created_at,"updated_at":t.updated_at})
 }
 async fn list(
@@ -331,8 +358,9 @@ async fn create(
         return Err(invalid());
     }
     let id = s.next_id()?;
-    let (config, binding) = prepare_execution(&s, &scope, &agent, &body, id).await?;
-    let extra = groups::prepare(&s, &scope, &body, &agent, &config, &binding, id).await?;
+    // Creating only creates: the host is chosen at each Agent's first message.
+    let config = prepare_execution(&s, &scope, &agent, &body).await?;
+    let extra = groups::prepare(&s, &scope, &body, &agent, &config).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     if available(&tx, &scope, agent_id).await?.revision_id != agent.revision_id {
         return Err(conflict());
@@ -348,7 +376,7 @@ async fn create(
             title: title.clone(),
             state: "active".into(),
             config: serde_json::to_string(&config).unwrap(),
-            binding: serde_json::to_string(&binding).unwrap(),
+            binding: placement::UNBOUND.into(),
             native_session_id: String::new(),
             next_sequence: 0,
             version: 1,
@@ -374,13 +402,14 @@ async fn create(
     Ok((StatusCode::CREATED, Json(json!({"id":id}))))
 }
 
+/// The frozen execution settings of a new conversation (or room Agent). No
+/// Runner is contacted: a CLI model is all it needs.
 async fn prepare_execution(
     s: &AppState,
     scope: &Scope,
     agent: &ai_agents::Model,
     body: &Create,
-    id: Id,
-) -> Result<(Configuration, ferry_protocol::agent::Binding)> {
+) -> Result<Configuration> {
     let resolved = crate::agents::resolve_model(&s.db, agent).await?;
     if resolved.runtime == "api" {
         return Err(error(StatusCode::CONFLICT, "conversations.apiPending"));
@@ -388,85 +417,18 @@ async fn prepare_execution(
     let mut config = Configuration::for_conversation(&resolved, body)?;
     if let Some(host) = body.host_id.filter(|id| i64::from(*id) != 0) {
         scope.require("hosts.update")?;
-        config.host_id = host;
-    }
-    if i64::from(config.host_id) != 0 {
-        return bind_execution(s, scope, config, agent.id, id).await;
-    }
-    use crate::entities::hosts;
-    let hosts = hosts::Entity::find()
-        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(hosts::Column::Connection.eq("runner"))
-        .filter(hosts::Column::State.eq("online"))
-        .order_by_asc(hosts::Column::Id)
-        .limit(100)
-        .all(&s.db)
-        .await?;
-    let allocate = async {
-        let mut last = error(StatusCode::CONFLICT, "conversations.noRunner");
-        for host in hosts {
-            let mut candidate = config.clone();
-            candidate.host_id = host.id.into();
-            match bind_execution(s, scope, candidate, agent.id, id).await {
-                Ok(bound) => return Ok(bound),
-                Err(e) => last = e,
-            }
-        }
-        Err(last)
-    };
-    tokio::time::timeout(std::time::Duration::from_secs(390), allocate)
-        .await
-        .map_err(|_| error(StatusCode::CONFLICT, "conversations.noRunner"))?
-}
-async fn bind_execution(
-    s: &AppState,
-    scope: &Scope,
-    mut config: Configuration,
-    agent: i64,
-    id: Id,
-) -> Result<(Configuration, ferry_protocol::agent::Binding)> {
-    let host = crate::entities::hosts::Entity::find_by_id(config.host_id)
-        .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(crate::entities::hosts::Column::Connection.eq("runner"))
-        .one(&s.db)
-        .await?
-        .ok_or_else(ApiError::missing)?;
-    config.runner_key_hash = host.runner_key_hash;
-    let channel = crate::hosts::remote::open(s, &scope.workspace_id, &config.host_id).await?;
-    let probe = if config.cwd.is_empty() {
-        channel
-            .agent_workspace(config.runtime, &format!("{id}-{agent}"))
+        crate::entities::hosts::Entity::find_by_id(host)
+            .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(
+                crate::entities::hosts::Column::Connection
+                    .is_in(crate::models::runner_connections().iter().copied()),
+            )
+            .one(&s.db)
             .await?
-    } else {
-        channel
-            .agent_probe(config.runtime, &config.cwd, None)
-            .await?
-    };
-    let canonical = probe
-        .canonical_directory
-        .filter(|_| probe.directory_exists)
-        .ok_or_else(|| error(StatusCode::CONFLICT, "conversations.directoryMissing"))?;
-    let executable = probe
-        .executable
-        .filter(|_| probe.error.is_none())
-        .ok_or_else(|| error(StatusCode::CONFLICT, "conversations.cliMissing"))?;
-    if !config.authentication_usable(&probe.authentication) {
-        return Err(error(StatusCode::CONFLICT, "conversations.loginRequired"));
+            .ok_or_else(ApiError::missing)?;
+        config.requested_host = host;
     }
-    if probe.execution_user.is_empty()
-        || probe.execution_identity.is_empty()
-        || config.runner_key_hash.is_empty()
-    {
-        return Err(error(StatusCode::CONFLICT, "conversations.bindingChanged"));
-    }
-    config.cwd = canonical.clone();
-    let binding = ferry_protocol::agent::Binding {
-        execution_user: probe.execution_user,
-        execution_identity: probe.execution_identity,
-        canonical_directory: canonical,
-        executable,
-    };
-    Ok((config, binding))
+    Ok(config)
 }
 async fn detail(
     State(s): State<AppState>,
@@ -480,6 +442,7 @@ async fn detail(
         c.owner_id == i64::from(scope.user.id) && scope.require("conversations.update").is_ok()
     );
     value["viewer_id"] = json!(scope.user.id);
+    value["host"] = placement::host_view(&s.db, &c.config, &c.binding).await?;
     value["turns"] = json!(
         turns::Entity::find()
             .filter(turns::Column::ConversationId.eq(id))

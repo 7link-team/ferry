@@ -1,9 +1,11 @@
 import { commonText, workflowText } from "../shared/i18n/i18n";
 /**
- * The whole menu tree as data. Moving an item between groups — the planned
- * merge of 主机 / 构建 / 部署 into one top-level module — is an edit here and
- * nowhere else. Routes are derived: /workspaces/{workspaceId}/{resource}.
+ * The whole menu tree as data. Moving an item between groups is an edit here
+ * (plus the legacy group alias in the router). Routes are derived:
+ * /workspaces/{workspaceId}/{resource}.
  */
+/** Former top-level groups whose items now live in another group. */
+export const movedGroups: Record<string, string> = { host: "ops" };
 export interface NavItem {
   key: string;
   label: string;
@@ -94,19 +96,6 @@ export const nav: NavGroup[] = [
     ],
   },
   {
-    key: "host",
-    get label() { return commonText("nav.hosts"); },
-    items: [
-      { key: "hosts", get label() { return commonText("nav.nodes"); }, resource: "hosts", permission: "hosts.read" },
-      { key: "holes", get label() { return commonText("holes:title"); }, resource: "holes", permission: "holes.read", hidden: true, parent: "hosts" },
-      { key: "host-groups", get label() { return commonText("nav.hostGroups"); }, resource: "host-groups", permission: "host-groups.read", hidden: true, parent: "hosts" },
-      { key: "credentials", get label() { return commonText("nav.credentials"); }, resource: "credentials", params: { scope: "host" }, permission: "credentials.read" },
-      { key: "tags", get label() { return commonText("nav.tags"); }, resource: "tags", permission: "tags.read" },
-      { key: "cron-jobs", get label() { return commonText("nav.cronJobs"); }, resource: "cron-jobs", params: { scope: "host" }, permission: "cron-jobs.read" },
-      { key: "cron-runs", get label() { return commonText("nav.cronRuns"); }, resource: "cron-runs", params: {scope:"host"}, permission:"cron-jobs.read", hidden:true },
-    ],
-  },
-  {
     key: "ops",
     get label() { return commonText("nav.maintenance"); },
     items: [
@@ -119,6 +108,14 @@ export const nav: NavGroup[] = [
       { key: "members", get label() { return commonText("nav.members"); }, resource: "members", permission: "members.read", section: "nav.sections.access" },
       { key: "roles", get label() { return commonText("nav.roles"); }, resource: "roles", permission: "roles.read", section: "nav.sections.access" },
       { key: "ai-models", get label() { return commonText("models:title"); }, resource: "ai-models", permission: "ai-models.read", section: "nav.sections.models" },
+      // Hosts are set up once and used by Agents, pipelines and deployments alike.
+      { key: "hosts", get label() { return commonText("nav.nodes"); }, resource: "hosts", permission: "hosts.read", section: "nav.sections.hosts" },
+      { key: "holes", get label() { return commonText("holes:title"); }, resource: "holes", permission: "holes.read", hidden: true, parent: "hosts", section: "nav.sections.hosts" },
+      { key: "host-groups", get label() { return commonText("nav.hostGroups"); }, resource: "host-groups", permission: "host-groups.read", hidden: true, parent: "hosts", section: "nav.sections.hosts" },
+      { key: "credentials", get label() { return commonText("nav.credentials"); }, resource: "credentials", params: { scope: "host" }, permission: "credentials.read", section: "nav.sections.hosts" },
+      { key: "tags", get label() { return commonText("nav.tags"); }, resource: "tags", permission: "tags.read", section: "nav.sections.hosts" },
+      { key: "cron-jobs", get label() { return commonText("nav.cronJobs"); }, resource: "cron-jobs", params: { scope: "host" }, permission: "cron-jobs.read", section: "nav.sections.hosts" },
+      { key: "cron-runs", get label() { return commonText("nav.cronRuns"); }, resource: "cron-runs", params: {scope:"host"}, permission:"cron-jobs.read", hidden:true, section: "nav.sections.hosts" },
       { key: "variables", get label() { return commonText("nav.variables"); }, resource: "variables", params: { scope: "global" }, permission: "variables.read", section: "nav.sections.configuration" },
       { key: "settings", get label() { return commonText("nav.settings"); }, resource: "settings", permission: "settings.read", section: "nav.sections.configuration" },
       { key: "dictionaries", get label() { return commonText("nav.dictionaries"); }, resource: "dictionaries", permission: "dictionaries.read", section: "nav.sections.configuration" },
@@ -127,6 +124,6 @@ export const nav: NavGroup[] = [
   },
 ];
 
-export const findGroup = (key: string) => nav.find((g) => g.key === key);
+export const findGroup = (key: string) => nav.find((g) => g.key === (movedGroups[key] ?? key));
 export const findItem = (group: string, key: string) =>
   findGroup(group)?.items.find((i) => i.key === key);

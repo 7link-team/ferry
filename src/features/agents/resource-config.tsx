@@ -2,8 +2,10 @@ import { Eye, Pencil } from "lucide-react";
 import { AvatarEditor, IdentityAvatar, type AvatarValue } from "../../shared/ui/identity-avatar";
 import { AgentPrompt } from "./AgentPrompt";
 import { useEffect, useState } from "react";
-import { errorText } from "../../shared/api/api";
+import { toast } from "sonner";
+import { api, errorText } from "../../shared/api/api";
 import { AutoField } from "../../shared/forms/auto-form";
+import { Button } from "../../shared/ui/button";
 import {
   Select,
   SelectContent,
@@ -12,7 +14,7 @@ import {
   SelectValue,
 } from "../../shared/ui/select";
 import { commonText as t } from "../../shared/i18n/i18n";
-import { listResource, named } from "../../shared/api/resource";
+import { base, getResource, listResource, named } from "../../shared/api/resource";
 import {
   form,
   list,
@@ -221,6 +223,54 @@ function AgentModel({
     </div>
   );
 }
+/**
+ * A host and directory pinned on an Agent before hosts were chosen per model.
+ * Shown so the hidden pin is visible, and removable; new pins are not made.
+ */
+function AgentHostPin({
+  workspace,
+  draft,
+  canUnpin,
+  onPatch,
+}: {
+  workspace: string;
+  draft: Partial<Agent>;
+  canUnpin: boolean;
+  onPatch: (patch: Partial<Agent>) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [cleared, setCleared] = useState(false);
+  if (cleared) return null;
+  async function unpin() {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`${base(workspace, "ai-agents")}/${encodeURIComponent(draft.id!)}/host-pin?version=${draft.version}`, { method: "DELETE" });
+      const fresh = await getResource<Agent>(workspace, "ai-agents", draft.id!);
+      setCleared(true);
+      onPatch({ host_id: "0", host_name: "", cwd: "", version: fresh.version, revision_id: fresh.revision_id });
+      toast.success(text("unpinnedHost"));
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const summary = t(key("pinnedHost"), { host: named(draft.host_name, draft.host_id), cwd: draft.cwd || "—" });
+  return (
+    <div role="group" aria-label={summary} className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+      <p className="font-medium">{summary}</p>
+      <p className="text-muted-foreground">{text("pinnedHostHelp")}</p>
+      {canUnpin && (
+        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void unpin()}>
+          {text("unpinHost")}
+        </Button>
+      )}
+      {error && <p role="alert" className="text-destructive">{error}</p>}
+    </div>
+  );
+}
 export function agentsLists(
   _: ResourceConfigContext,
 ): Record<string, ListConfig<AnyRow>> {
@@ -388,6 +438,22 @@ export function agentsForms({
               type: "custom",
               span: 2,
               render: (props) => <AgentModel {...props} />,
+            },
+            {
+              key: "host_id",
+              label: "Pinned host",
+              labelKey: key("unpinHost"),
+              type: "custom",
+              span: 2,
+              when: (r) => !!r.id && !!r.host_id && r.host_id !== "0",
+              render: ({ workspace, draft, onPatch }) => (
+                <AgentHostPin
+                  workspace={workspace}
+                  draft={draft}
+                  canUnpin={!!grants?.has("ai-agents.update") && !!grants?.has("hosts.update")}
+                  onPatch={onPatch}
+                />
+              ),
             },
             {
               key: "visibility",

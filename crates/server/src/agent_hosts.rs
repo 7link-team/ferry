@@ -1,0 +1,299 @@
+//! Which Runner hosts may run an Agent's CLI, in what order, and why each one
+//! could not. Conversations and workflow Agent nodes share this, so both pick
+//! hosts the same way and explain a failure the same way.
+use crate::{
+    entities::{ai_agents, hosts},
+    error::{ApiError, Result},
+    i18n::Message,
+    snowflake::Id,
+};
+use axum::http::StatusCode;
+use ferry_protocol::agent::{Binding, Probe, Runtime};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+
+/// Online Runners considered when a CLI model names no hosts.
+const AUTOMATIC_LIMIT: u64 = 100;
+/// Hosts listed by name in one error; the rest are counted.
+const LISTED_REASONS: usize = 8;
+
+/// Hosts to try, in order: an explicitly requested host, then the host still
+/// pinned on a legacy Agent, then the CLI model's hosts in order, and — only
+/// when the model names none — every online Runner by id. Named hosts are kept
+/// even when offline so the caller can say so; deleted ones are skipped.
+pub(crate) async fn candidates(
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+    requested: Option<i64>,
+    agent: &ai_agents::Model,
+    exclude: &[i64],
+) -> Result<Vec<hosts::Model>> {
+    let preferred = crate::models::cli_hosts(conn, workspace, agent).await?;
+    let mut named = vec![];
+    named.extend(requested.filter(|id| *id > 0));
+    named.extend((agent.host_id > 0).then_some(agent.host_id));
+    named.extend(preferred.iter().copied());
+    let mut rows: Vec<hosts::Model> = vec![];
+    for id in named {
+        if exclude.contains(&id) || rows.iter().any(|row| row.id == id) {
+            continue;
+        }
+        if let Some(row) = runners(workspace)
+            .filter(hosts::Column::Id.eq(id))
+            .one(conn)
+            .await?
+        {
+            rows.push(row);
+        }
+    }
+    if preferred.is_empty() {
+        for row in runners(workspace)
+            .filter(hosts::Column::State.eq("online"))
+            .order_by_asc(hosts::Column::Id)
+            .limit(AUTOMATIC_LIMIT)
+            .all(conn)
+            .await?
+        {
+            if !exclude.contains(&row.id) && !rows.iter().any(|known| known.id == row.id) {
+                rows.push(row);
+            }
+        }
+    }
+    Ok(rows)
+}
+
+fn runners(workspace: Id) -> sea_orm::Select<hosts::Entity> {
+    hosts::Entity::find()
+        .filter(hosts::Column::WorkspaceId.eq(workspace))
+        .filter(
+            hosts::Column::Connection.is_in(crate::models::runner_connections().iter().copied()),
+        )
+}
+
+/// Why one host could not run the CLI.
+pub(crate) fn reason(key: &'static str, cli: &str) -> Message {
+    Message::new(key).with("cli", cli.to_owned())
+}
+
+/// The reason behind an error opening or probing a host, for the host list.
+pub(crate) fn reason_from(error: &ApiError) -> Message {
+    match &error.2 {
+        Some(message) => Message::new("models.reasonError").with_message("detail", message.clone()),
+        None => Message::new("models.reasonError").with("detail", error.1.clone()),
+    }
+}
+
+/// Every host tried and why it could not run the CLI.
+#[derive(Default)]
+pub(crate) struct Reasons(Vec<Message>);
+
+impl Reasons {
+    pub(crate) fn push(&mut self, host: &hosts::Model, reason: Message) {
+        self.0.push(
+            Message::new("models.hostReason")
+                .with("host", host.name.clone())
+                .with_message("reason", reason),
+        );
+    }
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+    /// One error naming each host and its reason, or "no Runner" when none was tried.
+    pub(crate) fn into_error(self) -> ApiError {
+        if self.0.is_empty() {
+            return ApiError::localized(StatusCode::CONFLICT, Message::new("models.noRunner"));
+        }
+        let total = self.0.len();
+        let mut listed: Vec<Message> = self.0.into_iter().take(LISTED_REASONS).collect();
+        if total > LISTED_REASONS {
+            listed.push(
+                Message::new("models.hostReasonMore")
+                    .with("count", (total - LISTED_REASONS).to_string()),
+            );
+        }
+        let mut chain = listed.pop().expect("at least one reason");
+        while let Some(previous) = listed.pop() {
+            chain = Message::new("models.hostReasonList")
+                .with_message("first", previous)
+                .with_message("rest", chain);
+        }
+        ApiError::localized(
+            StatusCode::CONFLICT,
+            Message::new("models.noHost").with_message("reasons", chain),
+        )
+    }
+}
+
+/// The probe answer checked for running `runtime`: a found, working CLI, the
+/// directory, platform tools and a usable login. `login_usable` decides
+/// whether the reported login state is enough (a custom upstream replaces it).
+pub(crate) fn check(
+    probe: Probe,
+    cli: &str,
+    login_usable: impl Fn(&str) -> bool,
+) -> std::result::Result<Binding, Message> {
+    let Some(directory) = probe
+        .canonical_directory
+        .clone()
+        .filter(|_| probe.directory_exists)
+    else {
+        return Err(Message::new("models.reasonDirectory"));
+    };
+    let Some(executable) = probe.executable.clone().filter(|_| probe.error.is_none()) else {
+        return Err(
+            match probe.error.filter(|detail| !detail.trim().is_empty()) {
+                Some(detail) => {
+                    reason("models.reasonCliFailed", cli).with("detail", truncate(&detail))
+                }
+                None => reason("models.reasonCliMissing", cli),
+            },
+        );
+    };
+    if !probe.platform_tools
+        || probe.execution_user.is_empty()
+        || probe.execution_identity.is_empty()
+    {
+        return Err(Message::new("models.reasonRunnerOld"));
+    }
+    if !login_usable(&probe.authentication) {
+        return Err(reason("models.reasonLogin", cli));
+    }
+    Ok(Binding {
+        execution_user: probe.execution_user,
+        execution_identity: probe.execution_identity,
+        canonical_directory: directory,
+        executable,
+    })
+}
+
+/// Runner-reported detail, bounded and on one line.
+fn truncate(detail: &str) -> String {
+    let line = detail.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut end = line.len().min(300);
+    while !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    line[..end].to_owned()
+}
+
+/// Runtime name shown in reasons.
+pub(crate) fn cli_name(runtime: Runtime) -> String {
+    serde_json::to_value(runtime)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::{Locale, render};
+
+    fn host(id: i64, name: &str) -> hosts::Model {
+        crate::hosts::fake::host_row(1, id, name, "online")
+    }
+
+    /// Stored errors are re-rendered per reader only when every part is a
+    /// known message with exactly its template's parameters.
+    #[test]
+    fn every_reason_is_stored_as_a_translatable_message() {
+        let unreachable = ApiError::localized(
+            StatusCode::BAD_GATEWAY,
+            Message::new("ssh.unreachable")
+                .with("address", "10.0.0.1")
+                .with("detail", "refused"),
+        );
+        let reasons = [
+            Message::new("models.reasonOffline"),
+            Message::new("models.reasonUnreachable")
+                .with_message("detail", reason_from(&unreachable)),
+            reason_from(&ApiError::bad("plain text")),
+            Message::new("models.reasonDirectory"),
+            Message::new("models.reasonRunnerOld"),
+            Message::new("models.reasonNotRunner"),
+            reason("models.reasonCliMissing", "codex"),
+            reason("models.reasonCliFailed", "codex").with("detail", "failed"),
+            reason("models.reasonLogin", "codex"),
+            Message::new("conversations.bindingChanged"),
+        ];
+        let mut all = Reasons::default();
+        for (id, reason) in reasons.into_iter().enumerate() {
+            let one = Message::new("conversations.hostUnavailable")
+                .with("host", "alpha")
+                .with_message("reason", reason.clone());
+            let stored = crate::i18n::store_message(&one);
+            assert!(
+                crate::i18n::decode_stored(&stored).is_some(),
+                "{}",
+                reason.key
+            );
+            all.push(&host(id as i64, "h"), reason);
+        }
+        let stored = all.into_error().stored();
+        assert_eq!(
+            crate::i18n::decode_stored(&stored).unwrap().key,
+            "models.noHost"
+        );
+        assert!(crate::i18n::decode_stored(&Reasons::default().into_error().stored()).is_some());
+    }
+
+    #[test]
+    fn every_host_and_its_reason_is_named_in_order() {
+        let mut reasons = Reasons::default();
+        reasons.push(
+            &host(1, "alpha"),
+            reason("models.reasonCliMissing", "codex"),
+        );
+        reasons.push(&host(2, "beta"), reason("models.reasonLogin", "codex"));
+        reasons.push(&host(3, "gamma"), Message::new("models.reasonOffline"));
+        let text = render(Locale::EnUs, reasons.into_error().2.as_ref().unwrap());
+        let (a, b, c) = (
+            text.find("alpha").unwrap(),
+            text.find("beta").unwrap(),
+            text.find("gamma").unwrap(),
+        );
+        assert!(a < b && b < c, "{text}");
+        assert!(text.contains("codex"), "{text}");
+        assert!(!text.contains('{'), "{text}");
+        let zh = render(Locale::ZhCn, &Reasons::default().into_error().2.unwrap());
+        assert!(!zh.contains("models."), "{zh}");
+    }
+
+    #[test]
+    fn many_hosts_are_capped_and_counted() {
+        let mut reasons = Reasons::default();
+        for id in 0..12 {
+            reasons.push(
+                &host(id, &format!("h{id:02}")),
+                Message::new("models.reasonOffline"),
+            );
+        }
+        let text = render(Locale::EnUs, reasons.into_error().2.as_ref().unwrap());
+        assert!(text.contains("h07") && !text.contains("h08"), "{text}");
+        assert!(text.contains('4'), "{text}");
+        assert!(!text.contains('{'), "{text}");
+    }
+
+    #[test]
+    fn a_failed_probe_names_what_is_wrong() {
+        let usable = |_: &str| true;
+        let mut probe = crate::hosts::fake::probe_answer(Runtime::Codex, "/w");
+        probe.executable = None;
+        probe.error = Some("codex: not found\n in PATH".into());
+        let message = check(probe, "codex", usable).unwrap_err();
+        assert_eq!(message.key, "models.reasonCliFailed");
+        assert_eq!(message.params["detail"], "codex: not found in PATH");
+        let mut probe = crate::hosts::fake::probe_answer(Runtime::Codex, "/w");
+        probe.authentication = "logged_out".into();
+        assert_eq!(
+            check(probe, "codex", |state| state == "logged_in")
+                .unwrap_err()
+                .key,
+            "models.reasonLogin"
+        );
+        let probe = crate::hosts::fake::probe_answer(Runtime::Codex, "/w");
+        assert_eq!(
+            check(probe, "codex", usable).unwrap().canonical_directory,
+            "/w"
+        );
+    }
+}

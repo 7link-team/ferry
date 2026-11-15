@@ -20,5 +20,8 @@
   "conversations.apiPending": "API 会话执行尚未接通。",
   "conversations.noRunner": "没有可执行此模型的可用 Runner。",
   "conversations.cliPermissionUnsupported": "此CLI当前仅支持只读会话，请选择只读权限。",
-  "conversations.runnerUpgradeRequired": "请先升级主机 Runner 以启用平台工具，再运行此会话。"
+  "conversations.runnerUpgradeRequired": "请先升级主机 Runner 以启用平台工具，再运行此会话。",
+  "conversations.hostSwitched": "已从主机 {from} 切换到 {to} 执行。CLI 会话已用 Ferry 中的聊天记录重建；{from} 工作目录中的文件不会带过来。",
+  "conversations.hostReleased": "已解除与主机 {host} 的绑定，下一条消息将改用其他主机执行；CLI 会话将用 Ferry 中的聊天记录重建，{host} 工作目录中的文件不会带过来。",
+  "conversations.hostUnavailable": "执行主机 {host} 当前无法运行：{reason}。此会话固定了工作目录，不会自动换主机；可选择“改用其他主机”。"
 }

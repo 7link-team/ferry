@@ -350,8 +350,8 @@ pub(super) async fn members(
         }
         let create: Create =
             serde_json::from_value(json!({"agent_id":agent_id})).map_err(|_| invalid())?;
-        let (config, binding) = prepare_execution(&s, &scope, &a, &create, id).await?;
-        additions.push((a, config, binding));
+        let config = prepare_execution(&s, &scope, &a, &create).await?;
+        additions.push((a, config));
     }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let mut c = find(&tx, &scope, id).await?;
@@ -454,7 +454,7 @@ pub(super) async fn members(
             a.into_active_model().reset_all().update(&tx).await?;
         }
     }
-    for (a, config, binding) in additions {
+    for (a, config) in additions {
         if available(&tx, &scope, a.id.into()).await?.revision_id != a.revision_id {
             return Err(conflict());
         }
@@ -466,7 +466,7 @@ pub(super) async fn members(
         {
             old.state = "active".into();
             old.config = serde_json::to_string(&config).unwrap();
-            old.binding = serde_json::to_string(&binding).unwrap();
+            old.binding = super::placement::UNBOUND.into();
             old.revision_id = a.revision_id;
             old.native_session_id.clear();
             old.into_active_model().reset_all().update(&tx).await?;
@@ -479,7 +479,7 @@ pub(super) async fn members(
                     agent_id: a.id,
                     revision_id: a.revision_id,
                     config: serde_json::to_string(&config).unwrap(),
-                    binding: serde_json::to_string(&binding).unwrap(),
+                    binding: super::placement::UNBOUND.into(),
                     native_session_id: String::new(),
                     state: "active".into(),
                 }

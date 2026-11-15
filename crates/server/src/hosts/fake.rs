@@ -300,19 +300,67 @@ impl Channel {
             .lock()
             .unwrap()
             .clone()
-            .unwrap_or(ferry_protocol::agent::Probe {
-                platform_tools: true,
-                runtime,
-                execution_user: "fake".into(),
-                execution_identity: "fake-identity".into(),
-                executable: Some("/usr/bin/fake-cli".into()),
-                version: Some("1.0.0".into()),
-                models: vec![],
-                authentication: "logged_in".into(),
-                directory_exists: true,
-                error: None,
-                canonical_directory: Some(cwd.into()),
-            })
+            .unwrap_or_else(|| probe_answer(runtime, cwd))
+    }
+}
+
+/// The default probe answer: a usable, signed-in CLI with platform tools.
+pub(crate) fn probe_answer(
+    runtime: ferry_protocol::agent::Runtime,
+    cwd: &str,
+) -> ferry_protocol::agent::Probe {
+    ferry_protocol::agent::Probe {
+        platform_tools: true,
+        runtime,
+        execution_user: "fake".into(),
+        execution_identity: "fake-identity".into(),
+        executable: Some("/usr/bin/fake-cli".into()),
+        version: Some("1.0.0".into()),
+        models: vec![],
+        authentication: "logged_in".into(),
+        directory_exists: true,
+        error: None,
+        canonical_directory: Some(cwd.into()),
+    }
+}
+
+/// A host row served by a fake channel (connection `fake`).
+pub(crate) fn host_row(
+    workspace: i64,
+    id: i64,
+    name: &str,
+    state: &str,
+) -> crate::entities::hosts::Model {
+    crate::entities::hosts::Model {
+        id,
+        workspace_id: workspace,
+        name: name.into(),
+        address: format!("{name}.test"),
+        port: 0,
+        username: String::new(),
+        connection: "fake".into(),
+        state: state.into(),
+        group_id: 0,
+        description: String::new(),
+        host_key: String::new(),
+        runner_key_hash: format!("key-{id}"),
+        enroll_token: String::new(),
+        enroll_token_hash: String::new(),
+        jump_host_id: 0,
+        seen_at: 0,
+        created_at: 0,
+        updated_at: 0,
+        version: 1,
+        os: "linux".into(),
+        arch: "x86_64".into(),
+        agent_version: String::new(),
+        agent_update: None,
+        runner_auto_update: "inherit".into(),
+        metrics: String::new(),
+        credential_id: 0,
+        timezone: String::new(),
+        detected_timezone: String::new(),
+        timezone_supported: 1,
     }
 }
 

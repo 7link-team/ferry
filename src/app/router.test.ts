@@ -43,17 +43,26 @@ it("preserves each module through credential list, create, detail and edit links
     for (const suffix of ["", "/new", "/123", "/123/edit"]) {
       const path = `/workspaces/${workspace}/credentials${suffix}`;
       const route = parse(path, `?scope=${scope}`);
-      expect(route.group).toBe(scope === "build" ? "repository" : scope);
+      expect(route.group).toBe(scope === "build" ? "repository" : scope === "host" ? "ops" : scope);
       expect(href(route, {})).toBe(`/en-US${path}?scope=${scope}`);
     }
   }
   expect(parse(`/workspaces/${workspace}/credentials`, "").group).toBe("workflow");
 });
-it("places repository management between build and hosts and preserves old bookmarks", () => {
+it("places repository management after build, hosts under maintenance, and preserves old bookmarks", () => {
   const keys = nav.map(group => group.key);
   expect(keys.indexOf("repository")).toBe(keys.indexOf("workflow") + 1);
   expect(keys).not.toContain("build");
-  expect(keys.indexOf("host")).toBe(keys.indexOf("repository") + 1);
+  // Hosts are a maintenance section directly below model services.
+  expect(keys).not.toContain("host");
+  expect(keys.indexOf("ops")).toBe(keys.indexOf("repository") + 1);
+  const ops = nav.find(group => group.key === "ops")!.items;
+  const models = ops.findIndex(item => item.key === "ai-models");
+  expect(ops[models + 1]).toMatchObject({ key: "hosts", section: "nav.sections.hosts" });
+  expect(ops.filter(item => item.section === "nav.sections.hosts" && !item.hidden).map(item => item.key)).toEqual(["hosts", "credentials", "tags", "cron-jobs"]);
+  expect(href({ workspace, group: "host", item: "tags", mode: "list" }, {})).toBe(`/en-US/workspaces/${workspace}/tags`);
+  expect(parse(`/${workspace}/host/credentials`, "")).toMatchObject({ group: "ops", item: "credentials" });
+  expect(parse(`/workspaces/${workspace}/credentials`, "?scope=host")).toMatchObject({ group: "ops", item: "credentials" });
   const repositoryItems = nav.find(group => group.key === "repository")!.items;
   const events = repositoryItems.findIndex(item => item.key === "repository-events");
   expect(events).toBe(repositoryItems.findIndex(item => item.key === "code-insights") - 1);
@@ -69,7 +78,7 @@ it("places repository management between build and hosts and preserves old bookm
 });
 it("round trips node workspace URLs without changing snowflake precision", () => {
   const path = `/workspaces/${workspace}/nodes/109174082875949056/workspace`;
-  expect(parse(path)).toMatchObject({ workspace, group: "host", item: "hosts", id: "109174082875949056", mode: "workspace" });
+  expect(parse(path)).toMatchObject({ workspace, group: "ops", item: "hosts", id: "109174082875949056", mode: "workspace" });
   expect(href(parse(path), {})).toBe(`/en-US${path}`);
 });
 it("resolves legacy host bookmarks into canonical resource paths", () => {
@@ -114,7 +123,7 @@ it("keeps shared resource menu contexts in query parameters", () => {
     const url = new URL(path, 'http://localhost');
     expect(url.pathname).toBe(`/en-US/workspaces/${workspace}/cron-jobs`);
     expect(url.searchParams.get('scope')).toBe(group);
-    expect(parse(url.pathname, url.search)).toMatchObject({ group: group === 'build' ? 'workflow' : group, item: 'cron-jobs' });
+    expect(parse(url.pathname, url.search)).toMatchObject({ group: group === 'build' ? 'workflow' : group === 'host' ? 'ops' : group, item: 'cron-jobs' });
   }
 });
 
