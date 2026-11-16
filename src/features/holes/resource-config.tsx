@@ -37,6 +37,13 @@ export interface Hole {
   target_port: number;
   /** Empty: the Runner's own 127.0.0.1. */
   target_host?: string;
+  /** How Ferry talks to the target. */
+  target_scheme?: "http" | "https";
+  /** HTTPS without certificate verification (self-signed devices). */
+  target_tls_insecure?: boolean;
+  /** "separate": served on its own site, cookies and script storage work;
+   *  "isolated": cookies are not passed and the page is sandboxed. */
+  cookie_mode?: "separate" | "isolated" | undefined;
   strip_prefix: boolean;
   /** Root-relative preview path, e.g. "/holes/<token>/". */
   url?: string | undefined;
@@ -73,11 +80,22 @@ export interface Hole {
 }
 
 const key = (value: string) => `holes:${value}`;
+
+/** "192.168.0.2:8006", with "https://" when Ferry talks HTTPS to it. */
+export function targetLabel(row: Pick<Hole, "target_host" | "target_port" | "target_scheme">): string {
+  const host = row.target_host ? (row.target_host.includes(":") ? `[${row.target_host}]` : row.target_host) : "";
+  const address = host ? `${host}:${row.target_port}` : String(row.target_port);
+  return row.target_scheme === "https" ? `https://${host || "127.0.0.1"}:${row.target_port}` : address;
+}
 const text = (value: string, values?: Record<string, unknown>) =>
   commonText(key(value), values);
 
 export const HOLE_STATES: Option[] = ["active", "expired", "revoked"].map(
   (value) => ({ value, label: value, labelKey: key(`state.${value}`) }),
+);
+/** Why a login inside the preview works or not. */
+export const COOKIE_MODES: Option[] = ["separate", "isolated"].map(
+  (value) => ({ value, label: value, labelKey: key(`cookieMode.${value}`) }),
 );
 export const PROBE_STATES: Option[] = [
   "unknown",
@@ -444,10 +462,7 @@ export function holesLists({
           labelKey: key("target"),
           width: 160,
           align: "right",
-          render: (row) =>
-            row.target_host
-              ? `${row.target_host.includes(":") ? `[${row.target_host}]` : row.target_host}:${row.target_port}`
-              : String(row.target_port),
+          render: (row) => targetLabel(row),
         },
         {
           key: "state",
@@ -578,6 +593,8 @@ export function holesForms({
         name: "",
         host_id: "",
         target_host: "",
+        target_scheme: "http",
+        target_tls_insecure: false,
         strip_prefix: true,
         ttl_hours: DEFAULT_TTL_HOURS,
       },
@@ -587,6 +604,8 @@ export function holesForms({
       editValues: (row) => ({
         name: row.name,
         strip_prefix: row.strip_prefix,
+        target_scheme: row.target_scheme ?? "http",
+        target_tls_insecure: !!row.target_tls_insecure,
         version: row.version,
         ttl_hours: undefined,
         url: undefined,
@@ -645,6 +664,27 @@ export function holesForms({
               helpKey: key("portHelp"),
             },
             {
+              key: "target_scheme",
+              label: "Target protocol",
+              labelKey: key("targetScheme"),
+              type: "select",
+              options: [
+                { value: "http", label: "HTTP" },
+                { value: "https", label: "HTTPS" },
+              ],
+              helpKey: key("targetSchemeHelp"),
+              // Leaving HTTPS turns the certificate exception off with it.
+              resetOnChange: ["target_tls_insecure"],
+            },
+            {
+              key: "target_tls_insecure",
+              label: "Allow insecure certificate (self-signed)",
+              labelKey: key("targetTlsInsecure"),
+              type: "switch",
+              when: (draft) => draft.target_scheme === "https",
+              helpKey: key("targetTlsInsecureHelp"),
+            },
+            {
               key: "ttl_hours",
               label: "Validity",
               labelKey: key("ttl"),
@@ -695,6 +735,16 @@ export function holesForms({
               type: "text",
               when: persisted,
               display: probeSummary,
+            },
+            {
+              key: "cookie_mode",
+              label: "Cookies and storage",
+              labelKey: key("cookieMode"),
+              type: "text",
+              span: 2,
+              when: persisted,
+              display: (row) => label(COOKIE_MODES, row.cookie_mode ?? "isolated"),
+              helpKey: key("cookieModeHelp"),
             },
             {
               key: "probe_error",

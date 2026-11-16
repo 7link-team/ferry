@@ -1805,7 +1805,7 @@
     "source": "crates/server/src/holes.rs",
     "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<CreateBody>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct CreateBody {\n    name: String,\n    host_id: Id,\n    target_port: i64,\n    /// Empty: the Runner's own loopback. Otherwise a private-network IP or name.\n    #[serde(default)]\n    target_host: String,\n    #[serde(default = \"default_strip\")]\n    strip_prefix: bool,\n    ttl_hours: i64,\n    ingress_mode: Option<String>,\n    #[serde(default)]\n    public_access_acknowledged: bool,\n}"
+      "struct CreateBody {\n    name: String,\n    host_id: Id,\n    target_port: i64,\n    /// Empty: the Runner's own loopback. Otherwise a private-network IP or name.\n    #[serde(default)]\n    target_host: String,\n    /// \"http\" (default) or \"https\".\n    #[serde(default)]\n    target_scheme: String,\n    /// HTTPS only: skip certificate verification (self-signed devices).\n    #[serde(default)]\n    target_tls_insecure: bool,\n    #[serde(default = \"default_strip\")]\n    strip_prefix: bool,\n    ttl_hours: i64,\n    ingress_mode: Option<String>,\n    #[serde(default)]\n    public_access_acknowledged: bool,\n}"
     ],
     "permission_checks": [
       "holes.create"
@@ -1841,7 +1841,7 @@
     "source": "crates/server/src/holes.rs",
     "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<UpdateBody>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct UpdateBody {\n    version: i64,\n    name: Option<String>,\n    strip_prefix: Option<bool>,\n    /// Present means \"extend\": the new expiry counts from now.\n    ttl_hours: Option<i64>,\n    ingress_mode: Option<String>,\n    #[serde(default)]\n    public_access_acknowledged: bool,\n    #[serde(default)]\n    reconnect_ingress: bool,\n}"
+      "struct UpdateBody {\n    version: i64,\n    name: Option<String>,\n    strip_prefix: Option<bool>,\n    target_scheme: Option<String>,\n    target_tls_insecure: Option<bool>,\n    /// Present means \"extend\": the new expiry counts from now.\n    ttl_hours: Option<i64>,\n    ingress_mode: Option<String>,\n    #[serde(default)]\n    public_access_acknowledged: bool,\n    #[serde(default)]\n    reconnect_ingress: bool,\n}"
     ],
     "permission_checks": [
       "holes.read",

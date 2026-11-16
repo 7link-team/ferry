@@ -1585,3 +1585,448 @@ fn a_blocked_lan_connection_on_macos_explains_the_local_network_permission() {
     let linux = crate::i18n::store_raw("No route to host (os error 113)");
     assert!(!crate::holes::explain_probe_error(locale, &linux).contains("本地网络"));
 }
+
+// ---------------------------------------------------------- HTTPS targets
+
+/// A local HTTPS service with a self-signed certificate (localhost/127.0.0.1),
+/// like Proxmox VE or a NAS: `/` echoes Host and Origin, `/redirect` points at
+/// its own https:// origin, and `Upgrade: echo` switches to an echo stream.
+async fn https_upstream() -> u16 {
+    use tokio_rustls::rustls::{
+        self,
+        pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
+    };
+    let cert = CertificateDer::from(include_bytes!("fixtures/self-signed.der").to_vec());
+    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+        include_bytes!("fixtures/self-signed.key.der").to_vec(),
+    ));
+    let config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(vec![cert], key)
+    .unwrap();
+    let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(config));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((tcp, _)) = listener.accept().await {
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let Ok(mut tls) = acceptor.accept(tcp).await else {
+                    return;
+                };
+                loop {
+                    let mut head = Vec::new();
+                    let mut byte = [0u8; 1];
+                    while !head.ends_with(b"\r\n\r\n") {
+                        match tls.read(&mut byte).await {
+                            Ok(1) => head.push(byte[0]),
+                            _ => return,
+                        }
+                    }
+                    let head = String::from_utf8_lossy(&head).to_string();
+                    let lower = head.to_ascii_lowercase();
+                    let header = |name: &str| {
+                        lower
+                            .lines()
+                            .find_map(|line| line.strip_prefix(&format!("{name}: ")))
+                            .unwrap_or("")
+                            .to_owned()
+                    };
+                    let path = head.split(' ').nth(1).unwrap_or("/").to_owned();
+                    if header("upgrade") == "echo" {
+                        let _ = tls
+                            .write_all(
+                                b"HTTP/1.1 101 Switching Protocols\r\nConnection: upgrade\r\nUpgrade: echo\r\n\r\n",
+                            )
+                            .await;
+                        let mut buffer = [0u8; 1024];
+                        while let Ok(n) = tls.read(&mut buffer).await {
+                            if n == 0 || tls.write_all(&buffer[..n]).await.is_err() {
+                                break;
+                            }
+                        }
+                        return;
+                    }
+                    let response = if path == "/redirect" {
+                        format!(
+                            "HTTP/1.1 301 Moved Permanently\r\nLocation: https://localhost:{port}/target\r\nContent-Length: 0\r\n\r\n"
+                        )
+                    } else {
+                        let body =
+                            format!("secure host={} origin={}", header("host"), header("origin"));
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{body}",
+                            body.len()
+                        )
+                    };
+                    if tls.write_all(response.as_bytes()).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    port
+}
+
+async fn create_https_hole(s: &AppState, host: i64, port: u16, insecure: bool) -> Value {
+    let (status, Json(created)) = create(
+        State(s.clone()),
+        admin(1),
+        Json(parse(
+            json!({"name":"PVE","host_id":host.to_string(),"target_port":port,
+                   "ttl_hours":24,"target_scheme":"https","target_tls_insecure":insecure}),
+        )),
+    )
+    .await
+    .unwrap();
+    assert_eq!(status, StatusCode::CREATED);
+    created
+}
+
+#[tokio::test]
+async fn target_scheme_defaults_to_http_and_insecure_needs_https() {
+    let (_dir, s) = setup().await;
+    add_host(&s, 41, 1, KEY).await;
+    let plain = create_hole(&s, 41, 8080).await;
+    assert_eq!(plain["target_scheme"], "http");
+    assert_eq!(plain["target_tls_insecure"], false);
+    let row = reload(&s, i64::from(hole_id(&plain))).await;
+    assert_eq!(
+        (row.target_scheme.as_str(), row.target_tls_insecure),
+        ("http", false)
+    );
+    for (body, key) in [
+        (
+            json!({"name":"a","host_id":"41","target_port":80,"ttl_hours":24,"target_tls_insecure":true}),
+            "holes.insecureNeedsHttps",
+        ),
+        (
+            json!({"name":"a","host_id":"41","target_port":80,"ttl_hours":24,"target_scheme":"ftp"}),
+            "holes.targetSchemeInvalid",
+        ),
+    ] {
+        let error = create(State(s.clone()), admin(1), Json(parse(body)))
+            .await
+            .unwrap_err();
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+        assert_eq!(error.2.unwrap().key, key);
+    }
+    // Switching an existing preview to HTTPS with the exception, then back:
+    // leaving HTTPS also drops the exception.
+    let id = hole_id(&plain);
+    let Json(https) = update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id)),
+        Json(parse(
+            json!({"version":1,"target_scheme":"https","target_tls_insecure":true}),
+        )),
+    )
+    .await
+    .unwrap();
+    assert_eq!(https["target_scheme"], "https");
+    assert_eq!(https["target_tls_insecure"], true);
+    let Json(back) = update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id)),
+        Json(parse(json!({"version":2,"target_scheme":"http"}))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(back["target_scheme"], "http");
+    assert_eq!(back["target_tls_insecure"], false);
+    let error = update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id)),
+        Json(parse(json!({"version":3,"target_tls_insecure":true}))),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.2.unwrap().key, "holes.insecureNeedsHttps");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn https_targets_speak_tls_under_their_certificate_policy() {
+    let (_dir, s) = own_ids(setup().await);
+    add_host(&s, 51, 1, KEY).await;
+    let address = server(s.clone()).await;
+    fake_runner(&s, address, 51, KEY, true).await;
+    let secure = https_upstream().await;
+    let client = http();
+
+    // Self-signed, exception on: proxied over TLS, Host/Origin are the target's.
+    let hole = create_https_hole(&s, 51, secure, true).await;
+    let path = hole["url"].as_str().unwrap().to_owned();
+    let response = client
+        .get(format!("{path}status"))
+        .header("origin", "null")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.unwrap();
+    assert!(body.contains(&format!("host=localhost:{secure}")), "{body}");
+    assert!(
+        body.contains(&format!("origin=https://localhost:{secure}")),
+        "{body}"
+    );
+    let row = reload(&s, i64::from(hole_id(&hole))).await;
+    assert_eq!(row.probe_state, "reachable");
+    proxy::reach(&s, &row).await.unwrap();
+
+    // An https:// redirect to the device itself stays inside the preview.
+    let redirect = client.get(format!("{path}redirect")).send().await.unwrap();
+    assert_eq!(redirect.status(), 301);
+    assert_eq!(redirect.headers()["location"], "/target");
+
+    // Upgrades (noVNC's wss://) run over the same TLS connection.
+    let mut stream = upgraded(address, &format!("{path}console")).await;
+    stream.write_all(b"ping").await.unwrap();
+    let mut echoed = [0u8; 4];
+    tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut echoed))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&echoed, b"ping");
+    drop(stream);
+
+    // Same device, exception off: refused, and the reason says what to do.
+    let strict = create_https_hole(&s, 51, secure, false).await;
+    let strict_row = reload(&s, i64::from(hole_id(&strict))).await;
+    let error = proxy::reach(&s, &strict_row).await.unwrap_err();
+    assert_eq!(error.2.as_ref().unwrap().key, "holes.tlsUntrusted");
+    let strict_path = strict["url"].as_str().unwrap().to_owned();
+    let first = client.get(&strict_path).send().await.unwrap();
+    assert_eq!(first.status(), 503);
+    let stored = reload(&s, i64::from(hole_id(&strict))).await;
+    assert_eq!(stored.probe_state, "unreachable");
+    let again = client.get(&strict_path).send().await.unwrap();
+    assert_eq!(again.status(), 503);
+    let text = again.text().await.unwrap();
+    assert!(
+        text.contains("不受信任") || text.contains("not trusted"),
+        "{text}"
+    );
+
+    // HTTPS chosen for a service that only speaks HTTP.
+    let plain = upstream().await;
+    let wrong = create_https_hole(&s, 51, plain, true).await;
+    let wrong_row = reload(&s, i64::from(hole_id(&wrong))).await;
+    let error = proxy::reach(&s, &wrong_row).await.unwrap_err();
+    assert_eq!(error.2.unwrap().key, "holes.tlsPlainHttp");
+}
+
+#[test]
+fn https_redirects_and_refresh_headers_point_back_into_the_preview() {
+    let prefix = "/holes/t";
+    assert_eq!(
+        proxy::location("https://192.168.0.2:8006/", prefix, "192.168.0.2", 8006).as_deref(),
+        Some("/holes/t/")
+    );
+    assert_eq!(
+        proxy::location("https://nas.lan/login", prefix, "nas.lan", 443).as_deref(),
+        Some("/holes/t/login")
+    );
+    assert_eq!(
+        proxy::location("https://other.lan:8006/", prefix, "192.168.0.2", 8006),
+        None
+    );
+    assert_eq!(
+        proxy::refresh(
+            "0; url=https://192.168.0.2:8006/ui",
+            prefix,
+            "192.168.0.2",
+            8006
+        )
+        .as_deref(),
+        Some("0; url=/holes/t/ui")
+    );
+    assert_eq!(proxy::refresh("5", prefix, "192.168.0.2", 8006), None);
+}
+
+// ------------------------------------------------- separate-site cookies
+
+#[test]
+fn sites_compare_by_their_last_two_labels_and_unknowns_isolate() {
+    assert_eq!(proxy::site("lh64abc.debugs.top"), "debugs.top");
+    assert_eq!(proxy::site("Ferry.7link.TOP."), "7link.top");
+    assert_eq!(proxy::site("127.0.0.1"), "");
+    assert_eq!(proxy::site("[::1]"), "");
+    assert_eq!(proxy::site("localhost"), "");
+    let config = |public_url: &str, preview_domain: &str| {
+        let mut config = crate::accounts::addresses::Configuration::default();
+        config.public_url = public_url.into();
+        config.preview_domain = preview_domain.into();
+        proxy::Cookies::of(&config)
+    };
+    assert_eq!(
+        config("https://ferry.7link.top", "debugs.top"),
+        proxy::Cookies::Separate { secure: true }
+    );
+    // Same registrable domain, an IP console or no console URL: isolated.
+    assert_eq!(
+        config("https://ferry.example.com", "preview.example.com"),
+        proxy::Cookies::Isolated
+    );
+    assert_eq!(
+        config("http://192.168.1.10:4291", "debugs.top"),
+        proxy::Cookies::Isolated
+    );
+    assert_eq!(config("", "debugs.top"), proxy::Cookies::Isolated);
+}
+
+#[test]
+fn set_cookies_become_host_only_and_secure() {
+    assert_eq!(
+        proxy::set_cookie(
+            "PVEAuthCookie=abc; Domain=debugs.top; Path=/; HttpOnly; SameSite=Lax",
+            true
+        )
+        .as_deref(),
+        Some("PVEAuthCookie=abc; Path=/; HttpOnly; SameSite=Lax; Secure")
+    );
+    assert_eq!(
+        proxy::set_cookie("a=1; domain=.debugs.top; Secure", true).as_deref(),
+        Some("a=1; Secure")
+    );
+    // Over plain HTTP nothing is forced, and prefixed cookies that need
+    // Secure are dropped instead of being set invalid.
+    assert_eq!(
+        proxy::set_cookie("a=1; Path=/", false).as_deref(),
+        Some("a=1; Path=/")
+    );
+    assert_eq!(proxy::set_cookie("__Host-x=1; Path=/", false), None);
+    assert_eq!(
+        proxy::set_cookie("__Host-x=1; Path=/; Domain=debugs.top", true).as_deref(),
+        Some("__Host-x=1; Path=/; Secure")
+    );
+    assert_eq!(proxy::set_cookie("=nameless", true), None);
+}
+
+/// A login-like service: sets a cookie scoped to the whole preview domain and
+/// echoes the Cookie header it receives.
+async fn cookie_upstream() -> u16 {
+    let app = axum::Router::new().fallback(|request: Request| async move {
+        let cookie = request
+            .headers()
+            .get("cookie")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_owned();
+        (
+            [
+                (
+                    "set-cookie",
+                    "PVEAuthCookie=ticket; Domain=preview.localhost; Path=/; HttpOnly",
+                ),
+                ("content-security-policy", "default-src 'self'"),
+            ],
+            format!("cookie={cookie}"),
+        )
+            .into_response()
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    port
+}
+
+/// Points the console at `public_url` while previews stay on preview.localhost.
+async fn set_console(s: &AppState, public_url: String) {
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::AccessConfig,
+            sea_orm::sea_query::Expr::value(
+                json!({"public_url":public_url,"preview_domain":"preview.localhost"}).to_string(),
+            ),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn separate_site_previews_keep_their_cookies_and_a_real_origin() {
+    let (_dir, s) = own_ids(setup().await);
+    add_host(&s, 61, 1, KEY).await;
+    let address = server(s.clone()).await;
+    fake_runner(&s, address, 61, KEY, true).await;
+    let port = cookie_upstream().await;
+    let client = http();
+
+    // Console on another site than the previews: cookies flow both ways.
+    set_console(
+        &s,
+        format!("http://console.example.test:{}", address.port()),
+    )
+    .await;
+    let hole = create_hole(&s, 61, port).await;
+    let Json(view) = detail(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), hole_id(&hole))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(view["cookie_mode"], "separate");
+    let path = view["url"].as_str().unwrap().to_owned();
+    let response = client
+        .get(format!("{path}login"))
+        .header("cookie", "PVEAuthCookie=ticket")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let headers = response.headers().clone();
+    // Host-only: the Domain attribute is gone; the page is not sandboxed and
+    // keeps the app's own policy.
+    assert_eq!(
+        headers["set-cookie"],
+        "PVEAuthCookie=ticket; Path=/; HttpOnly"
+    );
+    let policies: Vec<&str> = headers
+        .get_all("content-security-policy")
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .collect();
+    assert!(policies.contains(&"default-src 'self'"), "{policies:?}");
+    assert!(policies.contains(&"frame-ancestors 'self'"), "{policies:?}");
+    assert!(!policies.iter().any(|policy| policy.contains("sandbox")));
+    assert_eq!(
+        response.text().await.unwrap(),
+        "cookie=PVEAuthCookie=ticket"
+    );
+
+    // Same registrable domain as the console: stripped and sandboxed as before.
+    set_console(
+        &s,
+        format!("http://ferry.preview.localhost:{}", address.port()),
+    )
+    .await;
+    let Json(view) = detail(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), hole_id(&hole))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(view["cookie_mode"], "isolated");
+    let path = view["url"].as_str().unwrap().to_owned();
+    let response = client
+        .get(format!("{path}login"))
+        .header("cookie", "PVEAuthCookie=ticket")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert!(!response.headers().contains_key("set-cookie"));
+    assert_eq!(response.headers()["content-security-policy"], SANDBOX);
+    assert_eq!(response.text().await.unwrap(), "cookie=");
+}

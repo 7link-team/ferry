@@ -25,5 +25,10 @@
   "holes.targetInvalid": "スキーム、ポート、パスを含めずに IP アドレスまたはホスト名を入力してください。",
   "holes.targetRunnerUpgrade": "LAN アドレスへの転送には、このホストの Runner 0.5.0-alpha 以降が必要です。Runner をアップグレードするか、ターゲットを空にしてホスト自身のポートを使用してください。",
   "holes.lastCheck": "最近の確認：",
-  "holes.macLocalNetwork": "macOS がホストエージェントのローカルネットワーク接続をブロックしている可能性があります。「システム設定 → プライバシーとセキュリティ → ローカルネットワーク」で ferry-runner を許可してください。一覧にない場合は「現在のユーザー」方式で再インストールしてください。"
+  "holes.macLocalNetwork": "macOS がホストエージェントのローカルネットワーク接続をブロックしている可能性があります。「システム設定 → プライバシーとセキュリティ → ローカルネットワーク」で ferry-runner を許可してください。一覧にない場合は「現在のユーザー」方式で再インストールしてください。",
+  "holes.targetSchemeInvalid": "ターゲットのプロトコルは HTTP または HTTPS のみです。",
+  "holes.insecureNeedsHttps": "「安全でない証明書を許可」は HTTPS ターゲットにのみ適用されます。",
+  "holes.tlsUntrusted": "ターゲットの HTTPS 証明書は信頼されていません（{detail}）。自己署名証明書を使う機器（PVE や NAS など）の場合は、このプレビューで「安全でない証明書を許可」をオンにしてください。",
+  "holes.tlsPlainHttp": "ターゲットは HTTPS ではなく通常の HTTP で応答しました。ターゲットのプロトコルを HTTP にしてください。",
+  "holes.tlsHandshake": "ターゲットとの HTTPS 接続を確立できませんでした：{detail}"
 }
