@@ -668,6 +668,8 @@ export function holesForms({
               label: "Target protocol",
               labelKey: key("targetScheme"),
               type: "select",
+              // Always HTTP or HTTPS (HTTP by default); no "not set" choice.
+              required: true,
               options: [
                 { value: "http", label: "HTTP" },
                 { value: "https", label: "HTTPS" },
