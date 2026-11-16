@@ -119,5 +119,15 @@
   "auth.otpExpired": "驗證已過期，請重新開始。",
   "auth.otpAttempts": "錯誤次數過多，請重新登入以開始新驗證。",
   "auth.otpUnavailable": "平台未開放新的驗證器綁定。",
-  "auth.otpAlreadyEnabled": "帳號已綁定驗證器，請先解除舊綁定。"
+  "auth.otpAlreadyEnabled": "帳號已綁定驗證器，請先解除舊綁定。",
+  "platform.storageEndpointInvalid": "S3 Endpoint 位址無效：請填寫以 http(s):// 開頭的完整位址，且不含使用者名稱、密碼或查詢參數。",
+  "platform.storageBucketRequired": "請填寫 S3 Bucket 和 Region。",
+  "platform.storageUnreachable": "無法連線 S3 Endpoint（網路、DNS 或 TLS 憑證問題），請檢查位址及伺服器的網路存取。",
+  "platform.storageAccessDenied": "S3 拒絕存取：請檢查 Access Key、Secret Key 及其對該 Bucket 的讀寫權限。",
+  "platform.storageBucketMissing": "S3 Bucket 不存在：請檢查 Bucket 名稱和 Region。",
+  "platform.storageLocalUnwritable": "本機儲存目錄 {path} 無法寫入，請檢查磁碟空間和目錄權限。",
+  "platform.storageCheckFailed": "儲存讀寫檢查未通過（步驟：{step}），請檢查儲存服務。",
+  "platform.storageConfigUnreadable": "已儲存的檔案儲存設定無法解密（可能更換過主金鑰），請重新填寫並儲存。",
+  "platform.storageClusterRequiresS3": "多實例部署必須使用 S3 檔案儲存，本機檔案無法在實例間共享。",
+  "platform.storageFieldInvalid": "檔案儲存設定 {field} 必須是文字。"
 }

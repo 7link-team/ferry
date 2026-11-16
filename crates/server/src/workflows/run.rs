@@ -744,7 +744,10 @@ pub async fn node_data(
             .await?
             .ok_or_else(ApiError::missing)?;
         if row.attempt != source.attempt || row.iteration_hash != source.iteration_hash {
-            return Err(error("workflow.executionDataUnavailable", "/input"));
+            return Err(crate::error::internal_fault(format!(
+                "execution {} input source node {} attempt/iteration differs from its snapshot",
+                run.id, source.node_run
+            )));
         }
         let source_snapshot =
             super::journal::read_snapshot(&s.vault, Some(&store), &tx, &run, &row).await?;
@@ -769,7 +772,10 @@ pub async fn node_data(
             &serde_json::to_string(port).map_err(|_| ApiError::missing())?,
         )?;
         if hex::encode(Sha256::digest(canonical.as_bytes())) != source.output_sha256 {
-            return Err(error("workflow.executionDataUnavailable", "/input"));
+            return Err(crate::error::internal_fault(format!(
+                "execution {} input source node {} output digest differs from its snapshot",
+                run.id, source.node_run
+            )));
         }
         let offset: usize = output
             .ports
@@ -1125,7 +1131,10 @@ async fn dispatch_inner(
         .await?
         .is_none()
     {
-        return Err(error("workflow.executionDataUnavailable", "/context"));
+        return Err(crate::error::internal_fault(format!(
+            "execution {} start context asset {asset} has no execution reference",
+            run.id
+        )));
     }
     let start: Start = serde_json::from_str(&store.read(&s.db, run.workspace_id, asset).await?)
         .map_err(|_| ApiError::missing())?;
@@ -1134,7 +1143,10 @@ async fn dispatch_inner(
         || start.plan.version != 1
         || start.plan.entry_node_id != run.trigger_ref
     {
-        return Err(error("workflow.executionDataUnavailable", "/context"));
+        return Err(crate::error::internal_fault(format!(
+            "execution {} start context does not match the execution (version/trigger)",
+            run.id
+        )));
     }
     let revision = definition_revisions::Entity::find_by_id(run.revision_id)
         .filter(definition_revisions::Column::WorkspaceId.eq(run.workspace_id))
@@ -1146,7 +1158,10 @@ async fn dispatch_inner(
     let graph: Value =
         serde_json::from_str(&revision.definition).map_err(|_| ApiError::missing())?;
     if plan::compile(&revision.definition, &run.trigger_ref)? != start.plan {
-        return Err(error("workflow.executionDataUnavailable", "/plan"));
+        return Err(crate::error::internal_fault(format!(
+            "execution {} frozen plan differs from revision {}",
+            run.id, run.revision_id
+        )));
     }
     supported(&graph, &start.plan)?;
     if context.pointer("/journal/parked_at").is_some() {
@@ -1537,7 +1552,11 @@ fn successful_output(spec: &Value, skipped: bool, mut items: Vec<Item>) -> Vec<I
 
 fn set(items: &[Item], params: &[Value]) -> Result<Vec<Item>> {
     if items.len() != params.len() {
-        return Err(error("workflow.executionDataUnavailable", "/params"));
+        return Err(crate::error::internal_fault(format!(
+            "node parameters resolved for {} of {} items",
+            params.len(),
+            items.len()
+        )));
     }
     items
         .iter()

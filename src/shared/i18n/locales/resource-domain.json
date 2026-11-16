@@ -1171,7 +1171,10 @@
     "timezone.hostHelp": "Pipelines, commands and AI processes this Runner starts run in this time zone (TZ variable). Applies to new jobs immediately; the host's system time zone is not changed and nothing needs a restart. A model's own time zone takes precedence.",
     "timezone.upgrade": "This Runner is too old to apply a time zone. Upgrade the Runner; until then its jobs use the host's own time zone and models that require a time zone are refused.",
     "timezone.windows": "Windows: some tools ignore the TZ variable and keep the system time zone.",
-    "timezone.invalid": "Choose a time zone from the list (an IANA name such as Asia/Shanghai)."
+    "timezone.invalid": "Choose a time zone from the list (an IANA name such as Asia/Shanghai).",
+    "platform.storageStatus": "Current status",
+    "platform.storageStatusOk": "Available: a test file was written, read back and deleted.",
+    "platform.storageStatusFailed": "Unavailable: {{reason}} File uploads, attachments and workflow data fail until this is fixed."
   },
   "zh-CN": {
     "runner.scopeFallback": "节点未上报服务安装方式。下方默认生成系统服务安装命令，不代表现有代理以系统服务运行；需要安装到当前用户时可切换。",
@@ -2345,7 +2348,10 @@
     "timezone.hostHelp": "此 Runner 启动的流水线、命令和 AI 进程使用该时区（TZ 变量）。对新任务立即生效；不修改主机系统时区，无需重启。模型自身设置的时区优先。",
     "timezone.upgrade": "此 Runner 版本过旧，无法应用时区。请升级 Runner；升级前其任务使用主机自身时区，要求时区的模型会被拒绝执行。",
     "timezone.windows": "Windows：部分工具会忽略 TZ 变量，仍使用系统时区。",
-    "timezone.invalid": "请从列表中选择时区（IANA 名称，如 Asia/Shanghai）。"
+    "timezone.invalid": "请从列表中选择时区（IANA 名称，如 Asia/Shanghai）。",
+    "platform.storageStatus": "当前状态",
+    "platform.storageStatusOk": "可用：已成功写入、读回并删除测试文件。",
+    "platform.storageStatusFailed": "不可用：{{reason}} 修复前文件上传、会话附件和工作流数据都会失败。"
   },
   "zh-TW": {
     "runner.scopeFallback": "節點未回報服務安裝方式。下方預設產生系統服務安裝命令，不代表現有代理以系統服務運行；需要安裝到目前使用者時可切換。",
@@ -3519,7 +3525,10 @@
     "timezone.hostHelp": "此 Runner 啟動的流水線、命令和 AI 程序使用該時區（TZ 變數）。對新任務立即生效；不修改主機系統時區，無需重新啟動。模型自身設定的時區優先。",
     "timezone.upgrade": "此 Runner 版本過舊，無法套用時區。請升級 Runner；升級前其任務使用主機自身時區，要求時區的模型會被拒絕執行。",
     "timezone.windows": "Windows：部分工具會忽略 TZ 變數，仍使用系統時區。",
-    "timezone.invalid": "請從清單中選擇時區（IANA 名稱，如 Asia/Shanghai）。"
+    "timezone.invalid": "請從清單中選擇時區（IANA 名稱，如 Asia/Shanghai）。",
+    "platform.storageStatus": "目前狀態",
+    "platform.storageStatusOk": "可用：已成功寫入、讀回並刪除測試檔案。",
+    "platform.storageStatusFailed": "不可用：{{reason}} 修復前檔案上傳、對話附件和工作流程資料都會失敗。"
   },
   "ja-JP": {
     "runner.scopeFallback": "ノードからサービスのインストール範囲が報告されていません。コマンドの既定値はシステムサービスですが、現在のエージェントの実行方式を示すものではありません。必要に応じて現在のユーザーに切り替えてください。",
@@ -4693,7 +4702,10 @@
     "timezone.hostHelp": "この Runner が起動するパイプライン、コマンド、AI プロセスはこのタイムゾーン（TZ 変数）で動作します。新しいジョブに即時適用され、ホストのシステムタイムゾーンは変更せず、再起動も不要です。モデル自身のタイムゾーンが優先されます。",
     "timezone.upgrade": "この Runner は古いためタイムゾーンを適用できません。Runner をアップグレードしてください。それまではホスト自身のタイムゾーンで動作し、タイムゾーンを必要とするモデルは実行を拒否されます。",
     "timezone.windows": "Windows: 一部のツールは TZ 変数を無視し、システムのタイムゾーンを使用します。",
-    "timezone.invalid": "一覧からタイムゾーンを選択してください（Asia/Shanghai などの IANA 名）。"
+    "timezone.invalid": "一覧からタイムゾーンを選択してください（Asia/Shanghai などの IANA 名）。",
+    "platform.storageStatus": "現在の状態",
+    "platform.storageStatusOk": "利用可能：テストファイルの書き込み・読み戻し・削除に成功しました。",
+    "platform.storageStatusFailed": "利用不可：{{reason}} 修正するまで、ファイルのアップロード、添付ファイル、ワークフローのデータは失敗します。"
   },
   "ko-KR": {
     "runner.scopeFallback": "노드가 서비스 설치 범위를 보고하지 않았습니다. 명령의 기본값은 시스템 서비스이며 현재 에이전트의 실행 방식을 뜻하지 않습니다. 필요하면 현재 사용자로 전환하세요.",
@@ -5867,7 +5879,10 @@
     "timezone.hostHelp": "이 Runner가 시작하는 파이프라인, 명령, AI 프로세스는 이 시간대(TZ 변수)로 실행됩니다. 새 작업에 즉시 적용되며 호스트 시스템 시간대는 바뀌지 않고 재시작도 필요 없습니다. 모델 자체 시간대가 우선합니다.",
     "timezone.upgrade": "이 Runner는 오래되어 시간대를 적용할 수 없습니다. Runner를 업그레이드하세요. 그 전까지 작업은 호스트 자체 시간대를 사용하며 시간대가 필요한 모델은 실행이 거부됩니다.",
     "timezone.windows": "Windows: 일부 도구는 TZ 변수를 무시하고 시스템 시간대를 사용합니다.",
-    "timezone.invalid": "목록에서 시간대를 선택하세요(Asia/Shanghai 같은 IANA 이름)."
+    "timezone.invalid": "목록에서 시간대를 선택하세요(Asia/Shanghai 같은 IANA 이름).",
+    "platform.storageStatus": "현재 상태",
+    "platform.storageStatusOk": "사용 가능: 테스트 파일을 쓰고, 다시 읽고, 삭제했습니다.",
+    "platform.storageStatusFailed": "사용 불가: {{reason}} 수정 전까지 파일 업로드, 첨부 파일, 워크플로 데이터가 실패합니다."
   },
   "ms-MY": {
     "runner.scopeFallback": "Nod belum melaporkan skop pemasangan perkhidmatan. Arahan lalai ialah perkhidmatan sistem; ini tidak menerangkan ejen yang sedang berjalan. Pilih Pengguna semasa jika diperlukan.",
@@ -7041,6 +7056,9 @@
     "timezone.hostHelp": "Saluran paip, arahan dan proses AI yang dimulakan Runner ini berjalan dalam zon waktu ini (pemboleh ubah TZ). Berkuat kuasa serta-merta untuk kerja baharu; zon waktu sistem hos tidak diubah dan tiada mula semula diperlukan. Zon waktu model sendiri diutamakan.",
     "timezone.upgrade": "Runner ini terlalu lama untuk menggunakan zon waktu. Naik taraf Runner; sehingga itu kerjanya menggunakan zon waktu hos sendiri dan model yang memerlukan zon waktu ditolak.",
     "timezone.windows": "Windows: sesetengah alat mengabaikan pemboleh ubah TZ dan kekal dengan zon waktu sistem.",
-    "timezone.invalid": "Pilih zon waktu daripada senarai (nama IANA seperti Asia/Shanghai)."
+    "timezone.invalid": "Pilih zon waktu daripada senarai (nama IANA seperti Asia/Shanghai).",
+    "platform.storageStatus": "Status semasa",
+    "platform.storageStatusOk": "Tersedia: fail ujian berjaya ditulis, dibaca semula dan dipadam.",
+    "platform.storageStatusFailed": "Tidak tersedia: {{reason}} Muat naik fail, lampiran dan data aliran kerja gagal sehingga ini dibaiki."
   }
 }

@@ -16,5 +16,6 @@
   "guard.request": "The operation verification header is missing.",
   "guard.origin": "Requests from this origin are not allowed.",
   "assets.not_built": "The interface assets have not been built. Please run npm run build first.",
-  "terminal.heartbeatTimeout": "The terminal connection heartbeat timed out. Please reconnect."
+  "terminal.heartbeatTimeout": "The terminal connection heartbeat timed out. Please reconnect.",
+  "error.internalFault": "Internal error (incident {id}). It has been logged; please try again or give this number to an administrator."
 }

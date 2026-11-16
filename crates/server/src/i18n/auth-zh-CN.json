@@ -119,5 +119,15 @@
   "auth.otpExpired": "验证已过期，请重新开始。",
   "auth.otpAttempts": "错误次数过多，请重新登录以开始新的验证。",
   "auth.otpUnavailable": "平台未开放新的验证器绑定。",
-  "auth.otpAlreadyEnabled": "账号已绑定验证器，请先解除旧绑定。"
+  "auth.otpAlreadyEnabled": "账号已绑定验证器，请先解除旧绑定。",
+  "platform.storageEndpointInvalid": "S3 Endpoint 地址无效：请填写以 http(s):// 开头的完整地址，且不含用户名、密码或查询参数。",
+  "platform.storageBucketRequired": "请填写 S3 Bucket 和 Region。",
+  "platform.storageUnreachable": "无法连接 S3 Endpoint（网络、DNS 或 TLS 证书问题），请检查地址及服务器的网络访问。",
+  "platform.storageAccessDenied": "S3 拒绝访问：请检查 Access Key、Secret Key 及其对该 Bucket 的读写权限。",
+  "platform.storageBucketMissing": "S3 Bucket 不存在：请检查 Bucket 名称和 Region。",
+  "platform.storageLocalUnwritable": "本机存储目录 {path} 不可写，请检查磁盘空间和目录权限。",
+  "platform.storageCheckFailed": "存储读写检查未通过（步骤：{step}），请检查存储服务。",
+  "platform.storageConfigUnreadable": "已保存的文件存储配置无法解密（可能更换过主密钥），请重新填写并保存。",
+  "platform.storageClusterRequiresS3": "多实例部署必须使用 S3 文件存储，本机文件无法在实例间共享。",
+  "platform.storageFieldInvalid": "文件存储设置 {field} 必须是文本。"
 }

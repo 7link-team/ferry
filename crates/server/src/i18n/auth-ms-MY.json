@@ -119,5 +119,15 @@
   "auth.otpExpired": "Pengesahan tamat tempoh. Mulakan semula.",
   "auth.otpAttempts": "Terlalu banyak kod salah. Log masuk semula untuk memulakan pengesahan baharu.",
   "auth.otpUnavailable": "Pendaftaran pengesah baharu dinyahaktifkan.",
-  "auth.otpAlreadyEnabled": "Aplikasi pengesah sudah didaftarkan. Nyahdaftar sebelum mendaftar yang lain."
+  "auth.otpAlreadyEnabled": "Aplikasi pengesah sudah didaftarkan. Nyahdaftar sebelum mendaftar yang lain.",
+  "platform.storageEndpointInvalid": "Titik akhir S3 tidak sah: gunakan alamat http(s):// penuh tanpa nama pengguna, kata laluan atau pertanyaan.",
+  "platform.storageBucketRequired": "Masukkan baldi dan rantau S3.",
+  "platform.storageUnreachable": "Tidak dapat mencapai titik akhir S3 (rangkaian, DNS atau sijil TLS). Semak alamat dan akses rangkaian pelayan.",
+  "platform.storageAccessDenied": "S3 menolak akses. Semak kunci akses, kunci rahsia dan kebenaran baca/tulis pada baldi ini.",
+  "platform.storageBucketMissing": "Baldi S3 tidak wujud. Semak nama baldi dan rantau.",
+  "platform.storageLocalUnwritable": "Direktori storan tempatan {path} tidak boleh ditulis. Semak ruang cakera dan kebenaran direktori.",
+  "platform.storageCheckFailed": "Semakan baca/tulis storan gagal pada langkah {step}. Semak perkhidmatan storan.",
+  "platform.storageConfigUnreadable": "Tetapan storan fail yang disimpan tidak dapat dinyahsulit (kunci induk mungkin telah berubah). Masukkan semula dan simpan.",
+  "platform.storageClusterRequiresS3": "Penggunaan berbilang tika memerlukan storan fail S3; fail tempatan tidak dikongsi antara tika.",
+  "platform.storageFieldInvalid": "Tetapan storan fail {field} mestilah teks."
 }

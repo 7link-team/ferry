@@ -129,7 +129,6 @@
   "request.path": "URL 路徑參數無效。",
   "execution.capacityWaiting": "任務 {job} 正在等候可用執行容量。",
   "execution.executorAssigned": "任務 {job} 已分配至主機 {host}。",
-  "workflow.executionDataUnavailable": "凍結的執行資料無法使用或無法內聯儲存。",
   "workflow.timezoneInvalid": "{path} 的 IANA 時區無效。",
   "execution.leaseLost": "執行控制權已轉移，正在停止本執行個體的工作。",
   "execution.revisionMessageLong": "版本說明不能超過200個字元。",
@@ -216,5 +215,10 @@
   "workflow.agentNoJson": "智能體最終回答中沒有 JSON 物件。原文：{text}",
   "workflow.agentInvalidOutput": "智能體輸出的 JSON 不符合輸出 Schema（{path}：{reason}）。原文：{text}",
   "workflow.agentOutputTooLarge": "智能體輸出的 JSON 超過 1 MiB 上限。",
-  "storage.unavailable": "檔案儲存不可用。請聯絡管理員在「平台管理 → 檔案儲存」中檢查設定，詳細原因見伺服器日誌。"
+  "storage.unavailable": "檔案儲存不可用。請聯絡管理員在「平台管理 → 檔案儲存」中檢查設定，詳細原因見伺服器日誌。",
+  "workflow.itemTooLarge": "單筆輸出資料超過 {limit} 上限，請拆分為更小的項目。",
+  "workflow.outputTooLarge": "此步驟的輸出超過 {limit} 上限，請在此之前減少或篩選資料。",
+  "storage.busy": "該檔案正被其他操作使用，請稍後重試。",
+  "storage.tooLarge": "檔案超過 {limit} 上限。",
+  "storage.quotaExceeded": "本工作空間的檔案儲存已用滿 {quota} 配額，請刪除不用的檔案或聯絡管理員調整配額。"
 }

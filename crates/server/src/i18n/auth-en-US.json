@@ -119,5 +119,15 @@
   "auth.otpExpired": "Verification expired. Start again.",
   "auth.otpAttempts": "Too many incorrect codes. Sign in again to start a new verification.",
   "auth.otpUnavailable": "New authenticator bindings are disabled.",
-  "auth.otpAlreadyEnabled": "An authenticator is already bound. Remove it before setting up another."
+  "auth.otpAlreadyEnabled": "An authenticator is already bound. Remove it before setting up another.",
+  "platform.storageEndpointInvalid": "The S3 endpoint is not valid: use a full http(s):// address without user name, password or query.",
+  "platform.storageBucketRequired": "Enter the S3 bucket and region.",
+  "platform.storageUnreachable": "Cannot reach the S3 endpoint (network, DNS or TLS certificate). Check the address and the server's network access.",
+  "platform.storageAccessDenied": "S3 denied access. Check the access key, secret key and their read/write permission on this bucket.",
+  "platform.storageBucketMissing": "The S3 bucket does not exist. Check the bucket name and region.",
+  "platform.storageLocalUnwritable": "The local storage directory {path} is not writable. Check disk space and directory permissions.",
+  "platform.storageCheckFailed": "The storage read/write check failed at step {step}. Check the storage service.",
+  "platform.storageConfigUnreadable": "The saved file storage settings cannot be decrypted (the master key may have changed). Enter them again and save.",
+  "platform.storageClusterRequiresS3": "A multi-instance deployment needs S3 file storage; local files are not shared between instances.",
+  "platform.storageFieldInvalid": "The file storage setting {field} must be text."
 }

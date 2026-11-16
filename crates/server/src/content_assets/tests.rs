@@ -368,3 +368,51 @@ async fn content_failed_object_delete_retains_metadata_and_retries_after_restart
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn content_failures_name_their_cause_and_never_show_internal_wording() {
+    let f = Fixture::new().await;
+    let key_of = |error: ApiError| error.2.map(|m| m.key).unwrap_or_default();
+    let small = Store {
+        quota: 7,
+        ..f.store()
+    };
+    small.stage(11, "{\"x\":1}", 8, "n").await.unwrap();
+    let full = small.stage(11, "{\"x\":2}", 8, "n").await.unwrap_err();
+    assert_eq!(full.0, StatusCode::CONFLICT);
+    assert_eq!(key_of(full), "storage.quotaExceeded");
+    let store = f.store();
+    let big = vec![b'a'; PACKET_LIMIT + 1];
+    let too_large = store
+        .stage_bytes(11, &big, "application/octet-stream", 0, "upload", 7)
+        .await
+        .unwrap_err();
+    assert_eq!(too_large.0, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(key_of(too_large), "storage.tooLarge");
+    // The object store losing the bytes is a storage problem for administrators.
+    let b = store.stage(12, "{\"y\":1}", 8, "n").await.unwrap();
+    f.backend.delete(&key(&b)).await.unwrap();
+    let lost = store.read(&f.db, 12, b.id).await.unwrap_err();
+    assert_eq!(lost.0, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(key_of(lost), "storage.unavailable");
+    // Bytes that no longer decrypt are an internal fault with an incident id.
+    f.backend
+        .create(&key(&b), bytes::Bytes::from_static(b"corrupt"))
+        .await
+        .unwrap();
+    let corrupt = store.read(&f.db, 12, b.id).await.unwrap_err();
+    assert_eq!(corrupt.0, StatusCode::INTERNAL_SERVER_ERROR);
+    let message = corrupt.2.clone().unwrap();
+    assert_eq!(message.key, "error.internalFault");
+    assert_eq!(message.params["id"].len(), 8);
+    let shown = corrupt.render(crate::i18n::Locale::ZhCn);
+    assert!(
+        shown.contains(&message.params["id"]) && !shown.contains("冻结"),
+        "{shown}"
+    );
+    // An unknown asset is simply missing.
+    assert_eq!(
+        store.read(&f.db, 12, 999).await.unwrap_err().0,
+        StatusCode::NOT_FOUND
+    );
+}

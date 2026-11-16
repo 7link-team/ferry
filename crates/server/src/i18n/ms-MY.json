@@ -16,5 +16,6 @@
   "guard.request": "Pengepala pengesahan operasi tiada.",
   "guard.origin": "Permintaan operasi daripada asal ini tidak dibenarkan.",
   "assets.not_built": "Fail antara muka belum dibina. Sila jalankan npm run build dahulu.",
-  "terminal.heartbeatTimeout": "Denyut sambungan terminal telah tamat masa. Sila sambung semula."
+  "terminal.heartbeatTimeout": "Denyut sambungan terminal telah tamat masa. Sila sambung semula.",
+  "error.internalFault": "Ralat dalaman (insiden {id}). Ia telah direkodkan; cuba lagi atau berikan nombor ini kepada pentadbir."
 }

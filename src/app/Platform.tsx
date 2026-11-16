@@ -19,6 +19,7 @@ import {FOOTER_UPDATED, PlatformFooterEditor} from "./PlatformFooter";
 import {PlatformMailTest} from "./PlatformMailTest";
 import {PlatformMailTemplates} from "./PlatformMailTemplates";
 import {AutoField} from "../shared/forms/auto-form";
+import {InlineAlert} from "../shared/ui/inline-alert";
 import { href,navigate,useRoute } from "./router";
 import { platformMarketplaceForm, platformMarketplaceList } from "../features/marketplace/platform-sources";
 
@@ -124,6 +125,7 @@ const forms: Record<string, FormConfig<Row>> = {
   ]},
 { title: "文件存储", titleKey: "resource-domain:platform.fileStorage", group: "文件存储", groupKey: "resource-domain:platform.fileStorage", fields: [
     {key:"storage_kind",label:"文件存储",labelKey:"resource-domain:platform.fileStorage",type:"select",options:[{value:"local",label:"本地文件（仅单机）",labelKey:"resource-domain:platform.storageLocal"},{value:"s3",label:"S3（单机或集群）",labelKey:"resource-domain:platform.storageS3"}],helpKey:"resource-domain:platform.storageHelp",disabled:d=>d.storage_source==="environment"},
+    {key:"storage_status",label:"当前状态",labelKey:"resource-domain:platform.storageStatus",type:"custom",span:2,render:({draft})=><StorageStatus status={draft.storage_status as StorageState|undefined}/>},
     {key:"storage_source",label:"配置来源",labelKey:"resource-domain:platform.configSource",type:"text",immutable:true,span:2},
     {key:"storage_local_path",label:"本机存储路径",labelKey:"resource-domain:platform.storageLocalPath",type:"custom",span:2,when:d=>d.storage_kind==="local",render:({draft})=><code className="block select-all whitespace-normal break-all rounded border bg-muted/30 p-3 text-sm">{String(draft.storage_local_path??"")}</code>,helpKey:"resource-domain:platform.storageLocalPathHelp"},
     ...([ ["endpoint","S3 Endpoint"], ["bucket","Bucket"] ] as const).map(([key,label])=>({key:`storage_${key}`,label,type:"text" as const,required:true,when:(d:Partial<Row>)=>d.storage_kind==="s3",disabled:(d:Partial<Row>)=>d.storage_source==="environment"})),
@@ -237,4 +239,15 @@ export function Platform({ identity, reload, headerActions }: { identity: Identi
     </div>
     <MobileNavigation items={mobileItems} active={item} primary={["workspaces", "users", "monitor", "settings"]} />
   </div>;
+}
+
+type StorageState = { ok: boolean; reason?: string };
+/** Live storage health from the server's last probe (at most 30 s old). */
+export function StorageStatus({ status }: { status: StorageState | undefined }) {
+  const label = commonText("resource-domain:platform.storageStatus");
+  return <AutoField label={label}>
+    {!status ? <p role="status" className="text-sm text-muted-foreground">—</p>
+      : status.ok ? <p role="status" className="text-sm text-muted-foreground">{commonText("resource-domain:platform.storageStatusOk")}</p>
+      : <InlineAlert>{commonText("resource-domain:platform.storageStatusFailed", { reason: status.reason ?? "" })}</InlineAlert>}
+  </AutoField>;
 }

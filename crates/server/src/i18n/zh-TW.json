@@ -16,5 +16,6 @@
   "guard.request": "缺少操作驗證標頭。",
   "guard.origin": "不允許此來源發起操作。",
   "assets.not_built": "介面檔案尚未建置，請先執行 npm run build。",
-  "terminal.heartbeatTimeout": "終端機連線心跳逾時，請重新連線。"
+  "terminal.heartbeatTimeout": "終端機連線心跳逾時，請重新連線。",
+  "error.internalFault": "內部錯誤（編號 {id}），已記錄。請重試，或將編號提供給管理員。"
 }

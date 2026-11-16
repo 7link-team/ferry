@@ -18,7 +18,160 @@ pub(crate) struct Configuration {
     pub access_key: String,
     pub secret_key: String,
 }
+/// Why file storage cannot be used, as a localized, actionable message. The
+/// `detail` (which may name configuration) goes to the server log only.
+pub(crate) struct Problem {
+    pub message: crate::i18n::Message,
+    pub detail: String,
+}
+impl Problem {
+    fn new(key: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            message: crate::i18n::Message::new(key),
+            detail: detail.into(),
+        }
+    }
+    fn check(step: &'static str, detail: impl Into<String>) -> Self {
+        let mut problem = Self::new("platform.storageCheckFailed", detail);
+        problem.message = problem.message.with("step", step);
+        problem
+    }
+    fn local(root: &FsPath, detail: impl Into<String>) -> Self {
+        let mut problem = Self::new("platform.storageLocalUnwritable", detail);
+        problem.message = problem.message.with("path", root.display().to_string());
+        problem
+    }
+    /// A settings form error: the save is refused with this reason.
+    fn rejected(self) -> crate::error::ApiError {
+        tracing::warn!(detail = %self.detail, "file storage settings rejected");
+        crate::error::ApiError::localized(axum::http::StatusCode::BAD_REQUEST, self.message)
+    }
+}
+
+/// How long one storage check may take before the store counts as unreachable.
+const PROBE_TIMEOUT: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_secs(3)
+} else {
+    std::time::Duration::from_secs(10)
+};
+
+/// Classifies an object store failure; `local` names the directory for local storage.
+fn classify(step: &'static str, error: &anyhow::Error, local: Option<&FsPath>) -> Problem {
+    let detail = format!("{step}: {error:#}");
+    if let Some(root) = local {
+        return Problem::local(root, detail);
+    }
+    if let Some(kind) = error.downcast_ref::<object_store::Error>() {
+        match kind {
+            object_store::Error::PermissionDenied { .. }
+            | object_store::Error::Unauthenticated { .. } => {
+                return Problem::new("platform.storageAccessDenied", detail);
+            }
+            object_store::Error::NotFound { .. } if step == "write" => {
+                return Problem::new("platform.storageBucketMissing", detail);
+            }
+            _ => {}
+        }
+    }
+    let text = detail.to_ascii_lowercase();
+    let any = |needles: &[&str]| needles.iter().any(|needle| text.contains(needle));
+    if any(&["nosuchbucket", "bucket does not exist"]) {
+        Problem::new("platform.storageBucketMissing", detail)
+    } else if any(&[
+        "accessdenied",
+        "access denied",
+        "invalidaccesskeyid",
+        "signaturedoesnotmatch",
+        "forbidden",
+        "403",
+        "401",
+    ]) {
+        Problem::new("platform.storageAccessDenied", detail)
+    } else if any(&[
+        "dns",
+        "connect",
+        "connection",
+        "tls",
+        "certificate",
+        "timed out",
+        "timeout",
+        "error sending request",
+        "unreachable",
+    ]) {
+        Problem::new("platform.storageUnreachable", detail)
+    } else {
+        Problem::check(step, detail)
+    }
+}
+
+/// Writes, reads back and deletes one small object, each step bounded in time.
+pub(crate) async fn probe(store: &ArtifactStore, local: Option<&FsPath>) -> Result<(), Problem> {
+    let key = format!("storage-check/{}", uuid::Uuid::new_v4());
+    let bytes = Bytes::from_static(b"storage-check");
+    let timeout = |step: &'static str| {
+        if let Some(root) = local {
+            Problem::local(root, format!("{step}: timed out"))
+        } else {
+            Problem::new("platform.storageUnreachable", format!("{step}: timed out"))
+        }
+    };
+    tokio::time::timeout(PROBE_TIMEOUT, store.create(&key, bytes.clone()))
+        .await
+        .map_err(|_| timeout("write"))?
+        .map_err(|error| classify("write", &error, local))?;
+    let read = tokio::time::timeout(PROBE_TIMEOUT, store.get(&key, 64))
+        .await
+        .map_err(|_| timeout("read"))?;
+    let deleted = tokio::time::timeout(PROBE_TIMEOUT, store.delete(&key))
+        .await
+        .map_err(|_| timeout("delete"))?;
+    match read {
+        Ok(read) if read == bytes => {}
+        Ok(_) => return Err(Problem::check("read", "read back different bytes")),
+        Err(error) => return Err(classify("read", &error, local)),
+    }
+    deleted.map_err(|error| classify("delete", &error, local))
+}
+
 impl Configuration {
+    /// Field checks that need no network, each with its own message.
+    fn check_fields(&self) -> Result<(), Problem> {
+        match self.kind.as_str() {
+            "local" => Ok(()),
+            "s3" => {
+                let valid = reqwest::Url::parse(&self.endpoint).is_ok_and(|url| {
+                    matches!(url.scheme(), "http" | "https")
+                        && url.host_str().is_some()
+                        && url.username().is_empty()
+                        && url.password().is_none()
+                        && url.query().is_none()
+                        && url.fragment().is_none()
+                });
+                if !valid {
+                    return Err(Problem::new("platform.storageEndpointInvalid", "endpoint"));
+                }
+                if self.bucket.is_empty() || self.region.is_empty() {
+                    return Err(Problem::new(
+                        "platform.storageBucketRequired",
+                        "bucket/region",
+                    ));
+                }
+                Ok(())
+            }
+            other => Err(Problem::check("configure", format!("unknown kind {other}"))),
+        }
+    }
+    /// Opens the configured store, with a precise reason when it cannot be.
+    fn open(&self, root: &FsPath) -> Result<ArtifactStore, Problem> {
+        self.check_fields()?;
+        self.backend(root).map_err(|error| {
+            if self.kind == "local" {
+                Problem::local(root, format!("{error:#}"))
+            } else {
+                Problem::check("configure", format!("{error:#}"))
+            }
+        })
+    }
     pub(crate) fn read(s: &crate::state::State, sealed: Option<&str>) -> anyhow::Result<Self> {
         let mut config: Self = match sealed {
             Some(value) => {
@@ -85,7 +238,20 @@ impl Configuration {
         if !fields.keys().any(|key| key.starts_with("storage_")) {
             return Ok(sealed.map(str::to_owned));
         }
-        let previous = Self::read(s, sealed).map_err(|_| crate::content_assets::unavailable())?;
+        // Settings that can no longer be decrypted are re-entered rather than blocking the fix.
+        let (previous, unreadable) = match Self::read(s, sealed) {
+            Ok(previous) => (previous, false),
+            Err(error) => {
+                tracing::error!(error = %format!("{error:#}"), "saved file storage settings unreadable");
+                (
+                    Self {
+                        kind: "local".into(),
+                        ..Self::default()
+                    },
+                    true,
+                )
+            }
+        };
         if std::env::var_os("FERRY_ARTIFACT_STORE").is_some() {
             let view = previous.view();
             let unchanged = fields
@@ -117,9 +283,13 @@ impl Configuration {
             ("storage_secret_key", &mut config.secret_key),
         ] {
             if let Some(value) = fields.get(key) {
-                let value = value
-                    .as_str()
-                    .ok_or_else(crate::content_assets::unavailable)?;
+                let value = value.as_str().ok_or_else(|| {
+                    crate::error::ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("platform.storageFieldInvalid")
+                            .with("field", key),
+                    )
+                })?;
                 if key != "storage_secret_key" || !value.is_empty() {
                     *target = value.trim().to_owned();
                 }
@@ -131,7 +301,7 @@ impl Configuration {
                 crate::i18n::Message::new("platform.storagePrefixInvalid"),
             )
         })?;
-        if config == previous {
+        if config == previous && !unreadable {
             return Ok(sealed.map(str::to_owned));
         }
         let reject = || {
@@ -141,7 +311,7 @@ impl Configuration {
             )
         };
         if config.kind == "local" && s.cluster.is_some() {
-            return Err(reject());
+            return Err(Problem::new("platform.storageClusterRequiresS3", "cluster").rejected());
         }
         // Switching a populated store without a migration would strand existing files.
         if config.kind != previous.kind
@@ -168,26 +338,16 @@ impl Configuration {
                 return Err(reject());
             }
         }
-        let backend = config
-            .backend(&s.data_dir)
-            .map_err(|_| crate::content_assets::unavailable())?;
-        if config.kind == "s3" {
-            let key = format!("storage-check/{}", uuid::Uuid::new_v4());
-            let bytes = Bytes::from_static(b"storage-check");
-            backend
-                .create(&key, bytes.clone())
-                .await
-                .map_err(|_| crate::content_assets::unavailable())?;
-            let read = backend.get(&key, 64).await;
-            let deleted = backend.delete(&key).await;
-            if read.ok().as_ref() != Some(&bytes) || deleted.is_err() {
-                return Err(crate::content_assets::unavailable());
-            }
-        }
-        Ok(Some(s.vault.seal(
-            &serde_json::to_string(&config).map_err(|_| crate::content_assets::unavailable())?,
+        // Settings that must work are proven when saved: write, read back, delete.
+        let backend = config.open(&s.data_dir).map_err(Problem::rejected)?;
+        let local = (config.kind == "local").then(|| s.data_dir.as_path());
+        probe(&backend, local).await.map_err(Problem::rejected)?;
+        let sealed = s.vault.seal(
+            &serde_json::to_string(&config).map_err(|error| crate::error::internal_fault(error))?,
             "platform:file-storage",
-        )?))
+        )?;
+        forget_status();
+        Ok(Some(sealed))
     }
 }
 
@@ -228,9 +388,12 @@ impl ArtifactStore {
         let row = crate::entities::platform_state::Entity::find_by_id(1)
             .one(conn)
             .await?
-            .ok_or_else(crate::content_assets::unavailable)?;
+            .ok_or_else(|| crate::error::internal_fault("platform state row missing"))?;
         Ok(Configuration::read(s, row.file_storage.as_deref())
-            .map_err(|_| crate::content_assets::unavailable())?
+            .map_err(|error| {
+                tracing::error!(error = %format!("{error:#}"), "saved file storage settings unreadable");
+                storage_unavailable()
+            })?
             .kind
             == "s3")
     }
@@ -272,26 +435,82 @@ impl ArtifactStore {
         s: &crate::state::State,
         conn: &impl sea_orm::ConnectionTrait,
     ) -> crate::error::Result<Self> {
-        let backend = if std::env::var_os("FERRY_ARTIFACT_STORE").is_some() {
-            Self::configured(&s.data_dir)
-        } else {
-            let row = crate::entities::platform_state::Entity::find_by_id(1)
-                .one(conn)
-                .await?
-                .ok_or_else(crate::content_assets::unavailable)?;
-            Configuration::read(s, row.file_storage.as_deref()).and_then(|c| {
-                anyhow::ensure!(s.cluster.is_none() || c.kind == "s3", "cluster requires S3");
-                c.backend(&s.data_dir)
-            })
-        };
-        if s.cluster.is_some() && std::env::var("FERRY_ARTIFACT_STORE").is_ok_and(|v| v != "s3") {
-            tracing::error!("file storage unavailable: a cluster requires FERRY_ARTIFACT_STORE=s3");
-            return Err(storage_unavailable());
+        match Self::resolve(s, conn).await? {
+            Ok((store, _)) => Ok(store),
+            Err(problem) => {
+                // The reason can name configuration; it goes to the server log, not the client.
+                tracing::error!(detail = %problem.detail, "file storage unavailable");
+                Err(storage_unavailable())
+            }
         }
-        backend.map_err(|error| {
-            // The reason can name configuration; it goes to the server log, not the client.
-            tracing::error!(error = %format!("{error:#}"), "file storage unavailable");
-            storage_unavailable()
+    }
+    /// The configured store and, for local storage, its directory; or why not.
+    async fn resolve(
+        s: &crate::state::State,
+        conn: &impl sea_orm::ConnectionTrait,
+    ) -> crate::error::Result<Result<(Self, Option<std::path::PathBuf>), Problem>> {
+        if let Ok(kind) = std::env::var("FERRY_ARTIFACT_STORE") {
+            if s.cluster.is_some() && kind != "s3" {
+                return Ok(Err(Problem::new(
+                    "platform.storageClusterRequiresS3",
+                    "FERRY_ARTIFACT_STORE must be s3 in a cluster",
+                )));
+            }
+            let local = (kind == "local").then(|| s.data_dir.clone());
+            return Ok(Self::configured(&s.data_dir)
+                .map(|store| (store, local))
+                .map_err(|error| Problem::check("environment", format!("{error:#}"))));
+        }
+        let row = crate::entities::platform_state::Entity::find_by_id(1)
+            .one(conn)
+            .await?
+            .ok_or_else(|| crate::error::internal_fault("platform state row missing"))?;
+        let config = match Configuration::read(s, row.file_storage.as_deref()) {
+            Ok(config) => config,
+            Err(error) => {
+                return Ok(Err(Problem::new(
+                    "platform.storageConfigUnreadable",
+                    format!("{error:#}"),
+                )));
+            }
+        };
+        if s.cluster.is_some() && config.kind != "s3" {
+            return Ok(Err(Problem::new(
+                "platform.storageClusterRequiresS3",
+                "cluster",
+            )));
+        }
+        let local = (config.kind == "local").then(|| s.data_dir.clone());
+        Ok(config.open(&s.data_dir).map(|store| (store, local)))
+    }
+    /// Live storage health for administrators, probed at most every 30 s.
+    pub(crate) async fn status(s: &crate::state::State) -> crate::error::Result<serde_json::Value> {
+        if let Some((at, value)) = STATUS.lock().unwrap_or_else(|p| p.into_inner()).clone() {
+            if at.elapsed() < std::time::Duration::from_secs(30) {
+                return Ok(value);
+            }
+        }
+        let value = Self::check(s).await?;
+        *STATUS.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some((std::time::Instant::now(), value.clone()));
+        Ok(value)
+    }
+    /// One uncached storage check: `{ok}` or `{ok:false, reason_key, reason}`.
+    pub(crate) async fn check(s: &crate::state::State) -> crate::error::Result<serde_json::Value> {
+        let result = match Self::resolve(s, &s.db).await? {
+            Ok((store, local)) => probe(&store, local.as_deref()).await,
+            Err(problem) => Err(problem),
+        };
+        Ok(match result {
+            Ok(()) => serde_json::json!({"ok": true}),
+            Err(problem) => {
+                tracing::error!(detail = %problem.detail, "file storage check failed");
+                serde_json::json!({
+                    "ok": false,
+                    "reason_key": problem.message.key.clone(),
+                    "reason": crate::i18n::render(crate::i18n::current_locale(), &problem.message),
+                })
+            }
         })
     }
     pub(crate) fn local(root: &FsPath) -> anyhow::Result<Self> {
@@ -382,6 +601,8 @@ impl ArtifactStore {
     }
 }
 
+#[cfg(test)]
+mod settings_tests;
 #[cfg(test)]
 mod prefix_tests {
     use super::*;
@@ -477,4 +698,11 @@ pub(crate) fn storage_unavailable() -> crate::error::ApiError {
         axum::http::StatusCode::SERVICE_UNAVAILABLE,
         crate::i18n::Message::new("storage.unavailable"),
     )
+}
+
+static STATUS: std::sync::Mutex<Option<(std::time::Instant, serde_json::Value)>> =
+    std::sync::Mutex::new(None);
+/// Saved settings change the answer; the next status request probes again.
+pub(crate) fn forget_status() {
+    *STATUS.lock().unwrap_or_else(|p| p.into_inner()) = None;
 }

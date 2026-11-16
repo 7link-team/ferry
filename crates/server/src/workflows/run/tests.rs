@@ -976,3 +976,43 @@ async fn a_failed_run_keeps_its_full_message_in_the_running_node_logs() {
     );
     assert!(node.logs_updated_at > 0);
 }
+
+#[test]
+fn parameters_that_do_not_match_their_items_are_an_internal_fault() {
+    let item = Item {
+        json: json!({"a":1}).as_object().unwrap().clone(),
+        binary: Default::default(),
+        paired: vec![],
+    };
+    let error = set(&[item.clone(), item], &[json!({})]).unwrap_err();
+    assert_eq!(error.0, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    let message = error.2.clone().unwrap();
+    assert_eq!(message.key, "error.internalFault");
+    let shown = error.render(crate::i18n::Locale::ZhCn);
+    assert!(shown.contains(&message.params["id"]), "{shown}");
+}
+
+#[test]
+fn no_code_or_catalogue_uses_the_old_internal_execution_message() {
+    // Internal wording must never reach users: storage problems, limits and
+    // internal faults each have their own message.
+    let retired = ["workflow.", "executionDataUnavailable"].concat();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut pending = vec![root];
+    let mut found = vec![];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("rs" | "json")
+            ) && std::fs::read_to_string(&path).unwrap().contains(&retired)
+            {
+                found.push(path);
+            }
+        }
+    }
+    assert!(found.is_empty(), "{found:?}");
+}

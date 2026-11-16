@@ -129,7 +129,6 @@
   "request.path": "URL のパスパラメーターが無効です。",
   "execution.capacityWaiting": "ジョブ {job} は実行容量の空きを待っています。",
   "execution.executorAssigned": "ジョブ {job} をホスト {host} に割り当てました。",
-  "workflow.executionDataUnavailable": "固定された実行データを利用できないか、インライン保存できません。",
   "workflow.timezoneInvalid": "{path} の IANA タイムゾーンが無効です。",
   "execution.leaseLost": "実行の制御権が移動しました。このインスタンスのタスクを停止しています。",
   "execution.revisionMessageLong": "バージョンの説明は200文字以内で入力してください。",
@@ -216,5 +215,10 @@
   "workflow.agentNoJson": "AI エージェントの最終回答に JSON オブジェクトがありません。回答：{text}",
   "workflow.agentInvalidOutput": "AI エージェントの JSON が出力スキーマに一致しません（{path}：{reason}）。回答：{text}",
   "workflow.agentOutputTooLarge": "AI エージェントの JSON 出力が 1 MiB を超えています。",
-  "storage.unavailable": "ファイルストレージを利用できません。管理者に「プラットフォーム管理 → ファイルストレージ」の設定を確認するよう依頼してください。詳細はサーバーログにあります。"
+  "storage.unavailable": "ファイルストレージを利用できません。管理者に「プラットフォーム管理 → ファイルストレージ」の設定を確認するよう依頼してください。詳細はサーバーログにあります。",
+  "workflow.itemTooLarge": "1 件の出力データが上限 {limit} を超えています。より小さな項目に分割してください。",
+  "workflow.outputTooLarge": "このステップの出力が上限 {limit} を超えています。前段でデータを減らすか絞り込んでください。",
+  "storage.busy": "このファイルは別の処理で使用中です。しばらくしてから再試行してください。",
+  "storage.tooLarge": "ファイルが上限 {limit} を超えています。",
+  "storage.quotaExceeded": "このワークスペースのファイル保存容量 {quota} を使い切りました。不要なファイルを削除するか、管理者に上限の変更を依頼してください。"
 }

@@ -129,7 +129,6 @@
   "request.path": "Parameter laluan URL tidak sah.",
   "execution.capacityWaiting": "Tugas {job} sedang menunggu kapasiti pelaksanaan.",
   "execution.executorAssigned": "Tugas {job} ditugaskan kepada hos {host}.",
-  "workflow.executionDataUnavailable": "Data pelaksanaan yang dibekukan tidak tersedia atau tidak boleh disimpan sebaris.",
   "workflow.timezoneInvalid": "Zon waktu IANA tidak sah di {path}.",
   "execution.leaseLost": "Pemilikan pelaksanaan telah berubah. Tugas pada tika ini sedang dihentikan.",
   "execution.revisionMessageLong": "Mesej semakan tidak boleh melebihi 200 aksara.",
@@ -216,5 +215,10 @@
   "workflow.agentNoJson": "Jawapan akhir ejen AI tiada objek JSON. Jawapan: {text}",
   "workflow.agentInvalidOutput": "JSON ejen AI tidak sepadan dengan skema output di {path}: {reason}. Jawapan: {text}",
   "workflow.agentOutputTooLarge": "Output JSON ejen AI melebihi 1 MiB.",
-  "storage.unavailable": "Storan fail tidak tersedia. Minta pentadbir menyemak Storan fail dalam Tetapan platform; butirannya ada dalam log pelayan."
+  "storage.unavailable": "Storan fail tidak tersedia. Minta pentadbir menyemak Storan fail dalam Tetapan platform; butirannya ada dalam log pelayan.",
+  "workflow.itemTooLarge": "Satu item output melebihi had {limit}. Pecahkan data kepada item yang lebih kecil.",
+  "workflow.outputTooLarge": "Output langkah ini melebihi had {limit}. Kurangkan atau tapis data sebelum langkah ini.",
+  "storage.busy": "Fail sedang digunakan oleh operasi lain. Cuba lagi sebentar lagi.",
+  "storage.tooLarge": "Fail melebihi had {limit}.",
+  "storage.quotaExceeded": "Ruang kerja ini telah menggunakan kuota storan fail {quota}. Padam fail yang tidak digunakan atau minta pentadbir menaikkan kuota."
 }

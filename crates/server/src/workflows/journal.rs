@@ -32,10 +32,16 @@ fn conflict() -> ApiError {
         Message::new("execution.versionConflict"),
     )
 }
-fn unavailable() -> ApiError {
+/// Stored execution data broke an invariant (decode, identity or digest); logged
+/// with an incident id and the caller's location, never shown as internal text.
+#[track_caller]
+fn fault() -> ApiError {
+    crate::error::internal_fault("workflow execution journal")
+}
+fn too_large(key: &'static str, limit: usize) -> ApiError {
     ApiError::localized(
-        StatusCode::CONFLICT,
-        Message::new("workflow.executionDataUnavailable"),
+        StatusCode::PAYLOAD_TOO_LARGE,
+        Message::new(key).with("limit", format!("{} MiB", limit / (1024 * 1024))),
     )
 }
 fn invalid() -> ApiError {
@@ -54,12 +60,12 @@ fn seal<T: Serialize>(vault: &Vault, value: &T, aad: &str) -> Result<String> {
     let plain = canonical(value)?;
     // Larger packets need the asset store, never an oversized inline fallback.
     if plain.len() > INLINE_BYTES {
-        return Err(unavailable());
+        return Err(fault());
     }
     vault.seal(&plain, aad)
 }
 fn open<T: serde::de::DeserializeOwned>(vault: &Vault, value: &str, aad: &str) -> Result<T> {
-    serde_json::from_str(&vault.open_secret(value, aad)?).map_err(|_| unavailable())
+    serde_json::from_str(&vault.open_secret(value, aad)?).map_err(|_| fault())
 }
 fn node_condition(node: &nodes::Model) -> Condition {
     Condition::all()
@@ -138,7 +144,7 @@ impl Output {
     pub(super) fn validate(&self, outputless: bool) -> Result<()> {
         let mut ports = BTreeSet::new();
         if self.version != 1 || self.ports.is_empty() != outputless {
-            return Err(unavailable());
+            return Err(fault());
         }
         let mut bytes = 0usize;
         for port in &self.ports {
@@ -156,13 +162,13 @@ impl Output {
             for item in &port.items {
                 let size = serde_json::to_vec(item).map_err(|_| invalid())?.len();
                 if size > MAX_ITEM_BYTES {
-                    return Err(unavailable());
+                    return Err(too_large("workflow.itemTooLarge", MAX_ITEM_BYTES));
                 }
-                bytes = bytes.checked_add(size).ok_or_else(unavailable)?;
+                bytes = bytes.checked_add(size).ok_or_else(|| fault())?;
             }
         }
         if bytes > MAX_OUTPUT_BYTES {
-            return Err(unavailable());
+            return Err(too_large("workflow.outputTooLarge", MAX_OUTPUT_BYTES));
         }
         Ok(())
     }
@@ -214,11 +220,11 @@ impl Journal<'_> {
         value: &T,
     ) -> Result<Packet> {
         let plain = canonical(value)?;
-        let bytes = i64::try_from(plain.len()).map_err(|_| unavailable())?;
+        let bytes = i64::try_from(plain.len()).map_err(|_| fault())?;
         let (value, asset) = if plain.len() <= INLINE_BYTES {
             (self.vault.seal(&plain, &aad(run, Some(node), field))?, None)
         } else {
-            let store = self.assets.ok_or_else(unavailable)?;
+            let store = self.assets.ok_or_else(|| fault())?;
             let asset = store
                 .stage(run.workspace_id, &plain, run.id, &node.to_string())
                 .await?;
@@ -270,7 +276,7 @@ impl Journal<'_> {
     ) -> Result<()> {
         if let Some(id) = packet.asset {
             self.assets
-                .ok_or_else(unavailable)?
+                .ok_or_else(|| fault())?
                 .attach(tx, run.workspace_id, id, "node_run", node)
                 .await?;
         }
@@ -280,7 +286,7 @@ impl Journal<'_> {
                 Expr::value(
                     run.data_bytes
                         .checked_add(packet.bytes)
-                        .ok_or_else(unavailable)?,
+                        .ok_or_else(|| fault())?,
                 ),
             )
             .filter(runs::Column::Id.eq(run.id))
@@ -296,7 +302,7 @@ impl Journal<'_> {
                 .filter(runs::Column::WorkspaceId.eq(workspace))
                 .one(tx)
                 .await?
-                .ok_or_else(unavailable)?;
+                .ok_or_else(|| fault())?;
             let scope = crate::accounts::workspace::Scope::for_actor_in(
                 tx,
                 workspace,
@@ -326,7 +332,7 @@ impl Journal<'_> {
         runs::Entity::find_by_id(self.lease.execution().id)
             .one(tx)
             .await?
-            .ok_or_else(unavailable)
+            .ok_or_else(|| fault())
     }
     async fn commit(&self, tx: DatabaseTransaction, run: &runs::Model) -> Result<i64> {
         // Re-evaluate expiry at the final SQL write, after all encryption/I/O.
@@ -349,7 +355,7 @@ impl Journal<'_> {
         node: &nodes::Model,
     ) -> Result<Output> {
         if node.execution_id != run.id {
-            return Err(unavailable());
+            return Err(fault());
         }
         let output: Output = self
             .open_packet(db, run, node.id, "output", &node.output, node.output_asset)
@@ -370,7 +376,7 @@ impl Journal<'_> {
                 .filter(nodes::Column::ExecutionId.eq(run.id))
                 .one(tx)
                 .await?
-                .ok_or_else(unavailable)?;
+                .ok_or_else(|| fault())?;
             if row.attempt != source.attempt
                 || row.iteration_hash != source.iteration_hash
                 || !matches!(
@@ -385,7 +391,7 @@ impl Journal<'_> {
                 )
                 || (row.state == "failed" && row.error_policy == "stop")
             {
-                return Err(unavailable());
+                return Err(fault());
             }
             self.snapshot(tx, run, &row).await?;
             let output = self.output(tx, run, &row).await?;
@@ -393,13 +399,13 @@ impl Journal<'_> {
                 .ports
                 .iter()
                 .find(|port| port.name == source.port && port.index == source.port_index)
-                .ok_or_else(unavailable)?;
+                .ok_or_else(|| fault())?;
             if digest(port)? != source.output_sha256 {
-                return Err(unavailable());
+                return Err(fault());
             }
             count = count
-                .checked_add(port.items.len().try_into().map_err(|_| unavailable())?)
-                .ok_or_else(unavailable)?;
+                .checked_add(port.items.len().try_into().map_err(|_| fault())?)
+                .ok_or_else(|| fault())?;
         }
         Ok(count)
     }
@@ -415,7 +421,7 @@ impl Journal<'_> {
             .filter(runs::Column::WorkspaceId.eq(self.lease.execution().workspace))
             .one(self.db)
             .await?
-            .ok_or_else(unavailable)?;
+            .ok_or_else(|| fault())?;
         let run = preview_run;
         let revision = definition_revisions::Entity::find_by_id(run.revision_id)
             .filter(definition_revisions::Column::WorkspaceId.eq(run.workspace_id))
@@ -423,9 +429,8 @@ impl Journal<'_> {
             .filter(definition_revisions::Column::SubjectId.eq(run.workflow_id))
             .one(self.db)
             .await?
-            .ok_or_else(unavailable)?;
-        let definition: Value =
-            serde_json::from_str(&revision.definition).map_err(|_| unavailable())?;
+            .ok_or_else(|| fault())?;
+        let definition: Value = serde_json::from_str(&revision.definition).map_err(|_| fault())?;
         let spec = super::graph::node_at(&definition, &activation.node_path).ok_or_else(invalid)?;
         let node_id = spec["id"].as_str().ok_or_else(invalid)?;
         if activation.id <= 0
@@ -451,7 +456,7 @@ impl Journal<'_> {
             {
                 if node.iteration_path != iteration_path || node.redo_round != activation.redo_round
                 {
-                    return Err(unavailable());
+                    return Err(fault());
                 }
                 let snapshot = self.snapshot(&tx, &run, &node).await?;
                 self.sources(&tx, &run, &snapshot.sources).await?;
@@ -507,7 +512,7 @@ impl Journal<'_> {
         if run.workspace_id != snapshot.identity.workspace
             || run.revision_id != snapshot.identity.revision
         {
-            return Err(unavailable());
+            return Err(fault());
         }
         if let Some(node) = nodes::Entity::find()
             .filter(nodes::Column::ExecutionId.eq(run.id))
@@ -518,7 +523,7 @@ impl Journal<'_> {
             .await?
         {
             if node.iteration_path != iteration_path || node.redo_round != activation.redo_round {
-                return Err(unavailable());
+                return Err(fault());
             }
             let snapshot = self.snapshot(&tx, &run, &node).await?;
             self.sources(&tx, &run, &snapshot.sources).await?;
@@ -599,7 +604,7 @@ impl Journal<'_> {
             .filter(runs::Column::WorkspaceId.eq(self.lease.execution().workspace))
             .one(self.db)
             .await?
-            .ok_or_else(unavailable)?;
+            .ok_or_else(|| fault())?;
         let packet = self
             .packet(&preview_run, node_id, "output", &output)
             .await?;
@@ -609,7 +614,7 @@ impl Journal<'_> {
             .filter(nodes::Column::ExecutionId.eq(run.id))
             .one(&tx)
             .await?
-            .ok_or_else(unavailable)?;
+            .ok_or_else(|| fault())?;
         let snapshot = self.snapshot(&tx, &run, &node).await?;
         output.validate(snapshot.outputless)?;
         if matches!(
@@ -639,7 +644,7 @@ impl Journal<'_> {
             .flat_map(|item| item.binary.values())
         {
             self.assets
-                .ok_or_else(unavailable)?
+                .ok_or_else(|| fault())?
                 .attach_binary(&tx, run.workspace_id, reference, "node_run", node_id)
                 .await?;
         }
@@ -657,7 +662,7 @@ impl Journal<'_> {
             .col_expr(nodes::Column::State, Expr::value(state))
             .col_expr(
                 nodes::Column::ItemsOut,
-                Expr::value(i64::try_from(items_out).map_err(|_| unavailable())?),
+                Expr::value(i64::try_from(items_out).map_err(|_| fault())?),
             )
             .col_expr(nodes::Column::Output, Expr::value(packet.value))
             .col_expr(nodes::Column::OutputAsset, Expr::value(packet.asset))
@@ -678,7 +683,7 @@ impl Journal<'_> {
         let node = nodes::Entity::find_by_id(node_id)
             .one(&tx)
             .await?
-            .ok_or_else(unavailable)?;
+            .ok_or_else(|| fault())?;
         let execution_version = self.commit(tx, &run).await?;
         Ok(Checkpoint {
             execution_version,
@@ -693,7 +698,7 @@ impl Journal<'_> {
             Some(value) => {
                 let value: Value = open(self.vault, value, &aad(run, None, "context"))?;
                 if !value.is_object() {
-                    return Err(unavailable());
+                    return Err(fault());
                 }
                 Ok(value)
             }
@@ -714,7 +719,7 @@ impl Journal<'_> {
             .filter(nodes::Column::ExecutionId.eq(run.id))
             .one(&tx)
             .await?
-            .ok_or_else(unavailable)?;
+            .ok_or_else(|| fault())?;
         self.snapshot(&tx, &run, &node).await?;
         let mut context = self.context(&run)?;
         let key = node_id.to_string();
@@ -734,7 +739,7 @@ impl Journal<'_> {
             context["journal"] = json!({"version":1,"waits":{}});
         }
         if context["journal"]["version"] != 1 || !context["journal"]["waits"].is_object() {
-            return Err(unavailable());
+            return Err(fault());
         }
         context["journal"]["waits"][&key] = json!(wake_at);
         if nodes::Entity::update_many()
@@ -780,10 +785,10 @@ impl Journal<'_> {
         let waits = context
             .pointer("/journal/waits")
             .and_then(Value::as_object)
-            .ok_or_else(unavailable)?;
+            .ok_or_else(|| fault())?;
         let wake_at = waits
             .values()
-            .map(|value| value.as_i64().ok_or_else(unavailable))
+            .map(|value| value.as_i64().ok_or_else(|| fault()))
             .collect::<Result<Vec<_>>>()?
             .into_iter()
             .min()
@@ -822,7 +827,7 @@ impl Journal<'_> {
         let waits = context
             .pointer_mut("/journal/waits")
             .and_then(Value::as_object_mut)
-            .ok_or_else(unavailable)?;
+            .ok_or_else(|| fault())?;
         let ready: Vec<_> = waits
             .iter()
             .filter_map(|(id, wake)| {
@@ -832,12 +837,12 @@ impl Journal<'_> {
             })
             .collect();
         for id in &ready {
-            let node_id = id.parse::<i64>().map_err(|_| unavailable())?;
+            let node_id = id.parse::<i64>().map_err(|_| fault())?;
             let node = nodes::Entity::find_by_id(node_id)
                 .filter(nodes::Column::ExecutionId.eq(run.id))
                 .one(&tx)
                 .await?
-                .ok_or_else(unavailable)?;
+                .ok_or_else(|| fault())?;
             if node.state != "waiting" {
                 return Err(conflict());
             }
@@ -867,11 +872,11 @@ impl Journal<'_> {
             .unwrap()
             .remove("parked_at")
             .and_then(|value| value.as_i64())
-            .ok_or_else(unavailable)?;
+            .ok_or_else(|| fault())?;
         let waiting_ms = run
             .waiting_ms
             .checked_add(std::cmp::max(now.saturating_sub(parked), 0))
-            .ok_or_else(unavailable)?;
+            .ok_or_else(|| fault())?;
         runs::Entity::update_many()
             .col_expr(runs::Column::WaitingMs, Expr::value(waiting_ms))
             .col_expr(runs::Column::NotBefore, Expr::value(Option::<i64>::None))
@@ -896,7 +901,7 @@ pub(crate) async fn read_snapshot(
     node: &nodes::Model,
 ) -> Result<Snapshot> {
     if node.execution_id != run.id {
-        return Err(unavailable());
+        return Err(fault());
     }
     let snapshot: Snapshot = read_packet(
         vault,
@@ -905,7 +910,7 @@ pub(crate) async fn read_snapshot(
         run,
         node.id,
         "params",
-        node.resolved_params.as_deref().ok_or_else(unavailable)?,
+        node.resolved_params.as_deref().ok_or_else(|| fault())?,
         None,
     )
     .await?;
@@ -920,10 +925,10 @@ pub(crate) async fn read_snapshot(
     };
     if snapshot.version != 1
         || snapshot.identity != identity
-        || digest(&serde_json::from_str::<Value>(&node.iteration_path).map_err(|_| unavailable())?)?
+        || digest(&serde_json::from_str::<Value>(&node.iteration_path).map_err(|_| fault())?)?
             != node.iteration_hash
     {
-        return Err(unavailable());
+        return Err(fault());
     }
     Ok(snapshot)
 }
@@ -939,14 +944,14 @@ pub(crate) async fn read_packet<T: serde::de::DeserializeOwned>(
     expected: Option<i64>,
 ) -> Result<T> {
     let plain = vault.open_secret(value, &aad(run, Some(node), field))?;
-    let value: Value = serde_json::from_str(&plain).map_err(|_| unavailable())?;
+    let value: Value = serde_json::from_str(&plain).map_err(|_| fault())?;
     let plain = if value.get("asset_packet").is_some() {
-        let locator: AssetPacket = serde_json::from_value(value).map_err(|_| unavailable())?;
+        let locator: AssetPacket = serde_json::from_value(value).map_err(|_| fault())?;
         if locator.asset_packet != 1
             || (field == "output" && expected.is_none())
             || expected.is_some_and(|id| id != locator.id)
         {
-            return Err(unavailable());
+            return Err(fault());
         }
         if crate::entities::asset_refs::Entity::find_by_id((
             locator.id,
@@ -957,21 +962,21 @@ pub(crate) async fn read_packet<T: serde::de::DeserializeOwned>(
         .await?
         .is_none()
         {
-            return Err(unavailable());
+            return Err(fault());
         }
         let plain = assets
-            .ok_or_else(unavailable)?
+            .ok_or_else(|| fault())?
             .read(db, run.workspace_id, locator.id)
             .await?;
         if hex::encode(Sha256::digest(plain.as_bytes())) != locator.sha256 {
-            return Err(unavailable());
+            return Err(fault());
         }
         plain
     } else {
         if expected.is_some() {
-            return Err(unavailable());
+            return Err(fault());
         }
         plain
     };
-    serde_json::from_str(&plain).map_err(|_| unavailable())
+    serde_json::from_str(&plain).map_err(|_| fault())
 }

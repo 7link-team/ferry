@@ -1151,3 +1151,46 @@ async fn pool_wait_crossing_expiry_cannot_authorize_a_prepared_activation() {
     assert_eq!(fixture.run().await.version, version);
     assert_eq!(nodes::Entity::find().count(&fixture.db).await.unwrap(), 0);
 }
+
+#[test]
+fn oversized_outputs_name_the_limit_and_broken_packets_are_internal_faults() {
+    let key_of = |error: ApiError| error.2.map(|m| m.key).unwrap_or_default();
+    let item = |bytes: usize| ferry_protocol::sandbox::Item {
+        json: serde_json::json!({"text": "x".repeat(bytes)})
+            .as_object()
+            .unwrap()
+            .clone(),
+        binary: Default::default(),
+        paired: vec![],
+    };
+    let port = |items| Port {
+        name: "main".into(),
+        index: 0,
+        skipped: false,
+        items,
+    };
+    let one = Output {
+        version: 1,
+        ports: vec![port(vec![item(MAX_ITEM_BYTES)])],
+    }
+    .validate(false)
+    .unwrap_err();
+    assert_eq!(key_of(one), "workflow.itemTooLarge");
+    let many = Output {
+        version: 1,
+        ports: vec![port((0..17).map(|_| item(1024 * 1024 - 64)).collect())],
+    }
+    .validate(false)
+    .unwrap_err();
+    assert_eq!(many.0, axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+    let shown = many.render(crate::i18n::Locale::ZhCn);
+    assert!(shown.contains("16 MiB"), "{shown}");
+    let broken = Output {
+        version: 2,
+        ports: vec![],
+    }
+    .validate(true)
+    .unwrap_err();
+    assert_eq!(broken.0, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(key_of(broken), "error.internalFault");
+}

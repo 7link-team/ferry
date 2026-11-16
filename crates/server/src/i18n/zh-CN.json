@@ -16,5 +16,6 @@
   "guard.request": "缺少操作校验标识。",
   "guard.origin": "不允许此来源发起操作。",
   "assets.not_built": "界面文件未构建，请先运行 npm run build。",
-  "terminal.heartbeatTimeout": "终端连接心跳超时，请重新连接。"
+  "terminal.heartbeatTimeout": "终端连接心跳超时，请重新连接。",
+  "error.internalFault": "内部错误（编号 {id}），已记录。请重试，或将编号提供给管理员。"
 }

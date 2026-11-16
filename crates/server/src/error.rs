@@ -167,6 +167,20 @@ impl ApiError {
     }
 }
 
+/// A "can't happen" internal fault (broken invariant, undecodable stored data).
+/// The full context and source location go to the server log under a short
+/// incident id; users only see a generic message carrying that id.
+#[track_caller]
+pub fn internal_fault(context: impl std::fmt::Display) -> ApiError {
+    let id = uuid::Uuid::new_v4().simple().to_string()[..8].to_ascii_uppercase();
+    let location = std::panic::Location::caller();
+    tracing::error!(incident = %id, %location, %context, "internal fault");
+    ApiError::localized(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        crate::i18n::Message::new("error.internalFault").with("id", id),
+    )
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let detail = self.render(crate::i18n::current_locale());

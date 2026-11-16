@@ -129,7 +129,6 @@
   "request.path": "URL 路径参数无效。",
   "execution.capacityWaiting": "任务 {job} 正在等待可用执行容量。",
   "execution.executorAssigned": "任务 {job} 已分配至主机 {host}。",
-  "workflow.executionDataUnavailable": "冻结的执行数据不可用或无法内联存储。",
   "workflow.timezoneInvalid": "{path} 的 IANA 时区无效。",
   "execution.leaseLost": "执行控制权已转移，正在停止本实例的任务。",
   "execution.revisionMessageLong": "版本说明不能超过200个字符。",
@@ -216,5 +215,10 @@
   "workflow.agentNoJson": "智能体最终回答中没有 JSON 对象。原文：{text}",
   "workflow.agentInvalidOutput": "智能体输出的 JSON 不符合输出 Schema（{path}：{reason}）。原文：{text}",
   "workflow.agentOutputTooLarge": "智能体输出的 JSON 超过 1 MiB 上限。",
-  "storage.unavailable": "文件存储不可用。请联系管理员在“平台管理 → 文件存储”中检查配置，详细原因见服务端日志。"
+  "storage.unavailable": "文件存储不可用。请联系管理员在“平台管理 → 文件存储”中检查配置，详细原因见服务端日志。",
+  "workflow.itemTooLarge": "单条输出数据超过 {limit} 上限，请拆分为更小的条目。",
+  "workflow.outputTooLarge": "该步骤的输出超过 {limit} 上限，请在此之前减少或筛选数据。",
+  "storage.busy": "该文件正被其他操作使用，请稍后重试。",
+  "storage.tooLarge": "文件超过 {limit} 上限。",
+  "storage.quotaExceeded": "本工作空间的文件存储已用满 {quota} 配额，请删除不用的文件或联系管理员调整配额。"
 }

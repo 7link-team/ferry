@@ -746,11 +746,20 @@ pub async fn get_settings(State(s): State<AppState>, _: Admin) -> Result<Json<Va
     } else {
         "Desktop / standalone"
     });
+    // Unreadable saved settings still open the page, so they can be re-entered;
+    // `storage_status` says what is wrong.
     let storage = crate::artifact_store::Configuration::read(&s, row.file_storage.as_deref())
-        .map_err(|_| crate::content_assets::unavailable())?;
+        .unwrap_or_else(|error| {
+            tracing::error!(error = %format!("{error:#}"), "saved file storage settings unreadable");
+            crate::artifact_store::Configuration {
+                kind: "local".into(),
+                ..Default::default()
+            }
+        });
     view.as_object_mut()
         .unwrap()
         .extend(storage.view().as_object().unwrap().clone());
+    view["storage_status"] = crate::artifact_store::ArtifactStore::status(&s).await?;
     view["storage_local_path"] = json!(std::path::absolute(&s.data_dir)?.display().to_string());
     view.as_object_mut().unwrap().extend(
         super::login_guard::Configuration::read(&s, row.login_security.as_deref())?

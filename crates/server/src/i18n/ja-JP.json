@@ -16,5 +16,6 @@
   "guard.request": "操作確認用のヘッダーがありません。",
   "guard.origin": "このオリジンからの操作は許可されていません。",
   "assets.not_built": "画面のファイルがビルドされていません。先に npm run build を実行してください。",
-  "terminal.heartbeatTimeout": "ターミナル接続のハートビートがタイムアウトしました。再接続してください。"
+  "terminal.heartbeatTimeout": "ターミナル接続のハートビートがタイムアウトしました。再接続してください。",
+  "error.internalFault": "内部エラーが発生しました（番号 {id}）。記録済みです。再試行するか、この番号を管理者に伝えてください。"
 }

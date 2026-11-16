@@ -119,5 +119,15 @@
   "auth.otpExpired": "認証期限が切れました。やり直してください。",
   "auth.otpAttempts": "試行回数の上限です。ログインからやり直してください。",
   "auth.otpUnavailable": "新規登録は無効です。",
-  "auth.otpAlreadyEnabled": "認証アプリが登録済みです。先に解除してください。"
+  "auth.otpAlreadyEnabled": "認証アプリが登録済みです。先に解除してください。",
+  "platform.storageEndpointInvalid": "S3 エンドポイントが無効です。ユーザー名・パスワード・クエリを含まない http(s):// で始まる完全なアドレスを入力してください。",
+  "platform.storageBucketRequired": "S3 のバケットとリージョンを入力してください。",
+  "platform.storageUnreachable": "S3 エンドポイントに接続できません（ネットワーク・DNS・TLS 証明書）。アドレスとサーバーのネットワーク接続を確認してください。",
+  "platform.storageAccessDenied": "S3 がアクセスを拒否しました。アクセスキー、シークレットキー、およびこのバケットへの読み書き権限を確認してください。",
+  "platform.storageBucketMissing": "S3 バケットが存在しません。バケット名とリージョンを確認してください。",
+  "platform.storageLocalUnwritable": "ローカル保存ディレクトリ {path} に書き込めません。ディスク容量とディレクトリの権限を確認してください。",
+  "platform.storageCheckFailed": "ストレージの読み書きチェックが失敗しました（手順：{step}）。ストレージサービスを確認してください。",
+  "platform.storageConfigUnreadable": "保存済みのファイルストレージ設定を復号できません（マスターキーが変更された可能性があります）。再入力して保存してください。",
+  "platform.storageClusterRequiresS3": "複数インスタンス構成では S3 ファイルストレージが必要です。ローカルファイルはインスタンス間で共有されません。",
+  "platform.storageFieldInvalid": "ファイルストレージ設定 {field} はテキストである必要があります。"
 }

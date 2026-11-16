@@ -129,7 +129,6 @@
   "request.path": "URL 경로 매개변수가 유효하지 않습니다.",
   "execution.capacityWaiting": "작업 {job}이 실행 용량을 기다리고 있습니다.",
   "execution.executorAssigned": "작업 {job}이 호스트 {host}에 할당되었습니다.",
-  "workflow.executionDataUnavailable": "고정된 실행 데이터를 사용할 수 없거나 인라인으로 저장할 수 없습니다.",
   "workflow.timezoneInvalid": "{path}의 IANA 시간대가 잘못되었습니다.",
   "execution.leaseLost": "실행 제어권이 변경되었습니다. 이 인스턴스의 작업을 중지하고 있습니다.",
   "execution.revisionMessageLong": "버전 설명은 200자를 초과할 수 없습니다.",
@@ -216,5 +215,10 @@
   "workflow.agentNoJson": "AI 에이전트의 최종 답변에 JSON 객체가 없습니다. 답변: {text}",
   "workflow.agentInvalidOutput": "AI 에이전트의 JSON이 출력 스키마와 맞지 않습니다({path}: {reason}). 답변: {text}",
   "workflow.agentOutputTooLarge": "AI 에이전트의 JSON 출력이 1 MiB를 넘습니다.",
-  "storage.unavailable": "파일 저장소를 사용할 수 없습니다. 관리자에게 \"플랫폼 관리 → 파일 저장소\" 설정을 확인하도록 요청하세요. 자세한 원인은 서버 로그에 있습니다."
+  "storage.unavailable": "파일 저장소를 사용할 수 없습니다. 관리자에게 \"플랫폼 관리 → 파일 저장소\" 설정을 확인하도록 요청하세요. 자세한 원인은 서버 로그에 있습니다.",
+  "workflow.itemTooLarge": "출력 항목 하나가 {limit} 한도를 초과합니다. 더 작은 항목으로 나누세요.",
+  "workflow.outputTooLarge": "이 단계의 출력이 {limit} 한도를 초과합니다. 이전 단계에서 데이터를 줄이거나 필터링하세요.",
+  "storage.busy": "이 파일은 다른 작업에서 사용 중입니다. 잠시 후 다시 시도하세요.",
+  "storage.tooLarge": "파일이 {limit} 한도를 초과합니다.",
+  "storage.quotaExceeded": "이 워크스페이스의 파일 저장 할당량 {quota}을(를) 모두 사용했습니다. 사용하지 않는 파일을 삭제하거나 관리자에게 할당량 조정을 요청하세요."
 }
