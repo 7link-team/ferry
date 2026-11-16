@@ -101,5 +101,7 @@
   "runner.reason.spawn": "新版本無法啟動（{detail}）",
   "runner.reason.missingBinary": "新版本檔案遺失或驗證失敗",
   "runner.reason.interrupted": "啟用完成前服務已重新啟動",
-  "runner.reason.other": "{detail}"
+  "runner.reason.other": "{detail}",
+  "runner.updateNotManaged": "主機代理不是以託管服務方式安裝的，無法自動升級。請用本頁顯示的安裝命令重新安裝。",
+  "runner.updateInProgress": "該主機代理已有升級正在準備中，請等待其完成。"
 }

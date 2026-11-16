@@ -101,5 +101,7 @@
   "runner.reason.spawn": "it could not be started ({detail})",
   "runner.reason.missingBinary": "its file was missing or failed verification",
   "runner.reason.interrupted": "the service restarted before activation finished",
-  "runner.reason.other": "{detail}"
+  "runner.reason.other": "{detail}",
+  "runner.updateNotManaged": "This HostAgent is not installed as a managed service, so it can't update itself. Reinstall it with the install command shown on this page.",
+  "runner.updateInProgress": "An update is already being prepared on this HostAgent. Wait for it to finish."
 }

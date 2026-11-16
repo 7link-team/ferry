@@ -20,7 +20,11 @@ pub(super) fn stored_update_failure(error: &str, identity: Option<wire::SystemMe
             message.params.is_empty()
                 && matches!(
                     message.key.as_str(),
-                    "runner.updateUnavailable" | "runner.failedTarget" | "runner.updateFailed"
+                    "runner.updateUnavailable"
+                        | "runner.updateNotManaged"
+                        | "runner.updateInProgress"
+                        | "runner.failedTarget"
+                        | "runner.updateFailed"
                 )
         })
         .map(|message| crate::i18n::Message::new(message.key))

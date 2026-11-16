@@ -245,13 +245,17 @@ fn close(mut frame: Frame, parent: &mut Frame) {
             };
             let mut align: Vec<&str> = align;
             align.resize(columns, "left");
+            let head = pad(head);
+            let rows: Vec<Vec<Value>> = rows.into_iter().map(pad).collect();
+            let widths = column_widths(&head, &rows, columns);
             push_block(
                 parent,
                 json!({
                     "k":"table",
                     "align":align,
-                    "head":pad(head),
-                    "rows":rows.into_iter().map(pad).collect::<Vec<_>>(),
+                    "widths":widths,
+                    "head":head,
+                    "rows":rows,
                 }),
             );
         }
@@ -282,8 +286,7 @@ pub(crate) fn safe_link(url: &str) -> bool {
         && reqwest::Url::parse(url).is_ok_and(|u| matches!(u.scheme(), "http" | "https" | "mailto"))
 }
 
-/// Plain text of an inline list, for limits and tests.
-#[cfg(test)]
+/// Plain text of an inline list, for limits, column widths and tests.
 pub(crate) fn plain(inlines: &Value) -> String {
     let mut out = String::new();
     for i in inlines.as_array().into_iter().flatten() {
@@ -295,4 +298,26 @@ pub(crate) fn plain(inlines: &Value) -> String {
         }
     }
     out
+}
+
+/// Relative column widths from each column's longest cell (CJK counts double),
+/// so a short column stays narrow and long text gets the room.
+pub(crate) fn column_widths(head: &[Value], rows: &[Vec<Value>], columns: usize) -> Vec<u32> {
+    let width = |cell: &Value| -> u32 {
+        plain(cell)
+            .chars()
+            .map(|c| if (c as u32) >= 0x2E80 { 2 } else { 1 })
+            .sum()
+    };
+    (0..columns)
+        .map(|i| {
+            std::iter::once(head.get(i))
+                .chain(rows.iter().map(|row| row.get(i)))
+                .flatten()
+                .map(width)
+                .max()
+                .unwrap_or(0)
+                .clamp(4, 40)
+        })
+        .collect()
 }

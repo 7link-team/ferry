@@ -92,8 +92,8 @@
     let columns = b.head.len()
     let place(name) = if name == "right" { right } else if name == "center" { center } else { left }
     block(width: 100%, radius: 4pt, clip: true, stroke: 0.5pt + rule, table(
-      // Content-sized columns; the last one takes the remaining width.
-      columns: (auto,) * (columns - 1) + (1fr,),
+      // Each column gets room in proportion to its longest cell.
+      columns: if b.at("widths", default: ()).len() == columns { b.widths.map(w => w * 1fr) } else { (auto,) * (columns - 1) + (1fr,) },
       stroke: none,
       inset: (x: 7pt, y: 5pt),
       fill: (_, y) => if y == 0 { navy } else if calc.even(y) { zebra } else { white },

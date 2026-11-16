@@ -101,5 +101,7 @@
   "runner.reason.spawn": "新版本无法启动（{detail}）",
   "runner.reason.missingBinary": "新版本文件缺失或校验失败",
   "runner.reason.interrupted": "激活完成前服务已重启",
-  "runner.reason.other": "{detail}"
+  "runner.reason.other": "{detail}",
+  "runner.updateNotManaged": "主机代理不是以托管服务方式安装的，无法自动升级。请用本页显示的安装命令重新安装。",
+  "runner.updateInProgress": "该主机代理已有升级正在准备中，请等待其完成。"
 }

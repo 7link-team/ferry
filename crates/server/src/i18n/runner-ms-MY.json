@@ -101,5 +101,7 @@
   "runner.reason.spawn": "versi baharu tidak dapat dimulakan ({detail})",
   "runner.reason.missingBinary": "fail versi baharu hilang atau gagal disahkan",
   "runner.reason.interrupted": "perkhidmatan dimulakan semula sebelum pengaktifan selesai",
-  "runner.reason.other": "{detail}"
+  "runner.reason.other": "{detail}",
+  "runner.updateNotManaged": "HostAgent ini tidak dipasang sebagai perkhidmatan terurus, jadi ia tidak boleh dikemas kini sendiri. Pasang semula dengan arahan pemasangan pada halaman ini.",
+  "runner.updateInProgress": "Kemas kini sedang disediakan pada HostAgent ini. Tunggu sehingga ia selesai."
 }

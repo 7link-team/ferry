@@ -101,5 +101,7 @@
   "runner.reason.spawn": "새 버전을 시작할 수 없습니다({detail})",
   "runner.reason.missingBinary": "새 버전 파일이 없거나 검증에 실패했습니다",
   "runner.reason.interrupted": "활성화가 끝나기 전에 서비스가 다시 시작되었습니다",
-  "runner.reason.other": "{detail}"
+  "runner.reason.other": "{detail}",
+  "runner.updateNotManaged": "이 호스트 에이전트는 관리형 서비스로 설치되지 않아 자동 업그레이드할 수 없습니다. 이 페이지의 설치 명령으로 다시 설치하세요.",
+  "runner.updateInProgress": "이 호스트 에이전트에서 이미 업그레이드를 준비 중입니다. 완료될 때까지 기다리세요."
 }

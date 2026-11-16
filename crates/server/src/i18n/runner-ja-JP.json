@@ -101,5 +101,7 @@
   "runner.reason.spawn": "新バージョンを起動できませんでした（{detail}）",
   "runner.reason.missingBinary": "新バージョンのファイルがないか検証に失敗しました",
   "runner.reason.interrupted": "有効化が完了する前にサービスが再起動しました",
-  "runner.reason.other": "{detail}"
+  "runner.reason.other": "{detail}",
+  "runner.updateNotManaged": "このホストエージェントは管理サービスとしてインストールされていないため、自動更新できません。このページのインストールコマンドで再インストールしてください。",
+  "runner.updateInProgress": "このホストエージェントでは既に更新を準備中です。完了をお待ちください。"
 }

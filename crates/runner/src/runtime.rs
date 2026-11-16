@@ -286,8 +286,10 @@ async fn hold(
                         // Applies to processes started from now on; nothing restarts.
                         wire::Control::Settings { timezone } => crate::timezone::pin(timezone),
                         wire::Control::Update { request, version, manifest, signature } => {
-                            if !cfg.managed || !preparing.is_empty() {
-                                send(&mut socket, &wire::Report::UpdateFailed { request, error: "代理不是托管服务或已有升级进行中".into(), message: Some(wire::SystemMessage::new("runner.updateUnavailable")) }).await?;
+                            if !cfg.managed {
+                                send(&mut socket, &wire::Report::UpdateFailed { request, error: "代理不是托管服务，无法自动升级".into(), message: Some(wire::SystemMessage::new("runner.updateNotManaged")) }).await?;
+                            } else if !preparing.is_empty() {
+                                send(&mut socket, &wire::Report::UpdateFailed { request, error: "已有升级正在进行".into(), message: Some(wire::SystemMessage::new("runner.updateInProgress")) }).await?;
                             } else if cfg.failed_version.as_deref() == Some(&version) {
                                 send(&mut socket, &wire::Report::UpdateFailed { request, error: "该版本启动失败，已回退，不能自动重复尝试".into(), message: Some(wire::SystemMessage::new("runner.failedTarget")) }).await?;
                             } else {

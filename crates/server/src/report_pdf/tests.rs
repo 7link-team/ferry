@@ -94,3 +94,20 @@ fn limits_and_required_title_are_named() {
         Problem::TooLarge("bytes", MAX_INPUT_BYTES)
     );
 }
+
+#[test]
+fn table_columns_are_sized_by_their_longest_cell() {
+    let cell = |t: &str| serde_json::json!([{"k":"t","t":t}]);
+    let head = vec![cell("仓库"), cell("提交"), cell("作者")];
+    let rows = vec![
+        vec![cell("7link-v3"), cell("42"), cell("张三")],
+        vec![cell("7link-mos-backend-service"), cell("17"), cell("李四")],
+    ];
+    let widths = super::markdown::column_widths(&head, &rows, 3);
+    // The repository column is widest, the short numeric/name columns stay narrow.
+    assert!(widths[0] > widths[1] && widths[0] > widths[2], "{widths:?}");
+    assert_eq!(widths[1], 4, "short columns get the minimum width");
+    // Very long cells are capped so one column cannot take the whole page.
+    let long = vec![vec![cell(&"x".repeat(500)), cell("1"), cell("1")]];
+    assert_eq!(super::markdown::column_widths(&head, &long, 3)[0], 40);
+}

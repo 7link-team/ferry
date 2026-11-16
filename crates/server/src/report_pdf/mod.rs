@@ -144,15 +144,19 @@ pub(crate) fn document(report: &Report, generated: &str) -> Result<Value, Proble
                 if !table.columns.is_empty() {
                     let cell = |value: &Value| json!([{"k":"t","t":text(value)}]);
                     let columns = table.columns.len();
+                    let head: Vec<Value> = table.columns.iter().map(|c| json!([{"k":"t","t":c}])).collect();
+                    let rows: Vec<Vec<Value>> = table.rows.iter().map(|row| {
+                        let mut cells: Vec<Value> = row.iter().take(columns).map(cell).collect();
+                        cells.resize(columns, json!([]));
+                        cells
+                    }).collect();
+                    let widths = markdown::column_widths(&head, &rows, columns);
                     blocks.push(json!({
+                        "widths":widths,
                         "k":"table",
                         "align":table.rows.first().map(|row| row.iter().take(columns).map(|v| if v.is_number() {"right"} else {"left"}).collect::<Vec<_>>()).unwrap_or_default().into_iter().chain(std::iter::repeat("left")).take(columns).collect::<Vec<_>>(),
-                        "head":table.columns.iter().map(|c| json!([{"k":"t","t":c}])).collect::<Vec<_>>(),
-                        "rows":table.rows.iter().map(|row| {
-                            let mut cells: Vec<Value> = row.iter().take(columns).map(cell).collect();
-                            cells.resize(columns, json!([]));
-                            cells
-                        }).collect::<Vec<_>>(),
+                        "head":head,
+                        "rows":rows,
                     }));
                 }
             }
