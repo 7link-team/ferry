@@ -268,3 +268,29 @@ it("offers execution hosts only on CLI models", async () => {
   await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
   expect(host.textContent).not.toContain("执行主机");
 });
+
+it("lets an API model be saved without the connection check only on request, and CLI models check their hosts", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-models/13/edit");
+  stored = {
+    id: "13", name: "No catalog", kind: "api", runtime: "", provider_id: "8", models: ["m"], default_model: "m", tool_version: "",
+    state: "enabled", version: 1,
+    connection: { name: "No catalog", protocol: "openai", base_url: "https://gw.example.com/v1", credential_id: "3", qps: 1, concurrency: 1, version: 1 },
+  };
+  await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
+  const skipField = () => [...host.querySelectorAll("[data-auto-field]")].find((f) => f.textContent?.includes("保存时跳过连接检测"));
+  const skip = skipField()!.querySelector<HTMLButtonElement>('[role="switch"]')!;
+  expect(skip.getAttribute("aria-checked")).toBe("false");
+  expect(host.textContent).toContain("仅当服务商不提供模型列表时才开启此项");
+  expect(host.textContent).not.toContain("检测执行主机");
+  await act(async () => skip.click());
+  await submit();
+  const body = JSON.parse(requests.find((r) => r.method === "PATCH" || r.method === "PUT")!.body!);
+  expect(body.skip_check).toBe(true);
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-models/9/edit");
+  stored = cli({ runtime: "codex" });
+  await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
+  expect(host.textContent).toContain("检测执行主机");
+  expect(skipField()).toBeUndefined();
+});

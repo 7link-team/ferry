@@ -491,7 +491,7 @@ pub async fn deliver_configured(
                 &Message::new("webhook.failedHttp")
                     .with("status", response.status().as_u16().to_string()),
             ),
-            Err(_) => crate::i18n::store_message(&Message::new("webhook.failedTimeout")),
+            Err(error) => crate::i18n::store_message(&send_failure(&error, None)),
         };
     };
     let name = robot.name();
@@ -527,9 +527,21 @@ pub async fn deliver_configured(
                 ),
             }
         }
-        Err(_) => crate::i18n::store_message(
-            &Message::new("webhook.providerTimeout").with("provider", name),
-        ),
+        Err(error) => crate::i18n::store_message(&send_failure(&error, Some(name))),
+    }
+}
+
+/// Why a webhook request was not answered. A refused or unresolvable
+/// connection is known not to have been delivered; anything else (a timeout
+/// after sending) may have been, so it keeps the "unknown" wording.
+fn send_failure(error: &reqwest::Error, provider: Option<&str>) -> Message {
+    let cause = crate::error::redact_urls(&format!("{error:#}"));
+    tracing::warn!(provider = provider.unwrap_or("webhook"), %cause, "webhook request failed");
+    match (error.is_connect(), provider) {
+        (true, Some(name)) => Message::new("webhook.providerUnreachable").with("provider", name),
+        (true, None) => Message::new("webhook.failedConnect"),
+        (false, Some(name)) => Message::new("webhook.providerTimeout").with("provider", name),
+        (false, None) => Message::new("webhook.failedTimeout"),
     }
 }
 

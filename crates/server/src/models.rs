@@ -19,7 +19,7 @@ use axum::{
 };
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
-    QueryFilter,
+    QueryFilter, QueryOrder, QuerySelect,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -29,6 +29,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/{workspace}/ai-models", get(list).post(create))
         .route("/{workspace}/ai-models/model-discoveries", post(discover))
+        .route("/{workspace}/ai-models/cli-checks", post(check_cli))
         .route("/{workspace}/ai-models/{id}", get(detail).patch(update))
 }
 const SPEC: Spec = Spec {
@@ -37,8 +38,20 @@ const SPEC: Spec = Spec {
     sortable: &["name", "created_at", "updated_at"],
     default_sort: "-updated_at",
 };
-fn invalid() -> ApiError {
-    ApiError::localized(StatusCode::BAD_REQUEST, Message::new("models.invalid"))
+/// One specific, actionable validation message.
+fn bad(key: &'static str) -> ApiError {
+    ApiError::localized(StatusCode::BAD_REQUEST, Message::new(key))
+}
+/// A save-time connection check failed; the client may retry with `skip_check`.
+fn check_failed(cause: ApiError) -> ApiError {
+    let reason = cause
+        .2
+        .clone()
+        .unwrap_or_else(|| Message::new("models.discoveryFailed"));
+    ApiError::localized(
+        StatusCode::FAILED_DEPENDENCY,
+        Message::new("models.connectionCheckFailed").with_message("reason", reason),
+    )
 }
 fn changed() -> ApiError {
     ApiError::localized(StatusCode::CONFLICT, Message::new("resource.conflict"))
@@ -71,6 +84,9 @@ struct Body {
     /// CLI-only: Runner hosts to use, first preferred; empty = any ready Runner.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     hosts: Vec<Id>,
+    /// Input only: save an API connection whose model list could not be loaded.
+    #[serde(default, skip_serializing)]
+    skip_check: bool,
 }
 /// At most this many preferred hosts on one CLI model.
 const MAX_HOSTS: usize = 20;
@@ -105,10 +121,13 @@ fn cli_options(runtime: &str, provider: bool, options: &mut Value) -> Result<()>
         *options = Value::Null;
         return Ok(());
     }
-    let runtime = ferry_protocol::agent::Runtime::parse(runtime).ok_or_else(invalid)?;
-    let map = options.as_object().ok_or_else(invalid)?;
+    let runtime = ferry_protocol::agent::Runtime::parse(runtime)
+        .ok_or_else(|| bad("models.cliToolUnknown"))?;
+    let map = options
+        .as_object()
+        .ok_or_else(|| bad("models.cliOptionsInvalid"))?;
     if map.len() > 40 || options.to_string().len() > 16 * 1024 {
-        return Err(invalid());
+        return Err(bad("models.cliOptionsInvalid"));
     }
     for (key, value) in map {
         let ok = key.len() <= 64
@@ -127,7 +146,11 @@ fn cli_options(runtime: &str, provider: bool, options: &mut Value) -> Result<()>
                 _ => false,
             };
         if !ok {
-            return Err(invalid());
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("models.cliOptionInvalid")
+                    .with("option", key.chars().take(64).collect::<String>()),
+            ));
         }
     }
     let format = map
@@ -150,7 +173,8 @@ async fn provider(conn: &impl ConnectionTrait, workspace: Id, id: Id) -> Result<
         .ok_or_else(ApiError::missing)
 }
 impl Body {
-    async fn validate(&mut self, conn: &impl ConnectionTrait, scope: &Scope) -> Result<Id> {
+    /// Checks needing no database or network, run before anything slower.
+    fn check_fields(&mut self) -> Result<()> {
         self.name = self.name.trim().into();
         self.default_model = self.default_model.trim().into();
         self.tool_version = self.tool_version.trim().into();
@@ -187,8 +211,53 @@ impl Body {
             ));
         }
         if self.hosts.len() > MAX_HOSTS {
-            return Err(invalid());
+            return Err(bad("models.tooManyHosts"));
         }
+        if self.name.is_empty() {
+            return Err(bad("models.nameRequired"));
+        }
+        if self.name.chars().count() > 128 || self.name.chars().any(char::is_control) {
+            return Err(bad("models.nameInvalid"));
+        }
+        if !["api", "cli"].contains(&self.kind.as_str()) {
+            return Err(bad("models.kindInvalid"));
+        }
+        if !["enabled", "disabled"].contains(&self.state.as_str()) {
+            return Err(bad("models.stateInvalid"));
+        }
+        if self.models.len() > 2000 {
+            return Err(bad("models.tooManyModels"));
+        }
+        if let Some(model) = self
+            .models
+            .iter()
+            .chain(std::iter::once(&self.default_model))
+            .find(|s| s.len() > 256 || s.starts_with('-') || s.chars().any(char::is_control))
+        {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("models.modelIdInvalid")
+                    .with("model", model.chars().take(64).collect::<String>()),
+            ));
+        }
+        if self.kind == "api" && (!self.runtime.is_empty() || !self.tool_version.is_empty()) {
+            return Err(bad("models.apiCliFields"));
+        }
+        if self.kind == "cli" && ferry_protocol::agent::Runtime::parse(&self.runtime).is_none() {
+            return Err(bad("models.cliToolUnknown"));
+        }
+        if self.tool_version.len() > 64
+            || !self
+                .tool_version
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b".-_+".contains(&b))
+        {
+            return Err(bad("models.toolVersionInvalid"));
+        }
+        Ok(())
+    }
+    async fn validate(&mut self, conn: &impl ConnectionTrait, scope: &Scope) -> Result<Id> {
+        self.check_fields()?;
         for host in &self.hosts {
             let found = crate::entities::hosts::Entity::find_by_id(*host)
                 .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
@@ -205,37 +274,12 @@ impl Body {
                 ));
             }
         }
-        if self.name.is_empty()
-            || self.name.len() > 128
-            || self.name.chars().any(char::is_control)
-            || !["api", "cli"].contains(&self.kind.as_str())
-            || !["enabled", "disabled"].contains(&self.state.as_str())
-            || self.models.len() > 2000
-            || self
-                .models
-                .iter()
-                .chain(std::iter::once(&self.default_model))
-                .any(|s| s.len() > 256 || s.starts_with('-') || s.chars().any(char::is_control))
-            || (self.kind == "api"
-                && (!self.runtime.is_empty()
-                    || !self.tool_version.is_empty()
-                    || self.default_model.is_empty()))
-            || (self.kind == "cli"
-                && ferry_protocol::agent::Runtime::parse(&self.runtime).is_none())
-            || self.tool_version.len() > 64
-            || !self
-                .tool_version
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b".-_+".contains(&b))
-        {
-            return Err(invalid());
-        }
         let id = Id::reference(&self.provider_id)?;
         if i64::from(id) != 0 {
             scope.require("credentials.read")?;
             provider(conn, scope.workspace_id, id).await?;
         } else if self.kind == "api" {
-            return Err(invalid());
+            return Err(bad("models.connectionRequired"));
         }
         if self.kind == "cli"
             && i64::from(id) != 0
@@ -343,6 +387,10 @@ async fn save(s: &AppState, scope: &Scope, id: Option<Id>, mut body: Body) -> Re
         "ai-models.create"
     };
     scope.require(permission)?;
+    body.check_fields()?;
+    if body.kind == "api" && !body.skip_check {
+        check_connection(s, scope, &body).await?;
+    }
     let tx = crate::variables::transaction(s, scope.workspace_id).await?;
     let current = crate::accounts::workspace_admin::authorize(&tx, scope, permission).await?;
     let old = if let Some(id) = id {
@@ -403,7 +451,7 @@ async fn save(s: &AppState, scope: &Scope, id: Option<Id>, mut body: Body) -> Re
         None => s.next_id()?,
     };
     let now = db::now();
-    let mut definition = serde_json::to_value(&body).map_err(|_| invalid())?;
+    let mut definition = serde_json::to_value(&body).map_err(crate::error::internal_fault)?;
     definition.as_object_mut().unwrap().remove("version");
     let revision = crate::definitions::record(
         s,
@@ -423,13 +471,13 @@ async fn save(s: &AppState, scope: &Scope, id: Option<Id>, mut body: Body) -> Re
         kind: body.kind,
         runtime: body.runtime,
         provider_id: provider_id.into(),
-        models: serde_json::to_string(&body.models).map_err(|_| invalid())?,
+        models: serde_json::to_string(&body.models).map_err(crate::error::internal_fault)?,
         default_model: body.default_model,
         tool_version: body.tool_version,
         state: body.state,
         cli_options: (!body.cli_options.is_null()).then(|| body.cli_options.to_string()),
         timezone: body.timezone,
-        hosts: serde_json::to_string(&body.hosts).map_err(|_| invalid())?,
+        hosts: serde_json::to_string(&body.hosts).map_err(crate::error::internal_fault)?,
         revision_id: revision.id,
         version: old
             .as_ref()
@@ -485,7 +533,8 @@ async fn discover(
     if !body.runtime.is_empty() {
         scope.require("hosts.read")?;
         scope.require("ai-agents.probe")?;
-        let runtime = ferry_protocol::agent::Runtime::parse(&body.runtime).ok_or_else(invalid)?;
+        let runtime = ferry_protocol::agent::Runtime::parse(&body.runtime)
+            .ok_or_else(|| bad("models.cliToolUnknown"))?;
         let host = crate::entities::hosts::Entity::find_by_id(body.host_id)
             .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
             .filter(crate::entities::hosts::Column::Connection.eq("runner"))
@@ -540,8 +589,8 @@ async fn discover(
         let p = stored.as_ref().unwrap();
         (p.credential_id, p.base_url.as_str(), p.protocol.as_str())
     };
-    if base_url.len() > 512 || !matches!(protocol, "openai" | "anthropic") {
-        return Err(invalid());
+    if !matches!(protocol, "openai" | "anthropic") {
+        return Err(bad("models.protocolInvalid"));
     }
     let supplied_key = body
         .connection
@@ -551,7 +600,7 @@ async fn discover(
         .filter(|key| !key.is_empty());
     let secret = if let Some(key) = supplied_key {
         if key.len() > 16_384 || key.chars().any(char::is_control) {
-            return Err(invalid());
+            return Err(bad("models.apiKeyInvalid"));
         }
         key.to_owned()
     } else {
@@ -561,7 +610,7 @@ async fn discover(
             .await?
             .ok_or_else(ApiError::missing)?;
         if c.scope != "ai" || c.kind != "token" {
-            return Err(invalid());
+            return Err(bad("models.credentialWrongKind"));
         }
         let (_, _, secret) =
             crate::credentials::unseal(&s, &scope.workspace_id, &Id::from(credential_id)).await?;
@@ -576,84 +625,7 @@ async fn discover(
         json!({"provider_id":body.provider_id}),
     )
     .await?;
-    let unavailable = || {
-        ApiError::localized(
-            StatusCode::BAD_GATEWAY,
-            Message::new("models.discoveryFailed"),
-        )
-    };
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|_| unavailable())?;
-    let url = reqwest::Url::parse(base_url).map_err(|_| invalid())?;
-    if !matches!(url.scheme(), "http" | "https")
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(invalid());
-    }
-    let request = client.get(format!("{}/models", base_url.trim_end_matches('/')));
-    let request = if protocol == "anthropic" {
-        request
-            .header("x-api-key", secret)
-            .header("anthropic-version", "2023-06-01")
-    } else {
-        request.bearer_auth(secret)
-    };
-    let host = crate::upstream::host(base_url);
-    let mut response = request.send().await.map_err(|e| {
-        crate::upstream::unreachable("model-list", &host, &e).unwrap_or_else(unavailable)
-    })?;
-    if !response.status().is_success() {
-        return Err(crate::upstream::status(
-            "model-list",
-            &host,
-            response.status().as_u16(),
-            true,
-        ));
-    }
-    let format = || {
-        tracing::warn!(host, "model list response is not a model catalog");
-        ApiError::localized(
-            StatusCode::BAD_GATEWAY,
-            Message::new("models.catalogFormat").with("host", host.clone()),
-        )
-    };
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| unavailable())? {
-        if bytes.len() + chunk.len() > 1024 * 1024 {
-            return Err(format());
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    let data: Value = serde_json::from_slice(&bytes).map_err(|_| format())?;
-    let rows = data["data"].as_array().ok_or_else(format)?;
-    let mut models = rows
-        .iter()
-        .filter_map(|v| v["id"].as_str())
-        .filter(|s| {
-            !s.is_empty()
-                && s.len() <= 256
-                && !s.starts_with('-')
-                && !s.chars().any(char::is_control)
-        })
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    models.sort();
-    models.dedup();
-    if models.is_empty() {
-        return Err(ApiError::localized(
-            StatusCode::BAD_GATEWAY,
-            Message::new("models.catalogEmpty").with("host", host.clone()),
-        ));
-    }
-    if models.len() > 2000 {
-        return Err(format());
-    }
+    let (models, has_more) = fetch_models(base_url, protocol, &secret).await?;
     let current = Scope::for_actor(&s, scope.workspace_id, scope.user.id).await?;
     if !current.permissions.contains("ai-models.create") {
         current.require("ai-models.update")?;
@@ -676,12 +648,10 @@ async fn discover(
             .await?
             .ok_or_else(ApiError::missing)?;
         if c.scope != "ai" || c.kind != "token" {
-            return Err(invalid());
+            return Err(bad("models.credentialWrongKind"));
         }
     }
-    Ok(Json(
-        json!({"models":models,"has_more":data["has_more"].as_bool().unwrap_or(false)}),
-    ))
+    Ok(Json(json!({"models":models,"has_more":has_more})))
 }
 
 /// A profile's stored preferred hosts, in order.
@@ -806,4 +776,251 @@ pub(crate) async fn cli_provider(
         models: serde_json::from_str(&profile.models).unwrap_or_default(),
         options,
     }))
+}
+
+/// Loads a connection's model list; every failure names its cause.
+pub(crate) async fn fetch_models(
+    base_url: &str,
+    protocol: &str,
+    secret: &str,
+) -> Result<(Vec<String>, bool)> {
+    if base_url.len() > 512 {
+        return Err(bad("models.baseUrlInvalid"));
+    }
+    let unavailable = || {
+        ApiError::localized(
+            StatusCode::BAD_GATEWAY,
+            Message::new("models.discoveryFailed"),
+        )
+    };
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|_| unavailable())?;
+    let url = reqwest::Url::parse(base_url).map_err(|_| bad("models.baseUrlInvalid"))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(bad("models.baseUrlInvalid"));
+    }
+    let request = client.get(format!("{}/models", base_url.trim_end_matches('/')));
+    let request = if protocol == "anthropic" {
+        request
+            .header("x-api-key", secret)
+            .header("anthropic-version", "2023-06-01")
+    } else {
+        request.bearer_auth(secret)
+    };
+    let host = crate::upstream::host(base_url);
+    let mut response = request.send().await.map_err(|e| {
+        crate::upstream::unreachable("model-list", &host, &e).unwrap_or_else(unavailable)
+    })?;
+    if !response.status().is_success() {
+        return Err(crate::upstream::status(
+            "model-list",
+            &host,
+            response.status().as_u16(),
+            true,
+        ));
+    }
+    let format = || {
+        tracing::warn!(host, "model list response is not a model catalog");
+        ApiError::localized(
+            StatusCode::BAD_GATEWAY,
+            Message::new("models.catalogFormat").with("host", host.clone()),
+        )
+    };
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| unavailable())? {
+        if bytes.len() + chunk.len() > 1024 * 1024 {
+            return Err(format());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let data: Value = serde_json::from_slice(&bytes).map_err(|_| format())?;
+    let rows = data["data"].as_array().ok_or_else(format)?;
+    let mut models = rows
+        .iter()
+        .filter_map(|v| v["id"].as_str())
+        .filter(|s| {
+            !s.is_empty()
+                && s.len() <= 256
+                && !s.starts_with('-')
+                && !s.chars().any(char::is_control)
+        })
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    models.sort();
+    models.dedup();
+    if models.is_empty() {
+        return Err(ApiError::localized(
+            StatusCode::BAD_GATEWAY,
+            Message::new("models.catalogEmpty").with("host", host.clone()),
+        ));
+    }
+    if models.len() > 2000 {
+        return Err(format());
+    }
+    Ok((models, data["has_more"].as_bool().unwrap_or(false)))
+}
+
+/// An API model's connection is proven when it is saved: its model list must load.
+/// Only a new or changed address, protocol or key is checked.
+async fn check_connection(s: &AppState, scope: &Scope, body: &Body) -> Result<()> {
+    let Some(connection) = &body.connection else {
+        return Ok(());
+    };
+    let provider_id = Id::reference(&body.provider_id)?;
+    let stored = if i64::from(provider_id) != 0 {
+        Some(provider(&s.db, scope.workspace_id, provider_id).await?)
+    } else {
+        None
+    };
+    let supplied = connection
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|key| !key.is_empty());
+    let unchanged = stored
+        .as_ref()
+        .is_some_and(|p| p.base_url == connection.base_url && p.protocol == connection.protocol)
+        && supplied.is_none();
+    if unchanged {
+        return Ok(());
+    }
+    let secret = match (supplied, &stored) {
+        (Some(key), _) => key.to_owned(),
+        (None, Some(p)) if p.credential_id != 0 => {
+            crate::credentials::unseal(s, &scope.workspace_id, &Id::from(p.credential_id))
+                .await?
+                .2
+        }
+        // No key to check with: saving reports the missing key itself.
+        _ => return Ok(()),
+    };
+    match tokio::time::timeout(
+        CHECK_TIMEOUT,
+        fetch_models(&connection.base_url, &connection.protocol, &secret),
+    )
+    .await
+    {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(cause)) => Err(check_failed(cause)),
+        Err(_) => Err(check_failed(ApiError::localized(
+            StatusCode::GATEWAY_TIMEOUT,
+            Message::new("models.checkTimeout")
+                .with("host", crate::upstream::host(&connection.base_url)),
+        ))),
+    }
+}
+const CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+#[derive(Deserialize)]
+struct CliCheck {
+    runtime: String,
+    /// The model's execution hosts; empty checks every online Runner.
+    #[serde(default)]
+    hosts: Vec<Id>,
+}
+/// Hosts one check may probe when the model names none.
+const CHECK_HOSTS: u64 = 20;
+/// Checks, without saving anything, whether each execution host can run the
+/// CLI: where it was found and for which user, or why it was not.
+async fn check_cli(
+    State(s): State<AppState>,
+    scope: Scope,
+    Json(body): Json<CliCheck>,
+) -> Result<Json<Value>> {
+    if !scope.permissions.contains("ai-models.create") {
+        scope.require("ai-models.update")?;
+    }
+    scope.require("hosts.read")?;
+    scope.require("ai-agents.probe")?;
+    let runtime = ferry_protocol::agent::Runtime::parse(&body.runtime)
+        .ok_or_else(|| bad("models.cliToolUnknown"))?;
+    if body.hosts.len() > MAX_HOSTS {
+        return Err(bad("models.tooManyHosts"));
+    }
+    let runners = || {
+        crate::entities::hosts::Entity::find()
+            .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(
+                crate::entities::hosts::Column::Connection
+                    .is_in(runner_connections().iter().copied()),
+            )
+    };
+    let hosts = if body.hosts.is_empty() {
+        runners()
+            .filter(crate::entities::hosts::Column::State.eq("online"))
+            .order_by_asc(crate::entities::hosts::Column::Id)
+            .limit(CHECK_HOSTS)
+            .all(&s.db)
+            .await?
+    } else {
+        let mut rows = vec![];
+        for id in &body.hosts {
+            rows.extend(
+                runners()
+                    .filter(crate::entities::hosts::Column::Id.eq(*id))
+                    .one(&s.db)
+                    .await?,
+            );
+        }
+        rows
+    };
+    let cli = crate::agent_hosts::cli_name(runtime);
+    let locale = crate::i18n::current_locale();
+    let checks = hosts.into_iter().map(|host| {
+        let s = s.clone();
+        let cli = cli.clone();
+        let workspace = scope.workspace_id;
+        async move {
+            let id = Id::from(host.id);
+            let probe = async {
+                let channel = crate::hosts::remote::open(&s, &workspace, &id).await?;
+                channel.agent_probe(runtime, "", None).await
+            };
+            let result = tokio::time::timeout(std::time::Duration::from_secs(20), probe).await;
+            let reason = |message: &Message| crate::i18n::render(locale, message);
+            match result {
+                Ok(Ok(probe)) if probe.executable.is_some() && probe.error.is_none() => json!({
+                    "host_id": id, "host_name": host.name, "ok": true,
+                    "executable": probe.executable, "user": probe.execution_user,
+                    "version": probe.version, "authentication": probe.authentication,
+                }),
+                Ok(Ok(probe)) => json!({
+                    "host_id": id, "host_name": host.name, "ok": false,
+                    "user": probe.execution_user,
+                    "reason": reason(&crate::agent_hosts::cli_problem(
+                        probe.error.as_deref().unwrap_or_default(),
+                        &cli,
+                        &probe.execution_user,
+                    )),
+                }),
+                Ok(Err(error)) => json!({
+                    "host_id": id, "host_name": host.name, "ok": false,
+                    "reason": reason(&crate::agent_hosts::reason_from(&error)),
+                }),
+                Err(_) => json!({
+                    "host_id": id, "host_name": host.name, "ok": false,
+                    "reason": reason(&Message::new("models.checkHostTimeout")),
+                }),
+            }
+        }
+    });
+    let results = futures::future::join_all(checks).await;
+    crate::hosts::activity(
+        &s,
+        &scope,
+        "check",
+        "ai-models",
+        &Id::from(0),
+        json!({"runtime": body.runtime, "hosts": results.len()}),
+    )
+    .await?;
+    Ok(Json(json!({ "items": results })))
 }

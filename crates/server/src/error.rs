@@ -181,6 +181,57 @@ pub fn internal_fault(context: impl std::fmt::Display) -> ApiError {
     )
 }
 
+/// Removes query strings and credentials from URLs inside an error text, so a
+/// logged cause never carries a webhook key or token.
+pub fn redact_urls(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("://") {
+        let scheme_start = rest[..start]
+            .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.'))
+            .map_or(0, |i| i + 1);
+        out.push_str(&rest[..scheme_start]);
+        let url_end = rest[start..]
+            .find(|c: char| c.is_whitespace() || matches!(c, ')' | '"' | '\'' | '>' | ','))
+            .map_or(rest.len(), |i| start + i);
+        let url = &rest[scheme_start..url_end];
+        let url = url.split(['?', '#']).next().unwrap_or(url);
+        // user:password@host
+        match url.find("://").and_then(|i| {
+            let authority = &url[i + 3..];
+            let end = authority.find('/').unwrap_or(authority.len());
+            authority[..end]
+                .rfind('@')
+                .map(|at| (i + 3, i + 3 + at + 1))
+        }) {
+            Some((from, to)) => {
+                out.push_str(&url[..from]);
+                out.push_str(&url[to..]);
+            }
+            None => out.push_str(url),
+        }
+        rest = &rest[url_end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Logs why an operation failed before a user-facing message replaces the cause.
+pub trait LogCause {
+    fn log_cause(self, context: &'static str) -> Self;
+}
+impl<T, E: std::fmt::Display> LogCause for std::result::Result<T, E> {
+    #[track_caller]
+    fn log_cause(self, context: &'static str) -> Self {
+        if let Err(error) = &self {
+            let location = std::panic::Location::caller();
+            let cause = redact_urls(&format!("{error:#}"));
+            tracing::warn!(%location, context, %cause, "operation failed");
+        }
+        self
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let detail = self.render(crate::i18n::current_locale());
@@ -391,5 +442,31 @@ mod extraction_tests {
             );
         }
         server.abort();
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    #[test]
+    fn logged_causes_never_carry_url_queries_or_credentials() {
+        let text = "error sending request for url (https://gitee.com/api/v5/repos/a/b?access_token=SECRET&ref=main): connection refused";
+        let redacted = super::redact_urls(text);
+        assert!(!redacted.contains("SECRET"), "{redacted}");
+        assert!(
+            redacted.contains("https://gitee.com/api/v5/repos/a/b"),
+            "{redacted}"
+        );
+        assert!(redacted.ends_with("connection refused"), "{redacted}");
+        let redacted =
+            super::redact_urls("POST https://user:pass@hooks.example.com/x?key=K failed");
+        assert!(
+            !redacted.contains("pass") && !redacted.contains("key=K"),
+            "{redacted}"
+        );
+        assert!(
+            redacted.contains("https://hooks.example.com/x"),
+            "{redacted}"
+        );
+        assert_eq!(super::redact_urls("no url here"), "no url here");
     }
 }

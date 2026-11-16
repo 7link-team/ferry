@@ -486,12 +486,7 @@ async fn check_connection(
             )
             .send()
             .await
-            .map_err(|_| {
-                ApiError::localized(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("repository.auth.tokenVerify"),
-                )
-            })?,
+            .map_err(|error| request_failed(&error, "repository.auth.tokenVerify"))?,
         )
         .await?;
         value
@@ -519,12 +514,7 @@ async fn check_connection(
     Ok((
         credential,
         account,
-        serde_json::to_string(&settings).map_err(|_| {
-            ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("repository.auth.connectionConfigEncode"),
-            )
-        })?,
+        serde_json::to_string(&settings).map_err(crate::error::internal_fault)?,
         config_fingerprint(&provider),
     ))
 }
@@ -1078,12 +1068,7 @@ pub async fn connection_branches(
     let response = authorize_request(http()?.get(url), &row.provider, &secret, token.is_some())
         .send()
         .await
-        .map_err(|_| {
-            ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("repository.auth.branchesRead"),
-            )
-        })?;
+        .map_err(|error| request_failed(&error, "repository.auth.branchesRead"))?;
     let has_more = (row.provider == "codeup")
         .then(|| codeup_has_more(&response, query.page))
         .flatten();

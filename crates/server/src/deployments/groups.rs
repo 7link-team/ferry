@@ -368,20 +368,11 @@ pub(super) fn rendered(targets: &[HostTarget], files: &[Vec<String>]) -> Result<
         .zip(files)
         .map(|(t, files)| json!({"host_id": t.host_id, "manifest": t.app.manifest, "files": files}))
         .collect::<Vec<_>>()}))
-    .map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("deployment.error.006"),
-        )
-    })
+    .map_err(|_| crate::error::internal_fault("deployment.error.006"))
 }
 fn plans(artifact: &str) -> Result<Vec<(Id, String)>> {
-    let doc: Value = serde_json::from_str(artifact).map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("deployment.error.052"),
-        )
-    })?;
+    let doc: Value = serde_json::from_str(artifact)
+        .map_err(|_| crate::error::internal_fault("deployment.error.052"))?;
     let rows = doc["targets"]
         .as_array()
         .filter(|rows| !rows.is_empty())
@@ -446,12 +437,8 @@ pub(super) async fn preview(
             let channel = remote::open(s, &scope.workspace_id, &target.host_id).await?;
             let artifact =
                 prepare_artifact(s, scope, channel.as_ref(), &target.app, &bound).await?;
-            let doc: Value = serde_json::from_str(&artifact).map_err(|_| {
-                ApiError::localized(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("deployment.error.057"),
-                )
-            })?;
+            let doc: Value = serde_json::from_str(&artifact)
+                .map_err(|_| crate::error::internal_fault("deployment.error.057"))?;
             encoded.push(doc.get("x-variable-bindings").cloned().unwrap_or(json!([])));
             rows.push(json!({"host_id":target.host_id,"artifact":artifact}));
             metadata.push(bound);
@@ -460,12 +447,8 @@ pub(super) async fn preview(
         if let Some(nodes) = &nodes {
             doc[PREVIEW_NODES] = json!(nodes.nodes);
         }
-        let desired = serde_json::to_string_pretty(&doc).map_err(|_| {
-            ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("deployment.error.052"),
-            )
-        })?;
+        let desired = serde_json::to_string_pretty(&doc)
+            .map_err(|_| crate::error::internal_fault("deployment.error.052"))?;
         let tx = crate::variables::transaction(s, scope.workspace_id).await?;
         let again = targets(&tx, scope.workspace_id, app, nodes.as_ref()).await?;
         let mut changed = again.len() != hosts.len();

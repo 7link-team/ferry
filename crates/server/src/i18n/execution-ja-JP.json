@@ -13,7 +13,6 @@
   "execution.referenceMissing": "選択した{noun}は現在のワークスペースに存在しません。",
   "execution.versionConflict": "レコードが変更されました。更新して再試行してください。",
   "execution.artifactReferenced": "パイプラインはアプリケーションのビルド成果物から参照されています。",
-  "execution.definitionJson": "パイプライン定義は有効な JSON にしてください。",
   "execution.definitionObject": "パイプライン定義は JSON オブジェクトにしてください。",
   "execution.definitionUnknownFields": "パイプライン定義に不明なフィールドがあります。",
   "execution.workdirString": "パイプラインの workdir は絶対パスの文字列にしてください。",
@@ -252,5 +251,6 @@
   "workflow.agentFileFormat": "ファイル「{name}」は許可された形式（{formats}）ではありません。",
   "workflow.agentFileMismatch": "「{name}」の内容がファイル形式と一致しないため、配信しませんでした。その形式の本物のファイルを生成するようエージェントに指示してください。",
   "workflow.agentNoFiles": "エージェントは終了しましたが、出力フォルダーにファイルがありません。最終メッセージで理由を確認するか、依頼を具体的にしてください。",
-  "hosts.fileToolsRunnerOnly": "ファイル作成ツールを確認できるのは Runner ホストだけです。"
+  "hosts.fileToolsRunnerOnly": "ファイル作成ツールを確認できるのは Runner ホストだけです。",
+  "execution.definitionJsonAt": "パイプライン定義の {line} 行 {column} 列が有効な JSON ではありません。"
 }

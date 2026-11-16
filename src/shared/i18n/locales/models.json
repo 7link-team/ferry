@@ -232,5 +232,16 @@
   "executionHostsUp": ["Move {{host}} up", "上移 {{host}}", "上移 {{host}}", "{{host}} を上へ", "{{host}} 위로", "Naikkan {{host}}"],
   "executionHostsDown": ["Move {{host}} down", "下移 {{host}}", "下移 {{host}}", "{{host}} を下へ", "{{host}} 아래로", "Turunkan {{host}}"],
   "executionHostsRemove": ["Remove {{host}}", "移除 {{host}}", "移除 {{host}}", "{{host}} を削除", "{{host}} 제거", "Buang {{host}}"],
-  "executionHostsOffline": ["offline", "离线", "離線", "オフライン", "오프라인", "luar talian"]
+  "executionHostsOffline": ["offline", "离线", "離線", "オフライン", "오프라인", "luar talian"],
+  "skipCheck": ["Save without checking the connection", "保存时跳过连接检测", "儲存時略過連線檢測", "接続チェックをせずに保存", "연결 확인 없이 저장", "Simpan tanpa menyemak sambungan"],
+  "skipCheckHelp": ["Saving normally loads the model list to prove the address and key work. Turn this on only for providers that have no model list.", "保存时会加载模型列表以确认地址和 API Key 可用。仅当服务商不提供模型列表时才开启此项。", "儲存時會載入模型清單以確認位址和 API Key 可用。僅當服務商不提供模型清單時才開啟此項。", "保存時にモデル一覧を読み込み、アドレスとキーが使えることを確認します。モデル一覧のないプロバイダーの場合のみオンにしてください。", "저장할 때 모델 목록을 불러와 주소와 키가 작동하는지 확인합니다. 모델 목록을 제공하지 않는 공급자일 때만 켜세요.", "Menyimpan biasanya memuatkan senarai model untuk membuktikan alamat dan kunci berfungsi. Hidupkan ini hanya untuk pembekal tanpa senarai model."],
+  "cliCheck": ["Check execution hosts", "检测执行主机", "檢測執行主機", "実行ホストを確認", "실행 호스트 확인", "Semak hos pelaksanaan"],
+  "cliCheckHelp": ["Asks each execution host (or every online Runner when automatic) whether it can run this CLI, without saving anything.", "向每台执行主机（自动时为所有在线 Runner）检测能否运行该 CLI，不会保存任何内容。", "向每台執行主機（自動時為所有線上 Runner）檢測能否執行該 CLI，不會儲存任何內容。", "各実行ホスト（自動の場合はオンラインのすべての Runner）でこの CLI を実行できるか確認します。何も保存しません。", "각 실행 호스트(자동이면 모든 온라인 Runner)에서 이 CLI를 실행할 수 있는지 확인합니다. 아무것도 저장하지 않습니다.", "Bertanya kepada setiap hos pelaksanaan (atau setiap Runner dalam talian jika automatik) sama ada ia boleh menjalankan CLI ini, tanpa menyimpan apa-apa."],
+  "cliCheckRun": ["Check now", "立即检测", "立即檢測", "今すぐ確認", "지금 확인", "Semak sekarang"],
+  "cliChecking": ["Checking…", "检测中…", "檢測中…", "確認中…", "확인 중…", "Menyemak…"],
+  "cliCheckNoHosts": ["No online Runner to check; connect a Runner or add execution hosts.", "没有可检测的在线 Runner；请连接 Runner 或添加执行主机。", "沒有可檢測的線上 Runner；請連接 Runner 或新增執行主機。", "確認できるオンラインの Runner がありません。Runner を接続するか実行ホストを追加してください。", "확인할 온라인 Runner가 없습니다. Runner를 연결하거나 실행 호스트를 추가하세요.", "Tiada Runner dalam talian untuk disemak; sambungkan Runner atau tambah hos pelaksanaan."],
+  "cliCheckFound": ["Found at {{path}} for user {{user}} · version {{version}} · sign-in: {{login}}", "已找到：{{path}}（执行账号 {{user}}）· 版本 {{version}} · 登录：{{login}}", "已找到：{{path}}（執行帳號 {{user}}）· 版本 {{version}} · 登入：{{login}}", "{{path}}（ユーザー {{user}}）で検出 · バージョン {{version}} · ログイン：{{login}}", "{{path}}에서 찾음(사용자 {{user}}) · 버전 {{version}} · 로그인: {{login}}", "Ditemui di {{path}} untuk pengguna {{user}} · versi {{version}} · log masuk: {{login}}"],
+  "login_logged_in": ["signed in", "已登录", "已登入", "ログイン済み", "로그인됨", "telah log masuk"],
+  "login_logged_out": ["not signed in", "未登录", "未登入", "未ログイン", "로그인 안 됨", "belum log masuk"],
+  "login_unknown": ["unknown", "未知", "未知", "不明", "알 수 없음", "tidak diketahui"]
 }

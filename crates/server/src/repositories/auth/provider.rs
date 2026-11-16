@@ -247,12 +247,7 @@ impl OAuthSettings {
     }
     pub(crate) fn seal(&self, s: &AppState) -> Result<String> {
         s.vault.seal(
-            &serde_json::to_string(self).map_err(|_| {
-                ApiError::localized(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("repository.auth.oauthConfigEncode"),
-                )
-            })?,
+            &serde_json::to_string(self).map_err(crate::error::internal_fault)?,
             SETTINGS_AAD,
         )
     }
@@ -329,12 +324,39 @@ pub(super) fn require_same_config(config: &Provider, fingerprint: &str) -> Resul
     }
     Ok(())
 }
+/// A code platform request that got no answer. Timeouts and failed
+/// connections are named; the cause is logged without URL query strings,
+/// which can carry an access token.
+pub(super) fn request_failed(error: &reqwest::Error, fallback: &'static str) -> ApiError {
+    let cause = crate::error::redact_urls(&format!("{error:#}"));
+    tracing::warn!(fallback, %cause, "code platform request failed");
+    let key = if error.is_timeout() {
+        "repository.auth.providerTimeout"
+    } else if error.is_connect() {
+        "repository.auth.providerUnreachable"
+    } else {
+        fallback
+    };
+    ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new(key),
+    )
+}
 pub(super) async fn response_json(mut response: reqwest::Response) -> Result<Value> {
     if !response.status().is_success() {
+        let status = response.status().as_u16();
+        tracing::warn!(status, "code platform answered with an error status");
+        let key = match status {
+            401 => "repository.auth.providerUnauthorized",
+            403 => "repository.auth.providerForbidden",
+            404 => "repository.auth.providerNotFound",
+            429 => "repository.auth.providerRateLimited",
+            500..=599 => "repository.auth.providerUnavailable",
+            _ => "repository.auth.providerHttp",
+        };
         return Err(ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("repository.auth.providerHttp")
-                .with("status", response.status().as_u16().to_string()),
+            crate::i18n::Message::new(key).with("status", status.to_string()),
         ));
     }
     let mut bytes = Vec::new();
@@ -643,12 +665,7 @@ pub(super) async fn remote_repositories(
     let response = authorize_request(http()?.get(url), kind, access, personal)
         .send()
         .await
-        .map_err(|_| {
-            ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("repository.auth.repositoriesRead"),
-            )
-        })?;
+        .map_err(|error| request_failed(&error, "repository.auth.repositoriesRead"))?;
     let has_more = (kind == "codeup")
         .then(|| codeup_has_more(&response, page))
         .flatten();
@@ -784,12 +801,7 @@ pub async fn ensure_fresh(s: &AppState, workspace: Id, credential: Id) -> Result
                 .form(&form)
                 .send()
                 .await
-                .map_err(|_| {
-                    ApiError::localized(
-                        axum::http::StatusCode::BAD_REQUEST,
-                        crate::i18n::Message::new("repository.auth.refreshFailed"),
-                    )
-                })?,
+                .map_err(|error| request_failed(&error, "repository.auth.refreshFailed"))?,
         )
         .await?;
         let (access, expires, new_refresh) = token_data(&tokens)?;
@@ -1017,12 +1029,7 @@ impl MonitorAccess {
         )
         .send()
         .await
-        .map_err(|_| {
-            ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("repository.auth.analysisRequestFailed"),
-            )
-        })?;
+        .map_err(|error| request_failed(&error, "repository.auth.analysisRequestFailed"))?;
         let page = query
             .iter()
             .find(|(k, _)| *k == "page")
@@ -1181,12 +1188,7 @@ impl MonitorAccess {
         )
         .send()
         .await
-        .map_err(|_| {
-            ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("repository.auth.pollRequestFailed"),
-            )
-        })?;
+        .map_err(|error| request_failed(&error, "repository.auth.pollRequestFailed"))?;
         let more = codeup_has_more(&response, page).or_else(|| {
             response
                 .headers()

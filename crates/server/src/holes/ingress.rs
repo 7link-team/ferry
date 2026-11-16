@@ -2,6 +2,7 @@
 //! Public port/Quick Tunnel modes are explicitly acknowledged, never token-authenticated URLs.
 use super::*;
 use crate::accounts::addresses::Configuration;
+use crate::error::LogCause;
 use axum::{extract::Request, routing::any};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -232,6 +233,7 @@ pub(super) async fn prepare(
             .map_err(|_| error("holes.entryInvalid"))?;
         let check = TcpListener::bind(SocketAddr::new(public, 0))
             .await
+            .log_cause("preview entry public address bind")
             .map_err(|_| error("holes.entryBind"))?;
         drop(check);
         let bind = config
@@ -309,7 +311,10 @@ pub(super) async fn prepare(
         {
             command.creation_flags(0x08000000);
         }
-        let mut child = command.spawn().map_err(|_| error("holes.entryBinary"))?;
+        let mut child = command
+            .spawn()
+            .log_cause("preview tunnel start")
+            .map_err(|_| error("holes.entryBinary"))?;
         #[cfg(windows)]
         {
             prepared.job = Some(child_job(&child)?);

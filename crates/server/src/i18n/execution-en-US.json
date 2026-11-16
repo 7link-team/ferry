@@ -13,7 +13,6 @@
   "execution.referenceMissing": "The selected {noun} does not exist in this workspace.",
   "execution.versionConflict": "The record was modified. Refresh and try again.",
   "execution.artifactReferenced": "The pipeline is still referenced by an application's build artifacts.",
-  "execution.definitionJson": "The pipeline definition must be valid JSON.",
   "execution.definitionObject": "The pipeline definition must be a JSON object.",
   "execution.definitionUnknownFields": "The pipeline definition contains unknown fields.",
   "execution.workdirString": "Pipeline workdir must be an absolute path string.",
@@ -252,5 +251,6 @@
   "workflow.agentFileFormat": "The file \"{name}\" is not one of the accepted formats ({formats}).",
   "workflow.agentFileMismatch": "The content of \"{name}\" does not match its file type, so it was not delivered. Ask the Agent to produce a real file of that type.",
   "workflow.agentNoFiles": "The Agent finished without leaving any file in its output folder. Check its final message for why, or make the request more specific.",
-  "hosts.fileToolsRunnerOnly": "Only Runner hosts report file-production tools."
+  "hosts.fileToolsRunnerOnly": "Only Runner hosts report file-production tools.",
+  "execution.definitionJsonAt": "The pipeline definition is not valid JSON at line {line}, column {column}."
 }

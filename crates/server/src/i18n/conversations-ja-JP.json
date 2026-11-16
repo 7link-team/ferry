@@ -26,5 +26,20 @@
   "conversations.hostUnavailable": "実行ホスト {host} は現在実行できません：{reason}。この会話は作業ディレクトリが固定されているため自動ではホストを変更しません。「別のホストを使う」で切り替えてください。",
   "conversations.executionFailedOn": "{cli} がホスト {host} で失敗したか接続が切れました。再試行する前に実行済みの結果を確認してください。詳細はそのホストの Runner ログにあります。",
   "conversations.boundHostOffline": "割り当て済みのホスト {host} は現在オフラインです（{reason}）。他の候補ホスト：{others}",
-  "conversations.boundHostOfflineNoOthers": "割り当て済みのホスト {host} は現在オフラインで（{reason}）、他の候補ホストはありません。オンラインに戻ってから再試行してください。"
+  "conversations.boundHostOfflineNoOthers": "割り当て済みのホスト {host} は現在オフラインで（{reason}）、他の候補ホストはありません。オンラインに戻ってから再試行してください。",
+  "conversations.messageEmpty": "メッセージを入力するか、ファイルを添付してから送信してください。",
+  "conversations.messageText": "メッセージに NULL 文字（\\0）が含まれています。削除して再送信してください。",
+  "conversations.clientInvalid": "ページから無効なリクエストが送信されました。再読み込みしてから送信し直してください。",
+  "conversations.tooManyAttachments": "1 件のメッセージに添付できるファイルは最大 10 個です。",
+  "conversations.attachmentNameInvalid": "添付ファイル名「{name}」が無効です。1～255 バイトで制御文字を含めないでください。名前を変更して添付し直してください。",
+  "conversations.messageTooLong": "メッセージとテキスト添付の合計が 48 KB を超えています。短くするか、ファイルとして送信してください。",
+  "conversations.messageTooLongWithInstructions": "エージェントの指示と合わせると、このメッセージは 63 KB を超えます。メッセージか指示を短くしてください。",
+  "conversations.tooManyTargets": "1 件のメッセージで同時に指定できるエージェントは最大 8 つです。",
+  "conversations.kindInvalid": "会話の種類（個別またはグループ）を選択してください。",
+  "conversations.tooManyMembers": "グループのメンバーは最大 100 人です。",
+  "conversations.tooManyAgents": "グループのエージェントは最大 8 つです。",
+  "conversations.agentRequired": "会話のエージェントを選択してください。",
+  "conversations.titleRequired": "会話のタイトルを入力してください。",
+  "conversations.titleInvalid": "会話のタイトルは 256 バイト以内で、NULL 文字を含めることはできません。",
+  "conversations.stateInvalid": "会話の状態は進行中・アーカイブ・中断のいずれかです。"
 }

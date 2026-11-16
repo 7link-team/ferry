@@ -69,6 +69,48 @@ pub(super) fn error(status: StatusCode, key: &'static str) -> ApiError {
 fn invalid() -> ApiError {
     error(StatusCode::BAD_REQUEST, "conversations.invalid")
 }
+fn bad(key: &'static str) -> ApiError {
+    error(StatusCode::BAD_REQUEST, key)
+}
+/// One message's text and attachments, each limit reported on its own.
+pub(super) fn check_message(
+    prompt: &str,
+    client_id: &str,
+    attachments: &[Attachment],
+) -> Result<()> {
+    if prompt.trim().is_empty() && attachments.is_empty() {
+        return Err(bad("conversations.messageEmpty"));
+    }
+    if prompt.contains('\0') || attachments.iter().any(|a| a.text.contains('\0')) {
+        return Err(bad("conversations.messageText"));
+    }
+    if client_id.is_empty() || client_id.len() > 128 || client_id.chars().any(char::is_control) {
+        return Err(bad("conversations.clientInvalid"));
+    }
+    if attachments.len() > 10 {
+        return Err(bad("conversations.tooManyAttachments"));
+    }
+    if let Some(a) = attachments
+        .iter()
+        .find(|a| a.name.is_empty() || a.name.len() > 255 || a.name.chars().any(char::is_control))
+    {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("conversations.attachmentNameInvalid")
+                .with("name", a.name.chars().take(64).collect::<String>()),
+        ));
+    }
+    if prompt.len()
+        + attachments
+            .iter()
+            .map(|a| a.text.len() + a.name.len())
+            .sum::<usize>()
+        > 48 * 1024
+    {
+        return Err(bad("conversations.messageTooLong"));
+    }
+    Ok(())
+}
 fn conflict() -> ApiError {
     error(StatusCode::CONFLICT, "conversations.changed")
 }
@@ -332,21 +374,27 @@ async fn create(
     Json(body): Json<Create>,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("conversations.create")?;
-    if !["private", "group"].contains(&body.kind.as_str())
-        || body.member_ids.len() > 100
-        || body.agent_ids.len() > 8
-    {
-        return Err(invalid());
+    if !["private", "group"].contains(&body.kind.as_str()) {
+        return Err(bad("conversations.kindInvalid"));
+    }
+    if body.member_ids.len() > 100 {
+        return Err(bad("conversations.tooManyMembers"));
+    }
+    if body.agent_ids.len() > 8 {
+        return Err(bad("conversations.tooManyAgents"));
     }
     // Group participants are peers: the UI submits one list, without requiring
     // users to nominate a primary Agent. Retain the old explicit field for clients.
     let agent_id = if body.agent_id.trim().is_empty() && body.kind == "group" {
-        body.agent_ids.first().copied().ok_or_else(invalid)?
+        body.agent_ids
+            .first()
+            .copied()
+            .ok_or_else(|| bad("conversations.agentRequired"))?
     } else {
         Id::reference(&body.agent_id)?
     };
     if i64::from(agent_id) <= 0 {
-        return Err(invalid());
+        return Err(bad("conversations.agentRequired"));
     }
     let agent = available(&s.db, &scope, agent_id).await?;
     let title = if body.title.trim().is_empty() {
@@ -355,7 +403,7 @@ async fn create(
         body.title.trim().to_owned()
     };
     if title.len() > 256 || title.contains('\0') {
-        return Err(invalid());
+        return Err(bad("conversations.titleInvalid"));
     }
     let id = s.next_id()?;
     // Creating only creates: the host is chosen at each Agent's first message.
@@ -470,12 +518,14 @@ async fn update(
     Json(body): Json<Update>,
 ) -> Result<Json<Value>> {
     scope.require("conversations.update")?;
-    if body.title.trim().is_empty()
-        || body.title.len() > 256
-        || body.title.contains('\0')
-        || !["active", "archived", "interrupted"].contains(&body.state.as_str())
-    {
-        return Err(invalid());
+    if body.title.trim().is_empty() {
+        return Err(bad("conversations.titleRequired"));
+    }
+    if body.title.len() > 256 || body.title.contains('\0') {
+        return Err(bad("conversations.titleInvalid"));
+    }
+    if !["active", "archived", "interrupted"].contains(&body.state.as_str()) {
+        return Err(bad("conversations.stateInvalid"));
     }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let mut c = find(&tx, &scope, id).await?;
@@ -605,28 +655,7 @@ async fn send(
         return Err(invalid());
     }
     files::canonicalize(&s, &scope, id, &mut body.attachments).await?;
-    if (body.prompt.trim().is_empty() && body.attachments.is_empty())
-        || body.prompt.contains('\0')
-        || body.client_id.is_empty()
-        || body.client_id.len() > 128
-        || body.client_id.chars().any(char::is_control)
-        || body.attachments.len() > 10
-        || body.attachments.iter().any(|a| {
-            a.name.is_empty()
-                || a.name.len() > 255
-                || a.name.chars().any(char::is_control)
-                || a.text.contains('\0')
-        })
-        || body.prompt.len()
-            + body
-                .attachments
-                .iter()
-                .map(|a| a.text.len() + a.name.len())
-                .sum::<usize>()
-            > 48 * 1024
-    {
-        return Err(invalid());
-    }
+    check_message(&body.prompt, &body.client_id, &body.attachments)?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let mut c = find(&tx, &scope, id).await?;
     available(&tx, &scope, c.agent_id.into()).await?;
@@ -642,7 +671,7 @@ async fn send(
             .sum::<usize>()
         > 63 * 1024
     {
-        return Err(invalid());
+        return Err(bad("conversations.messageTooLongWithInstructions"));
     }
     if let Some(existing) = turns::Entity::find()
         .filter(turns::Column::ConversationId.eq(id))

@@ -40,8 +40,9 @@ const SPEC: Spec = Spec {
     sortable: &["name", "created_at", "updated_at"],
     default_sort: "-updated_at",
 };
-fn invalid() -> ApiError {
-    ApiError::localized(StatusCode::BAD_REQUEST, Message::new("agents.invalid"))
+/// One specific, actionable validation message.
+fn bad(key: &'static str) -> ApiError {
+    ApiError::localized(StatusCode::BAD_REQUEST, Message::new(key))
 }
 fn changed() -> ApiError {
     ApiError::localized(StatusCode::CONFLICT, Message::new("agents.changed"))
@@ -110,7 +111,7 @@ impl Body {
         self.host_id.unwrap_or_default()
     }
     fn definition(&self) -> Result<String> {
-        let mut value = serde_json::to_value(self).map_err(|_| invalid())?;
+        let mut value = serde_json::to_value(self).map_err(crate::error::internal_fault)?;
         value.as_object_mut().unwrap().remove("version");
         Ok(value.to_string())
     }
@@ -134,7 +135,7 @@ impl Body {
             ]
             .contains(&k.as_str())
         }) {
-            return Err(invalid());
+            return Err(bad("agents.unknownField"));
         }
         self.name = self.name.trim().into();
         if self.avatar.is_none() {
@@ -168,7 +169,7 @@ impl Body {
                 )
                 .one(conn)
                 .await?
-                .ok_or_else(invalid)?;
+                .ok_or_else(|| bad("agents.roleNotFound"))?;
         }
         // The Agent form never sends the legacy pin: an omitted host keeps the
         // stored host, directory and permission. Only `unpin` removes a pin.
@@ -188,15 +189,19 @@ impl Body {
             scope.require("ai-models.read")?;
             let profile = model_profile(conn, scope.workspace_id, profile_id).await?;
             if profile.state != "enabled" {
-                return Err(invalid());
+                return Err(bad("agents.modelDisabled"));
             }
             let catalog: Vec<String> =
-                serde_json::from_str(&profile.models).map_err(|_| invalid())?;
+                serde_json::from_str(&profile.models).map_err(crate::error::internal_fault)?;
             if !self.model.is_empty()
                 && !catalog.contains(&self.model)
                 && self.model != profile.default_model
             {
-                return Err(invalid());
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("agents.modelNotListed")
+                        .with("model", self.model.chars().take(64).collect::<String>()),
+                ));
             }
             self.runtime = if profile.kind == "api" {
                 "api".into()
@@ -211,32 +216,55 @@ impl Body {
                 self.permission = default_permission();
             }
         }
-        if self.name.is_empty()
-            || self.name.len() > 128
-            || self.role.len() > 256
-            || self.description.len() > 4096
-            || self.system_prompt.len() > 32 * 1024
-            || self.cwd.len() > 4096
-            || self.model.len() > 256
+        if self.name.is_empty() {
+            return Err(bad("agents.nameRequired"));
+        }
+        if self.name.chars().count() > 128 {
+            return Err(bad("agents.nameTooLong"));
+        }
+        if self.role.chars().count() > 256 {
+            return Err(bad("agents.roleTooLong"));
+        }
+        if self.description.len() > 4096 {
+            return Err(bad("agents.descriptionTooLong"));
+        }
+        if self.system_prompt.len() > 32 * 1024 {
+            return Err(bad("agents.instructionsTooLong"));
+        }
+        if self.cwd.len() > 4096 {
+            return Err(bad("agents.directoryInvalid"));
+        }
+        if self.model.len() > 256
             || self.model.starts_with('-')
             || self.model.chars().any(char::is_control)
-            || (self.runtime != "api"
-                && ferry_protocol::agent::Runtime::parse(&self.runtime).is_none())
-            || (self.runtime == "api" && i64::from(profile_id) == 0)
-            || !["read_only", "on_request"].contains(&self.permission.as_str())
-            || !["owner", "workspace"].contains(&self.visibility.as_str())
-            || !["enabled", "disabled", "archived"].contains(&self.state.as_str())
-            || [
-                &self.name,
-                &self.role,
-                &self.description,
-                &self.cwd,
-                &self.system_prompt,
-            ]
-            .iter()
-            .any(|s| s.contains('\0'))
         {
-            return Err(invalid());
+            return Err(bad("agents.modelIdInvalid"));
+        }
+        if (self.runtime != "api" && ferry_protocol::agent::Runtime::parse(&self.runtime).is_none())
+            || (self.runtime == "api" && i64::from(profile_id) == 0)
+        {
+            return Err(model_required());
+        }
+        if !["read_only", "on_request"].contains(&self.permission.as_str()) {
+            return Err(bad("agents.permissionInvalid"));
+        }
+        if !["owner", "workspace"].contains(&self.visibility.as_str()) {
+            return Err(bad("agents.visibilityInvalid"));
+        }
+        if !["enabled", "disabled", "archived"].contains(&self.state.as_str()) {
+            return Err(bad("agents.stateInvalid"));
+        }
+        if [
+            &self.name,
+            &self.role,
+            &self.description,
+            &self.cwd,
+            &self.system_prompt,
+        ]
+        .iter()
+        .any(|s| s.contains('\0'))
+        {
+            return Err(bad("agents.textInvalid"));
         }
         if !self.cwd.is_empty() {
             crate::hosts::channel::check_path(&self.cwd)?;
@@ -262,7 +290,7 @@ impl Body {
                 .filter(hosts::Column::Connection.eq("runner"))
                 .one(conn)
                 .await?
-                .ok_or_else(invalid)?;
+                .ok_or_else(|| bad("agents.hostNotFound"))?;
         }
         workspace_members::Entity::find()
             .filter(workspace_members::Column::WorkspaceId.eq(scope.workspace_id))
@@ -270,12 +298,12 @@ impl Body {
             .filter(workspace_members::Column::State.eq("active"))
             .one(conn)
             .await?
-            .ok_or_else(invalid)?;
+            .ok_or_else(|| bad("agents.ownerNotMember"))?;
         users::Entity::find_by_id(self.owner_id)
             .filter(users::Column::Active.eq(1))
             .one(conn)
             .await?
-            .ok_or_else(invalid)?;
+            .ok_or_else(|| bad("agents.ownerInactive"))?;
         Ok(())
     }
     fn model(&self, id: Id, workspace: Id, now: i64) -> agents::Model {
@@ -411,14 +439,19 @@ pub(crate) async fn resolve_model(
         )
         .await?;
         if profile.state != "enabled" {
-            return Err(invalid());
+            return Err(bad("agents.modelDisabled"));
         }
-        let catalog: Vec<String> = serde_json::from_str(&profile.models).map_err(|_| invalid())?;
+        let catalog: Vec<String> =
+            serde_json::from_str(&profile.models).map_err(crate::error::internal_fault)?;
         if !resolved.model.is_empty()
             && !catalog.contains(&resolved.model)
             && resolved.model != profile.default_model
         {
-            return Err(invalid());
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("agents.modelNotListed")
+                    .with("model", resolved.model.chars().take(64).collect::<String>()),
+            ));
         }
         let api = profile.kind == "api";
         resolved.runtime = if api { "api".into() } else { profile.runtime };
@@ -589,7 +622,7 @@ async fn unpin(
     value["platform_role_id"] = json!(role);
     value["host_id"] = json!(Id::from(0));
     value["cwd"] = json!("");
-    let body: Body = serde_json::from_value(value).map_err(|_| invalid())?;
+    let body: Body = serde_json::from_value(value).map_err(crate::error::internal_fault)?;
     update(State(s), scope, Path((workspace, id)), Json(body)).await
 }
 async fn revisions(
@@ -629,7 +662,8 @@ async fn probe(
             })?
             .id;
     }
-    let runtime = ferry_protocol::agent::Runtime::parse(&execution.runtime).ok_or_else(invalid)?;
+    let runtime =
+        ferry_protocol::agent::Runtime::parse(&execution.runtime).ok_or_else(model_required)?;
     let channel =
         crate::hosts::remote::open(&s, &scope.workspace_id, &execution.host_id.into()).await?;
     let status = channel.agent_probe(runtime, &execution.cwd, None).await?;

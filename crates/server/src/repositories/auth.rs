@@ -57,7 +57,7 @@ pub(crate) use provider::MonitorPage;
 use provider::{
     Provider, TokenConfig, authorize_request, codeup_has_more, config_fingerprint,
     connection_provider, endpoint, http, parse_endpoint, remote_repositories, repository_response,
-    require_same_config, response_json, token_config, token_data,
+    request_failed, require_same_config, response_json, token_config, token_data,
 };
 
 fn hash(value: &str) -> String {

@@ -13,7 +13,6 @@
   "execution.referenceMissing": "所选{noun}不存在于当前工作空间。",
   "execution.versionConflict": "记录已被修改，请刷新后重试。",
   "execution.artifactReferenced": "流水线仍被应用的构建产物引用。",
-  "execution.definitionJson": "流水线定义必须是合法的 JSON。",
   "execution.definitionObject": "流水线定义必须是 JSON 对象。",
   "execution.definitionUnknownFields": "流水线定义包含未知字段。",
   "execution.workdirString": "流水线 workdir 必须是绝对路径字符串。",
@@ -252,5 +251,6 @@
   "workflow.agentFileFormat": "文件“{name}”不在允许的格式内（{formats}）。",
   "workflow.agentFileMismatch": "文件“{name}”的内容与其文件类型不符，未交付。请要求智能体生成真正的该类型文件。",
   "workflow.agentNoFiles": "智能体已结束，但输出目录中没有任何文件。请查看它的最终回复了解原因，或把要求写得更具体。",
-  "hosts.fileToolsRunnerOnly": "只有 Runner 主机可以检测文件制作能力。"
+  "hosts.fileToolsRunnerOnly": "只有 Runner 主机可以检测文件制作能力。",
+  "execution.definitionJsonAt": "流水线定义在第 {line} 行第 {column} 列不是合法的 JSON。"
 }

@@ -614,3 +614,26 @@ async fn workspace_visibility_and_permissions_cannot_be_bypassed() {
         StatusCode::FORBIDDEN
     );
 }
+
+#[tokio::test]
+async fn agent_field_errors_name_the_field() {
+    let (_dir, s) = setup().await;
+    let cases = [
+        (("name", json!("")), "agents.nameRequired"),
+        (
+            ("permission", json!("anything")),
+            "agents.permissionInvalid",
+        ),
+        (("visibility", json!("public")), "agents.visibilityInvalid"),
+        (("owner_id", json!("999")), "agents.ownerNotMember"),
+        (("model", json!("not-in-catalog")), "agents.modelNotListed"),
+    ];
+    for ((field, value), key) in cases {
+        let mut input = body();
+        input[field] = value.clone();
+        let error = create(State(s.clone()), admin(1), Json(parse(input)))
+            .await
+            .unwrap_err();
+        assert_eq!(error.2.as_ref().unwrap().key, key, "{field}={value}");
+    }
+}

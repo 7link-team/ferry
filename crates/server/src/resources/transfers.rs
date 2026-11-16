@@ -244,10 +244,14 @@ async fn create(
 ) -> Result<Value> {
     macro_rules! decode {
         () => {
-            serde_json::from_value(body).map_err(|_| {
+            serde_json::from_value(body).map_err(|error| {
+                // serde names the missing field or the expected type, never a value.
+                let detail = error.to_string();
+                let detail = detail.split(" at line ").next().unwrap_or(&detail);
                 ApiError::localized(
                     axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("transfers.fieldsInvalid"),
+                    crate::i18n::Message::new("transfers.fieldsInvalidDetail")
+                        .with("detail", detail.chars().take(200).collect::<String>()),
                 )
             })?
         };
@@ -478,7 +482,15 @@ fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>
         let mut previous_offset = 0usize;
         let mut line = 1usize;
         for row in reader.records() {
-            let row = row.map_err(|_| invalid_file())?;
+            let row = row.map_err(|error| {
+                let line = error
+                    .position()
+                    .map_or(line + 1, |position| position.line() as usize);
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("transfers.csvInvalid").with("row", line.to_string()),
+                )
+            })?;
             let mut offset = row.position().map_or(0, |p| p.byte() as usize);
             while bytes
                 .get(offset)

@@ -25,7 +25,7 @@ async fn inline_keys_rotate_without_leaking_or_changing_ledger_identity_and_roll
     .exec(&s.db)
     .await
     .unwrap();
-    let input = json!({"name":"Direct key","kind":"api","state":"enabled","default_model":"m","connection":{
+    let input = json!({"name":"Direct key","kind":"api","skip_check":true,"state":"enabled","default_model":"m","connection":{
         "name":"Direct key","api_key":"first-private-token","protocol":"openai","base_url":"https://api.example.invalid/v1","currency":"USD","timezone":"UTC","monthly_limit_micros":0,"qps":1,"concurrency":1,
         "prices":[{"model":"m","operation":"ai.llm.chat","input_micros":0,"output_micros":0,"unit_size":1}]}});
     let created = save(
@@ -59,6 +59,7 @@ async fn inline_keys_rotate_without_leaking_or_changing_ledger_identity_and_roll
     );
     let mut rotated = first.clone();
     rotated["connection"]["api_key"] = json!("second-private-token");
+    rotated["skip_check"] = json!(true);
     save(
         &s,
         &admin(1),
@@ -223,7 +224,7 @@ async fn api_connection_saves_without_metering_fields() {
     .exec(&s.db)
     .await
     .unwrap();
-    let input = json!({"name":"Unmetered","kind":"api","state":"enabled","default_model":"m","models":["m"],"connection":{
+    let input = json!({"name":"Unmetered","kind":"api","skip_check":true,"state":"enabled","default_model":"m","models":["m"],"connection":{
         "name":"Unmetered","api_key":"unmetered-token","protocol":"openai","base_url":"https://api.example.invalid/v1","qps":1,"concurrency":1}});
     // Without a default model the API model is refused with a message naming the
     // field, and its connection is not left behind.
@@ -380,7 +381,7 @@ async fn editing_a_cli_that_shares_an_api_connection_splits_it_instead_of_changi
         &s,
         &admin(1),
         None,
-        serde_json::from_value(json!({"name":"API","kind":"api","state":"enabled","default_model":"m","connection":{
+        serde_json::from_value(json!({"name":"API","kind":"api","skip_check":true,"state":"enabled","default_model":"m","connection":{
             "name":"API","api_key":"api-key","protocol":"openai","base_url":"https://api.example.invalid/v1","qps":1,"concurrency":1}}))
         .unwrap(),
     )
@@ -655,4 +656,126 @@ async fn loading_a_model_list_says_what_went_wrong() {
     let Json(ok) = load(format!("{origin}/ok/v1")).await.unwrap();
     assert_eq!(ok["models"], json!(["gpt-x"]));
     task.abort();
+}
+
+#[tokio::test]
+async fn saving_an_api_model_proves_its_connection_unless_explicitly_skipped() {
+    use axum::{Router, http::StatusCode as S, routing::get};
+    let (_dir, s) = setup().await;
+    manager(&s).await;
+    let app = Router::new()
+        .route("/key/v1/models", get(|| async { S::UNAUTHORIZED }))
+        .route(
+            "/ok/v1/models",
+            get(|| async { axum::Json(json!({"data":[{"id":"m"}]})) }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let body = |base: String, skip: bool, name: &str| -> Body {
+        serde_json::from_value(json!({"name":name,"kind":"api","state":"enabled","default_model":"m","skip_check":skip,
+            "connection":{"name":name,"api_key":"k-private","protocol":"openai","base_url":base,"qps":1,"concurrency":1}}))
+        .unwrap()
+    };
+    // A rejected key is named, nothing is saved, and the client may skip the check.
+    let error = save(
+        &s,
+        &admin(1),
+        None,
+        body(format!("{origin}/key/v1"), false, "Checked"),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.0, StatusCode::FAILED_DEPENDENCY);
+    let message = error.2.as_ref().unwrap();
+    assert_eq!(message.key, "models.connectionCheckFailed");
+    assert_eq!(message.children["reason"].key, "upstream.keyRejected");
+    let text = crate::i18n::render(crate::i18n::Locale::ZhCn, message);
+    assert!(!text.contains("k-private"), "{text}");
+    assert_eq!(
+        profiles::Entity::find()
+            .filter(profiles::Column::Name.eq("Checked"))
+            .count(&s.db)
+            .await
+            .unwrap(),
+        0
+    );
+    save(
+        &s,
+        &admin(1),
+        None,
+        body(format!("{origin}/key/v1"), true, "Skipped"),
+    )
+    .await
+    .unwrap();
+    // A working connection saves; an unchanged one is not checked again.
+    let created = save(
+        &s,
+        &admin(1),
+        None,
+        body(format!("{origin}/ok/v1"), false, "Working"),
+    )
+    .await
+    .unwrap();
+    task.abort();
+    let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let Json(mut row) = detail(State(s.clone()), admin(1), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    row["name"] = json!("Renamed");
+    save(
+        &s,
+        &admin(1),
+        Some(id),
+        serde_json::from_value(row).unwrap(),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn model_field_errors_name_the_field() {
+    let (_dir, s) = setup().await;
+    manager(&s).await;
+    let cases = [
+        (
+            json!({"name":"","kind":"cli","runtime":"claude","state":"enabled"}),
+            "models.nameRequired",
+        ),
+        (
+            json!({"name":"x","kind":"other","state":"enabled"}),
+            "models.kindInvalid",
+        ),
+        (
+            json!({"name":"x","kind":"cli","runtime":"nope","state":"enabled"}),
+            "models.cliToolUnknown",
+        ),
+        (
+            json!({"name":"x","kind":"cli","runtime":"claude","state":"enabled","models":["-bad"]}),
+            "models.modelIdInvalid",
+        ),
+        (
+            json!({"name":"x","kind":"cli","runtime":"claude","state":"enabled","tool_version":"1 2"}),
+            "models.toolVersionInvalid",
+        ),
+        (
+            json!({"name":"x","kind":"cli","runtime":"claude","state":"maybe"}),
+            "models.stateInvalid",
+        ),
+        (
+            json!({"name":"x","kind":"api","state":"enabled","default_model":"m"}),
+            "models.connectionRequired",
+        ),
+    ];
+    for (input, key) in cases {
+        let error = save(
+            &s,
+            &admin(1),
+            None,
+            serde_json::from_value(input.clone()).unwrap(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.2.as_ref().unwrap().key, key, "{input}");
+    }
 }

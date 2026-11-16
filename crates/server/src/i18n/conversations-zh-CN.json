@@ -26,5 +26,20 @@
   "conversations.hostUnavailable": "执行主机 {host} 当前无法运行：{reason}。此会话固定了工作目录，不会自动换主机；可选择“改用其他主机”。",
   "conversations.executionFailedOn": "{cli} 在主机 {host} 上执行失败或连接中断。请先查看已产生的结果再重试；详细原因见该主机的 Runner 日志。",
   "conversations.boundHostOffline": "绑定主机 {host} 当前离线（{reason}）；其他候选主机：{others}",
-  "conversations.boundHostOfflineNoOthers": "绑定主机 {host} 当前离线（{reason}），且没有其他候选主机；请等它恢复在线后重试。"
+  "conversations.boundHostOfflineNoOthers": "绑定主机 {host} 当前离线（{reason}），且没有其他候选主机；请等它恢复在线后重试。",
+  "conversations.messageEmpty": "请输入消息或添加附件后再发送。",
+  "conversations.messageText": "消息中包含空字符（\\0）；请删除后重新发送。",
+  "conversations.clientInvalid": "页面发送的请求无效；请刷新页面后重新发送。",
+  "conversations.tooManyAttachments": "一条消息最多 10 个附件。",
+  "conversations.attachmentNameInvalid": "附件名“{name}”无效：需为 1–255 字节且不含控制字符；请重命名文件后重新添加。",
+  "conversations.messageTooLong": "消息与文本附件合计超过 48 KB；请缩短内容，或改用文件发送。",
+  "conversations.messageTooLongWithInstructions": "加上智能体指令后，本条消息超过 63 KB；请缩短消息或智能体指令。",
+  "conversations.tooManyTargets": "一条消息最多同时指定 8 个智能体。",
+  "conversations.kindInvalid": "请选择会话类型：单独会话或群聊。",
+  "conversations.tooManyMembers": "群聊最多 100 名成员。",
+  "conversations.tooManyAgents": "群聊最多 8 个智能体。",
+  "conversations.agentRequired": "请为会话选择智能体。",
+  "conversations.titleRequired": "请填写会话标题。",
+  "conversations.titleInvalid": "会话标题最多 256 字节，且不能包含空字符。",
+  "conversations.stateInvalid": "会话状态只能是进行中、已归档或已中断。"
 }

@@ -147,7 +147,7 @@ pub(crate) async fn seed_examples(
         definitions.push(json!({"name":format!("port_{suffix}"),"label":format!("{} {}",crate::i18n::message("templates.examples.natsPort"),suffix.to_uppercase()),"type":"integer","min":1,"max":65535,"default":port}));
         definitions.push(json!({"name":format!("advertise_{suffix}"),"label":format!("{} {}",crate::i18n::message("templates.examples.natsAdvertise"),suffix.to_uppercase()),"type":"string","min_length":1,"max_length":255}));
     }
-    let parameters = serde_json::to_string(&definitions).map_err(|_| ApiError::missing())?;
+    let parameters = serde_json::to_string(&definitions).map_err(crate::error::internal_fault)?;
     validate_template(content, &parameters, Kind::App)?;
     crate::entities::app_templates::Entity::insert(crate::entities::app_templates::ActiveModel {
         id: Set(s.next_id()?.into()),
@@ -197,7 +197,7 @@ pub(crate) async fn seed_examples(
             definitions.push(json!({"name":format!("{prefix}_port_{suffix}"),"label":format!("{} {}",crate::i18n::message(label),suffix.to_uppercase()),"type":"integer","min":1,"max":65535,"default":port+index}));
         }
     }
-    let parameters = serde_json::to_string(&definitions).map_err(|_| ApiError::missing())?;
+    let parameters = serde_json::to_string(&definitions).map_err(crate::error::internal_fault)?;
     validate_template(content, &parameters, Kind::App)?;
     crate::entities::app_templates::Entity::insert(crate::entities::app_templates::ActiveModel {
         id: Set(s.next_id()?.into()),
@@ -396,10 +396,15 @@ fn document(text: &str) -> Result<Value> {
             crate::i18n::Message::new("templates.contentTooLarge"),
         ));
     }
-    let value: Value = serde_yaml_ng::from_str(text).map_err(|_| {
+    let value: Value = serde_yaml_ng::from_str(text).map_err(|error| {
+        let at = error
+            .location()
+            .map_or((0, 0), |at| (at.line(), at.column()));
         ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("templates.documentInvalid"),
+            crate::i18n::Message::new("templates.documentInvalidAt")
+                .with("line", at.0.to_string())
+                .with("column", at.1.to_string()),
         )
     })?;
     if !value.is_object() {
@@ -940,7 +945,7 @@ pub(crate) fn convert_legacy_content(content: &str) -> Result<String> {
         graph.remove("engine");
         // Canonical discriminator prefix supports correct DB pagination/filtering
         // without another template table, schema migration or JSON SQL dialect.
-        let rest = serde_json::to_string(&graph).map_err(|_| ApiError::missing())?;
+        let rest = serde_json::to_string(&graph).map_err(crate::error::internal_fault)?;
         return Ok(format!("{{\"engine\":\"ferry-graph\",{}", &rest[1..]));
     }
     if doc.get("engine").and_then(Value::as_str) == Some(crate::pipelines::actions::ENGINE) {

@@ -405,12 +405,7 @@ pub async fn connect_token(
     // Do not save a credential or mark connected unless repository access also succeeds.
     let mut result =
         remote_repositories(&kind, &config, &body.token, true, &settings.organization, 1).await?;
-    let stored = serde_json::to_string(&settings).map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("repository.auth.connectionConfigEncode"),
-        )
-    })?;
+    let stored = serde_json::to_string(&settings).map_err(crate::error::internal_fault)?;
     let (_, id) = save_connection(
         &s,
         &scope,

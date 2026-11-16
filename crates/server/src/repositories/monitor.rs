@@ -1393,12 +1393,7 @@ async fn deliver_notice(
             .timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .map_err(|_| {
-                ApiError::localized(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("repository.monitor.notificationClient"),
-                )
-            })?;
+            .map_err(crate::error::internal_fault)?;
         let title = detail::label(&event.event);
         let notice = build_notice(connection, event_id, event, &title);
         let delivery =
@@ -1565,12 +1560,7 @@ pub async fn notification_test(
         .timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|_| {
-            ApiError::localized(
-                StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("repository.monitor.notificationClient"),
-            )
-        })?;
+        .map_err(crate::error::internal_fault)?;
     let (ok, message) = crate::i18n::with_locale(locale, async {
         let title = sample_title();
         let event = sample_event();

@@ -224,10 +224,11 @@ impl Options {
         .iter()
         .any(|value| value.len() > 4096 || value.chars().any(char::is_control))
         {
-            return Err(invalid());
+            return Err(Message::new("webhook.secretInvalid"));
         }
         let mut url = if self.provider == "Telegram" && !self.bot_token.is_empty() {
-            let (id, token) = self.bot_token.split_once(':').ok_or_else(invalid)?;
+            let bot_token = || Message::new("webhook.botTokenInvalid");
+            let (id, token) = self.bot_token.split_once(':').ok_or_else(bot_token)?;
             if id.is_empty()
                 || !id.bytes().all(|c| c.is_ascii_digit())
                 || token.is_empty()
@@ -235,15 +236,15 @@ impl Options {
                     .bytes()
                     .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
             {
-                return Err(invalid());
+                return Err(bot_token());
             }
             Url::parse(&format!(
                 "https://api.telegram.org/bot{}/sendMessage",
                 self.bot_token
             ))
-            .map_err(|_| invalid())?
+            .map_err(|_| Message::new("webhook.botTokenInvalid"))?
         } else {
-            Url::parse(webhook).map_err(|_| invalid())?
+            Url::parse(webhook).map_err(|_| Message::new("webhook.urlInvalid"))?
         };
         if !matches!(url.scheme(), "http" | "https")
             || !url.has_host()
@@ -252,7 +253,7 @@ impl Options {
             || url.fragment().is_some()
             || url.as_str().len() > 4096
         {
-            return Err(invalid());
+            return Err(Message::new("webhook.urlInvalid"));
         }
         let detected = if self.provider == "Webhook" {
             "Webhook"
@@ -260,16 +261,18 @@ impl Options {
             provider(&url)
         };
         if !matches!(self.provider.as_str(), "" | "auto" | "Webhook") && self.provider != detected {
-            return Err(invalid());
+            return Err(Message::new("webhook.providerMismatch")
+                .with("provider", self.provider.clone())
+                .with("detected", detected));
         }
         if !self.signing_secret.is_empty() && !matches!(detected, "DingTalk" | "Feishu" | "Lark") {
-            return Err(invalid());
+            return Err(Message::new("webhook.signingSecretUnsupported"));
         }
         if !self.bearer_token.is_empty() && !(self.provider == "Webhook" || detected == "Webhook") {
-            return Err(invalid());
+            return Err(Message::new("webhook.bearerUnsupported"));
         }
         if (!self.bot_token.is_empty() || !self.chat_id.is_empty()) && detected != "Telegram" {
-            return Err(invalid());
+            return Err(Message::new("webhook.telegramOnly"));
         }
         if detected == "Telegram" {
             if !self.chat_id.is_empty() {
@@ -299,7 +302,7 @@ impl Options {
                     .filter(|id| *id > 0)
                     .is_none())
         {
-            return Err(invalid());
+            return Err(Message::new("webhook.threadInvalid"));
         }
         Ok(url)
     }

@@ -562,7 +562,10 @@ pub fn parse_for(input: &str, mode: &str) -> Result<Manifest> {
             _ => false,
         }
     }
-    if contains_nul(&serde_json::to_value(&m).map_err(|_| bad("deployment.error.006"))?) {
+    if contains_nul(
+        &serde_json::to_value(&m)
+            .map_err(|_| crate::error::internal_fault("deployment.error.006"))?,
+    ) {
         return Err(bad("deployment.manifest.025"));
     }
     // Validating the effective document also covers changes made by overrides.
@@ -864,7 +867,7 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
     }
     serde_json::to_string_pretty(&document)
         .map(|s| s + "\n")
-        .map_err(|_| bad("deployment.error.021"))
+        .map_err(|_| crate::error::internal_fault("deployment.error.021"))
 }
 
 fn render_native(m: &Manifest) -> Result<String> {

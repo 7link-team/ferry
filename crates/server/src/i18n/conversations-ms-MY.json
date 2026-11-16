@@ -26,5 +26,20 @@
   "conversations.hostUnavailable": "Hos pelaksanaan {host} tidak dapat menjalankannya sekarang: {reason}. Perbualan ini mempunyai direktori kerja tetap, jadi ia tidak berpindah hos sendiri; pilih \"Guna hos lain\" untuk bertukar.",
   "conversations.executionFailedOn": "{cli} gagal pada hos {host} atau sambungan terputus. Semak apa yang telah dilakukan sebelum mencuba semula; butirannya ada dalam log Runner hos itu.",
   "conversations.boundHostOffline": "Hos terikat {host} sedang luar talian ({reason}). Hos calon lain: {others}",
-  "conversations.boundHostOfflineNoOthers": "Hos terikat {host} sedang luar talian ({reason}) dan tiada hos calon lain. Cuba lagi selepas ia kembali dalam talian."
+  "conversations.boundHostOfflineNoOthers": "Hos terikat {host} sedang luar talian ({reason}) dan tiada hos calon lain. Cuba lagi selepas ia kembali dalam talian.",
+  "conversations.messageEmpty": "Taip mesej atau lampirkan fail sebelum menghantar.",
+  "conversations.messageText": "Mesej mengandungi aksara null (\\0); buang dan hantar semula.",
+  "conversations.clientInvalid": "Halaman menghantar permintaan tidak sah; muat semula halaman dan hantar semula.",
+  "conversations.tooManyAttachments": "Satu mesej boleh membawa paling banyak 10 lampiran.",
+  "conversations.attachmentNameInvalid": "Nama lampiran \"{name}\" tidak sah: mesti 1–255 bait tanpa aksara kawalan; namakan semula fail dan lampirkan semula.",
+  "conversations.messageTooLong": "Mesej dan lampiran teksnya melebihi 48 KB; pendekkan atau hantar kandungan sebagai fail.",
+  "conversations.messageTooLongWithInstructions": "Bersama arahan ejen, mesej ini melebihi 63 KB; pendekkan mesej atau arahan ejen.",
+  "conversations.tooManyTargets": "Satu mesej boleh ditujukan kepada paling banyak 8 ejen sekaligus.",
+  "conversations.kindInvalid": "Pilih jenis perbualan: peribadi atau kumpulan.",
+  "conversations.tooManyMembers": "Kumpulan boleh mempunyai paling banyak 100 ahli.",
+  "conversations.tooManyAgents": "Kumpulan boleh mempunyai paling banyak 8 ejen.",
+  "conversations.agentRequired": "Pilih ejen untuk perbualan.",
+  "conversations.titleRequired": "Masukkan tajuk perbualan.",
+  "conversations.titleInvalid": "Tajuk perbualan maksimum 256 bait dan tidak boleh mengandungi aksara null.",
+  "conversations.stateInvalid": "Status perbualan mesti aktif, diarkibkan atau terganggu."
 }

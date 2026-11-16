@@ -211,12 +211,8 @@ async fn check(conn: &impl sea_orm::ConnectionTrait, scope: &Scope, b: &Body) ->
 
     Ok((
         b.name.trim().into(),
-        serde_json::to_string_pretty(&manifest).map_err(|_| {
-            ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("deployment.error.006"),
-            )
-        })?,
+        serde_json::to_string_pretty(&manifest)
+            .map_err(|_| crate::error::internal_fault("deployment.error.006"))?,
         host_id,
         None,
     ))
@@ -257,12 +253,8 @@ async fn check_blueprint(
             *role.pointer_mut(pointer).unwrap() = json!(id.to_string());
         }
     }
-    let manifest = serde_json::to_string_pretty(&doc).map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("deployment.error.006"),
-        )
-    })?;
+    let manifest = serde_json::to_string_pretty(&doc)
+        .map_err(|_| crate::error::internal_fault("deployment.error.006"))?;
     let name = b.name.trim().to_owned();
     let tags = groups::role_tags(scope.workspace_id, b.deploy_spec.as_deref())?;
     for plan in
@@ -994,12 +986,7 @@ fn bind_artifact(artifact: &str, metadata: &Value) -> Result<String> {
     }
     serde_json::to_string_pretty(&document)
         .map(|s| s + "\n")
-        .map_err(|_| {
-            ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("deployment.error.021"),
-            )
-        })
+        .map_err(|_| crate::error::internal_fault("deployment.error.021"))
 }
 fn dotenv_value(value: &str) -> String {
     let mut encoded = String::from("\"");
@@ -1107,12 +1094,7 @@ fn open_snapshot(
         return Ok(BTreeMap::new());
     }
     let text = vault.open_secret(sealed, &snapshot_aad(rev.workspace_id, rev.id))?;
-    serde_json::from_str(&text).map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("deployment.error.026"),
-        )
-    })
+    serde_json::from_str(&text).map_err(|_| crate::error::internal_fault("deployment.error.026"))
 }
 fn seal_snapshot(
     vault: &crate::vault::Vault,
@@ -2011,10 +1993,7 @@ async fn execute_host(
             || !(name.starts_with(".variables-") && name.ends_with(".env")
                 || name.starts_with(".config-") && name.ends_with(".txt"))
         {
-            return Err(ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("deployment.error.049"),
-            ));
+            return Err(crate::error::internal_fault("deployment.error.049"));
         }
         let path = format!("{dir}/{name}");
         if let Err(error) = upload(ch.as_ref(), &path, text.clone()).await {

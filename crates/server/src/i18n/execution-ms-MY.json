@@ -13,7 +13,6 @@
   "execution.referenceMissing": "{noun} yang dipilih tidak wujud dalam ruang kerja ini.",
   "execution.versionConflict": "Rekod telah diubah. Muat semula dan cuba lagi.",
   "execution.artifactReferenced": "Saluran paip masih dirujuk oleh artifak binaan aplikasi.",
-  "execution.definitionJson": "Definisi saluran paip mestilah JSON yang sah.",
   "execution.definitionObject": "Definisi saluran paip mestilah objek JSON.",
   "execution.definitionUnknownFields": "Definisi saluran paip mengandungi medan tidak diketahui.",
   "execution.workdirString": "workdir saluran paip mestilah rentetan laluan mutlak.",
@@ -252,5 +251,6 @@
   "workflow.agentFileFormat": "Fail \"{name}\" bukan salah satu format yang diterima ({formats}).",
   "workflow.agentFileMismatch": "Kandungan \"{name}\" tidak sepadan dengan jenis failnya, jadi ia tidak dihantar. Minta Ejen menghasilkan fail sebenar jenis itu.",
   "workflow.agentNoFiles": "Ejen selesai tanpa meninggalkan sebarang fail dalam folder outputnya. Semak mesej akhirnya untuk sebabnya, atau buat permintaan lebih khusus.",
-  "hosts.fileToolsRunnerOnly": "Hanya hos Runner melaporkan alat penghasilan fail."
+  "hosts.fileToolsRunnerOnly": "Hanya hos Runner melaporkan alat penghasilan fail.",
+  "execution.definitionJsonAt": "Definisi saluran paip bukan JSON yang sah pada baris {line}, lajur {column}."
 }

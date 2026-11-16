@@ -13,7 +13,6 @@
   "execution.referenceMissing": "所選{noun}不存在於當前工作空間。",
   "execution.versionConflict": "記錄已被修改，請重新整理後重試。",
   "execution.artifactReferenced": "流水線仍被應用的構建產物引用。",
-  "execution.definitionJson": "流水線定義必須是合法的 JSON。",
   "execution.definitionObject": "流水線定義必須是 JSON 物件。",
   "execution.definitionUnknownFields": "流水線定義包含未知欄位。",
   "execution.workdirString": "流水線 workdir 必須是絕對路徑字串。",
@@ -252,5 +251,6 @@
   "workflow.agentFileFormat": "檔案「{name}」不在允許的格式內（{formats}）。",
   "workflow.agentFileMismatch": "檔案「{name}」的內容與其檔案類型不符，未交付。請要求智慧體產生真正的該類型檔案。",
   "workflow.agentNoFiles": "智慧體已結束，但輸出目錄中沒有任何檔案。請查看它的最終回覆了解原因，或把要求寫得更具體。",
-  "hosts.fileToolsRunnerOnly": "只有 Runner 主機可以偵測檔案製作能力。"
+  "hosts.fileToolsRunnerOnly": "只有 Runner 主機可以偵測檔案製作能力。",
+  "execution.definitionJsonAt": "流水線定義在第 {line} 行第 {column} 欄不是合法的 JSON。"
 }
