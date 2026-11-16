@@ -138,6 +138,18 @@ fn object_store_failures_are_classified() {
         problem("something else entirely"),
         "platform.storageCheckFailed"
     );
+    // Causes decide over wording: a refused connection whose text says nothing useful.
+    let refused = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::ConnectionRefused))
+        .context("Generic S3 error: request failed");
+    assert_eq!(
+        classify("write", &refused, None).message.key,
+        "platform.storageUnreachable"
+    );
+    // A status-like number inside a URL's object key is not a status.
+    assert_eq!(
+        problem("Generic S3 error for http://127.0.0.1:9/b/storage-check/4031-401a"),
+        "platform.storageCheckFailed"
+    );
     let denied = anyhow::Error::from(object_store::Error::PermissionDenied {
         path: "x".into(),
         source: "no".into(),

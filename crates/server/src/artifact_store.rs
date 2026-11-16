@@ -73,7 +73,33 @@ fn classify(step: &'static str, error: &anyhow::Error, local: Option<&FsPath>) -
             _ => {}
         }
     }
-    let text = detail.to_ascii_lowercase();
+    // Network failures are recognised from the error's causes, not its wording,
+    // which differs between platforms and HTTP stacks.
+    for cause in error.chain() {
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            use std::io::ErrorKind::*;
+            if matches!(
+                io.kind(),
+                ConnectionRefused
+                    | ConnectionReset
+                    | ConnectionAborted
+                    | NotConnected
+                    | TimedOut
+                    | HostUnreachable
+                    | NetworkUnreachable
+                    | AddrNotAvailable
+            ) {
+                return Problem::new("platform.storageUnreachable", detail);
+            }
+        }
+    }
+    // URLs carry random object keys; "401"/"403" inside one must not read as a status.
+    let text = detail
+        .split_whitespace()
+        .filter(|word| !word.contains("://"))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
     let any = |needles: &[&str]| needles.iter().any(|needle| text.contains(needle));
     if any(&["nosuchbucket", "bucket does not exist"]) {
         Problem::new("platform.storageBucketMissing", detail)
@@ -101,6 +127,26 @@ fn classify(step: &'static str, error: &anyhow::Error, local: Option<&FsPath>) -
         Problem::new("platform.storageUnreachable", detail)
     } else {
         Problem::check(step, detail)
+    }
+}
+
+/// Whether the S3 endpoint accepts a TCP connection at all (DNS and connect),
+/// so an unreachable endpoint is named the same way on every platform.
+pub(crate) async fn reachable(endpoint: &str) -> Result<(), Problem> {
+    let unreachable = |detail: String| Problem::new("platform.storageUnreachable", detail);
+    let url =
+        reqwest::Url::parse(endpoint).map_err(|error| unreachable(format!("endpoint: {error}")))?;
+    let host = url.host_str().unwrap_or_default().to_owned();
+    let port = url.port_or_known_default().unwrap_or(443);
+    match tokio::time::timeout(
+        PROBE_TIMEOUT,
+        tokio::net::TcpStream::connect((host.as_str(), port)),
+    )
+    .await
+    {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(error)) => Err(unreachable(format!("connect {host}:{port}: {error}"))),
+        Err(_) => Err(unreachable(format!("connect {host}:{port}: timed out"))),
     }
 }
 
@@ -341,6 +387,11 @@ impl Configuration {
         // Settings that must work are proven when saved: write, read back, delete.
         let backend = config.open(&s.data_dir).map_err(Problem::rejected)?;
         let local = (config.kind == "local").then(|| s.data_dir.as_path());
+        if config.kind == "s3" {
+            reachable(&config.endpoint)
+                .await
+                .map_err(Problem::rejected)?;
+        }
         probe(&backend, local).await.map_err(Problem::rejected)?;
         let sealed = s.vault.seal(
             &serde_json::to_string(&config).map_err(|error| crate::error::internal_fault(error))?,
