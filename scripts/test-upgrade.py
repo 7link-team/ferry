@@ -284,7 +284,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             assert not api('/workspaces/upgrade/alert-rules/'+alert)['has_webhook']
             assert api('/workspaces/upgrade/alert-events')['items']==[]
             print('PASS: alert rules and event history schemas work after upgrade')
-            source=create('marketplace-sources',{'name':'Migrated source','repository_id':repository,'provider':'github','api_base':'https://example.invalid/api','project':'owner/repository','branch':'main','index_path':'marketplace.json'})
+            source=create('marketplace-sources',{'name':'Migrated source','repository_id':repository,'provider':'github','api_base':'https://example.invalid/api','project':'owner/repository','branch':'main','index_path':'marketplace.json','skip_check':True})
             assert api('/workspaces/upgrade/marketplace-sources/'+source)['state']=='idle'
             # The built-in official source may sync when the network is available;
             # the never-synced migrated source must contribute nothing.

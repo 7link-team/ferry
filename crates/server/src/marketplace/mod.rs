@@ -26,6 +26,20 @@ pub struct Source {
     pub index_path: String,
 }
 impl Source {
+    /// Same index location; the API address is compared as a URL, so a
+    /// trailing slash or letter case in the host is not a change.
+    fn same_location(&self, other: &Source) -> bool {
+        let base = |s: &Source| reqwest::Url::parse(s.api_base.trim()).ok();
+        self.provider == other.provider
+            && self.project.trim() == other.project.trim()
+            && self.organization.trim() == other.organization.trim()
+            && self.branch.trim() == other.branch.trim()
+            && self.index_path.trim() == other.index_path.trim()
+            && match (base(self), base(other)) {
+                (Some(a), Some(b)) => a == b,
+                _ => self.api_base.trim() == other.api_base.trim(),
+            }
+    }
     fn url(&self) -> Result<reqwest::Url> {
         let mut url = reqwest::Url::parse(&self.api_base).map_err(|_| {
             ApiError::localized(
@@ -352,6 +366,47 @@ async fn fetch(
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_unchanged_source_location_is_recognised_despite_formatting() {
+        let stored = Source {
+            provider: "github".into(),
+            api_base: "http://127.0.0.1:9000".into(),
+            project: "owner/repository".into(),
+            organization: String::new(),
+            branch: "main".into(),
+            index_path: "marketplace.json".into(),
+        };
+        let same = Source {
+            api_base: "http://127.0.0.1:9000/".into(),
+            project: " owner/repository ".into(),
+            ..stored.clone()
+        };
+        assert!(
+            stored.same_location(&same),
+            "trailing slash and spaces are not a change"
+        );
+        for moved in [
+            Source {
+                branch: "release".into(),
+                ..stored.clone()
+            },
+            Source {
+                index_path: "other.json".into(),
+                ..stored.clone()
+            },
+            Source {
+                api_base: "http://127.0.0.1:9001".into(),
+                ..stored.clone()
+            },
+            Source {
+                provider: "gitlab".into(),
+                ..stored.clone()
+            },
+        ] {
+            assert!(!stored.same_location(&moved));
+        }
+    }
+
     #[tokio::test]
     async fn persisted_source_errors_follow_the_reader_while_source_fields_stay_literal() {
         use crate::i18n::{Locale, Message, with_locale};
@@ -593,6 +648,9 @@ pub struct Body {
     source: Source,
     #[serde(default)]
     version: i64,
+    /// Save without reading the index (e.g. it is not published yet). Never stored.
+    #[serde(default)]
+    skip_check: bool,
 }
 #[derive(Deserialize)]
 struct RepositorySelection {
@@ -715,7 +773,9 @@ pub async fn create_source(
     Json(b): Json<Body>,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("marketplace-sources.create")?;
-    check_index(&s, &scope, &b).await?;
+    if !b.skip_check {
+        check_index(&s, &scope, &b).await?;
+    }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let result = create_source_in(&s, &tx, &scope, b).await?;
     tx.commit().await?;
@@ -768,7 +828,16 @@ pub async fn update_source(
     Json(mut b): Json<Body>,
 ) -> Result<Json<Value>> {
     scope.require("marketplace-sources.update")?;
-    check_index(&s, &scope, &b).await?;
+    // Re-read the index only when where it comes from changed: renaming a
+    // source, or saving it unchanged, must not depend on the index being reachable.
+    let existing = scoped(&s.db, &scope, id).await?;
+    let moved = b.repository_selection.is_some()
+        || Id::reference(&b.repository_id)? != Id::from(existing.repository_id)
+        || serde_json::from_str::<Source>(&existing.config)
+            .map_or(true, |stored| !stored.same_location(&b.source));
+    if moved && !b.skip_check {
+        check_index(&s, &scope, &b).await?;
+    }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     scoped(&tx, &scope, id).await?;
     bind_source_repository(&s, &tx, &scope, &mut b).await?;

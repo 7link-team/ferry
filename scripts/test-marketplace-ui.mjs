@@ -103,6 +103,10 @@ try {
     await chooseNative(p.getByLabel('外部仓库',{exact:true}), legacy.id);
     await p.getByRole('textbox',{name:/^API 接入点/}).fill(fixtureOrigin);
     await p.getByRole('textbox',{name:/^项目路径/}).fill('owner/repository');
+    // This legacy repository has no credential, so its index can't be read; saving is checked by default.
+    await p.getByRole('button',{name:'创建',exact:true}).click();
+    await p.getByText(/仓库返回HTTP 401/).first().waitFor();
+    await p.getByRole('switch',{name:/保存时跳过索引检测/}).click();
     await p.getByRole('button',{name:'创建',exact:true}).click();
     await p.waitForURL(`**/workspaces/${workspace_tenant}/marketplace-sources`);
     const originalSources=await(await owner.request.get(`${origin}/api${root}/marketplace-sources`)).json();const legacySource=originalSources.items.find(row=>row.name==='Legacy browser source');assert(legacySource);assert.equal(legacySource.repository_id,legacy.id);
