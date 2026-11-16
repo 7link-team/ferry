@@ -14,6 +14,7 @@ import { formConfigs } from "../resources";
 import { ResourceForm } from "../resources/ResourceForm";
 import { ResourceTable } from "../resources/ResourceTable";
 import { useQueryValue,useRoute } from "../router";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export function RepositoryConnectionDetail({ workspace, connectionId, permissions, form }: {
   workspace: string; connectionId: string; permissions: Set<string>;
@@ -48,7 +49,7 @@ export function RepositoryConnectionDetail({ workspace, connectionId, permission
     emptyKey: "repository.empty",
   }), [workspace, connectionId]);
   const activeTab = tab === "repositories" || tab === "monitoring" || tab === "events" || tab === "insights" ? tab : tab === "analysis" ? "insights" : "info";
-  if (connectionError) return <p role="alert" className="text-destructive">{connectionError}</p>;
+  if (connectionError) return <InlineAlert>{connectionError}</InlineAlert>;
   if (route.mode === "edit") return connection.provider ? <div className="flex min-h-0 flex-1 flex-col gap-3"><ResourceHeading name={connection.name || connectionId} /><RepositoryMonitor workspace={workspace} connectionId={connectionId} provider={connection.provider} permissions={permissions} /></div> : <LoadingSkeleton />;
   return <Tabs.Root value={activeTab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-4">
     {connection.provider ? <ResourceHeading name={connection.name || connectionId} /> : <LoadingSkeleton variant="inline" />}

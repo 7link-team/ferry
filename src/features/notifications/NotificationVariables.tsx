@@ -3,6 +3,7 @@ import { getResource } from "../../shared/api/resource";
 import { AutoField } from "../../shared/forms/auto-form";
 import { commonText as t } from "../../shared/i18n/i18n";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export function NotificationVariables({ workspace, templateId, values, readOnly, onChange, onValidityChange }: {
   workspace: string; templateId: string; values: Record<string, string>; readOnly: boolean;
@@ -22,7 +23,7 @@ export function NotificationVariables({ workspace, templateId, values, readOnly,
   const validity=useRef(onValidityChange); validity.current=onValidityChange;
   useEffect(() => { validity.current(blocked); }, [blocked]);
   if (!templateId) return null;
-  if (error) return <p role="alert" className="text-sm text-destructive">{error}</p>;
+  if (error) return <InlineAlert>{error}</InlineAlert>;
   if (!data) return <LoadingSkeleton variant="form" />;
   return <div className="grid min-w-0 gap-3 sm:grid-cols-2">{names.map(name => <AutoField key={name} label={name}>
     {readOnly ? <span className="break-words text-sm">{values[name] || "—"}</span> : <input className="h-10 w-full rounded-md border bg-background px-3 text-sm" maxLength={48000} value={values[name] ?? ""} onChange={e => onChange({ ...values, [name]: e.target.value })} />}

@@ -1,9 +1,11 @@
+import { workflowText } from "../i18n/i18n";
+
 export interface LayoutCard { id: string; x: number; y: number; width: number; height: number }
 
 /** Reserve an inline slot by shifting the target row/column and successors. */
 export function insertLayout(cards: LayoutCard[], links: { from: string; to: string }[], fromId: string, toId: string, inserted: LayoutCard, direction: "right" | "down" = "right"): Record<string, { x: number; y: number }> {
   const from = cards.find(card => card.id === fromId), to = cards.find(card => card.id === toId);
-  if (!from || !to || cards.some(card => card.id === inserted.id)) throw new Error("Invalid insertion layout");
+  if (!from || !to || cards.some(card => card.id === inserted.id)) throw new Error(workflowText("editorError.incompatibleInsertion"));
   const axis = direction === "right" ? "x" : "y", dimension = direction === "right" ? "width" : "height";
   const position = { x: from.x, y: from.y };
   position[axis] = Math.max(from[axis] + from[dimension] + 96, (from[axis] + from[dimension] + to[axis] - inserted[dimension]) / 2);

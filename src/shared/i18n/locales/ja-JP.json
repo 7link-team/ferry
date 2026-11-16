@@ -24,7 +24,7 @@
     "refresh": "更新",
     "retry": "再試行"
   },
-  "errors": {
+  "errors": { "http": "リクエストに失敗しました（HTTP {{status}}）。しばらくしてから再試行してください。", "yaml": "YAML {{line}} 行 {{column}} 列目：{{reason}}", "yamlNoPosition": "YAML の形式エラー：{{reason}}", "yamlIndent": "インデントが前後の行と揃っていません", "yamlDuplicate": "同じ階層でキーが重複しています", "yamlTab": "タブはインデントに使えません。スペースを使ってください", "yamlUnclosed": "引用符または括弧が閉じられていません", "yamlToken": "この位置に想定外の内容があります", "yamlOther": "内容が有効な YAML ではありません", "detail": "詳細",
     "network": "サービスに接続できません。ネットワークを確認して再試行してください。",
     "operation": "操作に失敗しました。再試行してください。"
   }

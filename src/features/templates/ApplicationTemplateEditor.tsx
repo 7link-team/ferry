@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
+import { yamlError } from "../../shared/yaml-error";
 import { parseDocument, stringify, visit } from "yaml";
 import { commonText, hostRepositoryText, useCommonTranslation } from "../../shared/i18n/i18n";
 import { api, errorText } from "../../shared/api/api";
@@ -9,6 +10,7 @@ import type { TemplateParameter } from "./TemplateParametersEditor";
 import { ApplicationDefinitionFields } from "./ApplicationDefinitionFields";
 import { appendManifest, changeManifest, object, removeManifest, type Path } from "../deployments/manifest/model";
 import { DeleteConfirmDialog } from "../../shared/ui/DeleteConfirmDialog";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 const TemplateCodeEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 
@@ -56,7 +58,7 @@ export function ApplicationTemplateEditor({ value, readOnly, onChange, onValidit
   const editorId = useId();
   const source = authored.current === value ? value : applicationTemplateSource(value);
   const doc = parseDocument(source);
-  const syntaxError = doc.errors[0]?.message;
+  const syntaxError = doc.errors.length ? yamlError(doc.errors).message : undefined;
   let preview: Record<string, unknown> | undefined;
   let previewError = syntaxError;
   let aliases = false;
@@ -122,7 +124,7 @@ export function ApplicationTemplateEditor({ value, readOnly, onChange, onValidit
       <div aria-live="polite" className="grid min-w-0 gap-3 sm:grid-cols-2">{capabilities?.map(result => <div key={result.mode} className="min-w-0 rounded-md border p-3 text-sm">
         <span>{result.mode} · {commonText(`resource-domain:deployment.${result.supported ? "compatible" : "incompatible"}`)}</span>
         {result.reason && <p className="mt-2 break-words text-destructive">{result.reason}</p>}
-      </div>)}</div>{capabilityError && <p role="alert" className="text-sm text-destructive">{capabilityError}</p>}
+      </div>)}</div>{capabilityError && <InlineAlert>{capabilityError}</InlineAlert>}
     </section>}
     {!sourceMode && preview ? <ApplicationDefinitionFields value={preview} readOnly={readOnly} workspace={workspace} parameters={templateParameters ?? []} mode={mode}
       onSet={set} onSourceChange={(path, source) => {
@@ -134,8 +136,8 @@ export function ApplicationTemplateEditor({ value, readOnly, onChange, onValidit
       }} onAppend={(path, value) => { if (!readOnly) change(appendManifest(doc, path, value)); }} onRemove={remove} onInvalidChange={reportInvalid} /> : <div className="h-[28rem] min-w-0 overflow-hidden rounded-md border">
       <Suspense fallback={<LoadingSkeleton variant="editor" />}><TemplateCodeEditor value={source} language="yaml" path={`${workspace}/application-template-${editorId}.yaml`} label={commonText("resource-domain:template.appContent")} readOnly={readOnly} onChange={change} /></Suspense>
     </div>}
-    {previewError && <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">{previewError}</p>}
-    {notice && <p role="alert" className="text-sm text-destructive">{notice}</p>}
+    {previewError && <InlineAlert>{previewError}</InlineAlert>}
+    {notice && <InlineAlert>{notice}</InlineAlert>}
     {removal && <DeleteConfirmDialog action={commonText("common.delete")} target={String(removal.path.at(-1)) + (removal.index === undefined ? "" : ` ${removal.index + 1}`)} onClose={() => setRemoval(undefined)} onConfirm={() => {
       if (!readOnly) change(removal.index === undefined ? changeManifest(doc, [{ path: removal.path, value: undefined }]) : removeManifest(doc, removal.path, removal.index));setRemoval(undefined);
     }} />}

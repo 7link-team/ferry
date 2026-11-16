@@ -53,9 +53,30 @@ async function requestApi<T>(path: string, options: RequestInit): Promise<T> {
     window.dispatchEvent(new Event("ferry:unauthorized"));
   const plainText = response.headers?.get("content-type")?.startsWith("text/plain") ?? false;
   const data = plainText ? {} : await response.json().catch(() => ({}));
-  const detail = !response.ok && plainText ? (await response.text()).trim() : "";
-  if (!response.ok) throw new ApiError(data.error ?? (detail && detail.length <= 160 ? detail : i18n.t("errors.operation")), response.status);
+  if (!response.ok) throw new ApiError(data.error ?? (plainText ? await plainError(response) : undefined) ?? failure(response.status), response.status);
   return data as T;
+}
+
+/** A generic, localized failure that still says which HTTP status came back. */
+function failure(status: number) {
+  return status ? i18n.t("errors.http", { status }) : i18n.t("errors.operation");
+}
+
+/**
+ * Plain-text error bodies are shown only when Ferry wrote them: its localized
+ * responses carry Content-Language. Proxy pages and framework rejections are not
+ * user wording; they stay in the console.
+ */
+async function plainError(response: Response) {
+  const text = (await response.text().catch(() => "")).trim();
+  try {
+    const parsed = JSON.parse(text) as { error?: unknown };
+    if (typeof parsed?.error === "string" && parsed.error) return parsed.error;
+  } catch { /* not Ferry's JSON error shape */ }
+  const own = !!response.headers?.get("content-language");
+  if (own && text && text.length <= 300 && !/<[a-z!/]/i.test(text)) return text;
+  if (text) console.debug(`HTTP ${response.status} response body`, text.slice(0, 500));
+  return undefined;
 }
 
 export const errorText = (error: unknown) =>

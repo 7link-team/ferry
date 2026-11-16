@@ -3,6 +3,7 @@ import { listResource } from "../../shared/api/resource";
 import { errorText } from "../../shared/api/api";
 import { FieldCaption } from "../../shared/forms/FieldHelp";
 import { workflowText as t } from "../../shared/i18n/i18n";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 type Settings = Record<string, unknown>;
 const control = "h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm";
@@ -53,6 +54,6 @@ export function WorkflowExecutionTarget({ workspace, value, change, readOnly, ho
       </select>
     </label>}
     <p className="text-xs leading-5 text-muted-foreground">{t("execution.help")}</p>
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {error && <InlineAlert>{error}</InlineAlert>}
   </div>;
 }

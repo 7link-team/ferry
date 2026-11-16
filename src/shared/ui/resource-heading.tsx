@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { api, errorText } from "../api/api";
 import { LoadingSkeleton } from "./loading-skeleton";
+import { InlineAlert } from "./inline-alert";
 
 /** Record identity stays outside tab panels and above section scrolling. */
 export function ResourceHeading({ name, children }: { name: string; children?: ReactNode }) {
@@ -33,5 +34,5 @@ export function RemoteResourceHeading({ endpoint, fallback }: { endpoint: string
   }, [endpoint, fallback]);
   const current = record?.endpoint === endpoint ? record : undefined;
   if (!current) return <div className="shrink-0 border-b py-3"><LoadingSkeleton variant="inline" /></div>;
-  return <ResourceHeading name={current.name || fallback}>{current.error && <p role="alert" className="text-sm text-destructive">{current.error}</p>}</ResourceHeading>;
+  return <ResourceHeading name={current.name || fallback}>{current.error && <InlineAlert>{current.error}</InlineAlert>}</ResourceHeading>;
 }

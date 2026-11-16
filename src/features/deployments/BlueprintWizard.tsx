@@ -24,6 +24,7 @@ import { allHosts, type HostRow } from "./blueprint-hooks";
 import { deploymentDeployed, type Deployment } from "./deployment";
 import { ApplicationTemplateEditor } from "../templates/ApplicationTemplateEditor";
 import { ApplicationFiles, applicationHasFiles } from "../templates/ApplicationConfigurationFields";
+import { RetryButton, InlineAlert } from "../../shared/ui/inline-alert";
 
 const SpecEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 const w = (key: string, values?: Record<string, unknown>) => commonText(`resource-domain:wizard.${key}`, values);
@@ -170,7 +171,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
   const early = (body: ReactNode) => cancel ? <div className="space-y-3">{body}<div>{cancel}</div></div> : body;
   if (!allowed) return early(<p role="alert">{w("forbidden")}</p>);
   if (!templateId) return early(<p role="alert">{w("missingTemplate")}</p>);
-  if (loadError) return <div role="alert" className="space-y-3"><p>{loadError}</p><div className="flex flex-wrap gap-2"><Button variant="outline" className={touch} onClick={() => setReload(n => n + 1)}>{commonText("common-domain:common.retry")}</Button>{cancel}</div></div>;
+  if (loadError) return <div className="space-y-3"><InlineAlert action={<RetryButton onClick={() => setReload(n => n + 1)} />}>{loadError}</InlineAlert><div className="flex flex-wrap gap-2">{cancel}</div></div>;
   if (!loaded) return early(<LoadingSkeleton variant="page" label={w("loading")} />);
   const { template, blueprint, parameters } = loaded;
   if (!blueprint) return early(<p role="alert">{w("notBlueprint")}</p>);
@@ -320,7 +321,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
             {placement?.busy && <span role="status" className="text-sm text-muted-foreground">{w("previewing")}</span>}
           </div>
           {Object.keys(spec.placement ?? {}).length > 0 && <div className="flex flex-wrap gap-2">{Object.keys(spec.placement ?? {}).map(role => <Button key={role} type="button" variant="outline" size="sm" className={touch} disabled={invalid} onClick={() => automatic(role)}>{w("autoPlacement")} · {role}</Button>)}</div>}
-          {placement?.error && placement.for === text && <p role="alert" className="break-words text-sm text-destructive">{placement.error}</p>}
+          {placement?.error && placement.for === text && <InlineAlert>{placement.error}</InlineAlert>}
           {placement?.for !== text && !placement?.busy && <p className="text-sm text-muted-foreground">{w("placementStale")}</p>}
           {placement?.result && <>
             <p className="text-sm text-muted-foreground">{w("addressHelp")}</p>
@@ -359,7 +360,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
         <span>{w("versionChanged", { current: template.version, requested: spec.template.version })}</span>
         <Button type="button" size="sm" variant="outline" className={touch} disabled={invalid} onClick={() => patch([{ path: ["template", "version"], value: template.version }])}>{w("useLatest", { current: template.version })}</Button>
       </div>}
-      {optionsError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive"><span>{w("optionsFailed", { detail: optionsError })}</span><Button type="button" variant="outline" size="sm" className={touch} onClick={() => setReload(n => n + 1)}>{commonText("common-domain:common.retry")}</Button></div>}
+      {optionsError && <InlineAlert action={<RetryButton onClick={() => setReload(n => n + 1)} />}>{w("optionsFailed", { detail: optionsError })}</InlineAlert>}
 </>;
   const sourceEditor = <AutoField label={w("yamlLabel")} help={w("yamlHelp")}>
         <div className="h-[60vh] min-h-72 min-w-0 overflow-hidden rounded-md border lg:h-[28rem]">
@@ -383,7 +384,7 @@ export function BlueprintWizard({ workspace, templateId, version, permissions, n
     section("definition", commonText("resource-domain:template.definition"), <ApplicationTemplateEditor value={definition} readOnly workspace={workspace} templateParameters={parameters} onChange={() => {}} onValidityChange={() => {}} />),
     section("parameters", commonText("resource-domain:template.parameters"), <>{modeControl}{mode === "form" ? renderStep("stepValues") : sourceEditor}</>),
     ...(applicationHasFiles({ content: definition }) ? [section("files", commonText("resource-domain:market.files"), <ApplicationFiles draft={{ content: definition }} />)] : []),
-  ]} footer={<><div aria-live="polite">{submitError && <p role="alert" className="break-words text-sm text-destructive">{submitError}</p>}</div><FormActions>
+  ]} footer={<><div aria-live="polite">{submitError && <InlineAlert>{submitError}</InlineAlert>}</div><FormActions>
     {onCancel && <Button type="button" variant="outline" className={touch} disabled={creating} onClick={onCancel}>{w("cancel")}</Button>}
     <Button type="button" className={touch} disabled={blocked || creating} title={steps.flatMap(problems)[0]} onClick={() => void submit()}>{creating ? w(editing ? "saving" : "creating") : w(editing ? "save" : "create")}</Button>
   </FormActions></>} />;

@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../shared/ui/select";
+import { InlineAlert, RetryButton } from "../../shared/ui/inline-alert";
 
 export interface Hole {
   id: string;
@@ -324,7 +325,7 @@ function IngressChoice({ workspace, draft, readOnly, onPatch, onValidityChange }
     {draft.public_access && <p className="text-destructive">{text(`warning.${draft.ingress_mode}`)}</p>}
   </div>;
   return <div className="min-w-0 space-y-3">
-    {error && <div><p role="alert" className="break-words text-destructive">{error}</p><Button type="button" variant="outline" onClick={() => setAttempt(value => value + 1)}>{commonText("common.retry")}</Button></div>}
+    {error && <InlineAlert action={<RetryButton onClick={() => setAttempt(value => value + 1)} />}>{error}</InlineAlert>}
     <Select value={draft.ingress_mode ?? "keep"} disabled={!options} onValueChange={value => onPatch({ingress_mode: value === "keep" ? undefined : value, reconnect_ingress: value !== "keep", public_access_acknowledged: false})}>
       <SelectTrigger className="min-h-11 w-full min-w-0" aria-label={text("ingressMode")}><SelectValue placeholder={commonText("common.select")} /></SelectTrigger>
       <SelectContent>

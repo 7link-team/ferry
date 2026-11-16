@@ -9,6 +9,7 @@ import { outputPortLabel } from "./WorkflowNodePicker";
 import { WorkflowDataView } from "./WorkflowDataView";
 import { WorkflowPreviewReview } from "./WorkflowPreviewReview";
 import type { NodeExecutionData } from "./workflow-data";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export const executionStateText = (state: unknown) => {
   const value=String(state === "pending" ? "queued" : state || "not_started"), key=`execution.state.${value}`;
@@ -77,13 +78,13 @@ export function WorkflowExecutionView({ workspace, execution, graph, attempts, n
         <div className="max-h-[380px] space-y-3 overflow-y-auto break-words" role="tabpanel">
           {tab === "process" ? <>
             <dl className="grid grid-cols-2 gap-2 text-xs"><dt>{t("execution.startedAt")}</dt><dd>{Number(attempt?.started_at)>0?new Date(Number(attempt?.started_at)).toLocaleString():"—"}</dd><dt>{t("execution.finishedAt")}</dt><dd>{Number(attempt?.finished_at)>0?new Date(Number(attempt?.finished_at)).toLocaleString():"—"}</dd><dt>{t("execution.duration")}</dt><dd>{Number(attempt?.started_at)>0?`${Math.max(0,(Number(attempt?.finished_at)||Date.now())-Number(attempt?.started_at))} ms`:"—"}</dd><dt>{t("itemsIn")}</dt><dd>{String(attempt?.items_in??0)}</dd><dt>{t("itemsOut")}</dt><dd>{String(attempt?.items_out??0)}</dd></dl>
-            {attempt?.state === "failed" && execution.end_reason ? <p role="alert" className="text-sm text-destructive">{String(execution.end_reason)}</p>:null}
+            {attempt?.state === "failed" && execution.end_reason ? <InlineAlert>{String(execution.end_reason)}</InlineAlert>:null}
             {data?.logs ? <><pre data-node-execution-logs className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">{data.logs}</pre>{data.logs_truncated && <p role="status" className="text-xs text-amber-700 dark:text-amber-400">{t("execution.logsTruncated")}</p>}</> : loading ? <LoadingSkeleton variant="form" /> : logs.length ? logs.map((log,index)=><section key={index}><h4 className="text-xs font-medium">{log.key}</h4><pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">{log.text.slice(0,200_000)}</pre></section>) : <p className="text-xs text-muted-foreground">{t("execution.noTextLogs")}</p>}
           </> : loading ? <LoadingSkeleton variant="form" /> : tab === "input" ? <WorkflowDataView items={data?.input.items??[]} /> : <>
             {(data?.output?.ports??[]).map(port=><section key={`${port.name}:${port.index}`} className="space-y-2"><h4 className="text-sm font-medium">{port.name==="main"?t("mainPort"):port.name}</h4><WorkflowDataView items={port.items} /></section>)}
             {!data?.output && <p className="text-sm text-muted-foreground">{t("inspector.noOutput")}</p>}
           </>}
-          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          {error && <InlineAlert>{error}</InlineAlert>}
         </div>
       </section>
     </div>

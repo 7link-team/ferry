@@ -1,5 +1,6 @@
 import { Document, isAlias, isCollection, isMap, isScalar, isSeq, parseDocument, visit, type YAMLMap } from "yaml";
 import { commonText, executionText, workflowText } from "../../shared/i18n/i18n";
+import { yamlError } from "../../shared/yaml-error";
 
 export type ActionStep = Record<string, unknown> & { name?: string; run?: string; uses?: string; env?: Record<string, string> };
 export interface ActionJob { id: string; name: string; needs: string[]; runsOn: string[]; steps: ActionStep[]; raw: Record<string, unknown> }
@@ -43,7 +44,7 @@ export function dispatchInputs(source: string): DispatchInput[] {
 
 export function parseActions(source: string, allowEmpty = false): { document: Document; jobs: ActionJob[] } {
   const document = parseDocument(source, { uniqueKeys: true });
-  if (document.errors.length) throw new Error(document.errors.map(error => error.message).join("\n"));
+  if (document.errors.length) throw yamlError(document.errors);
   const value = document.toJS({ maxAliasCount: 50 });
   if (!object(value) || !object(value.jobs) || (!allowEmpty && !Object.keys(value.jobs).length)) throw new Error(executionText("workflow.jobsRequired"));
   const jobs = Object.entries(value.jobs).map(([id, raw]) => {
@@ -74,7 +75,7 @@ function blockYaml(document: Document): string {
 }
 export function formatActionYaml(source: string): string {
   const document = parseDocument(source, { uniqueKeys: true });
-  if (document.errors.length) throw new Error(document.errors.map(error => error.message).join("\n"));
+  if (document.errors.length) throw yamlError(document.errors);
   return blockYaml(document);
 }
 function serialize(document: Document) { const source = blockYaml(document); parseActions(source); return source; }
@@ -137,7 +138,7 @@ export function editActionFragment(source: string, job: string, index: number | 
   const target = jobs.find(row => row.id === job);
   if (!target || (index !== undefined && !target.steps[index])) throw new Error(executionText("workflow.stepMissing"));
   const edited = parseDocument(fragment, { uniqueKeys: true });
-  if (edited.errors.length) throw new Error(edited.errors.map(error => error.message).join("\n"));
+  if (edited.errors.length) throw yamlError(edited.errors);
   if (!isMap(edited.contents)) throw new Error(executionText("workflow.stepsArray", { id: job }));
   document.setIn(index === undefined ? ["jobs", job] : ["jobs", job, "steps", index], edited.contents);
   return serialize(document);

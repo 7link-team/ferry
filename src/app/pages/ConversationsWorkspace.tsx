@@ -26,6 +26,7 @@ import {
   type ConversationDraft,
 } from "../../features/conversations/Conversation";
 import { conversationText as t } from "../../features/conversations/resource-config";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 interface Summary {
   id: string;
@@ -185,9 +186,7 @@ export function ConversationsWorkspace({
       >
         {!loaded && <LoadingSkeleton variant="page" />}
         {error && (
-          <p role="alert" className="p-3 text-sm text-destructive">
-            {error}
-          </p>
+          <InlineAlert className="m-1">{error}</InlineAlert>
         )}
         {loaded && !error && !rows.length && (
           <p className="p-3 text-sm text-muted-foreground">

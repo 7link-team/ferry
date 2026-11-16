@@ -1000,7 +1000,7 @@ export function Conversation({
                                 {[...items].map(([key, item]) => (
                                   <div key={key} className="min-w-0 rounded border p-2">
                                     <p>{item.name}{item.state ? ` · ${item.state}` : ""}</p>
-                                    {item.result !== undefined && <LongText value={item.result} className="mt-2 max-h-64" />}
+                                    {item.result !== undefined && <><p className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground/80">{t("toolRawResult")}</p><LongText value={item.result} className="mt-1 max-h-64" /></>}
                                   </div>
                                 ))}
                                 {turn && m?.role !== "user" && Object.entries(turn.decisions).filter(([, decision]) => decision.decision !== null || turn.state !== "running").map(([request, decision]) => (
@@ -1324,9 +1324,7 @@ export function Conversation({
               />
             )}
             {actionError && (
-              <p role="alert" className="text-sm text-destructive">
-                {actionError}
-              </p>
+              <InlineAlert>{actionError}</InlineAlert>
             )}
             <div className="flex justify-end gap-2">
               <Button
@@ -1445,9 +1443,7 @@ export function Conversation({
               ))}
             </div>
             {actionError && (
-              <p role="alert" className="text-sm text-destructive">
-                {actionError}
-              </p>
+              <InlineAlert>{actionError}</InlineAlert>
             )}
             <div className="flex justify-end gap-2">
               <Button

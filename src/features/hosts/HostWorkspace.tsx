@@ -11,6 +11,7 @@ import { DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuTrigger }
 import { HostFiles } from "./HostFiles";
 import { HostLatency } from "./HostLatency";
 import { HostTelemetry } from "./HostTelemetry";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 const HostTerminal = lazy(() => import("./HostTerminal").then(module => ({ default: module.HostTerminal })));
 
@@ -122,7 +123,7 @@ export function HostWorkspace({ navigation, workspace, hostId, permissions, head
       <select aria-label={commonText("terminal.palette")} className="h-8 min-w-0 max-w-40 rounded-md border border-input bg-background px-2 text-sm font-medium" value={terminalPalette} onChange={event => setTerminalPalette(event.target.value)}>{["theme", "classic", "light", "dracula", "solarized"].map(value => <option key={value} value={value}>{commonText(`terminal.${value}`)}</option>)}</select>
       {headerActions}
     </header>
-    {error && <p role="alert" className="border-b px-3 py-1 text-sm text-destructive">{error}</p>}
+    {error && <InlineAlert className="m-2">{error}</InlineAlert>}
     <div role="tablist" aria-label={hostRepositoryText("host.084")} className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-2">
       {tabs.map(tab => <div key={tab.id} className={`inline-flex h-8 shrink-0 items-center rounded border ${activeTab === tab.id ? "bg-accent" : ""}`}>
         <button type="button" role="tab" aria-selected={activeTab === tab.id} className="h-full px-3 text-sm" onClick={() => setActiveTab(tab.id)}>{tabLabel(tab)}</button>

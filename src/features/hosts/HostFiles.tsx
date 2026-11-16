@@ -52,6 +52,7 @@ import { base } from "../../shared/api/resource";
 import { Button } from "../../shared/ui/button";
 import { DeleteConfirmDialog } from "../../shared/ui/DeleteConfirmDialog";
 import { Input } from "../../shared/ui/input";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 interface Entry {
   name: string;
@@ -364,7 +365,7 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
           <Dialog.Description className="mt-1 truncate text-sm text-muted-foreground" title={path}>{hostRepositoryText("host-files.022")}{" "}{path}</Dialog.Description>
           <AutoForm className="dialog-form mt-4" onSubmit={event => { event.preventDefault(); void createEntry(); }}>
             <div className="dialog-body space-y-4"><AutoField label={hostRepositoryText("host-files.023")} required><Input autoFocus name="name" required aria-label={hostRepositoryText("host-files.023")} value={newName} onChange={event => setNewName(event.target.value)} /></AutoField>
-            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+            {error && <InlineAlert>{error}</InlineAlert>}
             </div><div className="dialog-footer mt-4"><Button type="button" variant="outline" disabled={!!busy} onClick={() => setCreating(undefined)}>{hostRepositoryText("host-files.024")}</Button><Button type="submit" disabled={!!busy || !newName.trim()}>{busy ? hostRepositoryText("host-files.025") : hostRepositoryText("host-files.026")}</Button></div>
           </AutoForm>
         </Dialog.Content>
@@ -501,7 +502,7 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
             {preview?.kind === "text" && <Button size="sm" onClick={() => void savePreview()} disabled={!!busy || preview.readOnly || preview.value === preview.original}><Save className="size-4" />{hostRepositoryText("host-files.061")}</Button>}
             <Button variant="ghost" size="icon" aria-label={hostRepositoryText("host-files.062")} onClick={closePreview}><X className="size-4" /></Button>
           </div>
-          {error && <p role="alert" className="border-b px-3 py-2 text-sm text-destructive">{error}</p>}
+          {error && <InlineAlert className="m-2">{error}</InlineAlert>}
           {preview?.kind === "image" ? <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-4"><img src={preview.url} alt={preview.name} className="max-h-full max-w-full object-contain" /></div> :
             <div className="flex min-h-0 flex-1 flex-col">{preview?.readOnly && <p role="status" className="border-b px-3 py-2 text-sm text-muted-foreground">{hostRepositoryText("host-files.encodingReadOnly", { encoding: preview.encoding })}</p>}<div className="min-h-0 flex-1"><Suspense fallback={<LoadingSkeleton variant="editor" />}><CodeEditor value={preview?.value ?? ""} language={textFileLanguage(preview?.name ?? "")} path={`file:///hosts/${encodeURIComponent(workspace)}/${encodeURIComponent(hostId)}/${encodeURIComponent(preview?.path ?? "")}`} label={hostRepositoryText("host-files.063")} readOnly={preview?.readOnly ?? false} onChange={value => setPreview(current => current ? { ...current, value } : current)} /></Suspense></div></div>}
         </Dialog.Content>

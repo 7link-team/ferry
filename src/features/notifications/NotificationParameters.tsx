@@ -8,6 +8,7 @@ import { getResource } from "../../shared/api/resource";
 import { isSms, SmsParameters } from "./SmsParameters";
 import { NotificationBody } from "./NotificationBody";
 import { NotificationVariables } from "./NotificationVariables";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 /** Shared message parameters for workflow nodes and build notifications. */
 export function NotificationParameters({ workspace, value, readOnly, onChange, invalid }: {
@@ -45,5 +46,5 @@ export function NotificationParameters({ workspace, value, readOnly, onChange, i
     to: { name: t("notifications:to_text"), type: "custom", col: 2, help: t(sms ? "notifications:smsRecipientsHelp" : "notifications:recipientsHelp"), render: props => props.readonly ? <span>{(props.value as string[] ?? []).join(", ") || "—"}</span> : <textarea aria-label={t("notifications:to_text")} className="min-h-24 w-full rounded-md border bg-background p-3 text-sm" value={(props.value as string[] ?? []).join("\n")} onChange={e => props.onChange(e.target.value.split("\n"))} /> },
     variables: { name: t("notifications:variables"), type: "custom", col: 2, show: () => sms || !!value.template_id, render: props => sms ? <SmsParameters names={channel?.sms_parameter_names ?? []} values={(props.value ?? {}) as Record<string,string>} readOnly={props.readonly} onChange={props.onChange} /> : <NotificationVariables workspace={workspace} templateId={String(value.template_id ?? "")} values={(props.value ?? {}) as Record<string,string>} readOnly={props.readonly} onChange={props.onChange} onValidityChange={setVariablesBlocked} /> },
   };
-  return <div className="min-w-0 space-y-3">{(error || channelError) && <p role="alert" className="text-sm text-destructive">{error || channelError}</p>}<AutoFields fields={fields} values={value} readonly={readOnly} onChange={patch => {const next={...value,...patch}; if(next.channel_id !== value.channel_id) {next.template_id="";next.format="text";next.variables={};} else if(sms) {next.template_id="";next.format="text";} onChange(next);}} /></div>;
+  return <div className="min-w-0 space-y-3">{(error || channelError) && <InlineAlert>{error || channelError}</InlineAlert>}<AutoFields fields={fields} values={value} readonly={readOnly} onChange={patch => {const next={...value,...patch}; if(next.channel_id !== value.channel_id) {next.template_id="";next.format="text";next.variables={};} else if(sms) {next.template_id="";next.format="text";} onChange(next);}} /></div>;
 }

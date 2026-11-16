@@ -5,6 +5,7 @@ import { Button } from "../../shared/ui/button";
 import { BlueprintWizard } from "./BlueprintWizard";
 import { readSpec } from "./blueprint-spec";
 import type { Deployment } from "./deployment";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 const w = (key: string, values?: Record<string, unknown>) => commonText(`resource-domain:wizard.${key}`, values);
 
@@ -22,10 +23,10 @@ export function BlueprintSpecEdit({ workspace, deployment, permissions, navigati
     {parsed.spec
       ? <BlueprintWizard workspace={workspace} templateId={parsed.spec.template.id} version={parsed.spec.template.version} permissions={permissions} navigation={navigation}
         deployment={snapshot} onCancel={() => setSnapshot(undefined)} onDone={() => { setSnapshot(undefined); onSaved(); }} />
-      : <div role="alert" className="space-y-2 text-sm text-destructive">
+      : <div className="space-y-2"><InlineAlert>
         <p>{w("specUnreadable")}</p>
         {parsed.errors.map((error, index) => <p key={index} className="break-words">{error}</p>)}
-        <Button type="button" variant="outline" className="min-h-11 lg:min-h-9" onClick={() => setSnapshot(undefined)}>{w("cancel")}</Button>
+        </InlineAlert><Button type="button" variant="outline" className="min-h-11 lg:min-h-9" onClick={() => setSnapshot(undefined)}>{w("cancel")}</Button>
       </div>}
   </section>;
 }

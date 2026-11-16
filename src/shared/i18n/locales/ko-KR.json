@@ -24,7 +24,7 @@
     "refresh": "새로 고침",
     "retry": "다시 시도"
   },
-  "errors": {
+  "errors": { "http": "요청에 실패했습니다(HTTP {{status}}). 잠시 후 다시 시도하세요.", "yaml": "YAML {{line}}행 {{column}}열: {{reason}}", "yamlNoPosition": "YAML 형식 오류: {{reason}}", "yamlIndent": "들여쓰기가 앞뒤 줄과 맞지 않습니다", "yamlDuplicate": "같은 수준에 중복된 키가 있습니다", "yamlTab": "탭은 들여쓰기에 사용할 수 없습니다. 공백을 사용하세요", "yamlUnclosed": "따옴표나 괄호가 닫히지 않았습니다", "yamlToken": "이 위치에 예상하지 못한 내용이 있습니다", "yamlOther": "내용이 올바른 YAML이 아닙니다", "detail": "자세한 정보",
     "network": "서비스에 연결할 수 없습니다. 네트워크를 확인하고 다시 시도하세요.",
     "operation": "작업에 실패했습니다. 다시 시도하세요."
   }

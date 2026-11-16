@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { api, errorText, localizedFetch } from "../../shared/api/api";
 import { workflowText as t } from "../../shared/i18n/i18n";
 import { Input } from "../../shared/ui/input";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export interface WorkflowAsset {
   asset: string;
@@ -99,7 +100,7 @@ function TextFilePreview({ url }: { url: string }) {
     return () => controller.abort();
   }, [url, attempt]);
   if (!result || result.url !== url) return <div role="status" aria-label={t("filePreviewLoading")} className="h-32 animate-pulse rounded bg-muted motion-reduce:animate-none" />;
-  if (result.failed) return <div role="alert" className="space-y-2 text-sm text-destructive"><p>{t("filePreviewFailed")}</p><button type="button" className="underline" onClick={() => setAttempt(value => value + 1)}>{t("filePreviewRetry")}</button></div>;
+  if (result.failed) return <InlineAlert action={<button type="button" className="rounded-md border border-destructive/40 px-2.5 py-1 text-xs font-medium hover:bg-destructive/10" onClick={() => setAttempt(value => value + 1)}>{t("filePreviewRetry")}</button>}>{t("filePreviewFailed")}</InlineAlert>;
   return <><pre aria-label={t("filePreviewContent")} className="max-h-[55dvh] overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-sm">{result.text || t("filePreviewEmpty")}</pre>{result.truncated && <p role="status" className="text-xs text-muted-foreground">{t("filePreviewTruncated")}</p>}</>;
 }
 export function FileContentPreview({ file, url, showDownload = true }: { file: Pick<WorkflowAsset, "name" | "mime" | "size">; url: string; showDownload?: boolean }) {

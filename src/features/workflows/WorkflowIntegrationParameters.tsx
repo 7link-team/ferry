@@ -18,6 +18,7 @@ import {
   type IntegrationField,
   type IntegrationManifest,
 } from "./integrations";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 const control =
   "h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm";
@@ -195,9 +196,7 @@ function Field({
             {t("integration.optionsHelp")}
           </p>
           {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
+            <InlineAlert>{error}</InlineAlert>
           )}
         </div>
       )}
@@ -316,7 +315,7 @@ export function WorkflowIntegrationParameters({
           change(next);
         }}/>
         <p className="text-xs leading-5 text-muted-foreground">{t("integration.connectionHelp")}</p>
-        {repositories.error && <p role="alert" className="text-sm text-destructive">{repositories.error}</p>}
+        {repositories.error && <InlineAlert>{repositories.error}</InlineAlert>}
         {clone && !!value.connection_id && repositories.connection?.provider !== "git" && <AutoField label={<>{t("actions.cloneMultiple")}</>} className="min-w-40"><Switch   disabled={readOnly} checked={batch} onCheckedChange={checked => {
           const next = {...value};
           if (checked) next.repositories = repositories.repositories.filter(row => row.url === value.url).map(({url,name,full_name}) => ({url,name,full_name}));
@@ -414,9 +413,7 @@ export function WorkflowIntegrationParameters({
         {integrationText(spec.ui.credential_help_key)}
       </p>}
       {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
+        <InlineAlert>{error}</InlineAlert>
       )}
       {required.map(([key, definition]) => field(key, definition))}
       {!!optional.length && (
@@ -529,9 +526,7 @@ export function WorkflowIntegrationParameters({
                 />
               </label>
               {error && (
-                <p role="alert" className="text-sm text-destructive">
-                  {error}
-                </p>
+                <InlineAlert>{error}</InlineAlert>
               )}
               </div>
               <div className="dialog-footer mt-4">

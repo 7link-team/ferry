@@ -19,6 +19,7 @@ import type { Attachment } from "./AttachmentView";
 import everydayWallpaper from "./wallpapers/everyday.svg";
 import cosmosWallpaper from "./wallpapers/cosmos.svg";
 import botanicalWallpaper from "./wallpapers/botanical.svg";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export interface ChatAppearance {
   pattern: string;
@@ -365,9 +366,7 @@ export function ConversationAppearance({
           </div>
           <div className="shrink-0 space-y-3 border-t bg-background p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             {error && (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
+              <InlineAlert>{error}</InlineAlert>
             )}
             <div className="flex gap-3">
               <Button

@@ -8,6 +8,7 @@ import { Input } from "../../shared/ui/input";
 import { IdentityAvatar, type AvatarValue } from "../../shared/ui/identity-avatar";
 import { conversationText as t } from "./resource-config";
 import { MemberActivity, type ActivityItems, type ActivityTurn } from "./MemberActivity";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export interface ConversationMember {
   id: string; name: string; kind: "user" | "agent";
@@ -82,7 +83,7 @@ export function ConversationMembers({ open, onOpenChange, selected, onSelect, ti
             {!filtered.length && <p role="status" className="py-8 text-center text-sm text-muted-foreground">{t("noMatchingMembers")}</p>}
             {executionDetails}
           </>}
-          {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
+          {error && <InlineAlert className="mt-4">{error}</InlineAlert>}
         </div>
         {(canChat || !member && manage) && <footer className="shrink-0 border-t bg-background p-4 pb-[max(1rem,env(safe-area-inset-bottom))] [&>button]:min-h-11 [&>button]:w-full">{member ? <Button disabled={busy} onClick={() => void startChat()}><MessageSquare />{t(busy ? "creatingConversation" : "startDirectChat")}</Button> : manage}</footer>}
       </Dialog.Content>

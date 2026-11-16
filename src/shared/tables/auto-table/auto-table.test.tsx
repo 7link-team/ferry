@@ -33,6 +33,13 @@ it("illustrates empty data and filtered results while preserving custom messages
   await act(async () => root.render(<AutoTable columns={[{field:"name",name:"Name"}]} state={{rows:[],total:0,query:{page:1,pageSize:20},error:"offline"}} />));
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("offline");
   expect(host.querySelector('[role="status"]')).toBeNull();
+  // A load error is the shared alert with a Retry action wired to the table's retry.
+  const onRetry = vi.fn();
+  await act(async () => root.render(<AutoTable columns={[{field:"name",name:"Name"}]} onRetry={onRetry} state={{rows:[],total:0,query:{page:1,pageSize:20},error:"加载失败"}} />));
+  const alert = host.querySelector('[role="alert"]')!;
+  expect(alert.className).toContain("border-destructive/40");
+  await act(async () => [...alert.querySelectorAll("button")].find(button => button.textContent === "重试")!.click());
+  expect(onRetry).toHaveBeenCalledOnce();
 });
 it("opens rows by mouse and keyboard while giving embedded controls and columns priority", async () => {
   const open = vi.fn(),

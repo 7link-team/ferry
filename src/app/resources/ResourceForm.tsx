@@ -45,6 +45,7 @@ import { MarketplaceRepository,PipelineRepository,PipelineRepositories } from ".
 import { RepositorySource } from "../pages/RepositorySource";
 import { RunnerConnection } from "../pages/RunnerConnection";
 import { href,navigate,parse,replacePath,safeLoginRedirect,useRoute } from "../router";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 /** The side-menu group last opened in each grouped form during this session. */
 
@@ -401,7 +402,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
             <div className="dialog-body space-y-4">
             <AutoField label={commonText("form.templateName")} className="block space-y-2 text-sm"><Input value={templateName} maxLength={60} onChange={event => setTemplateName(event.target.value)} /></AutoField>
             <AutoField label={commonText("common.description")} className="block space-y-2 text-sm"><Input value={templateDescription} onChange={event => setTemplateDescription(event.target.value)} /></AutoField>
-            {templateError && <p role="alert" className="text-sm text-destructive">{templateError}</p>}
+            {templateError && <InlineAlert>{templateError}</InlineAlert>}
             </div>
             <div className="dialog-footer mt-4"><Button type="button" variant="outline" onClick={() => setTemplateDialog(null)}>{commonText("common.cancel")}</Button><Button type="button" disabled={templateBusy || !templateName.trim()} onClick={async () => {
               setTemplateBusy(true); setTemplateError("");
@@ -641,7 +642,7 @@ function Field<T>({
   }
 
   if (field.type === "actions-template-editor" && !envelope) return <Wrapper field={field}>
-    <p role="alert" className="text-sm text-destructive">{templateError}</p>
+    <InlineAlert>{templateError}</InlineAlert>
     <FieldControl name={field.key} field={{ name: field.label, type: "code" }} value={text} readonly={readOnly} onChange={value => onChange({ content: value })} />
   </Wrapper>;
   if (field.type === "actions-editor" || field.type === "actions-template-editor") {
@@ -790,7 +791,7 @@ export function ResourceActionDialog<T>({ action, row, workspace, permissions, o
    }}>
     <div className="dialog-body space-y-4">
     {fields.map(field=><Field key={field.key} field={field} workspace={workspace} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={permissions} reportOptions={report} onChange={value=>setValues(current=>({...current,...Object.fromEntries((field.resetOnChange??[]).map(key=>[key,undefined])),...(field.type === "custom" && field.render ? value as Record<string, unknown> : { [field.key]: value }),...field.patchOnChange?.(value,current)}))} />)}
-    {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
+    {error&&<InlineAlert>{error}</InlineAlert>}
     </div>
     <div className="dialog-footer mt-4"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>{commonText("common.cancel")}</Button><Button type="submit" disabled={busy||incomplete||Object.values(blocked).some(Boolean)}>{busy?commonText("common.processing"):commonText("form.confirmAction", { action: configText(action.label, action.labelKey) })}</Button></div>
    </AutoForm>

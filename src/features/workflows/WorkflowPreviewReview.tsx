@@ -5,6 +5,7 @@ import { listResource } from "../../shared/api/resource";
 import { commonText, workflowText as t } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { previewLink, type Hole } from "../holes/resource-config";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 type Preview = Hole & { review_state: string };
 const reviewText = (state: string) => {
@@ -52,6 +53,6 @@ export function WorkflowPreviewReview({ workspace, execution, node, canReview, r
         </div>}
       </div>;
     })}
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {error && <InlineAlert>{error}</InlineAlert>}
   </section>;
 }

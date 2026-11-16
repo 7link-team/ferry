@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { commonText } from "../shared/i18n/i18n";
 import { Button } from "../shared/ui/button";
 import { Input } from "../shared/ui/input";
+import { InlineAlert } from "../shared/ui/inline-alert";
 
 export type LoginChallengeData = {
   required: boolean; kind?: "image" | "math" | "select" | "slider" | "turnstile";
@@ -77,7 +78,7 @@ export function LoginChallenge({ challenge, onProof, onRefresh, onVerify, busy }
         <p id={sliderHelpId} role="status" className="text-sm text-muted-foreground">{text(dragging ? "sliderDragging" : answer ? "sliderReady" : "sliderIdle")}</p>
       </div> : <Input aria-label={text("answer")} value={answer} maxLength={32} disabled={busy} autoComplete="off" inputMode={challenge.kind === "math" ? "numeric" : "text"} placeholder={text("answer")} onChange={event => update(event.target.value)} />}
     </>}
-    {unavailable && <p role="alert" className="text-sm text-destructive">{text("unavailable")}</p>}
+    {unavailable && <InlineAlert>{text("unavailable")}</InlineAlert>}
     <Button type="button" variant="ghost" disabled={busy} onClick={onRefresh}>{text("refresh")}</Button>
   </div>;
 }

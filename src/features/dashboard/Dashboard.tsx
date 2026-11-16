@@ -4,6 +4,7 @@ import { api,errorText } from "../../shared/api/api";
 import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
 import { currentLocale } from "../../shared/i18n/locale";
 import { Button } from "../../shared/ui/button";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 interface Summary {
   counts: Record<string, number>;
@@ -104,11 +105,7 @@ export function Dashboard({ workspace }: { workspace: string }) {
           </span>
         )}
       </div>
-      {error && (
-        <p role="alert" className="text-destructive">
-          {error}
-        </p>
-      )}
+      {error && <InlineAlert>{error}</InlineAlert>}
       {!data && busy && !error && <LoadingSkeleton variant="page" />}
       {data && (
         <>

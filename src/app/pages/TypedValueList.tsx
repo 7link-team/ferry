@@ -9,6 +9,7 @@ import { categoryLabel } from "../../features/maintenance/typed-resources";
 import { ResourceTable } from "../resources/ResourceTable";
 import { useQueryValue } from "../router";
 import { GroupSidebar, type GroupNode } from "./GroupSidebar";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export function TypedValueList({ config, workspace, permissions }: {
  config: ListConfig<TypedValueRow>; workspace: string; permissions: Set<string>;
@@ -40,7 +41,7 @@ export function TypedValueList({ config, workspace, permissions }: {
  return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 sm:flex-row">
   <GroupSidebar workspace={workspace} permissions={permissions} resource={resource} noun={typedText("category")} active={category} onSelect={select} groups={groups} {...(total === undefined ? {} : { total })} />
   <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-   {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+   {error && <InlineAlert>{error}</InlineAlert>}
    <ResourceTable config={table} workspace={workspace} permissions={permissions} onLoaded={refreshGroups} />
   </div>
  </div>;

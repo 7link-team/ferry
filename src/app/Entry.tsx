@@ -18,6 +18,7 @@ import { Input } from "../shared/ui/input";
 import { navigate,useRoute } from "./router";
 import { LoginChallenge, type LoginChallengeData, type LoginProof } from "./LoginChallenge";
 import { OtpLogin } from "./AccountOtp";
+import { InlineAlert } from "../shared/ui/inline-alert";
 
 type Step = "setup" | "sign-in" | "register" | "workspace";
 
@@ -225,7 +226,7 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
             <Dialog.Title className="text-base font-semibold">{commonText("resource-domain:loginGuard.title")}</Dialog.Title>
             <Dialog.Description className="text-sm text-muted-foreground">{commonText("resource-domain:loginGuard.dialogHelp")}</Dialog.Description>
             <div className="dialog-body space-y-4">
-            {verificationError&&<p role="alert" className="text-sm text-destructive">{verificationError}</p>}
+            {verificationError&&<InlineAlert>{verificationError}</InlineAlert>}
             <LoginChallenge challenge={challenge} onProof={setProof} onVerify={verifyChallenge} busy={busy} onRefresh={()=>void run(async()=>{setVerificationError("");await refreshChallenge(loginEmail);})} />
             {busy&&<p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />{commonText(verified?"resource-domain:loginGuard.verified":"resource-domain:loginGuard.verifying")}</p>}
             </div>

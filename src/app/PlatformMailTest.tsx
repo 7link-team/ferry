@@ -4,6 +4,7 @@ import {commonText as t} from "../shared/i18n/i18n";
 import {AutoField} from "../shared/forms/auto-form";
 import {Input} from "../shared/ui/input";
 import {Button} from "../shared/ui/button";
+import { InlineAlert } from "../shared/ui/inline-alert";
 
 /** Tests the saved configuration, then reloads its verification state/version. */
 export function PlatformMailTest({readOnly,onVerified,draft,locale,template}:{readOnly:boolean;draft:Record<string,unknown>;onVerified:(value:Record<string,unknown>)=>void;locale?:string;template?:{subject:string;body:string;html:string}}) {
@@ -18,7 +19,7 @@ export function PlatformMailTest({readOnly,onVerified,draft,locale,template}:{re
         setSuccess(true);
       }catch(e){setMessage(errorText(e));}finally{setBusy(false);}
     }}>{t(busy?"common-domain:common.loading":"resource-domain:platform.mailTest")}</Button></div>
-    {message&&<p role="alert" className="text-sm text-destructive">{message}</p>}
+    {message&&<InlineAlert>{message}</InlineAlert>}
     {success&&<p role="status" className="text-sm text-muted-foreground">{t("resource-domain:platform.mailTestSent")}</p>}
   </div></AutoField>;
 }

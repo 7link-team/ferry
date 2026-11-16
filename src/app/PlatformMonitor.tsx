@@ -14,6 +14,7 @@ import { PlatformFileCatalog } from "./PlatformFileCatalog";
 import { DeleteConfirmDialog } from "../shared/ui/DeleteConfirmDialog";
 import { ResourceTable } from "./resources/ResourceTable";
 import type { ListConfig } from "../shared/resources/types";
+import { InlineAlert, RetryButton } from "../shared/ui/inline-alert";
 
 type Row = Record<string, unknown>;
 type Snapshot = Record<string, any>;
@@ -107,7 +108,7 @@ export function PlatformMonitor({ section }: { section: string }) {
         <select className="h-9 rounded-md border bg-background px-3 text-sm" aria-label={commonText("table.autoRefresh")} value={refresh} onChange={event => setRefresh(Number(event.target.value))}>{[0, 5, 10, 15, 30, 60].map(seconds => <option key={seconds} value={seconds}>{seconds ? `${seconds}s` : commonText("table.off")}</option>)}</select>
         {!!refresh && <span role="timer" className="text-sm tabular-nums">{remaining}s</span>}</>}
       </div>
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {error && <InlineAlert action={<RetryButton disabled={pending} onClick={() => void load()} />}>{error}</InlineAlert>}
       {!data && pending && <LoadingSkeleton variant="page" />}
       {data && active === "database" && <Tabs value={tab} onValueChange={setTab} className="min-w-0">
         <TabsList aria-label={t(active)} className="max-w-full flex-wrap group-data-[orientation=horizontal]/tabs:h-auto"><TabsTrigger value="overview">{t("overview")}</TabsTrigger><TabsTrigger value="pools">{t("nodePools")}</TabsTrigger><TabsTrigger value="sql">{t("sql")}</TabsTrigger><TabsTrigger value="tables">{t("tables")}</TabsTrigger><TabsTrigger value="inspect">{t("inspect")}</TabsTrigger></TabsList>
