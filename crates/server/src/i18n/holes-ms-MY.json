@@ -23,5 +23,7 @@
   "holes.entryTimeout": "Terowong sementara tidak sedia dalam 45 saat. Pintu masuk asal dikekalkan.",
   "holes.targetNotPrivate": "Sasaran mesti hos Runner ini atau alamat pada rangkaian setempatnya (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10 atau IPv6 ULA). Alamat awam, pautan setempat dan metadata awan tidak dibenarkan.",
   "holes.targetInvalid": "Masukkan alamat IP atau nama hos tanpa skema, port atau laluan.",
-  "holes.targetRunnerUpgrade": "Pemajuan ke alamat LAN memerlukan Runner 0.5.0-alpha atau lebih baharu pada hos ini. Naik taraf Runner, atau biarkan sasaran kosong untuk menggunakan port hos ini."
+  "holes.targetRunnerUpgrade": "Pemajuan ke alamat LAN memerlukan Runner 0.5.0-alpha atau lebih baharu pada hos ini. Naik taraf Runner, atau biarkan sasaran kosong untuk menggunakan port hos ini.",
+  "holes.lastCheck": "Semakan terkini: ",
+  "holes.macLocalNetwork": "macOS mungkin menyekat HostAgent daripada rangkaian setempat: dalam Tetapan Sistem → Privasi & Keselamatan → Rangkaian Setempat, benarkan ferry-runner. Jika tiada dalam senarai, pasang semula HostAgent untuk pengguna semasa."
 }

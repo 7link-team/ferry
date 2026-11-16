@@ -154,7 +154,7 @@ pub(crate) async fn views(
             "expires_at": row.expires_at,
             "revoked_at": row.revoked_at,
             "probe_state": row.probe_state,
-            "probe_error": crate::i18n::render_stored(crate::i18n::current_locale(), &row.probe_error),
+            "probe_error": explain_probe_error(crate::i18n::current_locale(), &row.probe_error),
             "source_kind": row.source_kind,
             "source_id": Id::from(row.source_id),
             "source_ref": row.source_ref,
@@ -732,4 +732,20 @@ async fn probe_round(s: &AppState, owner: &str) -> Result<()> {
 /// Stored probe error text is bounded by the column.
 fn bounded(text: &str) -> String {
     text.chars().take(ERROR_LIMIT).collect()
+}
+
+/// The stored probe failure in the reader's language. macOS reports a blocked
+/// LAN connection from a background service as "No route to host" (os error 65,
+/// only macOS uses that number for it), so that case gets the fix next to it.
+pub(crate) fn explain_probe_error(locale: crate::i18n::Locale, stored: &str) -> String {
+    let text = crate::i18n::render_stored(locale, stored);
+    if text.contains("(os error 65)") {
+        let hint = crate::i18n::render(locale, &crate::i18n::Message::new("holes.macLocalNetwork"));
+        format!(
+            "{text}
+{hint}"
+        )
+    } else {
+        text
+    }
 }

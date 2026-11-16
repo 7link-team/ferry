@@ -1141,7 +1141,9 @@ async fn proxy_isolates_the_console_and_releases_every_connection() {
             .send()
             .await
             .unwrap();
-        assert_eq!(response.status(), 502, "{expected}");
+        // 503, never 502/504: Cloudflare would replace those with its own page.
+        assert_eq!(response.status(), 503, "{expected}");
+        assert!(response.headers().contains_key("retry-after"));
         let row = holes::Entity::find_by_id(id)
             .one(&s.db)
             .await
@@ -1154,6 +1156,17 @@ async fn proxy_isolates_the_console_and_releases_every_connection() {
                 "{}",
                 row.probe_error
             );
+        }
+        if expected == "unreachable" {
+            // The next visitor is told what the check found.
+            let again = client
+                .get(format!("{base}{}", hole["url"].as_str().unwrap()))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(again.status(), 503);
+            let text = again.text().await.unwrap();
+            assert!(text.contains(&target.to_string()), "{text}");
         }
         assert_eq!(proxy::active(id), 0, "failed opens leave nothing behind");
     }
@@ -1557,4 +1570,18 @@ async fn lan_targets_reach_the_runner_with_their_address_and_require_a_current_r
         "[fd00::1]:8080"
     );
     assert_eq!(proxy::tests_upstream_authority("", 5173), "localhost:5173");
+}
+
+#[test]
+fn a_blocked_lan_connection_on_macos_explains_the_local_network_permission() {
+    let locale = crate::i18n::Locale::ZhCn;
+    let stored = crate::i18n::store_raw(
+        "主机代理执行失败：无法连接192.168.0.2端口 8006：No route to host (os error 65)",
+    );
+    let text = crate::holes::explain_probe_error(locale, &stored);
+    assert!(text.contains("192.168.0.2"));
+    assert!(text.contains("本地网络"), "{text}");
+    // Other systems' unreachable errors get no macOS advice.
+    let linux = crate::i18n::store_raw("No route to host (os error 113)");
+    assert!(!crate::holes::explain_probe_error(locale, &linux).contains("本地网络"));
 }

@@ -23,5 +23,7 @@
   "holes.entryTimeout": "临时隧道未在 45 秒内就绪；已有入口保持不变。",
   "holes.targetNotPrivate": "目标地址只能是 Runner 本机或其局域网地址（回环、10/8、172.16/12、192.168/16、100.64/10 或 IPv6 ULA），不允许公网、链路本地和云元数据地址。",
   "holes.targetInvalid": "请输入 IP 或主机名，不要包含协议、端口或路径。",
-  "holes.targetRunnerUpgrade": "转发到局域网地址需要该主机的 Runner 为 0.5.0-alpha 或更高版本。请升级 Runner，或将目标地址留空以使用本机端口。"
+  "holes.targetRunnerUpgrade": "转发到局域网地址需要该主机的 Runner 为 0.5.0-alpha 或更高版本。请升级 Runner，或将目标地址留空以使用本机端口。",
+  "holes.lastCheck": "最近一次检测：",
+  "holes.macLocalNetwork": "macOS 可能阻止了主机代理访问局域网：请在“系统设置 → 隐私与安全性 → 本地网络”中允许 ferry-runner；若列表中没有，请改用“当前用户”方式重新安装主机代理。"
 }

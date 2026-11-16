@@ -654,7 +654,7 @@ pub(super) async fn serve_entry(
         Ok(_) => return not_found(),
         Err(error) => {
             tracing::warn!(%error, "预览穿透查询失败");
-            return refuse(StatusCode::BAD_GATEWAY, "holes.unavailable");
+            return refuse(StatusCode::SERVICE_UNAVAILABLE, "holes.unavailable");
         }
     };
     match super::ingress::Entry::read(&s, &row) {
@@ -722,8 +722,10 @@ pub(super) async fn serve_entry(
         Request::from_parts(parts, http_body_util::Limited::new(body, BODY_LIMIT));
     let mut response =
         match tokio::time::timeout(RESPONSE_TIMEOUT, client().request(upstream_request)).await {
-            Err(_) => return refuse(StatusCode::GATEWAY_TIMEOUT, "holes.timeout"),
-            Ok(Err(error)) => return failure(&error),
+            // 503, not 502/504: Cloudflare replaces origin 502/504 pages with
+            // its own, which would hide why the preview failed.
+            Err(_) => return refuse_with(StatusCode::SERVICE_UNAVAILABLE, "holes.timeout", &row),
+            Ok(Err(error)) => return failure(&error, &row),
             Ok(Ok(response)) => response,
         };
     if response.status() == StatusCode::SWITCHING_PROTOCOLS {
@@ -733,7 +735,7 @@ pub(super) async fn serve_entry(
                 tokio::spawn(splice(client_upgrade, upstream_upgrade));
             }
             // A 101 nobody asked for cannot be relayed.
-            None => return refuse(StatusCode::BAD_GATEWAY, "holes.unavailable"),
+            None => return refuse_with(StatusCode::SERVICE_UNAVAILABLE, "holes.unavailable", &row),
         }
     }
     let (mut head, body) = response.into_parts();
@@ -762,13 +764,15 @@ fn upgrade_requested(headers: &HeaderMap) -> bool {
             .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
 }
 
-fn failure(error: &hyper_util::client::legacy::Error) -> Response {
+fn failure(error: &hyper_util::client::legacy::Error, row: &holes::Model) -> Response {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
     while let Some(current) = source {
         if let Some(refused) = current.downcast_ref::<Refused>() {
             return match refused {
                 Refused::Busy => refuse(StatusCode::SERVICE_UNAVAILABLE, "holes.busy"),
-                Refused::Unavailable => refuse(StatusCode::BAD_GATEWAY, "holes.unavailable"),
+                Refused::Unavailable => {
+                    refuse_with(StatusCode::SERVICE_UNAVAILABLE, "holes.unavailable", row)
+                }
             };
         }
         if current
@@ -779,7 +783,29 @@ fn failure(error: &hyper_util::client::legacy::Error) -> Response {
         }
         source = current.source();
     }
-    refuse(StatusCode::BAD_GATEWAY, "holes.unavailable")
+    refuse_with(StatusCode::SERVICE_UNAVAILABLE, "holes.unavailable", row)
+}
+
+/// A refusal that also says what the latest check of this preview found
+/// (e.g. which address the Runner could not reach and why).
+fn refuse_with(status: StatusCode, key: &str, row: &holes::Model) -> Response {
+    let locale = crate::i18n::current_locale();
+    let mut text = crate::i18n::render(locale, &Message::new(key));
+    if !row.probe_error.is_empty() {
+        let detail = crate::holes::explain_probe_error(locale, &row.probe_error);
+        let label = crate::i18n::render(locale, &Message::new("holes.lastCheck"));
+        text = format!(
+            "{text}
+
+{label}{detail}"
+        );
+    }
+    let mut response = refuse(status, key);
+    *response.body_mut() = Body::from(text);
+    response
+        .headers_mut()
+        .insert(header::RETRY_AFTER, HeaderValue::from_static("10"));
+    response
 }
 
 fn preflight(request: &HeaderMap) -> Response {
