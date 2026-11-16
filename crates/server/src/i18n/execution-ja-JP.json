@@ -13,7 +13,6 @@
   "execution.referenceMissing": "選択した{noun}は現在のワークスペースに存在しません。",
   "execution.versionConflict": "レコードが変更されました。更新して再試行してください。",
   "execution.artifactReferenced": "パイプラインはアプリケーションのビルド成果物から参照されています。",
-  "execution.definitionJson": "パイプライン定義は有効な JSON にしてください。",
   "execution.definitionObject": "パイプライン定義は JSON オブジェクトにしてください。",
   "execution.definitionUnknownFields": "パイプライン定義に不明なフィールドがあります。",
   "execution.workdirString": "パイプラインの workdir は絶対パスの文字列にしてください。",
@@ -233,5 +232,6 @@
   "workflow.integrationRemoteReason": "{reason}",
   "workflow.integrationNotJson": "アプリケーションは HTTP {status} を返しましたが、JSON ではありません。リクエスト先とパラメーターを確認してください（呼び出しは反映済みの可能性があります）。",
   "workflow.integrationTooLarge": "アプリケーションの応答が 1 MiB の上限を超えています。範囲を絞るかページ単位で読み取ってください（呼び出しは反映済みの可能性があります）。",
-  "workflow.integrationSecretEcho": "アプリケーションの応答に呼び出しで使用した認証情報が含まれていたため、結果を拒否し保存しませんでした。"
+  "workflow.integrationSecretEcho": "アプリケーションの応答に呼び出しで使用した認証情報が含まれていたため、結果を拒否し保存しませんでした。",
+  "execution.definitionJsonAt": "パイプライン定義の {line} 行 {column} 列が有効な JSON ではありません。"
 }

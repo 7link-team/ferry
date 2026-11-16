@@ -106,12 +106,7 @@ fn grant(scope: &Scope, permissions: &[String]) -> Result<()> {
     Ok(())
 }
 fn role_permissions(role: &roles::Model) -> Result<Vec<String>> {
-    serde_json::from_str(&role.permissions).map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("workspace.error.role_permissions_invalid"),
-        )
-    })
+    serde_json::from_str(&role.permissions).map_err(crate::error::internal_fault)
 }
 fn role_json(row: roles::Model) -> Value {
     json!({"id": Id::from(row.id), "name": workspace::role_name(&row.name, row.builtin != 0), "builtin": row.builtin != 0,

@@ -13,7 +13,6 @@
   "execution.referenceMissing": "所選{noun}不存在於當前工作空間。",
   "execution.versionConflict": "記錄已被修改，請重新整理後重試。",
   "execution.artifactReferenced": "流水線仍被應用的構建產物引用。",
-  "execution.definitionJson": "流水線定義必須是合法的 JSON。",
   "execution.definitionObject": "流水線定義必須是 JSON 物件。",
   "execution.definitionUnknownFields": "流水線定義包含未知欄位。",
   "execution.workdirString": "流水線 workdir 必須是絕對路徑字串。",
@@ -233,5 +232,6 @@
   "workflow.integrationRemoteReason": "{reason}",
   "workflow.integrationNotJson": "應用回傳了 HTTP {status}，但回應不是 JSON。請檢查要求位址和參數；該呼叫可能已生效。",
   "workflow.integrationTooLarge": "應用的回應超過 1 MiB 上限，請縮小查詢範圍或分頁讀取；該呼叫可能已生效。",
-  "workflow.integrationSecretEcho": "應用的回應中包含本次呼叫使用的憑據，已拒絕且未儲存該結果。"
+  "workflow.integrationSecretEcho": "應用的回應中包含本次呼叫使用的憑據，已拒絕且未儲存該結果。",
+  "execution.definitionJsonAt": "流水線定義在第 {line} 行第 {column} 欄不是合法的 JSON。"
 }

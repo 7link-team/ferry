@@ -487,5 +487,10 @@
     "通知チャネルを選択し、本文またはテンプレート変数を入力してください。",
     "채널을 선택하고 본문 또는 템플릿 변수를 입력하세요.",
     "Pilih saluran dan lengkapkan mesej atau pemboleh ubah templat."
-  ]
+  ],
+  "testChannel": ["Test channel", "测试渠道", "測試通道", "チャネルをテスト", "채널 테스트", "Uji saluran"],
+  "lastTest": ["Last test", "最近测试", "最近測試", "最終テスト", "최근 테스트", "Ujian terakhir"],
+  "notTested": ["Not tested yet — use Test channel to send a test message.", "尚未测试——请用“测试渠道”发送一条测试消息。", "尚未測試——請用「測試通道」傳送一則測試訊息。", "未テスト — 「チャネルをテスト」でテストメッセージを送ってください。", "아직 테스트하지 않음 — '채널 테스트'로 테스트 메시지를 보내세요.", "Belum diuji — gunakan Uji saluran untuk menghantar mesej ujian."],
+  "testSucceeded": ["Delivered at {{at}}", "{{at}} 投递成功", "{{at}} 傳遞成功", "{{at}} に配信成功", "{{at}}에 전달됨", "Dihantar pada {{at}}"],
+  "testFailed": ["Failed at {{at}}: {{reason}}", "{{at}} 测试未成功：{{reason}}", "{{at}} 測試未成功：{{reason}}", "{{at}} に失敗：{{reason}}", "{{at}}에 실패: {{reason}}", "Gagal pada {{at}}: {{reason}}"]
 }

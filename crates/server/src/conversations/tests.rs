@@ -1527,3 +1527,36 @@ fn a_turn_labels_agent_instructions_apart_from_the_users_own_words() {
         bare.ends_with("<user_message>\nA message with attachments was sent.\n</user_message>")
     );
 }
+
+#[test]
+fn message_limits_are_each_named() {
+    let attachment = |name: &str, text: &str| -> Attachment {
+        serde_json::from_value(json!({"name":name,"text":text})).unwrap()
+    };
+    let key = |result: Result<()>| result.unwrap_err().2.unwrap().key;
+    assert_eq!(
+        key(check_message("  ", "c", &[])),
+        "conversations.messageEmpty"
+    );
+    assert_eq!(
+        key(check_message("hi", "", &[])),
+        "conversations.clientInvalid"
+    );
+    assert_eq!(
+        key(check_message("hi", "c", &vec![attachment("a.txt", ""); 11])),
+        "conversations.tooManyAttachments"
+    );
+    assert_eq!(
+        key(check_message("hi", "c", &[attachment("", "")])),
+        "conversations.attachmentNameInvalid"
+    );
+    assert_eq!(
+        key(check_message(&"x".repeat(48 * 1024 + 1), "c", &[])),
+        "conversations.messageTooLong"
+    );
+    assert_eq!(
+        key(check_message("a\0b", "c", &[])),
+        "conversations.messageText"
+    );
+    check_message("hello", "c", &[attachment("a.txt", "text")]).unwrap();
+}

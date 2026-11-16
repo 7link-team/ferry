@@ -26,5 +26,20 @@
   "conversations.hostUnavailable": "Execution host {host} cannot run this now: {reason}. This conversation has a fixed working directory, so it does not move to another host by itself; choose \"Use another host\" to switch.",
   "conversations.executionFailedOn": "{cli} failed on host {host} or the connection dropped. Check what it already did before retrying; the host's Runner log has the details.",
   "conversations.boundHostOffline": "The bound host {host} is offline right now ({reason}). Other candidate hosts: {others}",
-  "conversations.boundHostOfflineNoOthers": "The bound host {host} is offline right now ({reason}) and there is no other candidate host. Try again once it is back online."
+  "conversations.boundHostOfflineNoOthers": "The bound host {host} is offline right now ({reason}) and there is no other candidate host. Try again once it is back online.",
+  "conversations.messageEmpty": "Type a message or attach a file before sending.",
+  "conversations.messageText": "The message contains null characters (\\0); remove them and send again.",
+  "conversations.clientInvalid": "This page sent an invalid request; reload the page and send again.",
+  "conversations.tooManyAttachments": "A message can carry at most 10 attachments.",
+  "conversations.attachmentNameInvalid": "The attachment name \"{name}\" is invalid: it must be 1–255 bytes without control characters; rename the file and attach it again.",
+  "conversations.messageTooLong": "The message and its text attachments together exceed 48 KB; shorten it or send the content as a file.",
+  "conversations.messageTooLongWithInstructions": "Together with the agent's instructions, this message exceeds 63 KB; shorten the message or the agent's instructions.",
+  "conversations.tooManyTargets": "A message can address at most 8 agents at once.",
+  "conversations.kindInvalid": "Choose a conversation type: private or group.",
+  "conversations.tooManyMembers": "A group can have at most 100 members.",
+  "conversations.tooManyAgents": "A group can have at most 8 agents.",
+  "conversations.agentRequired": "Choose an agent for the conversation.",
+  "conversations.titleRequired": "Enter a conversation title.",
+  "conversations.titleInvalid": "The conversation title must be at most 256 bytes and cannot contain null characters.",
+  "conversations.stateInvalid": "The conversation status must be active, archived or interrupted."
 }

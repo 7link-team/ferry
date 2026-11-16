@@ -13,7 +13,6 @@
   "execution.referenceMissing": "{noun} yang dipilih tidak wujud dalam ruang kerja ini.",
   "execution.versionConflict": "Rekod telah diubah. Muat semula dan cuba lagi.",
   "execution.artifactReferenced": "Saluran paip masih dirujuk oleh artifak binaan aplikasi.",
-  "execution.definitionJson": "Definisi saluran paip mestilah JSON yang sah.",
   "execution.definitionObject": "Definisi saluran paip mestilah objek JSON.",
   "execution.definitionUnknownFields": "Definisi saluran paip mengandungi medan tidak diketahui.",
   "execution.workdirString": "workdir saluran paip mestilah rentetan laluan mutlak.",
@@ -233,5 +232,6 @@
   "workflow.integrationRemoteReason": "{reason}",
   "workflow.integrationNotJson": "Aplikasi menjawab HTTP {status} tetapi bukan JSON. Semak alamat dan parameter permintaan; panggilan itu mungkin sudah berkuat kuasa.",
   "workflow.integrationTooLarge": "Respons aplikasi melebihi had 1 MiB. Kecilkan pertanyaan atau baca mengikut halaman; panggilan itu mungkin sudah berkuat kuasa.",
-  "workflow.integrationSecretEcho": "Respons aplikasi mengandungi kelayakan yang digunakan untuk panggilan, jadi hasilnya ditolak dan tidak disimpan."
+  "workflow.integrationSecretEcho": "Respons aplikasi mengandungi kelayakan yang digunakan untuk panggilan, jadi hasilnya ditolak dan tidak disimpan.",
+  "execution.definitionJsonAt": "Definisi saluran paip bukan JSON yang sah pada baris {line}, lajur {column}."
 }

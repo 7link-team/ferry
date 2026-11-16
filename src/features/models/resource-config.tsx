@@ -20,6 +20,7 @@ import {
 import { matchPreset, ProviderPresetPicker, type ProviderPreset } from "./ProviderPresets";
 import { CLI_TOOLS, CliConnection, cliToolOptions } from "./CliConnection";
 import { ModelHosts } from "./ModelHosts";
+import { CliCheck } from "./CliCheck";
 
 const key = (s: string) => `models:${s}`;
 const t = (s: string) => commonText(key(s));
@@ -330,6 +331,7 @@ export function modelsLists(
   };
 }
 export function modelsForms({
+  workspace,
   permissions,
 }: ResourceConfigContext): Record<string, FormConfig<AnyRow>> {
   return {
@@ -460,6 +462,22 @@ export function modelsForms({
               ),
             },
             {
+              key: "cli_check",
+              label: "Check execution hosts",
+              labelKey: key("cliCheck"),
+              type: "custom",
+              span: 2,
+              when: (draft) => draft.kind === "cli",
+              render: ({ draft }) => (
+                <CliCheck
+                  workspace={workspace}
+                  runtime={String(draft.runtime ?? "")}
+                  hosts={(draft.hosts ?? []) as string[]}
+                  disabled={!permissions?.has("ai-agents.probe")}
+                />
+              ),
+            },
+            {
               key: "provider_id",
               label: "Provider",
               labelKey: key("provider"),
@@ -490,6 +508,14 @@ export function modelsForms({
               // An API model calls one concrete model; the server rejects an empty one.
               required: (draft) => draft.kind === "api",
               render: (p) => <DefaultModel {...p} />,
+            },
+            {
+              key: "skip_check",
+              label: "Save without checking the connection",
+              labelKey: key("skipCheck"),
+              type: "switch",
+              helpKey: key("skipCheckHelp"),
+              when: (draft) => draft.kind === "api",
             },
             {
               key: "state",

@@ -335,28 +335,12 @@ pub(super) async fn send_message(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("conversations.run")?;
     find(&s.db, &scope, id).await?;
-    if (body.prompt.trim().is_empty() && body.attachments.is_empty())
-        || body.prompt.len() > 48 * 1024
-        || body.prompt.contains('\0')
-        || body.client_id.is_empty()
-        || body.client_id.len() > 128
-        || body.client_id.chars().any(char::is_control)
-        || body.attachments.len() > 10
-        || body.targets.len() > 8
-    {
-        return Err(invalid());
+    if body.targets.len() > 8 {
+        return Err(bad("conversations.tooManyTargets"));
     }
+    check_message(&body.prompt, &body.client_id, &body.attachments)?;
     files::canonicalize(&s, &scope, id, &mut body.attachments).await?;
-    if body.attachments.iter().any(|a| {
-        a.name.is_empty()
-            || a.name.len() > 255
-            || a.name.chars().any(char::is_control)
-            || a.text.contains('\0')
-    }) || body.attachments.iter().map(|a| a.text.len()).sum::<usize>() + body.prompt.len()
-        > 48 * 1024
-    {
-        return Err(invalid());
-    }
+    check_message(&body.prompt, &body.client_id, &body.attachments)?;
     body.targets.sort();
     body.targets.dedup();
     body.mentions.sort();

@@ -15,7 +15,7 @@ use crate::{
 };
 use axum::{extract::State, http::StatusCode};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Iterable, QueryFilter,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Iterable, QueryFilter, QueryOrder,
     QuerySelect, sea_query::Expr,
 };
 use serde::{Deserialize, Serialize};
@@ -52,6 +52,10 @@ fn invalid() -> ApiError {
 }
 fn conflict() -> ApiError {
     ApiError::localized(StatusCode::CONFLICT, Message::new("notification.conflict"))
+}
+/// One specific, actionable validation message.
+fn bad(key: &'static str) -> ApiError {
+    ApiError::localized(StatusCode::BAD_REQUEST, Message::new(key))
 }
 fn aad(workspace: i64, id: i64) -> String {
     format!("notification-channel:{workspace}:{id}")
@@ -101,19 +105,29 @@ impl Transport {
             .iter()
             .any(|locale| locale.tag() == self.language)
         {
-            return Err(invalid());
+            return Err(bad("notification.languageInvalid"));
         }
-        if serde_json::to_vec(self).map_err(|_| invalid())?.len() > 65536 {
-            return Err(invalid());
+        if serde_json::to_vec(self)
+            .map_err(crate::error::internal_fault)?
+            .len()
+            > 65536
+        {
+            return Err(bad("notification.configTooLarge"));
         }
         if provider == "SMTP" {
-            if self.recipients.len() > 20
-                || self
-                    .recipients
-                    .iter()
-                    .any(|v| v.len() > 320 || v.parse::<lettre::message::Mailbox>().is_err())
+            if self.recipients.len() > 20 {
+                return Err(bad("notification.tooManyRecipients"));
+            }
+            if let Some(value) = self
+                .recipients
+                .iter()
+                .find(|v| v.len() > 320 || v.parse::<lettre::message::Mailbox>().is_err())
             {
-                return Err(invalid());
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("notification.recipientInvalid")
+                        .with("value", value.chars().take(80).collect::<String>()),
+                ));
             }
             if self.host.is_empty()
                 || self.host.len() > 253
@@ -121,18 +135,24 @@ impl Transport {
                     .host
                     .chars()
                     .any(|c| c.is_whitespace() || c.is_control())
-                || self.port == 0
-                || !matches!(self.security.as_str(), "tls" | "starttls" | "none")
-                || self.from.parse::<lettre::message::Mailbox>().is_err()
             {
-                return Err(invalid());
+                return Err(bad("notification.smtpHostInvalid"));
+            }
+            if self.port == 0 {
+                return Err(bad("notification.smtpPortInvalid"));
+            }
+            if !matches!(self.security.as_str(), "tls" | "starttls" | "none") {
+                return Err(bad("notification.smtpSecurityInvalid"));
+            }
+            if self.from.parse::<lettre::message::Mailbox>().is_err() {
+                return Err(bad("notification.smtpFromInvalid"));
             }
         } else if super::sms::is_sms(provider) {
-            if !self.sms.validate(provider, &self.recipients) {
-                return Err(invalid());
-            }
-        } else if self.webhook.len() > 4096 || self.options.resolve(&self.webhook).is_err() {
-            return Err(invalid());
+            self.sms.check(provider, &self.recipients).map_err(bad)?;
+        } else if self.webhook.len() > 4096 {
+            return Err(bad("notification.webhookTooLong"));
+        } else if let Err(reason) = self.options.resolve(&self.webhook) {
+            return Err(ApiError::localized(StatusCode::BAD_REQUEST, reason));
         }
         Ok(())
     }
@@ -351,13 +371,95 @@ pub async fn list(
         &q,
     )
     .await?;
+    let ids = rows.iter().map(|r: &channels::Model| r.id).collect();
+    let tests = last_tests(&s.db, scope.workspace_id, ids).await?;
     let items = rows
         .iter()
-        .map(|r| Ok(public(r, &decode(&s, r)?)))
+        .map(|r| {
+            let mut value = public(r, &decode(&s, r)?);
+            value["last_test"] = tests.get(&r.id).cloned().unwrap_or(Value::Null);
+            Ok(value)
+        })
         .collect::<Result<Vec<_>>>()?;
     Ok(Json(
         json!({"items":items,"total":total,"page":q.page,"page_size":q.page_size}),
     ))
+}
+/// The latest test delivery per channel: when, and whether it arrived.
+async fn last_tests(
+    conn: &impl sea_orm::ConnectionTrait,
+    workspace: Id,
+    channels: Vec<i64>,
+) -> Result<HashMap<i64, Value>> {
+    let mut tests = HashMap::new();
+    if channels.is_empty() {
+        return Ok(tests);
+    }
+    for row in deliveries::Entity::find()
+        .filter(deliveries::Column::WorkspaceId.eq(workspace))
+        .filter(deliveries::Column::ChannelId.is_in(channels))
+        .filter(deliveries::Column::Source.eq(TEST_SOURCE))
+        .order_by_desc(deliveries::Column::CreatedAt)
+        .all(conn)
+        .await?
+    {
+        tests.entry(row.channel_id).or_insert_with(|| {
+            json!({"id":Id::from(row.id),"state":row.state,"at":row.created_at,"result":crate::i18n::display_stored(&row.result)})
+        });
+    }
+    Ok(tests)
+}
+/// Deliveries sent by "test channel" carry this source.
+const TEST_SOURCE: &str = "test";
+
+#[derive(Deserialize, Default)]
+pub struct TestBody {
+    /// SMTP only: send the test here instead of the channel's recipients.
+    #[serde(default)]
+    pub to: Vec<String>,
+}
+/// Sends a real test message through the saved channel and reports the
+/// provider's own answer, so a channel is proven before anything relies on it.
+pub async fn test(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, Id)>,
+    Json(body): Json<TestBody>,
+) -> Result<Json<Value>> {
+    if !scope.permissions.contains("notifications.update") {
+        scope.require("notifications.send")?;
+    }
+    let row = channel(&s, scope.workspace_id, id).await?;
+    if super::sms::is_sms(&row.provider) {
+        return Err(bad("notification.smsTestUnsupported"));
+    }
+    if row.enabled != 1 {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            Message::new("notification.disabled"),
+        ));
+    }
+    let locale = crate::i18n::current_locale();
+    let send = SendBody {
+        client_id: uuid::Uuid::new_v4().to_string(),
+        subject: crate::i18n::render(locale, &Message::new("notification.testSubject")),
+        body: crate::i18n::render(
+            locale,
+            &Message::new("notification.testBody").with("channel", row.name.clone()),
+        ),
+        to: body.to,
+        format: text(),
+        ..Default::default()
+    };
+    let sent = send_authorized(&s, &scope, row, send, TEST_SOURCE, "", None).await?;
+    let delivery: Id =
+        serde_json::from_value(sent["id"].clone()).map_err(crate::error::internal_fault)?;
+    let record = deliveries::Entity::find_by_id(delivery)
+        .filter(deliveries::Column::WorkspaceId.eq(scope.workspace_id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    Ok(Json(delivery_public(&record, false)))
 }
 pub async fn get(
     State(s): State<AppState>,
@@ -366,7 +468,12 @@ pub async fn get(
 ) -> Result<Json<Value>> {
     scope.require("notifications.read")?;
     let row = channel(&s, scope.workspace_id, id).await?;
-    Ok(Json(public(&row, &decode(&s, &row)?)))
+    let mut value = public(&row, &decode(&s, &row)?);
+    value["last_test"] = last_tests(&s.db, scope.workspace_id, vec![row.id])
+        .await?
+        .remove(&row.id)
+        .unwrap_or(Value::Null);
+    Ok(Json(value))
 }
 async fn save(
     s: &AppState,
@@ -375,27 +482,35 @@ async fn save(
     mut body: ChannelBody,
     old: Option<channels::Model>,
 ) -> Result<()> {
-    if body.name.trim().is_empty()
-        || body.name.chars().count() > 120
-        || body.description.len() > 2048
-        || body.role_ids.len() > 100
-        || ![
-            "SMTP",
-            "Aliyun SMS",
-            "Tencent SMS",
-            "WeCom",
-            "DingTalk",
-            "Feishu",
-            "Lark",
-            "Telegram",
-            "Slack",
-            "Discord",
-            "Google Chat",
-            "Webhook",
-        ]
-        .contains(&body.provider.as_str())
+    if body.name.trim().is_empty() {
+        return Err(bad("notification.nameRequired"));
+    }
+    if body.name.chars().count() > 120 {
+        return Err(bad("notification.nameTooLong"));
+    }
+    if body.description.len() > 2048 {
+        return Err(bad("notification.descriptionTooLong"));
+    }
+    if body.role_ids.len() > 100 {
+        return Err(bad("notification.tooManyRoles"));
+    }
+    if ![
+        "SMTP",
+        "Aliyun SMS",
+        "Tencent SMS",
+        "WeCom",
+        "DingTalk",
+        "Feishu",
+        "Lark",
+        "Telegram",
+        "Slack",
+        "Discord",
+        "Google Chat",
+        "Webhook",
+    ]
+    .contains(&body.provider.as_str())
     {
-        return Err(invalid());
+        return Err(bad("notification.providerUnknown"));
     }
     for role in &body.role_ids {
         if workspace_roles::Entity::find_by_id(*role)
@@ -404,7 +519,7 @@ async fn save(
             .await?
             .is_none()
         {
-            return Err(ApiError::missing());
+            return Err(bad("notification.roleNotFound"));
         }
     }
     if let Some(old) = &old {

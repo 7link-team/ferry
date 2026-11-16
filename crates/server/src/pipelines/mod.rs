@@ -708,10 +708,12 @@ pub(crate) fn convert_legacy(input: &str, target_kind: &str, target_ref: &str) -
     if !input.contains(".Values.") {
         validate_definition(input)?;
     }
-    let legacy: Value = serde_json::from_str(input).map_err(|_| {
+    let legacy: Value = serde_json::from_str(input).map_err(|error| {
         ApiError::localized(
             StatusCode::BAD_REQUEST,
-            Message::new("execution.definitionJson"),
+            Message::new("execution.definitionJsonAt")
+                .with("line", error.line().to_string())
+                .with("column", error.column().to_string()),
         )
     })?;
     let object = legacy.as_object().ok_or_else(|| {
@@ -1033,10 +1035,12 @@ pub fn validate_definition(input: &str) -> Result<Definition> {
             Message::new("execution.definitionTooLarge"),
         ));
     }
-    let value: Value = serde_json::from_str(input).map_err(|_| {
+    let value: Value = serde_json::from_str(input).map_err(|error| {
         ApiError::localized(
             StatusCode::BAD_REQUEST,
-            Message::new("execution.definitionJson"),
+            Message::new("execution.definitionJsonAt")
+                .with("line", error.line().to_string())
+                .with("column", error.column().to_string()),
         )
     })?;
     let object = value.as_object().ok_or_else(|| {

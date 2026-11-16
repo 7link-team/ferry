@@ -32,36 +32,67 @@ pub(crate) fn phone(value: &str) -> bool {
 }
 impl Config {
     pub fn validate(&self, provider: &str, recipients: &[String]) -> bool {
+        self.check(provider, recipients).is_ok()
+    }
+    /// The first setting that is wrong, as a message key naming it.
+    pub fn check(&self, provider: &str, recipients: &[String]) -> Result<(), &'static str> {
         let token = |s: &str, max: usize| {
             !s.is_empty()
                 && s.len() <= max
                 && s.bytes()
                     .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
         };
-        token(&self.sms_access_key, 128)
-            && !self.sms_secret_key.is_empty()
-            && self.sms_secret_key.len() <= 256
-            && self.sms_sign_name.chars().count() <= 50
-            && !self.sms_sign_name.trim().is_empty()
-            && !self.sms_sign_name.chars().any(char::is_control)
-            && token(&self.sms_template_code, 128)
-            && (provider != "Tencent SMS"
-                || (token(&self.sms_region, 64)
-                    && !self.sms_app_id.is_empty()
-                    && self.sms_app_id.len() <= 32
-                    && self.sms_app_id.bytes().all(|b| b.is_ascii_digit())))
-            && self.sms_parameter_names.len() <= 20
-            && self.sms_parameter_names.iter().all(|s| token(s, 64))
-            && self
+        if !token(&self.sms_access_key, 128) {
+            return Err("notification.smsAccessKey");
+        }
+        if self.sms_secret_key.is_empty() || self.sms_secret_key.len() > 256 {
+            return Err("notification.smsSecretKey");
+        }
+        if self.sms_sign_name.chars().count() > 50
+            || self.sms_sign_name.trim().is_empty()
+            || self.sms_sign_name.chars().any(char::is_control)
+        {
+            return Err("notification.smsSignName");
+        }
+        if !token(&self.sms_template_code, 128) {
+            return Err("notification.smsTemplateCode");
+        }
+        if provider == "Tencent SMS" {
+            if !token(&self.sms_region, 64) {
+                return Err("notification.smsRegion");
+            }
+            if self.sms_app_id.is_empty()
+                || self.sms_app_id.len() > 32
+                || !self.sms_app_id.bytes().all(|b| b.is_ascii_digit())
+            {
+                return Err("notification.smsAppId");
+            }
+        }
+        if self.sms_parameter_names.len() > 20
+            || !self.sms_parameter_names.iter().all(|s| token(s, 64))
+            || self
                 .sms_parameter_names
                 .iter()
                 .collect::<std::collections::HashSet<_>>()
                 .len()
-                == self.sms_parameter_names.len()
-            && recipients.len() <= 20
-            && recipients.iter().all(|s| {
-                phone(s) && (provider != "Aliyun SMS" || s.starts_with("+86") && s.len() == 14)
-            })
+                != self.sms_parameter_names.len()
+        {
+            return Err("notification.smsParameterNames");
+        }
+        if recipients.len() > 20 {
+            return Err("notification.tooManyRecipients");
+        }
+        if !recipients.iter().all(|s| phone(s)) {
+            return Err("notification.smsPhoneInvalid");
+        }
+        if provider == "Aliyun SMS"
+            && !recipients
+                .iter()
+                .all(|s| s.starts_with("+86") && s.len() == 14)
+        {
+            return Err("notification.smsPhoneMainland");
+        }
+        Ok(())
     }
     pub fn parameters(
         &self,

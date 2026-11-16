@@ -347,12 +347,8 @@ pub async fn docker_execute(
     files: &BTreeMap<String, String>,
     protected: bool,
 ) -> Result<(bool, String)> {
-    let artifact: Value = serde_json::from_str(&rev.artifact).map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("deployment.mode.009"),
-        )
-    })?;
+    let artifact: Value = serde_json::from_str(&rev.artifact)
+        .map_err(|_| crate::error::internal_fault("deployment.mode.009"))?;
     let dir = directory(app);
     let stage = format!("{dir}/revision-{}.json", rev.id);
     let current = format!("{dir}/compose.json");
@@ -370,10 +366,7 @@ pub async fn docker_execute(
             || !(name.starts_with(".variables-") && name.ends_with(".env")
                 || name.starts_with(".config-") && name.ends_with(".txt"))
         {
-            return Err(ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("deployment.mode.010"),
-            ));
+            return Err(crate::error::internal_fault("deployment.mode.010"));
         }
         let path = format!("{dir}/{name}");
         if let Err(error) = upload(ch, &path, text.clone()).await {
@@ -660,12 +653,8 @@ pub(crate) async fn native_execute(
     protected: bool,
 ) -> Result<(bool, String)> {
     use tokio::io::AsyncReadExt;
-    let artifact: Value = serde_json::from_str(&rev.artifact).map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("deployment.mode.018"),
-        )
-    })?;
+    let artifact: Value = serde_json::from_str(&rev.artifact)
+        .map_err(|_| crate::error::internal_fault("deployment.mode.018"))?;
     let dir = directory(app);
     let prefix = project(app);
     let staging = format!("{dir}/stage-{}", rev.id);
@@ -691,10 +680,7 @@ pub(crate) async fn native_execute(
     command.push_str(&format!("for unit in /etc/systemd/system/{prefix}-*.service; do [ -e \"$unit\" ] || continue; [ \"$(head -n 1 \"$unit\")\" = {} ] || exit 75; done; ",quote(&format!("# workspace.deployment={prefix}"))));
     for name in units.keys() {
         if !name.starts_with(&format!("{prefix}-")) || name.contains('/') {
-            return Err(ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("deployment.mode.020"),
-            ));
+            return Err(crate::error::internal_fault("deployment.mode.020"));
         }
         // Units installed through another systemd search path also count as occupied.
         command.push_str(&format!("found=$(systemctl show -p FragmentPath --value {} 2>/dev/null || :); if [ -n \"$found\" ]; then [ \"$(head -n 1 \"$found\")\" = {} ] || exit 75; fi; ",quote(name),quote(&format!("# workspace.deployment={prefix}"))));
@@ -706,12 +692,7 @@ pub(crate) async fn native_execute(
             let hash = reference["sha256"]
                 .as_str()
                 .filter(|h| h.len() == 64 && h.bytes().all(|c| c.is_ascii_hexdigit()))
-                .ok_or_else(|| {
-                    ApiError::localized(
-                        axum::http::StatusCode::BAD_REQUEST,
-                        crate::i18n::Message::new("deployment.mode.021"),
-                    )
-                })?;
+                .ok_or_else(|| crate::error::internal_fault("deployment.mode.021"))?;
             if !uploaded.insert(hash.to_owned()) {
                 continue;
             }
@@ -744,10 +725,7 @@ pub(crate) async fn native_execute(
             if name.contains('/')
                 || !(name.starts_with(".variables-") || name.starts_with(".config-"))
             {
-                return Err(ApiError::localized(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("deployment.mode.010"),
-                ));
+                return Err(crate::error::internal_fault("deployment.mode.010"));
             }
             upload(ch, &format!("{staging}/{name}"), text.clone()).await?;
             command.push_str(&format!(
@@ -771,10 +749,7 @@ pub(crate) async fn native_execute(
             )
         })? {
             if name.contains('/') {
-                return Err(ApiError::localized(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("deployment.mode.024"),
-                ));
+                return Err(crate::error::internal_fault("deployment.mode.024"));
             }
             upload(
                 ch,
@@ -911,12 +886,8 @@ pub(crate) async fn stack_execute(
     files: &BTreeMap<String, String>,
     protected: bool,
 ) -> Result<(bool, String)> {
-    let artifact: Value = serde_json::from_str(&rev.artifact).map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("deployment.mode.027"),
-        )
-    })?;
+    let artifact: Value = serde_json::from_str(&rev.artifact)
+        .map_err(|_| crate::error::internal_fault("deployment.mode.027"))?;
     let mut runtime = artifact.clone();
     for service in runtime["services"].as_object_mut().unwrap().values_mut() {
         // A service update is asynchronous: old Running tasks must never satisfy
@@ -932,12 +903,10 @@ pub(crate) async fn stack_execute(
                 .unwrap()
                 .entry("environment")
                 .or_insert(json!({}));
-            for path in paths.as_array().ok_or_else(|| {
-                ApiError::localized(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("deployment.mode.028"),
-                )
-            })? {
+            for path in paths
+                .as_array()
+                .ok_or_else(|| crate::error::internal_fault("deployment.mode.028"))?
+            {
                 let text = files.get(path.as_str().unwrap_or("")).ok_or_else(|| {
                     ApiError::localized(
                         axum::http::StatusCode::BAD_REQUEST,
@@ -945,13 +914,8 @@ pub(crate) async fn stack_execute(
                     )
                 })?;
                 for line in text.lines() {
-                    let values: BTreeMap<String, String> =
-                        serde_json::from_str(line).map_err(|_| {
-                            ApiError::localized(
-                                axum::http::StatusCode::BAD_REQUEST,
-                                crate::i18n::Message::new("deployment.mode.030"),
-                            )
-                        })?;
+                    let values: BTreeMap<String, String> = serde_json::from_str(line)
+                        .map_err(|_| crate::error::internal_fault("deployment.mode.030"))?;
                     for (key, value) in values {
                         environment[key] = json!(value);
                     }

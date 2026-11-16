@@ -629,3 +629,119 @@ async fn the_saved_webhook_is_echoed_masked_and_revealed_only_to_editors_with_au
         .any(|a| a.action == "reveal" && a.resource == "notification-channels");
     assert!(audited);
 }
+
+#[tokio::test]
+async fn testing_a_channel_sends_once_and_its_outcome_is_shown_on_the_channel() {
+    let (_dir, s) = setup().await;
+    let scope = admin(1);
+    let (url, count, task) = receiver(StatusCode::OK).await;
+    let (_, Json(created)) = create(State(s.clone()), scope.clone(), Json(channel_body(&url)))
+        .await
+        .unwrap();
+    let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let Json(before) = get(State(s.clone()), scope.clone(), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert!(before["last_test"].is_null());
+    let Json(delivery) = test(
+        State(s.clone()),
+        scope.clone(),
+        Path(("1".into(), id)),
+        Json(TestBody::default()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(delivery["state"], "succeeded");
+    assert_eq!(delivery["source"], "test");
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    let Json(after) = get(State(s.clone()), scope.clone(), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert_eq!(after["last_test"]["state"], "succeeded");
+    let mut reader = scope.clone();
+    reader.permissions.retain(|p| p == "notifications.read");
+    assert_eq!(
+        test(
+            State(s.clone()),
+            reader,
+            Path(("1".into(), id)),
+            Json(TestBody::default())
+        )
+        .await
+        .unwrap_err()
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn an_unreachable_webhook_is_a_known_failure_not_an_unknown_outcome() {
+    let (_dir, s) = setup().await;
+    let scope = admin(1);
+    let closed = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        format!("http://127.0.0.1:{port}/notify")
+    };
+    let (_, Json(created)) = create(State(s.clone()), scope.clone(), Json(channel_body(&closed)))
+        .await
+        .unwrap();
+    let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let Json(delivery) = test(
+        State(s.clone()),
+        scope,
+        Path(("1".into(), id)),
+        Json(TestBody::default()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(delivery["state"], "failed");
+}
+
+#[tokio::test]
+async fn channel_field_errors_name_the_field() {
+    let (_dir, s) = setup().await;
+    let scope = admin(1);
+    let cases = [
+        (
+            json!({"name":"", "provider":"Webhook", "webhook":"https://example.com/x"}),
+            "notification.nameRequired",
+        ),
+        (
+            json!({"name":"x", "provider":"Pager", "webhook":"https://example.com/x"}),
+            "notification.providerUnknown",
+        ),
+        (
+            json!({"name":"x", "provider":"Webhook", "webhook":"ftp://example.com/x"}),
+            "webhook.urlInvalid",
+        ),
+        (
+            json!({"name":"x", "provider":"WeCom", "webhook":"https://example.com/x"}),
+            "webhook.providerMismatch",
+        ),
+        (
+            json!({"name":"x", "provider":"SMTP", "host":"", "from":"a@example.com"}),
+            "notification.smtpHostInvalid",
+        ),
+        (
+            json!({"name":"x", "provider":"SMTP", "host":"smtp.example.com", "from":"not an address"}),
+            "notification.smtpFromInvalid",
+        ),
+        (
+            json!({"name":"x", "provider":"Aliyun SMS", "sms_access_key":"", "sms_secret_key":"s", "sms_sign_name":"n", "sms_template_code":"t"}),
+            "notification.smsAccessKey",
+        ),
+    ];
+    for (input, key) in cases {
+        let error = create(
+            State(s.clone()),
+            scope.clone(),
+            Json(serde_json::from_value(input.clone()).unwrap()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.2.as_ref().unwrap().key, key, "{input}");
+    }
+}

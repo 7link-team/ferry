@@ -798,6 +798,10 @@ fn workspace_routes() -> Router<state::AppState> {
             post(notifications::center::reveal_webhook),
         )
         .route(
+            "/{workspace}/notification-channels/{id}/tests",
+            post(notifications::center::test),
+        )
+        .route(
             "/{workspace}/notification-channels/{id}/previews",
             post(notifications::center::preview),
         )

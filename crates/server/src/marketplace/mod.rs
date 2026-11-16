@@ -6,6 +6,7 @@ pub(crate) mod git;
 pub(crate) mod index;
 pub mod platform;
 pub(crate) mod store;
+use crate::error::LogCause;
 use crate::error::{ApiError, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -230,12 +231,23 @@ async fn fetch(
         };
     }
     // Never expose reqwest errors: they may include Gitee's query credential.
-    let mut response = request.send().await.map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("marketplace.requestFailed"),
-        )
-    })?;
+    let mut response = request
+        .send()
+        .await
+        .log_cause("marketplace index request")
+        .map_err(|error| {
+            let key = if error.is_timeout() {
+                "marketplace.requestTimeout"
+            } else if error.is_connect() {
+                "marketplace.requestUnreachable"
+            } else {
+                "marketplace.requestFailed"
+            };
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new(key),
+            )
+        })?;
     if !response.status().is_success() {
         return Err(ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
@@ -244,12 +256,17 @@ async fn fetch(
         ));
     }
     let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("marketplace.fileReadFailed"),
-        )
-    })? {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .log_cause("marketplace index read")
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.fileReadFailed"),
+            )
+        })?
+    {
         if bytes.len() + chunk.len() > MAX_INDEX_BYTES * 2 {
             return Err(ApiError::localized(
                 axum::http::StatusCode::BAD_REQUEST,
@@ -697,6 +714,8 @@ pub async fn create_source(
     scope: Scope,
     Json(b): Json<Body>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    scope.require("marketplace-sources.create")?;
+    check_index(&s, &scope, &b).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let result = create_source_in(&s, &tx, &scope, b).await?;
     tx.commit().await?;
@@ -749,6 +768,7 @@ pub async fn update_source(
     Json(mut b): Json<Body>,
 ) -> Result<Json<Value>> {
     scope.require("marketplace-sources.update")?;
+    check_index(&s, &scope, &b).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     scoped(&tx, &scope, id).await?;
     bind_source_repository(&s, &tx, &scope, &mut b).await?;
@@ -850,7 +870,7 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
         tx.commit().await?;
         row
     };
-    let result = async {
+    let result: Result<usize> = async {
         let config: Source = serde_json::from_str(&row.config).map_err(|_| {
             ApiError::localized(
                 axum::http::StatusCode::BAD_REQUEST,
@@ -862,50 +882,15 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
             .one(&s.db)
             .await?
             .ok_or_else(ApiError::missing)?;
-        validate_origin(&config, &repository.url)?;
-        let token = if repository.credential_id != 0 {
-            crate::repositories::auth::validate_target(
-                s,
-                &s.db,
-                scope.workspace_id,
-                repository.credential_id.into(),
-                &config.api_base,
-                true,
-            )
-            .await?;
-            let (kind, _, secret) = crate::credentials::unseal(
-                s,
-                &scope.workspace_id,
-                &repository.credential_id.into(),
-            )
-            .await?;
-            if kind != "token" {
-                return Err(ApiError::localized(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("marketplace.tokenRequired"),
-                ));
-            }
-            Some(secret)
-        } else {
-            None
-        };
-        let oauth = crate::entities::repository_connections::Entity::find()
-            .filter(crate::entities::repository_connections::Column::TokenConfig.is_null())
-            .filter(
-                crate::entities::repository_connections::Column::WorkspaceId.eq(scope.workspace_id),
-            )
-            .filter(
-                crate::entities::repository_connections::Column::CredentialId
-                    .eq(repository.credential_id),
-            )
-            .one(&s.db)
-            .await?
-            .is_some();
-        let packages = index::parse_bundle(
-            &fetch(&config, token.as_deref(), oauth, timeout).await?,
-            &ferry_version(),
-            "en-US",
-        )?;
+        let packages = load_index(
+            s,
+            scope.workspace_id,
+            &repository.url,
+            repository.credential_id,
+            &config,
+            timeout,
+        )
+        .await?;
         // The write budget starts after the fetch: a Git fetch may take minutes.
         let deadline = std::time::Instant::now() + timeout;
         let fresh = Scope::for_actor(s, scope.workspace_id, scope.user.id).await?;
@@ -978,3 +963,96 @@ pub async fn recover(s: &AppState) -> Result<()> {
         .await?;
     platform::release_expired(s).await
 }
+
+/// Reads and parses a source's index exactly as a sync does, without storing
+/// anything. Saving a source runs it first so a source that cannot be read is
+/// refused with the reason instead of failing at its first sync. It never runs
+/// inside a transaction: unsealing the credential uses its own connection.
+async fn load_index(
+    s: &AppState,
+    workspace: Id,
+    repository_url: &str,
+    credential_id: i64,
+    config: &Source,
+    timeout: Duration,
+) -> Result<Vec<index::PackageVersion>> {
+    validate_origin(config, repository_url)?;
+    let token = if credential_id != 0 {
+        crate::repositories::auth::validate_target(
+            s,
+            &s.db,
+            workspace,
+            credential_id.into(),
+            &config.api_base,
+            true,
+        )
+        .await?;
+        let (kind, _, secret) =
+            crate::credentials::unseal(s, &workspace, &credential_id.into()).await?;
+        if kind != "token" {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.tokenRequired"),
+            ));
+        }
+        Some(secret)
+    } else {
+        None
+    };
+    let oauth = crate::entities::repository_connections::Entity::find()
+        .filter(crate::entities::repository_connections::Column::TokenConfig.is_null())
+        .filter(crate::entities::repository_connections::Column::WorkspaceId.eq(workspace))
+        .filter(crate::entities::repository_connections::Column::CredentialId.eq(credential_id))
+        .one(&s.db)
+        .await?
+        .is_some();
+    index::parse_bundle(
+        &fetch(config, token.as_deref(), oauth, timeout).await?,
+        &ferry_version(),
+        "en-US",
+    )
+}
+/// The repository a source body points at: a new selection through a saved
+/// connection, or an existing repository of the workspace.
+async fn source_repository(s: &AppState, scope: &Scope, b: &Body) -> Result<(String, i64)> {
+    if let Some(selection) = &b.repository_selection {
+        let (_, credential) = crate::repositories::auth::resolve_connection(
+            s,
+            &s.db,
+            scope,
+            selection.connection_id,
+            &selection.url,
+        )
+        .await?;
+        return Ok((selection.url.clone(), credential.into()));
+    }
+    let repository = repositories::Entity::find_by_id(i64::from(Id::reference(&b.repository_id)?))
+        .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.repositoryMissing"),
+            )
+        })?;
+    Ok((repository.url, repository.credential_id))
+}
+/// A source is proven when saved: its index must be readable and valid.
+async fn check_index(s: &AppState, scope: &Scope, b: &Body) -> Result<()> {
+    scope.require("repositories.read")?;
+    b.source.url()?;
+    let (url, credential) = source_repository(s, scope, b).await?;
+    load_index(
+        s,
+        scope.workspace_id,
+        &url,
+        credential,
+        &b.source,
+        SAVE_CHECK_TIMEOUT,
+    )
+    .await?;
+    Ok(())
+}
+/// How long saving a source may spend reading its index.
+const SAVE_CHECK_TIMEOUT: Duration = Duration::from_secs(20);

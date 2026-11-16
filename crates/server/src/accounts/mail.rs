@@ -71,7 +71,7 @@ impl Configuration {
     pub fn read(s: &AppState, stored: Option<&str>) -> Result<Self> {
         match stored {
             Some(value) => serde_json::from_str(&s.vault.open_secret(value, AAD)?)
-                .map_err(|_| error("mail.invalid")),
+                .map_err(crate::error::internal_fault),
             None => Ok(Self {
                 port: 587,
                 security: "starttls".into(),
@@ -125,15 +125,15 @@ impl Configuration {
         }
         if let Some(value) = patch.get("mail_password") {
             if !value.is_string() {
-                return Err(error("mail.invalid"));
+                return Err(error("mail.passwordInvalid"));
             }
             if !value.as_str().unwrap().is_empty() {
                 fields["password"] = value.clone();
             }
         }
-        config = serde_json::from_value(fields).map_err(|_| error("mail.invalid"))?;
+        config = serde_json::from_value(fields).map_err(|_| error("mail.fieldType"))?;
         if !(1..=60).contains(&config.code_minutes()) {
-            return Err(error("mail.invalid"));
+            return Err(error("mail.codeMinutes"));
         }
         config.host = config.host.trim().to_owned();
         config.username = config.username.trim().to_owned();
@@ -147,7 +147,7 @@ impl Configuration {
                 .iter()
                 .any(|item| item.tag() == locale)
             {
-                return Err(error("mail.invalid"));
+                return Err(error("mail.templateLocale"));
             }
             template.validate()?;
         }
@@ -156,15 +156,28 @@ impl Configuration {
                 .host
                 .bytes()
                 .any(|b| !b.is_ascii_alphanumeric() && !b".:-[]".contains(&b))
-            || config.port == 0
-            || !["tls", "starttls", "none"].contains(&config.security.as_str())
-            || config.username.len() > 320
-            || config.password.len() > 4096
-            || config.from.len() > 320
-            || (!config.from.is_empty() && config.from.parse::<Mailbox>().is_err())
-            || (config.enabled && (config.host.is_empty() || config.from.is_empty()))
         {
-            return Err(error("mail.invalid"));
+            return Err(error("mail.hostInvalid"));
+        }
+        if config.port == 0 {
+            return Err(error("mail.portInvalid"));
+        }
+        if !["tls", "starttls", "none"].contains(&config.security.as_str()) {
+            return Err(error("mail.securityInvalid"));
+        }
+        if config.username.len() > 320 {
+            return Err(error("mail.usernameTooLong"));
+        }
+        if config.password.len() > 4096 {
+            return Err(error("mail.passwordInvalid"));
+        }
+        if config.from.len() > 320
+            || (!config.from.is_empty() && config.from.parse::<Mailbox>().is_err())
+        {
+            return Err(error("mail.fromInvalid"));
+        }
+        if config.enabled && (config.host.is_empty() || config.from.is_empty()) {
+            return Err(error("mail.enableRequiresServer"));
         }
         let changed = ["host", "port", "security", "username", "password", "from"]
             .iter()
@@ -182,7 +195,7 @@ impl Configuration {
         let from = self
             .from
             .parse::<Mailbox>()
-            .map_err(|_| error("mail.invalid"))?;
+            .map_err(|_| error("mail.fromInvalid"))?;
         let to = to
             .parse::<Mailbox>()
             .map_err(|_| error("auth.email_invalid"))?;
@@ -195,17 +208,17 @@ impl Configuration {
                     .singlepart(SinglePart::plain(html_text(&body)))
                     .singlepart(SinglePart::html(body)),
             )
-            .map_err(|_| error("mail.invalid"))?;
+            .map_err(|_| error("mail.recipientInvalid"))?;
         if self.host.is_empty() {
-            return Err(error("mail.invalid"));
+            return Err(error("mail.enableRequiresServer"));
         }
         let builder = match self.security.as_str() {
             "tls" => AsyncSmtpTransport::<Tokio1Executor>::relay(&self.host)
-                .map_err(|_| error("mail.invalid"))?,
+                .map_err(|_| error("mail.hostInvalid"))?,
             "starttls" => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&self.host)
-                .map_err(|_| error("mail.invalid"))?,
+                .map_err(|_| error("mail.hostInvalid"))?,
             "none" => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&self.host),
-            _ => return Err(error("mail.invalid")),
+            _ => return Err(error("mail.securityInvalid")),
         }
         .port(self.port)
         .timeout(Some(std::time::Duration::from_secs(15)));
@@ -233,26 +246,30 @@ fn validate_template(subject: &str, body: &str, code: bool) -> Result<()> {
         || body.len() > 16_384
         || body.contains('\0')
     {
-        return Err(error("mail.invalid"));
+        return Err(error("mail.templateText"));
     }
     for value in [subject, body] {
         let mut rest = value;
         while let Some(start) = rest.find("{{") {
             let Some(end) = rest[start + 2..].find("}}") else {
-                return Err(error("mail.invalid"));
+                return Err(error("mail.templateBraces"));
             };
             let key = &rest[start + 2..start + 2 + end];
             if !matches!(key, "email" | "expires_minutes") && !(code && key == "code") {
-                return Err(error("mail.invalid"));
+                return Err(crate::error::ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("mail.templateVariable")
+                        .with("name", key.chars().take(40).collect::<String>()),
+                ));
             }
             rest = &rest[start + 2 + end + 2..];
         }
         if rest.contains("}}") {
-            return Err(error("mail.invalid"));
+            return Err(error("mail.templateBraces"));
         }
     }
     if code && !body.trim().is_empty() && !body.contains("{{code}}") {
-        return Err(error("mail.invalid"));
+        return Err(error("mail.templateCodeMissing"));
     }
     Ok(())
 }
@@ -421,7 +438,7 @@ pub async fn test(
         Some(tag) => crate::i18n::Locale::ALL
             .into_iter()
             .find(|item| item.tag() == tag)
-            .ok_or_else(|| error("mail.invalid"))?,
+            .ok_or_else(|| error("mail.templateLocale"))?,
         None => crate::i18n::current_locale(),
     };
     if let Some(template) = &body.template {
@@ -735,5 +752,46 @@ mod template_tests {
             ),
             "{{code}}@example.com 123456 10"
         );
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    #[tokio::test]
+    async fn mail_setting_errors_name_the_setting() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let cases = [
+            (json!({"mail_host":"bad host!"}), "mail.hostInvalid"),
+            (
+                json!({"mail_host":"smtp.example.com","mail_port":0}),
+                "mail.portInvalid",
+            ),
+            (json!({"mail_security":"ssl3"}), "mail.securityInvalid"),
+            (json!({"mail_from":"not an address"}), "mail.fromInvalid"),
+            (json!({"mail_enabled":true}), "mail.enableRequiresServer"),
+            (json!({"mail_code_valid_minutes":90}), "mail.codeMinutes"),
+            (
+                json!({"mail_code_body":"Code {{nope}}"}),
+                "mail.templateVariable",
+            ),
+            (
+                json!({"mail_code_body":"Code {{code"}),
+                "mail.templateBraces",
+            ),
+            (
+                json!({"mail_code_body":"No code here"}),
+                "mail.templateCodeMissing",
+            ),
+        ];
+        for (patch, key) in cases {
+            let error = Configuration::update(&s, None, patch.as_object().unwrap()).unwrap_err();
+            assert_eq!(error.2.as_ref().unwrap().key, key, "{patch}");
+        }
+        let text = crate::i18n::render(
+            crate::i18n::Locale::EnUs,
+            &crate::i18n::Message::new("mail.templateVariable").with("name", "nope"),
+        );
+        assert!(text.contains("\"nope\""), "{text}");
     }
 }

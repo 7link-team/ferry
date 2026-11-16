@@ -13,7 +13,6 @@
   "execution.referenceMissing": "The selected {noun} does not exist in this workspace.",
   "execution.versionConflict": "The record was modified. Refresh and try again.",
   "execution.artifactReferenced": "The pipeline is still referenced by an application's build artifacts.",
-  "execution.definitionJson": "The pipeline definition must be valid JSON.",
   "execution.definitionObject": "The pipeline definition must be a JSON object.",
   "execution.definitionUnknownFields": "The pipeline definition contains unknown fields.",
   "execution.workdirString": "Pipeline workdir must be an absolute path string.",
@@ -233,5 +232,6 @@
   "workflow.integrationRemoteReason": "{reason}",
   "workflow.integrationNotJson": "The application answered HTTP {status} but not with JSON. Check the request address and parameters; the call may have taken effect.",
   "workflow.integrationTooLarge": "The application response exceeds the 1 MiB limit. Narrow the query or read it in pages; the call may have taken effect.",
-  "workflow.integrationSecretEcho": "The application response contained the credential used for the call, so the result was rejected and not stored."
+  "workflow.integrationSecretEcho": "The application response contained the credential used for the call, so the result was rejected and not stored.",
+  "execution.definitionJsonAt": "The pipeline definition is not valid JSON at line {line}, column {column}."
 }
