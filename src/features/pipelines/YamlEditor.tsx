@@ -1,12 +1,11 @@
 import { Columns2, IndentIncrease, Maximize2, Minimize2, Upload } from "lucide-react";
 import { Dialog } from "radix-ui";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { parseDocument } from "yaml";
+import { useEffect, useRef, useState } from "react";
 import { CodeEditor } from "../../shared/editor/CodeEditor";
 import { executionText, useCommonTranslation } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { InlineAlert } from "../../shared/ui/inline-alert";
-import { YamlSyntaxError, yamlError } from "../../shared/yaml-error";
+import { YamlSyntaxError } from "../../shared/yaml-error";
 import { formatActionYaml } from "./actions-workflow";
 
 const prettyIfValid = (source: string) => { try { return formatActionYaml(source); } catch { return source; } };
@@ -26,9 +25,6 @@ export function YamlEditor({ value, originalValue, readOnly, fillHeight, onChang
   const emitted = useRef(value);
   const [displayValue, setDisplayValue] = useState(() => prettyIfValid(value));
   const [formatError, setFormatError] = useState<{ message: string; detail?: string | undefined }>();
-  // The current text's first syntax problem, marked at its line in the editor.
-  const syntax = useMemo(() => { const errors = parseDocument(displayValue).errors; return errors.length ? yamlError(errors) : undefined; }, [displayValue]);
-  const markers = syntax?.line ? [{ line: syntax.line, column: syntax.column ?? 1, message: syntax.message }] : undefined;
   useEffect(() => {
     // Reformat external loads/form changes, never each keystroke from Monaco.
     if (value !== emitted.current) { emitted.current = value; setDisplayValue(prettyIfValid(value)); setFormatError(undefined); }
@@ -66,7 +62,7 @@ export function YamlEditor({ value, originalValue, readOnly, fillHeight, onChang
   </div>;
   const editor = <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-input">
     {compare && <div className="grid grid-cols-2 border-b bg-muted/40 text-center text-xs"><span className="p-2">{executionText("editor.original")}</span><span className="p-2">{executionText("editor.modified")}</span></div>}
-    <div className={compare ? "h-[calc(100%-2rem)]" : "h-full"}><CodeEditor path={path} language="yaml" label={label} value={displayValue} onChange={update} readOnly={readOnly} markers={markers} {...(compare ? { originalValue: originalValue ?? initial.current } : {})} /></div>
+    <div className={compare ? "h-[calc(100%-2rem)]" : "h-full"}><CodeEditor path={path} language="yaml" label={label} value={displayValue} onChange={update} readOnly={readOnly} {...(compare ? { originalValue: originalValue ?? initial.current } : {})} /></div>
   </div>;
   return <div className={fillHeight ? "flex min-h-0 flex-1 flex-col gap-2" : "flex h-[520px] min-h-[360px] flex-col gap-2"}>
     <input ref={fileInput} className="hidden" type="file" accept=".yml,.yaml,text/yaml" aria-label={executionText("editor.selectYamlFile")} onChange={async event => { const file = event.target.files?.[0]; if (file) onChange(await file.text()); event.target.value = ""; }} />
