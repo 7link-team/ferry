@@ -41,6 +41,9 @@ export interface Hole {
   target_scheme?: "http" | "https";
   /** HTTPS without certificate verification (self-signed devices). */
   target_tls_insecure?: boolean;
+  /** "separate": served on its own site, cookies and script storage work;
+   *  "isolated": cookies are not passed and the page is sandboxed. */
+  cookie_mode?: "separate" | "isolated" | undefined;
   strip_prefix: boolean;
   /** Root-relative preview path, e.g. "/holes/<token>/". */
   url?: string | undefined;
@@ -89,6 +92,10 @@ const text = (value: string, values?: Record<string, unknown>) =>
 
 export const HOLE_STATES: Option[] = ["active", "expired", "revoked"].map(
   (value) => ({ value, label: value, labelKey: key(`state.${value}`) }),
+);
+/** Why a login inside the preview works or not. */
+export const COOKIE_MODES: Option[] = ["separate", "isolated"].map(
+  (value) => ({ value, label: value, labelKey: key(`cookieMode.${value}`) }),
 );
 export const PROBE_STATES: Option[] = [
   "unknown",
@@ -728,6 +735,16 @@ export function holesForms({
               type: "text",
               when: persisted,
               display: probeSummary,
+            },
+            {
+              key: "cookie_mode",
+              label: "Cookies and storage",
+              labelKey: key("cookieMode"),
+              type: "text",
+              span: 2,
+              when: persisted,
+              display: (row) => label(COOKIE_MODES, row.cookie_mode ?? "isolated"),
+              helpKey: key("cookieModeHelp"),
             },
             {
               key: "probe_error",

@@ -1850,3 +1850,183 @@ fn https_redirects_and_refresh_headers_point_back_into_the_preview() {
     );
     assert_eq!(proxy::refresh("5", prefix, "192.168.0.2", 8006), None);
 }
+
+// ------------------------------------------------- separate-site cookies
+
+#[test]
+fn sites_compare_by_their_last_two_labels_and_unknowns_isolate() {
+    assert_eq!(proxy::site("lh64abc.debugs.top"), "debugs.top");
+    assert_eq!(proxy::site("Ferry.7link.TOP."), "7link.top");
+    assert_eq!(proxy::site("127.0.0.1"), "");
+    assert_eq!(proxy::site("[::1]"), "");
+    assert_eq!(proxy::site("localhost"), "");
+    let config = |public_url: &str, preview_domain: &str| {
+        let mut config = crate::accounts::addresses::Configuration::default();
+        config.public_url = public_url.into();
+        config.preview_domain = preview_domain.into();
+        proxy::Cookies::of(&config)
+    };
+    assert_eq!(
+        config("https://ferry.7link.top", "debugs.top"),
+        proxy::Cookies::Separate { secure: true }
+    );
+    // Same registrable domain, an IP console or no console URL: isolated.
+    assert_eq!(
+        config("https://ferry.example.com", "preview.example.com"),
+        proxy::Cookies::Isolated
+    );
+    assert_eq!(
+        config("http://192.168.1.10:4291", "debugs.top"),
+        proxy::Cookies::Isolated
+    );
+    assert_eq!(config("", "debugs.top"), proxy::Cookies::Isolated);
+}
+
+#[test]
+fn set_cookies_become_host_only_and_secure() {
+    assert_eq!(
+        proxy::set_cookie(
+            "PVEAuthCookie=abc; Domain=debugs.top; Path=/; HttpOnly; SameSite=Lax",
+            true
+        )
+        .as_deref(),
+        Some("PVEAuthCookie=abc; Path=/; HttpOnly; SameSite=Lax; Secure")
+    );
+    assert_eq!(
+        proxy::set_cookie("a=1; domain=.debugs.top; Secure", true).as_deref(),
+        Some("a=1; Secure")
+    );
+    // Over plain HTTP nothing is forced, and prefixed cookies that need
+    // Secure are dropped instead of being set invalid.
+    assert_eq!(
+        proxy::set_cookie("a=1; Path=/", false).as_deref(),
+        Some("a=1; Path=/")
+    );
+    assert_eq!(proxy::set_cookie("__Host-x=1; Path=/", false), None);
+    assert_eq!(
+        proxy::set_cookie("__Host-x=1; Path=/; Domain=debugs.top", true).as_deref(),
+        Some("__Host-x=1; Path=/; Secure")
+    );
+    assert_eq!(proxy::set_cookie("=nameless", true), None);
+}
+
+/// A login-like service: sets a cookie scoped to the whole preview domain and
+/// echoes the Cookie header it receives.
+async fn cookie_upstream() -> u16 {
+    let app = axum::Router::new().fallback(|request: Request| async move {
+        let cookie = request
+            .headers()
+            .get("cookie")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_owned();
+        (
+            [
+                (
+                    "set-cookie",
+                    "PVEAuthCookie=ticket; Domain=preview.localhost; Path=/; HttpOnly",
+                ),
+                ("content-security-policy", "default-src 'self'"),
+            ],
+            format!("cookie={cookie}"),
+        )
+            .into_response()
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    port
+}
+
+/// Points the console at `public_url` while previews stay on preview.localhost.
+async fn set_console(s: &AppState, public_url: String) {
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::AccessConfig,
+            sea_orm::sea_query::Expr::value(
+                json!({"public_url":public_url,"preview_domain":"preview.localhost"}).to_string(),
+            ),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn separate_site_previews_keep_their_cookies_and_a_real_origin() {
+    let (_dir, s) = own_ids(setup().await);
+    add_host(&s, 61, 1, KEY).await;
+    let address = server(s.clone()).await;
+    fake_runner(&s, address, 61, KEY, true).await;
+    let port = cookie_upstream().await;
+    let client = http();
+
+    // Console on another site than the previews: cookies flow both ways.
+    set_console(
+        &s,
+        format!("http://console.example.test:{}", address.port()),
+    )
+    .await;
+    let hole = create_hole(&s, 61, port).await;
+    let Json(view) = detail(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), hole_id(&hole))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(view["cookie_mode"], "separate");
+    let path = view["url"].as_str().unwrap().to_owned();
+    let response = client
+        .get(format!("{path}login"))
+        .header("cookie", "PVEAuthCookie=ticket")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let headers = response.headers().clone();
+    // Host-only: the Domain attribute is gone; the page is not sandboxed and
+    // keeps the app's own policy.
+    assert_eq!(
+        headers["set-cookie"],
+        "PVEAuthCookie=ticket; Path=/; HttpOnly"
+    );
+    let policies: Vec<&str> = headers
+        .get_all("content-security-policy")
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .collect();
+    assert!(policies.contains(&"default-src 'self'"), "{policies:?}");
+    assert!(policies.contains(&"frame-ancestors 'self'"), "{policies:?}");
+    assert!(!policies.iter().any(|policy| policy.contains("sandbox")));
+    assert_eq!(
+        response.text().await.unwrap(),
+        "cookie=PVEAuthCookie=ticket"
+    );
+
+    // Same registrable domain as the console: stripped and sandboxed as before.
+    set_console(
+        &s,
+        format!("http://ferry.preview.localhost:{}", address.port()),
+    )
+    .await;
+    let Json(view) = detail(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), hole_id(&hole))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(view["cookie_mode"], "isolated");
+    let path = view["url"].as_str().unwrap().to_owned();
+    let response = client
+        .get(format!("{path}login"))
+        .header("cookie", "PVEAuthCookie=ticket")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert!(!response.headers().contains_key("set-cookie"));
+    assert_eq!(response.headers()["content-security-policy"], SANDBOX);
+    assert_eq!(response.text().await.unwrap(), "cookie=");
+}

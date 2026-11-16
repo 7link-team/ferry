@@ -130,6 +130,11 @@ pub(crate) async fn views(
         .into_iter()
         .map(|host| (host.id, host.state == "online"))
         .collect::<HashMap<_, _>>();
+    // Whether a separate-domain preview may keep cookies and a real origin.
+    let separate = crate::accounts::addresses::Configuration::load(s, &s.db)
+        .await
+        .map(|config| proxy::Cookies::of(&config) != proxy::Cookies::Isolated)
+        .unwrap_or(false);
     let mut values = Vec::with_capacity(rows.len());
     for row in rows {
         let url = link(s, &row).await?;
@@ -153,6 +158,9 @@ pub(crate) async fn views(
             "ingress_mode": mode,
             "ingress_available": available,
             "public_access": mode != "domain",
+            // "separate": its own site, cookies and script storage work;
+            // "isolated": cookies are not passed and the page is sandboxed.
+            "cookie_mode": if mode == "domain" && separate { "separate" } else { "isolated" },
             "state": state(&row, now),
             "expires_at": row.expires_at,
             "revoked_at": row.revoked_at,

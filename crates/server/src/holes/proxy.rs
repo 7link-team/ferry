@@ -702,6 +702,7 @@ pub(super) async fn serve_entry(
     let Some(target) = Target::of(&row) else {
         return not_found();
     };
+    let cookies = Cookies::for_entry(&s, expected).await;
     if request.method() == Method::OPTIONS
         && request
             .headers()
@@ -753,6 +754,7 @@ pub(super) async fn serve_entry(
         &external_host,
         &prefix,
         upgrade,
+        cookies,
     );
     parts.uri = uri;
     let upstream_request =
@@ -776,7 +778,13 @@ pub(super) async fn serve_entry(
         }
     }
     let (mut head, body) = response.into_parts();
-    rewrite_response(&mut head.headers, &prefix, &target.address, target.port);
+    rewrite_response(
+        &mut head.headers,
+        &prefix,
+        &target.address,
+        target.port,
+        cookies,
+    );
     Response::from_parts(head, Body::new(body))
 }
 
@@ -895,9 +903,14 @@ fn rewrite_request(
     external_host: &HeaderValue,
     prefix: &str,
     upgrade: bool,
+    cookies: Cookies,
 ) {
-    // The console session cookie must never reach the previewed service.
-    headers.remove(header::COOKIE);
+    // The console session cookie must never reach the previewed service. On a
+    // separate site the browser cannot send console cookies here at all, so the
+    // preview's own cookies pass through.
+    if cookies == Cookies::Isolated {
+        headers.remove(header::COOKIE);
+    }
     headers.remove("x-ferry-request");
     for name in HOP_BY_HOP {
         headers.remove(name);
@@ -929,11 +942,49 @@ fn rewrite_request(
 }
 
 /// Section 6: nothing the local service returns may act on the console origin.
-fn rewrite_response(headers: &mut HeaderMap, prefix: &str, address: &str, port: u16) {
+fn rewrite_response(
+    headers: &mut HeaderMap,
+    prefix: &str,
+    address: &str,
+    port: u16,
+    cookies: Cookies,
+) {
+    match cookies {
+        Cookies::Isolated => {
+            for name in [
+                header::SET_COOKIE,
+                header::CONTENT_SECURITY_POLICY,
+                header::CONTENT_SECURITY_POLICY_REPORT_ONLY,
+            ] {
+                headers.remove(name);
+            }
+            headers.insert(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(SANDBOX),
+            );
+        }
+        // Its own site: a real origin, so the app's scripts, storage, wss and
+        // login work. Cookies stay host-only on this preview's host, the app's
+        // own CSP is kept, and only same-origin pages may frame it.
+        Cookies::Separate { secure } => {
+            let rewritten: Vec<HeaderValue> = headers
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .filter_map(|value| value.to_str().ok())
+                .filter_map(|value| set_cookie(value, secure))
+                .filter_map(|value| HeaderValue::from_str(&value).ok())
+                .collect();
+            headers.remove(header::SET_COOKIE);
+            for value in rewritten {
+                headers.append(header::SET_COOKIE, value);
+            }
+            headers.append(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static("frame-ancestors 'self'"),
+            );
+        }
+    }
     for name in [
-        header::SET_COOKIE,
-        header::CONTENT_SECURITY_POLICY,
-        header::CONTENT_SECURITY_POLICY_REPORT_ONLY,
         header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
     ] {
@@ -941,10 +992,6 @@ fn rewrite_response(headers: &mut HeaderMap, prefix: &str, address: &str, port: 
     }
     headers.remove("service-worker-allowed");
     headers.remove("clear-site-data");
-    headers.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(SANDBOX),
-    );
     headers.insert(
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
         HeaderValue::from_static("*"),
@@ -1030,4 +1077,109 @@ pub(super) fn location(value: &str, prefix: &str, address: &str, port: u16) -> O
     } else {
         Some(format!("{prefix}{path}"))
     }
+}
+
+// ------------------------------------------------------------- cookies
+
+/// Whether a preview may keep cookies and a real origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Cookies {
+    /// Cookies stripped both ways and the response sandboxed (opaque origin).
+    Isolated,
+    /// Served on its own site: host-only cookies and a real origin.
+    Separate { secure: bool },
+}
+
+impl Cookies {
+    /// Only the separate-domain entry, and only when the preview domain is a
+    /// different site from the console; everything else stays isolated.
+    async fn for_entry(s: &AppState, mode: &str) -> Self {
+        if mode != "domain" {
+            return Self::Isolated;
+        }
+        match crate::accounts::addresses::Configuration::load(s, &s.db).await {
+            Ok(config) => Self::of(&config),
+            Err(_) => Self::Isolated,
+        }
+    }
+    pub(super) fn of(config: &crate::accounts::addresses::Configuration) -> Self {
+        let Ok(console) = reqwest::Url::parse(&config.public_url) else {
+            return Self::Isolated;
+        };
+        let console_site = site(console.host_str().unwrap_or_default());
+        let preview_site = site(&config.preview_domain);
+        if console_site.is_empty() || preview_site.is_empty() || console_site == preview_site {
+            return Self::Isolated;
+        }
+        // Previews are served with the console's scheme.
+        Self::Separate {
+            secure: console.scheme() == "https",
+        }
+    }
+}
+
+/// The registrable part of a host, approximated by its last two DNS labels
+/// (no public-suffix list is available): "lh64….debugs.top" → "debugs.top".
+/// Under a shared suffix such as "co.uk" two different sites compare equal and
+/// so stay isolated, which errs on the safe side. An IP literal (or a single
+/// label) cannot be compared this way and counts as unknown, which isolates.
+pub(super) fn site(host: &str) -> String {
+    let host = host
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return String::new();
+    }
+    let labels: Vec<&str> = host.split('.').filter(|label| !label.is_empty()).collect();
+    if labels.len() < 2 {
+        return String::new();
+    }
+    labels[labels.len() - 2..].join(".")
+}
+
+/// A `Set-Cookie` the preview may keep: any Domain attribute is dropped so the
+/// cookie is host-only (one preview host can never set or read another's),
+/// Secure is added when the preview is served over HTTPS, and a `__Host-` or
+/// `__Secure-` cookie that could not be valid without Secure is dropped.
+pub(super) fn set_cookie(value: &str, secure: bool) -> Option<String> {
+    let mut parts = value.split(';');
+    let pair = parts.next()?.trim();
+    let name = pair.split('=').next().unwrap_or_default().trim();
+    if name.is_empty() {
+        return None;
+    }
+    let mut attributes: Vec<String> = Vec::new();
+    let mut has_secure = false;
+    for attribute in parts {
+        let attribute = attribute.trim();
+        let key = attribute
+            .split('=')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        match key.as_str() {
+            "" | "domain" => continue,
+            "secure" => has_secure = true,
+            _ => {}
+        }
+        attributes.push(attribute.to_owned());
+    }
+    if secure && !has_secure {
+        attributes.push("Secure".into());
+        has_secure = true;
+    }
+    let prefixed = name.starts_with("__Host-") || name.starts_with("__Secure-");
+    if prefixed && !has_secure {
+        return None;
+    }
+    Some(
+        std::iter::once(pair.to_owned())
+            .chain(attributes)
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
 }

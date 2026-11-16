@@ -165,7 +165,7 @@ it("edits only name, path mode and validity, and treats revoked records as read-
   expect(visible(edit)).toEqual(["ingress_mode", "name", "host_id", "target_host", "target_port", "target_scheme", "ttl_hours"]);
   expect(visible(config.blank)).toEqual(["ingress_mode", "name", "host_id", "target_host", "target_port", "target_scheme", "ttl_hours"]);
   expect(visible(row())).toEqual([
-    "ingress_mode", "name", "host_id", "target_host", "target_port", "target_scheme", "url", "state", "probe_state", "probe_error",
+    "ingress_mode", "name", "host_id", "target_host", "target_port", "target_scheme", "url", "state", "probe_state", "cookie_mode", "probe_error",
     "active_connections", "expires_at", "created_by_name", "created_at", "updated_at", "usage",
   ]);
   expect(visible(row({ state: "revoked", revoked_at: 5, probe_error: "" }))).toContain("revoked_at");
@@ -261,4 +261,15 @@ it("shows the target with https:// when Ferry talks HTTPS to it", () => {
   expect(targetLabel({ target_host: "192.168.0.2", target_port: 8006, target_scheme: "http" })).toBe("192.168.0.2:8006");
   expect(targetLabel({ target_host: "", target_port: 5173 })).toBe("5173");
   expect(targetLabel({ target_host: "fd00::5", target_port: 443, target_scheme: "https" })).toBe("https://[fd00::5]:443");
+});
+
+it("tells whether a login inside the preview can keep its cookies", () => {
+  const field = fields().find((item) => item.key === "cookie_mode")!;
+  expect(field.when!(row())).toBe(true);
+  expect(field.when!(formConfig().blank)).toBe(false);
+  i18n.changeLanguage("zh-CN");
+  expect(field.display!(row({ cookie_mode: "separate" }))).toBe("独立域名预览：允许 Cookie 与脚本存储");
+  expect(field.display!(row({ cookie_mode: "isolated" }))).toBe("已隔离：不传递 Cookie");
+  // Older servers send nothing: assume the safe default.
+  expect(field.display!(row({ cookie_mode: undefined }))).toBe("已隔离：不传递 Cookie");
 });
