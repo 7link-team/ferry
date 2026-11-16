@@ -24,6 +24,7 @@ import { manifest, type GraphNode } from "./graph";
 import { WorkflowAssetUpload, type WorkflowAsset } from "./WorkflowAssets";
 import { WorkflowAIParameters } from "./WorkflowAIParameters";
 import { WorkflowAgentParameters } from "./WorkflowAgentParameters";
+import { WorkflowReportParameters } from "./WorkflowReportParameters";
 import { WorkflowIntegrationParameters } from "./WorkflowIntegrationParameters";
 import { integrationManifest } from "./integrations";
 import { ComboInput } from "../../shared/forms/ComboInput";
@@ -876,7 +877,10 @@ export function WorkflowNodeParameters({
   let fields: ReactNode;
   switch (node.type) {
     case "notification.send":
-      fields = <NotificationParameters workspace={workspace} value={p} readOnly={readOnly} onChange={update} invalid={blocked => invalid("notification", blocked)} />;
+      fields = <NotificationParameters workspace={workspace} value={p} readOnly={readOnly} onChange={update} invalid={blocked => invalid("notification", blocked)} fileAttachments />;
+      break;
+    case "report.render":
+      fields = <WorkflowReportParameters value={p} readOnly={readOnly} patch={patch} Structured={StructuredValue} />;
       break;
     case "ai.agent.run":
       fields = <WorkflowAgentParameters node={node} readOnly={readOnly} patch={patch} invalid={invalid} />;

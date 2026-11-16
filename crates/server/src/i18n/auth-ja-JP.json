@@ -129,5 +129,10 @@
   "platform.storageCheckFailed": "ストレージの読み書きチェックが失敗しました（手順：{step}）。ストレージサービスを確認してください。",
   "platform.storageConfigUnreadable": "保存済みのファイルストレージ設定を復号できません（マスターキーが変更された可能性があります）。再入力して保存してください。",
   "platform.storageClusterRequiresS3": "複数インスタンス構成では S3 ファイルストレージが必要です。ローカルファイルはインスタンス間で共有されません。",
-  "platform.storageFieldInvalid": "ファイルストレージ設定 {field} はテキストである必要があります。"
+  "platform.storageFieldInvalid": "ファイルストレージ設定 {field} はテキストである必要があります。",
+  "notification.attachmentFailed": "メッセージは送信されましたが、{provider} がファイル {file} を受け付けませんでした：{reason}",
+  "notification.attachmentTooLarge": "ファイル {file} はこのチャネルの上限（{limit}）を超えています。",
+  "notification.attachmentUnsupported": "{provider} のメッセージにはファイルを添付できません。添付を外すか別のチャネルを使ってください。",
+  "notification.attachmentNeedsLink": "このチャネルはファイルを直接受け取れないため、{file} はダウンロードリンクで送ります。プラットフォームの公開アドレスを「プラットフォーム設定」で設定してください。",
+  "notification.attachmentMissing": "入力に「{field}」という名前のファイルがありません。ファイルを生成した前のノードと出力フィールドを確認してください。"
 }

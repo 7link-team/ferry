@@ -533,6 +533,259 @@ pub async fn deliver_configured(
     }
 }
 
+/// A file sent with a notification (any type: PDF, documents, images...).
+pub struct OutgoingFile<'a> {
+    pub name: &'a str,
+    pub mime: &'a str,
+    pub bytes: &'a [u8],
+}
+
+/// WeCom robot files: `upload_media` takes 5 B..20 MB; images up to 2 MB can go
+/// as an image message instead.
+pub(super) const WECOM_FILE_LIMIT: usize = 20 * 1024 * 1024;
+const WECOM_IMAGE_LIMIT: usize = 2 * 1024 * 1024;
+/// Telegram Bot API: documents up to 50 MB, photos up to 10 MB.
+pub(super) const TELEGRAM_FILE_LIMIT: usize = 50 * 1024 * 1024;
+const TELEGRAM_PHOTO_LIMIT: usize = 10 * 1024 * 1024;
+
+/// Whether a robot can receive files itself; the others get download links.
+pub(super) fn carries_files(robot: Option<Robot>) -> bool {
+    matches!(robot, Some(Robot::WeCom | Robot::Telegram))
+}
+
+/// The robot a configured channel posts to, if it is a recognised one.
+pub(super) fn configured_robot(url: &str, options: &super::channel::Options) -> Option<Robot> {
+    if options.provider == "Webhook" {
+        return None;
+    }
+    options.resolve(url).ok().as_ref().and_then(robot)
+}
+
+fn file_failed(robot: Robot, file: &str, reason: impl Into<String>) -> Message {
+    Message::new("notification.attachmentFailed")
+        .with("provider", robot.name())
+        .with("file", file)
+        .with("reason", reason.into())
+}
+
+fn too_large(file: &str, limit: usize) -> Message {
+    Message::new("notification.attachmentTooLarge")
+        .with("file", file)
+        .with("limit", format!("{} MB", limit / 1024 / 1024))
+}
+
+/// Size checks before anything is sent, so a too-large file never leaves a
+/// half-delivered notification.
+pub(super) fn check_files(robot: Option<Robot>, files: &[OutgoingFile<'_>]) -> Result<(), Message> {
+    let limit = match robot {
+        Some(Robot::WeCom) => WECOM_FILE_LIMIT,
+        Some(Robot::Telegram) => TELEGRAM_FILE_LIMIT,
+        _ => return Ok(()),
+    };
+    for file in files {
+        if file.bytes.len() > limit {
+            return Err(too_large(file.name, limit));
+        }
+        if robot == Some(Robot::WeCom) && file.bytes.len() < 5 {
+            return Err(file_failed(
+                Robot::WeCom,
+                file.name,
+                "file is smaller than 5 bytes",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Sends each file to a robot that carries files (after the text message).
+pub(super) async fn deliver_files(
+    client: &reqwest::Client,
+    url: &str,
+    options: &super::channel::Options,
+    files: &[OutgoingFile<'_>],
+) -> Result<(), Message> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let parsed = options.resolve(url)?;
+    match configured_robot(url, options) {
+        Some(Robot::WeCom) => {
+            for file in files {
+                wecom_file(client, &parsed, file).await?;
+            }
+            Ok(())
+        }
+        Some(Robot::Telegram) => {
+            for file in files {
+                telegram_file(client, &parsed, &options.thread_id, file).await?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Posts JSON to a WeCom endpoint and checks `errcode`.
+async fn wecom_post(
+    client: &reqwest::Client,
+    url: reqwest::Url,
+    body: &Value,
+    file: &str,
+) -> Result<Value, Message> {
+    let response = client
+        .post(url)
+        .json(body)
+        .send()
+        .await
+        .map_err(|error| file_failed(Robot::WeCom, file, send_error(&error)))?;
+    wecom_answer(response, file).await
+}
+
+async fn wecom_answer(response: reqwest::Response, file: &str) -> Result<Value, Message> {
+    let status = response.status().as_u16();
+    let text = response.text().await.unwrap_or_default();
+    let value: Value = serde_json::from_str(&text)
+        .map_err(|_| file_failed(Robot::WeCom, file, format!("HTTP {status}")))?;
+    match value["errcode"].as_i64() {
+        Some(0) => Ok(value),
+        code => Err(file_failed(
+            Robot::WeCom,
+            file,
+            format!(
+                "{} {}",
+                code.map(|c| c.to_string())
+                    .unwrap_or_else(|| format!("HTTP {status}")),
+                clean(value["errmsg"].as_str().unwrap_or_default(), 200)
+            ),
+        )),
+    }
+}
+
+/// WeCom robot: small PNG/JPEG images as an image message, everything else
+/// uploaded with `upload_media` and sent as a file message.
+pub(super) async fn wecom_file(
+    client: &reqwest::Client,
+    send: &reqwest::Url,
+    file: &OutgoingFile<'_>,
+) -> Result<(), Message> {
+    use base64::Engine;
+    use md5::Digest;
+    if matches!(file.mime, "image/png" | "image/jpeg") && file.bytes.len() <= WECOM_IMAGE_LIMIT {
+        let body = json!({"msgtype":"image","image":{
+            "base64": base64::engine::general_purpose::STANDARD.encode(file.bytes),
+            "md5": format!("{:x}", md5::Md5::digest(file.bytes)),
+        }});
+        wecom_post(client, send.clone(), &body, file.name).await?;
+        return Ok(());
+    }
+    let mut upload = send.clone();
+    upload.set_path("/cgi-bin/webhook/upload_media");
+    let key: Vec<(String, String)> = send
+        .query_pairs()
+        .filter(|(k, _)| k == "key")
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    upload.set_query(None);
+    upload
+        .query_pairs_mut()
+        .extend_pairs(key)
+        .append_pair("type", "file");
+    let part = reqwest::multipart::Part::bytes(file.bytes.to_vec())
+        .file_name(file.name.to_owned())
+        .mime_str(file.mime)
+        .map_err(|_| file_failed(Robot::WeCom, file.name, "invalid media type"))?;
+    let response = client
+        .post(upload)
+        .multipart(reqwest::multipart::Form::new().part("media", part))
+        .send()
+        .await
+        .map_err(|error| file_failed(Robot::WeCom, file.name, send_error(&error)))?;
+    let uploaded = wecom_answer(response, file.name).await?;
+    let media = uploaded["media_id"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| file_failed(Robot::WeCom, file.name, "no media_id"))?;
+    wecom_post(
+        client,
+        send.clone(),
+        &json!({"msgtype":"file","file":{"media_id":media}}),
+        file.name,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Telegram bot: photos as `sendPhoto`, everything else as `sendDocument`, to
+/// the configured chat (and thread).
+pub(super) async fn telegram_file(
+    client: &reqwest::Client,
+    send: &reqwest::Url,
+    thread: &str,
+    file: &OutgoingFile<'_>,
+) -> Result<(), Message> {
+    let chat = send
+        .query_pairs()
+        .find(|(key, value)| key == "chat_id" && !value.is_empty())
+        .map(|(_, value)| value.into_owned())
+        .ok_or_else(|| Message::new("webhook.chatMissing"))?;
+    let photo = matches!(file.mime, "image/png" | "image/jpeg" | "image/webp")
+        && file.bytes.len() <= TELEGRAM_PHOTO_LIMIT;
+    let (method, field) = if photo {
+        ("sendPhoto", "photo")
+    } else {
+        ("sendDocument", "document")
+    };
+    let mut url = send.clone();
+    let path = url
+        .path()
+        .rsplit_once('/')
+        .map(|(base, _)| format!("{base}/{method}"))
+        .unwrap_or_default();
+    url.set_path(&path);
+    url.set_query(None);
+    let part = reqwest::multipart::Part::bytes(file.bytes.to_vec())
+        .file_name(file.name.to_owned())
+        .mime_str(file.mime)
+        .map_err(|_| file_failed(Robot::Telegram, file.name, "invalid media type"))?;
+    let mut form = reqwest::multipart::Form::new()
+        .text("chat_id", chat)
+        .part(field, part);
+    if !thread.is_empty() {
+        form = form.text("message_thread_id", thread.to_owned());
+    }
+    let response = client
+        .post(url)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|error| file_failed(Robot::Telegram, file.name, send_error(&error)))?;
+    let status = response.status().as_u16();
+    let value: Value =
+        serde_json::from_str(&response.text().await.unwrap_or_default()).unwrap_or(Value::Null);
+    if value["ok"] == true {
+        Ok(())
+    } else {
+        Err(file_failed(
+            Robot::Telegram,
+            file.name,
+            format!(
+                "HTTP {status} {}",
+                clean(value["description"].as_str().unwrap_or_default(), 200)
+            ),
+        ))
+    }
+}
+
+fn send_error(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        "timed out".into()
+    } else if error.is_connect() {
+        "cannot connect".into()
+    } else {
+        "request failed".into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -933,5 +1186,189 @@ mod tests {
             ),
             Err("HTTP 400：Invalid JSON payload".into())
         );
+    }
+}
+
+#[cfg(test)]
+mod file_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug, Clone)]
+    struct Seen {
+        path: String,
+        query: String,
+        content_type: String,
+        body: Vec<u8>,
+    }
+
+    /// A local stand-in for the robot APIs: records every request and answers
+    /// with `answer(path)`.
+    async fn mock(answer: fn(&str) -> Value) -> (String, Arc<Mutex<Vec<Seen>>>) {
+        use axum::{Router, body::Bytes, extract::Request, http::HeaderMap};
+        let seen = Arc::new(Mutex::new(Vec::<Seen>::new()));
+        let log = seen.clone();
+        let app = Router::new().fallback(move |headers: HeaderMap, request: Request| {
+            let log = log.clone();
+            async move {
+                let path = request.uri().path().to_owned();
+                let query = request.uri().query().unwrap_or_default().to_owned();
+                let body: Bytes = axum::body::to_bytes(request.into_body(), 64 * 1024 * 1024)
+                    .await
+                    .unwrap();
+                log.lock().unwrap().push(Seen {
+                    content_type: headers
+                        .get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or_default()
+                        .to_owned(),
+                    path: path.clone(),
+                    query,
+                    body: body.to_vec(),
+                });
+                axum::Json(answer(&path))
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (format!("http://{address}"), seen)
+    }
+
+    fn wecom(path: &str) -> Value {
+        if path.ends_with("/upload_media") {
+            json!({"errcode":0,"errmsg":"ok","type":"file","media_id":"MEDIA-1"})
+        } else {
+            json!({"errcode":0,"errmsg":"ok"})
+        }
+    }
+
+    const PDF: &[u8] = b"%PDF-1.7 report body";
+
+    #[tokio::test]
+    async fn wecom_uploads_the_file_then_sends_a_file_message() {
+        let (base, seen) = mock(wecom).await;
+        let send = reqwest::Url::parse(&format!("{base}/cgi-bin/webhook/send?key=ROBOT")).unwrap();
+        let file = OutgoingFile {
+            name: "周报.pdf",
+            mime: "application/pdf",
+            bytes: PDF,
+        };
+        wecom_file(&reqwest::Client::new(), &send, &file)
+            .await
+            .unwrap();
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].path, "/cgi-bin/webhook/upload_media");
+        assert!(seen[0].query.contains("key=ROBOT") && seen[0].query.contains("type=file"));
+        assert!(seen[0].content_type.starts_with("multipart/form-data"));
+        let upload = String::from_utf8_lossy(&seen[0].body);
+        assert!(upload.contains("name=\"media\""));
+        assert!(upload.contains("%PDF-1.7 report body"));
+        assert_eq!(seen[1].path, "/cgi-bin/webhook/send");
+        let message: Value = serde_json::from_slice(&seen[1].body).unwrap();
+        assert_eq!(
+            message,
+            json!({"msgtype":"file","file":{"media_id":"MEDIA-1"}})
+        );
+    }
+
+    #[tokio::test]
+    async fn wecom_sends_small_images_as_image_messages_and_reports_rejections() {
+        let (base, seen) = mock(wecom).await;
+        let send = reqwest::Url::parse(&format!("{base}/cgi-bin/webhook/send?key=K")).unwrap();
+        let png = OutgoingFile {
+            name: "chart.png",
+            mime: "image/png",
+            bytes: b"\x89PNG\r\n\x1a\n....",
+        };
+        wecom_file(&reqwest::Client::new(), &send, &png)
+            .await
+            .unwrap();
+        let message: Value = serde_json::from_slice(&seen.lock().unwrap()[0].body).unwrap();
+        assert_eq!(message["msgtype"], "image");
+        assert_eq!(message["image"]["md5"].as_str().unwrap().len(), 32);
+
+        let (base, _) = mock(|_| json!({"errcode":93000,"errmsg":"invalid webhook url"})).await;
+        let send = reqwest::Url::parse(&format!("{base}/cgi-bin/webhook/send?key=K")).unwrap();
+        let file = OutgoingFile {
+            name: "a.pdf",
+            mime: "application/pdf",
+            bytes: PDF,
+        };
+        let error = wecom_file(&reqwest::Client::new(), &send, &file)
+            .await
+            .unwrap_err();
+        assert_eq!(error.key, "notification.attachmentFailed");
+        assert!(error.params["reason"].contains("93000"));
+    }
+
+    #[tokio::test]
+    async fn telegram_sends_documents_and_photos_to_the_configured_chat() {
+        let (base, seen) = mock(|_| json!({"ok":true})).await;
+        let send = reqwest::Url::parse(&format!("{base}/botTOKEN/sendMessage?chat_id=42")).unwrap();
+        let client = reqwest::Client::new();
+        telegram_file(
+            &client,
+            &send,
+            "7",
+            &OutgoingFile {
+                name: "r.pdf",
+                mime: "application/pdf",
+                bytes: PDF,
+            },
+        )
+        .await
+        .unwrap();
+        telegram_file(
+            &client,
+            &send,
+            "",
+            &OutgoingFile {
+                name: "c.png",
+                mime: "image/png",
+                bytes: b"png",
+            },
+        )
+        .await
+        .unwrap();
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen[0].path, "/botTOKEN/sendDocument");
+        let form = String::from_utf8_lossy(&seen[0].body);
+        assert!(form.contains("name=\"chat_id\"") && form.contains("42"));
+        assert!(form.contains("name=\"message_thread_id\""));
+        assert!(form.contains("name=\"document\"; filename=\"r.pdf\""));
+        assert_eq!(seen[1].path, "/botTOKEN/sendPhoto");
+        assert!(String::from_utf8_lossy(&seen[1].body).contains("name=\"photo\""));
+    }
+
+    #[test]
+    fn file_limits_are_checked_before_anything_is_sent() {
+        let big = vec![0u8; WECOM_FILE_LIMIT + 1];
+        let file = OutgoingFile {
+            name: "big.pdf",
+            mime: "application/pdf",
+            bytes: &big,
+        };
+        let error = check_files(Some(Robot::WeCom), &[file]).unwrap_err();
+        assert_eq!(error.key, "notification.attachmentTooLarge");
+        assert_eq!(error.params["limit"], "20 MB");
+        let file = OutgoingFile {
+            name: "big.pdf",
+            mime: "application/pdf",
+            bytes: &big,
+        };
+        assert!(check_files(Some(Robot::Telegram), &[file]).is_ok());
+        let file = OutgoingFile {
+            name: "big.pdf",
+            mime: "application/pdf",
+            bytes: &big,
+        };
+        assert!(
+            check_files(None, &[file]).is_ok(),
+            "link channels have no size limit"
+        );
+        assert!(carries_files(Some(Robot::WeCom)) && carries_files(Some(Robot::Telegram)));
+        assert!(!carries_files(Some(Robot::Feishu)) && !carries_files(None));
     }
 }

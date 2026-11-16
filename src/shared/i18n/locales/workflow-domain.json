@@ -1,12 +1,68 @@
 {
-  "editorError.invalidGraph": ["The workflow definition is invalid and cannot be opened.", "工作流定义无效，无法打开。", "工作流定義無效，無法開啟。", "ワークフロー定義が無効なため開けません。", "워크플로 정의가 잘못되어 열 수 없습니다.", "Definisi aliran kerja tidak sah dan tidak boleh dibuka."],
-  "editorError.unknownNodeType": ["This node type is not available (it may have been removed with its extension).", "此节点类型不可用（可能已随扩展一起移除）。", "此節點類型不可用（可能已隨擴充一起移除）。", "このノードタイプは使用できません（拡張機能と一緒に削除された可能性があります）。", "이 노드 유형을 사용할 수 없습니다(확장과 함께 제거되었을 수 있음).", "Jenis nod ini tidak tersedia (mungkin telah dialih keluar bersama sambungannya)."],
-  "editorError.incompatibleAdjacent": ["These two nodes cannot be connected here; their outputs and inputs do not match.", "这两个节点不能在此相连：输出与输入不匹配。", "這兩個節點不能在此相連：輸出與輸入不相符。", "この 2 つのノードはここで接続できません（出力と入力が一致しません）。", "두 노드를 여기서 연결할 수 없습니다. 출력과 입력이 맞지 않습니다.", "Kedua-dua nod ini tidak boleh disambungkan di sini; output dan input tidak sepadan."],
-  "editorError.invalidAdjacent": ["A node cannot be added at this connection point.", "无法在此连接点添加节点。", "無法在此連接點新增節點。", "この接続ポイントにはノードを追加できません。", "이 연결 지점에는 노드를 추가할 수 없습니다.", "Nod tidak boleh ditambah pada titik sambungan ini."],
-  "editorError.connectionGone": ["This connection no longer exists; it may have been changed in the meantime. Try again.", "该连线已不存在，可能刚被修改，请重试。", "該連線已不存在，可能剛被修改，請重試。", "この接続はもう存在しません。変更された可能性があります。もう一度お試しください。", "이 연결은 더 이상 없습니다. 방금 변경되었을 수 있으니 다시 시도하세요.", "Sambungan ini tidak lagi wujud; ia mungkin telah diubah. Cuba lagi."],
-  "editorError.incompatibleInsertion": ["This node cannot be inserted into this connection; its input or output does not fit.", "此节点不能插入到这条连线中：输入或输出不匹配。", "此節點不能插入到這條連線中：輸入或輸出不相符。", "このノードはこの接続に挿入できません（入力または出力が合いません）。", "이 노드는 이 연결에 삽입할 수 없습니다. 입력 또는 출력이 맞지 않습니다.", "Nod ini tidak boleh disisipkan ke dalam sambungan ini; input atau outputnya tidak sesuai."],
-  "editorError.invalidCatalog": ["The workflow node catalog could not be loaded; refresh the page or contact an administrator.", "工作流节点目录加载失败，请刷新页面或联系管理员。", "工作流節點目錄載入失敗，請重新整理頁面或聯絡管理員。", "ワークフローノードカタログを読み込めませんでした。ページを更新するか管理者に連絡してください。", "워크플로 노드 카탈로그를 불러오지 못했습니다. 페이지를 새로 고치거나 관리자에게 문의하세요.", "Katalog nod aliran kerja tidak dapat dimuatkan; muat semula halaman atau hubungi pentadbir."],
-  "editorError.invalidParameters": ["These parameters do not match the node's expected fields.", "这些参数与节点要求的字段不匹配。", "這些參數與節點要求的欄位不相符。", "パラメーターがノードの必要なフィールドと一致しません。", "매개변수가 노드에 필요한 필드와 맞지 않습니다.", "Parameter ini tidak sepadan dengan medan yang dijangka oleh nod."],
+  "editorError.invalidGraph": [
+    "The workflow definition is invalid and cannot be opened.",
+    "工作流定义无效，无法打开。",
+    "工作流定義無效，無法開啟。",
+    "ワークフロー定義が無効なため開けません。",
+    "워크플로 정의가 잘못되어 열 수 없습니다.",
+    "Definisi aliran kerja tidak sah dan tidak boleh dibuka."
+  ],
+  "editorError.unknownNodeType": [
+    "This node type is not available (it may have been removed with its extension).",
+    "此节点类型不可用（可能已随扩展一起移除）。",
+    "此節點類型不可用（可能已隨擴充一起移除）。",
+    "このノードタイプは使用できません（拡張機能と一緒に削除された可能性があります）。",
+    "이 노드 유형을 사용할 수 없습니다(확장과 함께 제거되었을 수 있음).",
+    "Jenis nod ini tidak tersedia (mungkin telah dialih keluar bersama sambungannya)."
+  ],
+  "editorError.incompatibleAdjacent": [
+    "These two nodes cannot be connected here; their outputs and inputs do not match.",
+    "这两个节点不能在此相连：输出与输入不匹配。",
+    "這兩個節點不能在此相連：輸出與輸入不相符。",
+    "この 2 つのノードはここで接続できません（出力と入力が一致しません）。",
+    "두 노드를 여기서 연결할 수 없습니다. 출력과 입력이 맞지 않습니다.",
+    "Kedua-dua nod ini tidak boleh disambungkan di sini; output dan input tidak sepadan."
+  ],
+  "editorError.invalidAdjacent": [
+    "A node cannot be added at this connection point.",
+    "无法在此连接点添加节点。",
+    "無法在此連接點新增節點。",
+    "この接続ポイントにはノードを追加できません。",
+    "이 연결 지점에는 노드를 추가할 수 없습니다.",
+    "Nod tidak boleh ditambah pada titik sambungan ini."
+  ],
+  "editorError.connectionGone": [
+    "This connection no longer exists; it may have been changed in the meantime. Try again.",
+    "该连线已不存在，可能刚被修改，请重试。",
+    "該連線已不存在，可能剛被修改，請重試。",
+    "この接続はもう存在しません。変更された可能性があります。もう一度お試しください。",
+    "이 연결은 더 이상 없습니다. 방금 변경되었을 수 있으니 다시 시도하세요.",
+    "Sambungan ini tidak lagi wujud; ia mungkin telah diubah. Cuba lagi."
+  ],
+  "editorError.incompatibleInsertion": [
+    "This node cannot be inserted into this connection; its input or output does not fit.",
+    "此节点不能插入到这条连线中：输入或输出不匹配。",
+    "此節點不能插入到這條連線中：輸入或輸出不相符。",
+    "このノードはこの接続に挿入できません（入力または出力が合いません）。",
+    "이 노드는 이 연결에 삽입할 수 없습니다. 입력 또는 출력이 맞지 않습니다.",
+    "Nod ini tidak boleh disisipkan ke dalam sambungan ini; input atau outputnya tidak sesuai."
+  ],
+  "editorError.invalidCatalog": [
+    "The workflow node catalog could not be loaded; refresh the page or contact an administrator.",
+    "工作流节点目录加载失败，请刷新页面或联系管理员。",
+    "工作流節點目錄載入失敗，請重新整理頁面或聯絡管理員。",
+    "ワークフローノードカタログを読み込めませんでした。ページを更新するか管理者に連絡してください。",
+    "워크플로 노드 카탈로그를 불러오지 못했습니다. 페이지를 새로 고치거나 관리자에게 문의하세요.",
+    "Katalog nod aliran kerja tidak dapat dimuatkan; muat semula halaman atau hubungi pentadbir."
+  ],
+  "editorError.invalidParameters": [
+    "These parameters do not match the node's expected fields.",
+    "这些参数与节点要求的字段不匹配。",
+    "這些參數與節點要求的欄位不相符。",
+    "パラメーターがノードの必要なフィールドと一致しません。",
+    "매개변수가 노드에 필요한 필드와 맞지 않습니다.",
+    "Parameter ini tidak sepadan dengan medan yang dijangka oleh nod."
+  ],
   "integration.gitDirectoryHelp": [
     "Directory on the execution host, not the server. Linux: /srv/workflows/app; macOS: /Users/name/workflows/app; Windows Git Bash: /d/workflows/app (D: drive). The host needs Git and sh / Git Bash. Clone into a new directory; use the same specific host for later build steps. An absolute path is not portable across operating systems.",
     "这是执行主机上的目录，不是服务器目录。Linux：/srv/workflows/app；macOS：/Users/用户名/workflows/app；Windows Git Bash：/d/workflows/app（D盘）。主机需安装 Git 和 sh / Git Bash。克隆使用新目录，后续构建选择同一台具体主机。绝对路径不能直接跨操作系统复用。",
@@ -6159,21 +6215,300 @@
     "AI 에이전트 노드 구성이 잘못되었습니다. 에이전트, 프롬프트, 출력 스키마 및 실행 호스트를 확인하세요.",
     "Konfigurasi nod ejen AI tidak sah: semak ejen, gesaan, skema output dan hos pelaksanaan."
   ],
-  "valueMode": ["Edit as", "编辑方式", "編輯方式", "編集方法", "편집 방식", "Sunting sebagai"],
-  "valueModeForm": ["Form", "表单", "表單", "フォーム", "양식", "Borang"],
-  "valueModeYaml": ["YAML", "YAML", "YAML", "YAML", "YAML", "YAML"],
-  "yamlInvalid": ["Invalid YAML; the value was not changed.", "YAML 格式错误，值未修改。", "YAML 格式錯誤，值未修改。", "YAML が無効です。値は変更されていません。", "YAML이 올바르지 않아 값이 변경되지 않았습니다.", "YAML tidak sah; nilai tidak diubah."],
-  "yamlExpectObject": ["The YAML must be an object (key: value); the value was not changed.", "YAML 必须是对象（键: 值），值未修改。", "YAML 必須是物件（鍵: 值），值未修改。", "YAML はオブジェクト（キー: 値）である必要があります。値は変更されていません。", "YAML은 객체(키: 값)여야 하며 값이 변경되지 않았습니다.", "YAML mesti objek (kunci: nilai); nilai tidak diubah."],
-  "yamlExpectList": ["The YAML must be a list (- item); the value was not changed.", "YAML 必须是列表（- 项），值未修改。", "YAML 必須是清單（- 項），值未修改。", "YAML はリスト（- 項目）である必要があります。値は変更されていません。", "YAML은 목록(- 항목)이어야 하며 값이 변경되지 않았습니다.", "YAML mesti senarai (- item); nilai tidak diubah."],
-  "platform.operationPlaceholder": ["Search or choose an endpoint, e.g. code-insights", "搜索或选择接口，例如 code-insights", "搜尋或選擇介面，例如 code-insights", "エンドポイントを検索または選択（例：code-insights）", "엔드포인트 검색 또는 선택(예: code-insights)", "Cari atau pilih titik akhir, cth. code-insights"],
-  "platform.queryParams": ["Query parameters", "查询参数", "查詢參數", "クエリパラメーター", "쿼리 매개변수", "Parameter pertanyaan"],
-  "platform.queryParam": ["Query", "查询", "查詢", "クエリ", "쿼리", "Pertanyaan"],
-  "platform.queryExtra": ["Other query parameters", "其他查询参数", "其他查詢參數", "その他のクエリパラメーター", "기타 쿼리 매개변수", "Parameter pertanyaan lain"],
-  "platform.queryDefault": ["Default", "默认", "預設", "既定", "기본값", "Lalai"],
-  "platform.queryHintFilter": ["Optional; separate several values with commas", "可选；多个值用逗号分隔", "可選；多個值用逗號分隔", "任意。複数の値はカンマ区切り", "선택 사항, 여러 값은 쉼표로 구분", "Pilihan; asingkan beberapa nilai dengan koma"],
-  "platform.queryHintSearch": ["Optional search text", "可选，搜索关键字", "可選，搜尋關鍵字", "任意の検索文字列", "선택 사항, 검색어", "Teks carian pilihan"],
-  "platform.queryHintNumber": ["Optional number", "可选，数字", "可選，數字", "任意の数値", "선택 사항, 숫자", "Nombor pilihan"],
-  "platform.queryHintParam": ["Optional; a value or an expression like ={{ $json.since }}", "可选；填写值或表达式，如 ={{ $json.since }}", "可選；填寫值或運算式，如 ={{ $json.since }}", "任意。値または ={{ $json.since }} のような式", "선택 사항, 값 또는 ={{ $json.since }} 같은 표현식", "Pilihan; nilai atau ungkapan seperti ={{ $json.since }}"],
-  "platform.queryHelp": ["Empty fields are not sent. Parameters are read from this endpoint's server code; the endpoint still validates every value.", "留空的参数不会发送。参数列表来自该接口的服务端代码，取值仍由接口校验。", "留空的參數不會傳送。參數清單來自該介面的伺服器程式碼，取值仍由介面驗證。", "空欄のパラメーターは送信されません。一覧はこのエンドポイントのサーバーコードから取得し、値はエンドポイントが検証します。", "비어 있는 매개변수는 전송되지 않습니다. 목록은 이 엔드포인트의 서버 코드에서 가져오며 값은 엔드포인트가 검증합니다.", "Medan kosong tidak dihantar. Senarai diambil daripada kod pelayan titik akhir ini; titik akhir masih mengesahkan setiap nilai."],
-  "platform.queryUndeclared": ["Not declared by this endpoint (still sent):", "该接口未声明以下参数（仍会发送）：", "該介面未宣告以下參數（仍會傳送）：", "このエンドポイントで宣言されていません（送信はされます）：", "이 엔드포인트에 선언되지 않음(전송은 됨):", "Tidak diisytiharkan oleh titik akhir ini (masih dihantar):"]
+  "valueMode": [
+    "Edit as",
+    "编辑方式",
+    "編輯方式",
+    "編集方法",
+    "편집 방식",
+    "Sunting sebagai"
+  ],
+  "valueModeForm": [
+    "Form",
+    "表单",
+    "表單",
+    "フォーム",
+    "양식",
+    "Borang"
+  ],
+  "valueModeYaml": [
+    "YAML",
+    "YAML",
+    "YAML",
+    "YAML",
+    "YAML",
+    "YAML"
+  ],
+  "yamlInvalid": [
+    "Invalid YAML; the value was not changed.",
+    "YAML 格式错误，值未修改。",
+    "YAML 格式錯誤，值未修改。",
+    "YAML が無効です。値は変更されていません。",
+    "YAML이 올바르지 않아 값이 변경되지 않았습니다.",
+    "YAML tidak sah; nilai tidak diubah."
+  ],
+  "yamlExpectObject": [
+    "The YAML must be an object (key: value); the value was not changed.",
+    "YAML 必须是对象（键: 值），值未修改。",
+    "YAML 必須是物件（鍵: 值），值未修改。",
+    "YAML はオブジェクト（キー: 値）である必要があります。値は変更されていません。",
+    "YAML은 객체(키: 값)여야 하며 값이 변경되지 않았습니다.",
+    "YAML mesti objek (kunci: nilai); nilai tidak diubah."
+  ],
+  "yamlExpectList": [
+    "The YAML must be a list (- item); the value was not changed.",
+    "YAML 必须是列表（- 项），值未修改。",
+    "YAML 必須是清單（- 項），值未修改。",
+    "YAML はリスト（- 項目）である必要があります。値は変更されていません。",
+    "YAML은 목록(- 항목)이어야 하며 값이 변경되지 않았습니다.",
+    "YAML mesti senarai (- item); nilai tidak diubah."
+  ],
+  "platform.operationPlaceholder": [
+    "Search or choose an endpoint, e.g. code-insights",
+    "搜索或选择接口，例如 code-insights",
+    "搜尋或選擇介面，例如 code-insights",
+    "エンドポイントを検索または選択（例：code-insights）",
+    "엔드포인트 검색 또는 선택(예: code-insights)",
+    "Cari atau pilih titik akhir, cth. code-insights"
+  ],
+  "platform.queryParams": [
+    "Query parameters",
+    "查询参数",
+    "查詢參數",
+    "クエリパラメーター",
+    "쿼리 매개변수",
+    "Parameter pertanyaan"
+  ],
+  "platform.queryParam": [
+    "Query",
+    "查询",
+    "查詢",
+    "クエリ",
+    "쿼리",
+    "Pertanyaan"
+  ],
+  "platform.queryExtra": [
+    "Other query parameters",
+    "其他查询参数",
+    "其他查詢參數",
+    "その他のクエリパラメーター",
+    "기타 쿼리 매개변수",
+    "Parameter pertanyaan lain"
+  ],
+  "platform.queryDefault": [
+    "Default",
+    "默认",
+    "預設",
+    "既定",
+    "기본값",
+    "Lalai"
+  ],
+  "platform.queryHintFilter": [
+    "Optional; separate several values with commas",
+    "可选；多个值用逗号分隔",
+    "可選；多個值用逗號分隔",
+    "任意。複数の値はカンマ区切り",
+    "선택 사항, 여러 값은 쉼표로 구분",
+    "Pilihan; asingkan beberapa nilai dengan koma"
+  ],
+  "platform.queryHintSearch": [
+    "Optional search text",
+    "可选，搜索关键字",
+    "可選，搜尋關鍵字",
+    "任意の検索文字列",
+    "선택 사항, 검색어",
+    "Teks carian pilihan"
+  ],
+  "platform.queryHintNumber": [
+    "Optional number",
+    "可选，数字",
+    "可選，數字",
+    "任意の数値",
+    "선택 사항, 숫자",
+    "Nombor pilihan"
+  ],
+  "platform.queryHintParam": [
+    "Optional; a value or an expression like ={{ $json.since }}",
+    "可选；填写值或表达式，如 ={{ $json.since }}",
+    "可選；填寫值或運算式，如 ={{ $json.since }}",
+    "任意。値または ={{ $json.since }} のような式",
+    "선택 사항, 값 또는 ={{ $json.since }} 같은 표현식",
+    "Pilihan; nilai atau ungkapan seperti ={{ $json.since }}"
+  ],
+  "platform.queryHelp": [
+    "Empty fields are not sent. Parameters are read from this endpoint's server code; the endpoint still validates every value.",
+    "留空的参数不会发送。参数列表来自该接口的服务端代码，取值仍由接口校验。",
+    "留空的參數不會傳送。參數清單來自該介面的伺服器程式碼，取值仍由介面驗證。",
+    "空欄のパラメーターは送信されません。一覧はこのエンドポイントのサーバーコードから取得し、値はエンドポイントが検証します。",
+    "비어 있는 매개변수는 전송되지 않습니다. 목록은 이 엔드포인트의 서버 코드에서 가져오며 값은 엔드포인트가 검증합니다.",
+    "Medan kosong tidak dihantar. Senarai diambil daripada kod pelayan titik akhir ini; titik akhir masih mengesahkan setiap nilai."
+  ],
+  "platform.queryUndeclared": [
+    "Not declared by this endpoint (still sent):",
+    "该接口未声明以下参数（仍会发送）：",
+    "該介面未宣告以下參數（仍會傳送）：",
+    "このエンドポイントで宣言されていません（送信はされます）：",
+    "이 엔드포인트에 선언되지 않음(전송은 됨):",
+    "Tidak diisytiharkan oleh titik akhir ini (masih dihantar):"
+  ],
+  "reportRender": [
+    "Report file",
+    "生成报告文件",
+    "產生報告檔案",
+    "レポートファイル",
+    "보고서 파일",
+    "Fail laporan"
+  ],
+  "nodeHint.reportRender": [
+    "Turn structured content into a formatted document (PDF)",
+    "把结构化内容排版成文档文件（PDF）",
+    "把結構化內容排版成文件檔案（PDF）",
+    "構造化した内容を整形済みドキュメント（PDF）にする",
+    "구조화된 내용을 서식 있는 문서(PDF)로 만들기",
+    "Jadikan kandungan berstruktur dokumen berformat (PDF)"
+  ],
+  "report.help": [
+    "Lays out a report on the platform server from structured content, typically the JSON an AI agent step returned: key figures, a Markdown summary and sections (headings, lists, tables, > [!NOTE] callouts). Text is always shown as text.",
+    "在平台服务器上把结构化内容排版成报告，通常来自 AI 智能体步骤输出的 JSON：关键指标、Markdown 摘要和章节（标题、列表、表格、> [!NOTE] 提示框）。内容始终按文本显示。",
+    "在平台伺服器上把結構化內容排版成報告，通常來自 AI 智能體步驟輸出的 JSON：關鍵指標、Markdown 摘要和章節（標題、清單、表格、> [!NOTE] 提示框）。內容一律以文字顯示。",
+    "プラットフォームサーバー上で構造化した内容（通常は AI エージェントの JSON 出力）からレポートを組版します：主要指標、Markdown の概要とセクション（見出し、リスト、表、> [!NOTE] 注記）。内容は常にテキストとして表示されます。",
+    "플랫폼 서버에서 구조화된 내용(보통 AI 에이전트 단계의 JSON 출력)으로 보고서를 조판합니다: 핵심 지표, Markdown 요약과 섹션(제목, 목록, 표, > [!NOTE] 안내). 내용은 항상 텍스트로 표시됩니다.",
+    "Menyusun laporan pada pelayan platform daripada kandungan berstruktur, biasanya JSON daripada langkah ejen AI: angka utama, ringkasan Markdown dan bahagian (tajuk, senarai, jadual, petak > [!NOTE]). Teks sentiasa dipaparkan sebagai teks."
+  ],
+  "report.format": [
+    "Format",
+    "格式",
+    "格式",
+    "形式",
+    "형식",
+    "Format"
+  ],
+  "report.title": [
+    "Title",
+    "标题",
+    "標題",
+    "タイトル",
+    "제목",
+    "Tajuk"
+  ],
+  "report.subtitle": [
+    "Subtitle",
+    "副标题",
+    "副標題",
+    "サブタイトル",
+    "부제",
+    "Subtajuk"
+  ],
+  "report.period": [
+    "Period",
+    "统计周期",
+    "統計週期",
+    "対象期間",
+    "기간",
+    "Tempoh"
+  ],
+  "report.summary": [
+    "Summary (Markdown)",
+    "摘要（Markdown）",
+    "摘要（Markdown）",
+    "概要（Markdown）",
+    "요약(Markdown)",
+    "Ringkasan (Markdown)"
+  ],
+  "report.metrics": [
+    "Key figures",
+    "关键指标",
+    "關鍵指標",
+    "主要指標",
+    "핵심 지표",
+    "Angka utama"
+  ],
+  "report.sections": [
+    "Sections",
+    "章节",
+    "章節",
+    "セクション",
+    "섹션",
+    "Bahagian"
+  ],
+  "report.useExpression": [
+    "Use expression",
+    "改用表达式",
+    "改用運算式",
+    "式を使う",
+    "표현식 사용",
+    "Guna ungkapan"
+  ],
+  "report.editManually": [
+    "Edit by hand",
+    "手动编辑",
+    "手動編輯",
+    "手動で編集",
+    "직접 편집",
+    "Sunting secara manual"
+  ],
+  "report.language": [
+    "Labels",
+    "文档语言",
+    "文件語言",
+    "ラベルの言語",
+    "문서 언어",
+    "Bahasa label"
+  ],
+  "report.languageZh": [
+    "Chinese",
+    "中文",
+    "中文",
+    "中国語",
+    "중국어",
+    "Cina"
+  ],
+  "report.languageEn": [
+    "English",
+    "英文",
+    "英文",
+    "英語",
+    "영어",
+    "Inggeris"
+  ],
+  "report.fileName": [
+    "File name",
+    "文件名",
+    "檔案名稱",
+    "ファイル名",
+    "파일 이름",
+    "Nama fail"
+  ],
+  "report.fileNamePlaceholder": [
+    "Defaults to the title",
+    "默认使用标题",
+    "預設使用標題",
+    "既定はタイトル",
+    "기본값은 제목",
+    "Lalai: tajuk"
+  ],
+  "report.outputField": [
+    "Output file field",
+    "输出文件字段",
+    "輸出檔案欄位",
+    "出力ファイルのフィールド",
+    "출력 파일 필드",
+    "Medan fail output"
+  ],
+  "report.linkTtl": [
+    "Download link valid (days)",
+    "下载链接有效期（天）",
+    "下載連結有效期（天）",
+    "ダウンロードリンクの有効期間（日）",
+    "다운로드 링크 유효 기간(일)",
+    "Tempoh sah pautan muat turun (hari)"
+  ],
+  "report.outputHelp": [
+    "Output: the input item plus a file under the output field (name, size, download link, pages). Attach it in a later 'Send notification' step with that field name.",
+    "输出：输入数据加上输出字段中的文件（名称、大小、下载链接、页数）。在后续“发送通知”步骤里用该字段名作为附件即可发送。",
+    "輸出：輸入資料加上輸出欄位中的檔案（名稱、大小、下載連結、頁數）。在後續「傳送通知」步驟用該欄位名稱作為附件即可傳送。",
+    "出力：入力データに、出力フィールドのファイル（名前、サイズ、ダウンロードリンク、ページ数）を加えたもの。後続の「通知を送信」でそのフィールド名を添付に指定します。",
+    "출력: 입력 데이터에 출력 필드의 파일(이름, 크기, 다운로드 링크, 쪽수)을 더한 것. 이후 '알림 보내기' 단계에서 그 필드 이름을 첨부로 지정하세요.",
+    "Output: item input serta fail di bawah medan output (nama, saiz, pautan muat turun, halaman). Lampirkannya dalam langkah 'Hantar pemberitahuan' kemudian dengan nama medan itu."
+  ]
 }

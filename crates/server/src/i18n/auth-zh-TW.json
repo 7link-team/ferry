@@ -129,5 +129,10 @@
   "platform.storageCheckFailed": "儲存讀寫檢查未通過（步驟：{step}），請檢查儲存服務。",
   "platform.storageConfigUnreadable": "已儲存的檔案儲存設定無法解密（可能更換過主金鑰），請重新填寫並儲存。",
   "platform.storageClusterRequiresS3": "多實例部署必須使用 S3 檔案儲存，本機檔案無法在實例間共享。",
-  "platform.storageFieldInvalid": "檔案儲存設定 {field} 必須是文字。"
+  "platform.storageFieldInvalid": "檔案儲存設定 {field} 必須是文字。",
+  "notification.attachmentFailed": "訊息已送出，但{provider}未接收檔案 {file}：{reason}",
+  "notification.attachmentTooLarge": "檔案 {file} 超過該管道允許的大小（{limit}）。",
+  "notification.attachmentUnsupported": "{provider} 訊息不能攜帶檔案，請移除附件或改用其他管道。",
+  "notification.attachmentNeedsLink": "該管道不能直接接收檔案，{file} 需以下載連結傳送，這需要平台對外存取位址；請在「平台設定」中設定。",
+  "notification.attachmentMissing": "輸入中沒有名為「{field}」的檔案，請檢查產生檔案的上游節點及其輸出欄位。"
 }

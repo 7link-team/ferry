@@ -1224,7 +1224,7 @@ mod tests {
 
     #[test]
     fn draft_contracts_accept_all_catalog_examples_and_reject_unknown_parameters() {
-        assert_eq!(contracts().nodes.len(), 186);
+        assert_eq!(contracts().nodes.len(), 187);
         for kind in contracts().nodes.keys() {
             let mut graph = json!({"engine":"ferry-graph","schema":1,"nodes":[node("test",kind)],"connections":[]});
             accepts(&graph);

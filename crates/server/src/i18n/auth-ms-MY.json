@@ -129,5 +129,10 @@
   "platform.storageCheckFailed": "Semakan baca/tulis storan gagal pada langkah {step}. Semak perkhidmatan storan.",
   "platform.storageConfigUnreadable": "Tetapan storan fail yang disimpan tidak dapat dinyahsulit (kunci induk mungkin telah berubah). Masukkan semula dan simpan.",
   "platform.storageClusterRequiresS3": "Penggunaan berbilang tika memerlukan storan fail S3; fail tempatan tidak dikongsi antara tika.",
-  "platform.storageFieldInvalid": "Tetapan storan fail {field} mestilah teks."
+  "platform.storageFieldInvalid": "Tetapan storan fail {field} mestilah teks.",
+  "notification.attachmentFailed": "Mesej dihantar, tetapi {provider} tidak menerima fail {file}: {reason}",
+  "notification.attachmentTooLarge": "Fail {file} melebihi saiz yang dibenarkan saluran ini ({limit}).",
+  "notification.attachmentUnsupported": "Mesej {provider} tidak boleh membawa fail; buang lampiran atau gunakan saluran lain.",
+  "notification.attachmentNeedsLink": "Saluran ini tidak boleh menerima fail, jadi {file} dihantar sebagai pautan muat turun yang memerlukan alamat awam platform. Tetapkannya dalam Tetapan platform.",
+  "notification.attachmentMissing": "Input tiada fail bernama \"{field}\"; semak nod terdahulu yang menghasilkan fail dan medan outputnya."
 }

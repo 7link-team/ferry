@@ -233,5 +233,14 @@
   "workflow.integrationRemoteReason": "{reason}",
   "workflow.integrationNotJson": "アプリケーションは HTTP {status} を返しましたが、JSON ではありません。リクエスト先とパラメーターを確認してください（呼び出しは反映済みの可能性があります）。",
   "workflow.integrationTooLarge": "アプリケーションの応答が 1 MiB の上限を超えています。範囲を絞るかページ単位で読み取ってください（呼び出しは反映済みの可能性があります）。",
-  "workflow.integrationSecretEcho": "アプリケーションの応答に呼び出しで使用した認証情報が含まれていたため、結果を拒否し保存しませんでした。"
+  "workflow.integrationSecretEcho": "アプリケーションの応答に呼び出しで使用した認証情報が含まれていたため、結果を拒否し保存しませんでした。",
+  "workflow.fileTooLarge": "生成されたファイルが上限 {limit} を超えています。",
+  "workflow.reportTitleRequired": "レポートにはタイトルが必要です。",
+  "workflow.reportTooManySections": "レポートのセクションが {limit} 個を超えています。",
+  "workflow.reportTooManyMetrics": "レポートの主要指標が {limit} 個を超えています。",
+  "workflow.reportTooLarge": "レポートの内容が {limit} を超えています。短くするか複数のレポートに分けてください。",
+  "workflow.reportTooManyPages": "レポートが {limit} ページを超えます。短くするか複数のレポートに分けてください。",
+  "workflow.reportTimeout": "レポートのレイアウトが {seconds} 秒以内に終わりませんでした。内容を減らすか再試行してください。",
+  "workflow.reportContentInvalid": "レポートの内容が想定の形式ではありません：{reason}",
+  "fileLink.unavailable": "このダウンロードリンクは期限切れか、ファイルが利用できなくなりました。"
 }

@@ -764,6 +764,24 @@ pub struct SendBody {
 fn text() -> String {
     "text".into()
 }
+
+/// A file sent with a notification: delivered as a file where the channel can
+/// carry one (WeCom, Telegram, email), otherwise as an expiring download link.
+pub(crate) struct Attachment {
+    pub name: String,
+    pub mime: String,
+    pub sha256: String,
+    pub bytes: Vec<u8>,
+    /// Signed download link; `None` when no public address is configured.
+    pub link: Option<String>,
+}
+
+/// Largest total attachment size for email.
+const EMAIL_ATTACHMENT_LIMIT: usize = 20 * 1024 * 1024;
+
+fn attachment_error(key: &'static str) -> Message {
+    Message::new(key)
+}
 fn render(
     input: &str,
     vars: &std::collections::BTreeMap<String, String>,
@@ -945,6 +963,19 @@ pub(crate) async fn send_message(
     source: &str,
     source_id: &str,
 ) -> Result<Value> {
+    send_message_with_files(s, scope, id, body, source, source_id, Vec::new()).await
+}
+
+/// Like [`send_message`], with files (any type) attached.
+pub(crate) async fn send_message_with_files(
+    s: &AppState,
+    scope: &Scope,
+    id: Id,
+    body: SendBody,
+    source: &str,
+    source_id: &str,
+    files: Vec<Attachment>,
+) -> Result<Value> {
     if source.len() > 32
         || source_id.len() > 128
         || body.client_id.is_empty()
@@ -955,7 +986,7 @@ pub(crate) async fn send_message(
     }
     let row = channel(s, scope.workspace_id, id).await?;
     authorize(s, scope, &row).await?;
-    send_authorized(s, scope, row, body, source, source_id, None).await
+    send_authorized(s, scope, row, body, source, source_id, None, &files).await
 }
 
 /// Business subscriptions are authorized when configured. Background delivery
@@ -1004,7 +1035,7 @@ pub(crate) async fn send_system_notice(
         format: text(),
         ..Default::default()
     };
-    let sent = send_authorized(s, &scope, row, body, source, source_id, Some(notice)).await?;
+    let sent = send_authorized(s, &scope, row, body, source, source_id, Some(notice), &[]).await?;
     let id: Id = serde_json::from_value(sent["id"].clone()).map_err(|_| invalid())?;
     let record = deliveries::Entity::find_by_id(id)
         .filter(deliveries::Column::WorkspaceId.eq(workspace))
@@ -1022,15 +1053,19 @@ async fn send_authorized(
     source: &str,
     source_id: &str,
     business_notice: Option<&super::webhook::Notice<'_>>,
+    files: &[Attachment],
 ) -> Result<Value> {
     let id = Id::from(row.id);
-    let hash = format!(
-        "{:x}",
-        Sha256::digest(
-            serde_json::to_vec(&(scope.user.id, crate::platform_tools::current_agent(), &body))
-                .map_err(|_| invalid())?
-        )
+    let mut digest = Sha256::new();
+    digest.update(
+        serde_json::to_vec(&(scope.user.id, crate::platform_tools::current_agent(), &body))
+            .map_err(|_| invalid())?,
     );
+    // Files join the idempotency hash only when present, so earlier deliveries keep theirs.
+    for file in files {
+        digest.update(file.sha256.as_bytes());
+    }
+    let hash = format!("{:x}", digest.finalize());
     let prior = deliveries::Entity::find()
         .filter(deliveries::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(deliveries::Column::ChannelId.eq(id))
@@ -1055,6 +1090,68 @@ async fn send_authorized(
     } else {
         None
     };
+    // Attachments are checked before anything is recorded or sent.
+    let robot = if row.provider == "SMTP" || sms_parameters.is_some() {
+        None
+    } else {
+        super::webhook::configured_robot(&transport.webhook, &transport.options)
+    };
+    let carries = row.provider == "SMTP" || super::webhook::carries_files(robot);
+    if !files.is_empty() {
+        if sms_parameters.is_some() {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                attachment_error("notification.attachmentUnsupported")
+                    .with("provider", &row.provider),
+            ));
+        }
+        if row.provider == "SMTP" {
+            if files.iter().map(|f| f.bytes.len()).sum::<usize>() > EMAIL_ATTACHMENT_LIMIT {
+                return Err(ApiError::localized(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    attachment_error("notification.attachmentTooLarge")
+                        .with(
+                            "file",
+                            files
+                                .iter()
+                                .map(|f| f.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        )
+                        .with(
+                            "limit",
+                            format!("{} MB", EMAIL_ATTACHMENT_LIMIT / 1024 / 1024),
+                        ),
+                ));
+            }
+        } else if carries {
+            let outgoing: Vec<_> = files
+                .iter()
+                .map(|f| super::webhook::OutgoingFile {
+                    name: &f.name,
+                    mime: &f.mime,
+                    bytes: &f.bytes,
+                })
+                .collect();
+            super::webhook::check_files(robot, &outgoing)
+                .map_err(|message| ApiError::localized(StatusCode::PAYLOAD_TOO_LARGE, message))?;
+        } else if let Some(file) = files.iter().find(|f| f.link.is_none()) {
+            // Without a public address there is no link to send instead of the file.
+            return Err(ApiError::localized(
+                StatusCode::CONFLICT,
+                attachment_error("notification.attachmentNeedsLink").with("file", &file.name),
+            ));
+        }
+    }
+    let record_body = if files.is_empty() {
+        body.body.clone()
+    } else {
+        let lines: Vec<String> = files
+            .iter()
+            .map(|f| format!("📎 {} · {}", f.name, human_size(f.bytes.len())))
+            .collect();
+        format!("{}\n\n{}", body.body, lines.join("\n"))
+    };
     let now = db::now();
     let delivery_id = s.next_id()?;
     let record = deliveries::Model {
@@ -1070,7 +1167,7 @@ async fn send_authorized(
         request_hash: hash,
         state: "sending".into(),
         subject: body.subject.clone(),
-        body: body.body.clone(),
+        body: record_body,
         result: String::new(),
         version: 1,
         created_at: now,
@@ -1083,7 +1180,7 @@ async fn send_authorized(
         .await?;
     tx.commit().await?;
     let (result, state) = if row.provider == "SMTP" {
-        smtp(&transport, &body).await
+        smtp(&transport, &body, files).await
     } else if let Some(parameters) = sms_parameters {
         super::sms::send(&row.provider, &transport.sms, &body.to, &parameters).await
     } else {
@@ -1092,13 +1189,29 @@ async fn send_authorized(
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| invalid())?;
+        // Channels that cannot carry files get each file's download link.
+        let mut text = body.body.clone();
+        if !carries {
+            for file in files {
+                if let Some(link) = &file.link {
+                    text.push_str(&format!("\n📎 {}: {link}", file.name));
+                }
+            }
+        }
+        let mut generic = json!({"subject":body.subject,"body":body.body,"format":body.format});
+        if !files.is_empty() {
+            generic["attachments"] = json!(files
+                .iter()
+                .map(|f| json!({"name":f.name,"mime":f.mime,"size":f.bytes.len(),"sha256":f.sha256,"url":f.link}))
+                .collect::<Vec<_>>());
+        }
         let notice = super::webhook::Notice {
             title: &body.subject,
             accent: None,
             field_links: vec![],
             field_accents: vec![],
-            fields: vec![(String::new(), body.body.clone())],
-            generic: json!({"subject":body.subject,"body":body.body,"format":body.format}),
+            fields: vec![(String::new(), text)],
+            generic,
         };
         let result = super::webhook::deliver_configured(
             &client,
@@ -1110,7 +1223,32 @@ async fn send_authorized(
         let key = crate::i18n::decode_stored(&result)
             .map(|m| m.key)
             .unwrap_or_default();
-        let state = if matches!(key.as_str(), "webhook.delivered" | "webhook.deliveredHttp") {
+        let delivered = matches!(key.as_str(), "webhook.delivered" | "webhook.deliveredHttp");
+        // Files follow the text message on robots that carry them.
+        let (result, delivered) = if delivered && carries && !files.is_empty() {
+            let outgoing: Vec<_> = files
+                .iter()
+                .map(|f| super::webhook::OutgoingFile {
+                    name: &f.name,
+                    mime: &f.mime,
+                    bytes: &f.bytes,
+                })
+                .collect();
+            match super::webhook::deliver_files(
+                &client,
+                &transport.webhook,
+                &transport.options,
+                &outgoing,
+            )
+            .await
+            {
+                Ok(()) => (result, true),
+                Err(message) => (crate::i18n::store_message(&message), false),
+            }
+        } else {
+            (result, delivered)
+        };
+        let state = if delivered {
             "succeeded"
         } else if key.contains("Timeout")
             || key == "webhook.failed"
@@ -1163,10 +1301,17 @@ fn sms_message(
         json!({"template":transport.sms.sms_template_code,"parameters":parameters}).to_string();
     Ok(parameters)
 }
-async fn smtp(config: &Transport, body: &SendBody) -> (String, &'static str) {
+fn human_size(bytes: usize) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / 1024.0 / 1024.0)
+    } else {
+        format!("{} KB", bytes.div_ceil(1024))
+    }
+}
+
+async fn smtp(config: &Transport, body: &SendBody, files: &[Attachment]) -> (String, &'static str) {
     use lettre::{
-        AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
-        message::{Message, MultiPart, SinglePart, header::ContentType},
+        AsyncSmtpTransport, AsyncTransport, Tokio1Executor, message::Message,
         transport::smtp::authentication::Credentials,
     };
     let invalid = || {
@@ -1183,19 +1328,7 @@ async fn smtp(config: &Transport, body: &SendBody) -> (String, &'static str) {
         let Ok(to) = to.parse() else { return invalid() };
         message = message.to(to);
     }
-    let Ok(message) = (if body.format == "html" {
-        message.multipart(
-            MultiPart::alternative()
-                .singlepart(SinglePart::plain(crate::accounts::mail::html_text(
-                    &body.body,
-                )))
-                .singlepart(SinglePart::html(body.body.clone())),
-        )
-    } else {
-        message
-            .header(ContentType::TEXT_PLAIN)
-            .body(body.body.clone())
-    }) else {
+    let Ok(message) = email(message, body, files) else {
         return invalid();
     };
     let builder = match config.security.as_str() {
@@ -1250,4 +1383,41 @@ pub(crate) async fn prepare(s: &AppState) -> Result<()> {
         .exec(&s.db)
         .await?;
     Ok(())
+}
+
+/// The email body, with files as MIME attachments of their own media type.
+pub(crate) fn email(
+    message: lettre::message::MessageBuilder,
+    body: &SendBody,
+    files: &[Attachment],
+) -> std::result::Result<lettre::Message, lettre::error::Error> {
+    use lettre::message::{Attachment as MailFile, MultiPart, SinglePart, header::ContentType};
+    let text = || {
+        if body.format == "html" {
+            MultiPart::alternative()
+                .singlepart(SinglePart::plain(crate::accounts::mail::html_text(
+                    &body.body,
+                )))
+                .singlepart(SinglePart::html(body.body.clone()))
+        } else {
+            MultiPart::mixed().singlepart(SinglePart::plain(body.body.clone()))
+        }
+    };
+    if files.is_empty() {
+        return if body.format == "html" {
+            message.multipart(text())
+        } else {
+            message
+                .header(ContentType::TEXT_PLAIN)
+                .body(body.body.clone())
+        };
+    }
+    let mut mixed = MultiPart::mixed().multipart(text());
+    for file in files {
+        let kind = ContentType::parse(&file.mime).unwrap_or_else(|_| {
+            ContentType::parse("application/octet-stream").expect("valid media type")
+        });
+        mixed = mixed.singlepart(MailFile::new(file.name.clone()).body(file.bytes.clone(), kind));
+    }
+    message.multipart(mixed)
 }

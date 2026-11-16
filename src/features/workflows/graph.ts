@@ -121,6 +121,8 @@ export function newNode(graph: Graph, type: string, name: string): GraphNode {
   if (type === "ferry.request") Object.assign(defaults, { operation: "", path_params: {}, query: {} });
   // An AI agent node starts without a sample Agent or task; the example schema stays as a starting point.
   if (type === "ai.agent.run") Object.assign(defaults, { agent_id: "", prompt: "" });
+  // A report is usually fed whole lists from the previous step's structured JSON.
+  if (type === "report.render") Object.assign(defaults, { metrics: "={{ $json.metrics }}", sections: "={{ $json.sections }}" });
   if (spec.params_schema.properties?.connection_id && spec.params_schema.properties?.credential_id) {
     delete defaults.credential_id;
     delete defaults.organization_id;

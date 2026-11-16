@@ -4656,6 +4656,16 @@
               "type": "string",
               "maxLength": 48000
             }
+          },
+          "attachments": {
+            "type": "array",
+            "maxItems": 10,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
           }
         },
         "required": [
@@ -4671,7 +4681,7 @@
         "template_id",
         "variables"
       ],
-      "semantic_rule": "Use a workspace notification channel. Recheck actor and channel permissions on each send; credentials remain on the server. Persist idempotency before delivery; unknown results are never automatically replayed.",
+      "semantic_rule": "Use a workspace notification channel. Recheck actor and channel permissions on each send; credentials remain on the server. Persist idempotency before delivery; unknown results are never automatically replayed. attachments names file artifacts on the input item by their binary field (e.g. \"file\" from report.render), or \"*\" for every file; any file type. WeCom and Telegram receive the files themselves, email gets MIME attachments, other channels get an expiring download link (requires the platform public address).",
       "example_params": {
         "channel_id": "1",
         "subject": "",

@@ -233,5 +233,14 @@
   "workflow.integrationRemoteReason": "{reason}",
   "workflow.integrationNotJson": "Aplikasi menjawab HTTP {status} tetapi bukan JSON. Semak alamat dan parameter permintaan; panggilan itu mungkin sudah berkuat kuasa.",
   "workflow.integrationTooLarge": "Respons aplikasi melebihi had 1 MiB. Kecilkan pertanyaan atau baca mengikut halaman; panggilan itu mungkin sudah berkuat kuasa.",
-  "workflow.integrationSecretEcho": "Respons aplikasi mengandungi kelayakan yang digunakan untuk panggilan, jadi hasilnya ditolak dan tidak disimpan."
+  "workflow.integrationSecretEcho": "Respons aplikasi mengandungi kelayakan yang digunakan untuk panggilan, jadi hasilnya ditolak dan tidak disimpan.",
+  "workflow.fileTooLarge": "Fail yang dijana melebihi had {limit}.",
+  "workflow.reportTitleRequired": "Laporan memerlukan tajuk.",
+  "workflow.reportTooManySections": "Laporan mempunyai lebih daripada {limit} bahagian.",
+  "workflow.reportTooManyMetrics": "Laporan mempunyai lebih daripada {limit} angka utama.",
+  "workflow.reportTooLarge": "Kandungan laporan melebihi {limit}; pendekkan atau pecahkan kepada beberapa laporan.",
+  "workflow.reportTooManyPages": "Laporan akan melebihi {limit} halaman; pendekkan atau pecahkan kepada beberapa laporan.",
+  "workflow.reportTimeout": "Susun atur laporan mengambil masa lebih daripada {seconds} saat; pendekkan atau cuba lagi.",
+  "workflow.reportContentInvalid": "Kandungan laporan tidak mengikut bentuk yang dijangka: {reason}",
+  "fileLink.unavailable": "Pautan muat turun ini telah tamat tempoh atau fail tidak lagi tersedia."
 }

@@ -233,5 +233,14 @@
   "workflow.integrationRemoteReason": "{reason}",
   "workflow.integrationNotJson": "The application answered HTTP {status} but not with JSON. Check the request address and parameters; the call may have taken effect.",
   "workflow.integrationTooLarge": "The application response exceeds the 1 MiB limit. Narrow the query or read it in pages; the call may have taken effect.",
-  "workflow.integrationSecretEcho": "The application response contained the credential used for the call, so the result was rejected and not stored."
+  "workflow.integrationSecretEcho": "The application response contained the credential used for the call, so the result was rejected and not stored.",
+  "workflow.fileTooLarge": "The generated file is larger than {limit}.",
+  "workflow.reportTitleRequired": "The report needs a title.",
+  "workflow.reportTooManySections": "The report has more than {limit} sections.",
+  "workflow.reportTooManyMetrics": "The report has more than {limit} key figures.",
+  "workflow.reportTooLarge": "The report content is larger than {limit}; shorten it or split it into several reports.",
+  "workflow.reportTooManyPages": "The report would have more than {limit} pages; shorten it or split it into several reports.",
+  "workflow.reportTimeout": "Laying out the report took longer than {seconds} seconds; shorten it or try again.",
+  "workflow.reportContentInvalid": "The report content does not have the expected shape: {reason}",
+  "fileLink.unavailable": "This download link has expired or the file is no longer available."
 }
