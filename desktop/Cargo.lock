@@ -1071,7 +1071,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-desktop"
-version = "0.8.1-alpha"
+version = "0.8.2-alpha"
 dependencies = [
  "reqwest",
  "semver",
