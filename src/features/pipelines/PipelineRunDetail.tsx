@@ -9,6 +9,7 @@ import { executionText,useCommonTranslation } from "../../shared/i18n/i18n";
 import type { Navigation } from "../../shared/routing/types";
 import { Button } from "../../shared/ui/button";
 import { duration,isActive,mergeLogs,stateBadge,type LogPage,type PipelineRun,type RunLog } from "./pipeline";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 function PipelineState({ value }: { value: string }) {
   const { label, ...props } = stateBadge(value);
@@ -143,7 +144,7 @@ export function PipelineRunDetail({ navigation, workspace, runId, permissions, t
   const otherLogs = logs.filter(log => log.step_index < 0);
   return (
     <div className="flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden pb-3">
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {error && <InlineAlert>{error}</InlineAlert>}
       {!run ? !error && <LoadingSkeleton variant="page" label={executionText("run.loading")} /> : <>
         <section aria-label={executionText("run.summary")} className="max-h-[35dvh] shrink-0 space-y-3 overflow-auto overscroll-contain rounded-lg border border-border bg-card p-4">
           <div className="flex flex-wrap items-center gap-3">

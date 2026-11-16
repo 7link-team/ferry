@@ -4,7 +4,8 @@
  * wizard never submits keys the server rejects; business rules stay server-side.
  */
 import { Document, parse, parseDocument, stringify } from "yaml";
-import { commonText } from "../../shared/i18n/i18n";
+import { commonText, i18n } from "../../shared/i18n/i18n";
+import { yamlError } from "../../shared/yaml-error";
 
 export const SPEC_API_VERSION = "ferry/deploy-v1";
 export const HOST_DOWN_AFTER = { min: 30, max: 3600, default: 90 } as const;
@@ -125,11 +126,13 @@ function toSpec(value: unknown): DeploySpec {
 /** Parses the YAML text. `spec` is present only when there are no errors. */
 export function readSpec(source: string): { doc?: Document; spec?: DeploySpec; errors: string[] } {
   const doc = parseDocument(source, { uniqueKeys: true });
-  if (doc.errors.length) return { errors: doc.errors.map(error => text("syntax", { detail: error.message })) };
+  if (doc.errors.length) return { errors: [yamlError(doc.errors).message] };
   try { return { doc, spec: toSpec(doc.toJS({ maxAliasCount: 50 })), errors: [] }; }
   catch (error) {
     if (error instanceof SpecError) return { doc, errors: [error.message] };
-    return { doc, errors: [text("syntax", { detail: error instanceof Error ? error.message : String(error) })] };
+    // The parser's own wording is not shown; the YAML could not be turned into a value.
+    console.debug("blueprint spec", error);
+    return { doc, errors: [text("syntax", { detail: i18n.t("errors.yamlOther") })] };
   }
 }
 

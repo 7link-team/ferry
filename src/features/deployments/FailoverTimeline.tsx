@@ -8,6 +8,7 @@ import { Button } from "../../shared/ui/button";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { useFailoverEvents } from "./blueprint-hooks";
 import { instanceResource, type Deployment } from "./deployment";
+import { RetryButton, InlineAlert } from "../../shared/ui/inline-alert";
 
 const t = (key: string, values?: Record<string, unknown>) => commonText(`resource-domain:failover.${key}`, values);
 const touch = "min-h-11 lg:min-h-9";
@@ -23,9 +24,7 @@ export function FailoverTimeline({ workspace, deployment }: { workspace: string;
   useEffect(() => { if (!events.loading && !events.error && page > pages) setPage(pages); }, [events.loading, events.error, page, pages]);
   return <section aria-labelledby={title} className="min-w-0 space-y-3">
     <h3 id={title} className="font-semibold">{t("timeline")}</h3>
-    {events.loading ? <LoadingSkeleton variant="page" label={t("loading")} /> : events.error ? <div role="alert" className="space-y-2 break-words text-sm text-destructive">
-      <p>{events.error}</p><Button className={touch} variant="outline" onClick={events.retry}>{commonText("common.retry")}</Button>
-    </div> : <>
+    {events.loading ? <LoadingSkeleton variant="page" label={t("loading")} /> : events.error ? <InlineAlert action={<RetryButton onClick={events.retry} />}>{events.error}</InlineAlert> : <>
       {!events.items.length ? <p className="text-sm text-muted-foreground">{t("empty")}</p> : <ol className="min-w-0 divide-y rounded-md border px-3">{events.items.map(event => <li key={event.id} className="min-w-0 space-y-2 py-3 text-sm">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <time dateTime={new Date(event.created_at).toISOString()} className="text-muted-foreground">{date(event.created_at)}</time>
@@ -67,6 +66,6 @@ export function FailoverAttention({ workspace, deployment, permissions, onDone }
       <span className="min-w-0 break-all font-medium">{item.instance}</span><span className="text-muted-foreground">{date(item.since)}</span>
       {permissions.has("deployments.apply") && instanceResource(workspace, deployment.id, item.instance) && <Button className={touch} variant="outline" disabled={busy} onClick={() => void acknowledge(item.instance)}>{t("acknowledge")}</Button>}
     </li>)}</ul>
-    {error && <p role="alert" className="break-words text-sm text-destructive">{error}</p>}
+    {error && <InlineAlert>{error}</InlineAlert>}
   </section>;
 }

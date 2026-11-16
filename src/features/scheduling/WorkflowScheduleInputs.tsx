@@ -6,6 +6,7 @@ import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../shared/ui/select";
 import { parseGraph, type GraphNode } from "../workflows/graph";
 import { validRunInputs, WorkflowRunInputs } from "../workflows/WorkflowNodeParameters";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 type ScheduleInputs = { target_ref?: string; entry_node_id?: string; inputs?: Record<string, unknown> };
 type Props = { workspace: string; draft: ScheduleInputs; readOnly: boolean; onPatch: (patch: ScheduleInputs) => void; onValidityChange: (blocked: boolean) => void };
 
@@ -40,7 +41,7 @@ export function WorkflowScheduleInputs(props: Props) {
   useEffect(() => { onValidityChange(!readOnly && blocked); }, [blocked, readOnly, onValidityChange]);
   useEffect(() => () => onValidityChange(false), [onValidityChange]);
   if (loading) return <LoadingSkeleton variant="form" />;
-  if (readOnly) return <div className="min-w-0 space-y-3">{error && <p role="alert" className="break-words text-sm text-destructive">{error}</p>}<p className="break-words text-sm">{workflowText("entry")}: {entry?.name ?? draft.entry_node_id}</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">{JSON.stringify(inputs, null, 2)}</pre></div>;
+  if (readOnly) return <div className="min-w-0 space-y-3">{error && <InlineAlert>{error}</InlineAlert>}<p className="break-words text-sm">{workflowText("entry")}: {entry?.name ?? draft.entry_node_id}</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">{JSON.stringify(inputs, null, 2)}</pre></div>;
   if (error) return <div role="alert" className="space-y-2"><p className="break-words text-sm text-destructive">{error}</p><Button type="button" variant="outline" onClick={() => setReload(value => value + 1)}>{commonText("common.retry")}</Button></div>;
   return <div className="min-w-0 space-y-4">
     <p className="text-sm text-muted-foreground">{commonText("resource-domain:cron.workflowHelp")}</p>

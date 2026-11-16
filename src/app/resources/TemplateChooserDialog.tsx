@@ -8,6 +8,7 @@ import type { FormConfig, FormField } from "../../shared/resources/types";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
+import { InlineAlert, RetryButton } from "../../shared/ui/inline-alert";
 
 const PAGE_SIZE = 12;
 type TemplateRow = { id: string; name: string; description?: string; version: number };
@@ -128,14 +129,14 @@ export function TemplateChooserDialog<T>({ config, allowBlank, onBlank, onCancel
             </div>
           </fieldset>}
           {step === "catalog" && loading && <LoadingSkeleton variant="form" label={commonText("form.loadingTemplates")} />}
-          {step === "catalog" && listError && <div role="alert" className="space-y-2 text-sm text-destructive"><p>{listError}</p><Button type="button" variant="outline" onClick={() => setAttempt(n => n + 1)}>{commonText("common.retry")}</Button></div>}
+          {step === "catalog" && listError && <InlineAlert action={<RetryButton onClick={() => setAttempt(n => n + 1)} />}>{listError}</InlineAlert>}
           {step === "catalog" && !loading && !listError && !catalog.rows.length && <p className="py-4 text-sm text-muted-foreground">{commonText("form.noTemplates")}</p>}
           {step === "parameters" && loadingTemplate && <LoadingSkeleton variant="inline" />}
           {step === "parameters" && current && <section className="space-y-3" aria-label={commonText("resource-domain:template.parameters")}>
             <h3 className="break-words font-medium [overflow-wrap:anywhere]">{current.name} · {commonText("common.version")} {current.version}</h3>
             <div className="grid min-w-0 gap-4 sm:grid-cols-2">{current.fields.map(field => <div key={field.key} className="min-w-0">{renderParameter(field, values[field.key], value => setValues(previous => ({ ...previous, [field.key]: value })), busy)}</div>)}</div>
           </section>}
-          {error && <div role="alert" className="space-y-2 text-sm text-destructive"><p>{error}</p><Button type="button" variant="outline" disabled={busy} onClick={() => setAttempt(n => n + 1)}>{commonText("form.reloadTemplate")}</Button></div>}
+          {error && <InlineAlert action={<Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setAttempt(n => n + 1)}>{commonText("form.reloadTemplate")}</Button>}>{error}</InlineAlert>}
         </div>
         {step === "catalog" && <nav aria-label={commonText("table.pagination")} className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t py-3 text-sm">
           <span>{commonText("table.totalSummary", { count: catalog.total, start: catalog.total ? (page - 1) * PAGE_SIZE + 1 : 0, end: Math.min(page * PAGE_SIZE, catalog.total) })}</span>

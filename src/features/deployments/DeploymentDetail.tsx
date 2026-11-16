@@ -15,6 +15,7 @@ import { deploymentActive,deploymentState,revisionActionLabel,type Deployment,ty
 import { BlueprintSpecEdit } from "./BlueprintSpecEdit";
 import { BlueprintTarget, BlueprintTopology } from "./BlueprintTopology";
 import { FailoverAttention, FailoverTimeline } from "./FailoverTimeline";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 const CodeEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 
@@ -110,7 +111,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
       <Button variant="outline" onClick={() => navigation.navigate({ item: "revisions", mode: "list" }, { deployment_id: app.id })}>{executionText("shared.common.nav.deploymentHistory")}</Button>
     </div>
     <p className="text-sm text-muted-foreground">{executionText("deployment.applyHelp")}</p>
-    {error && <p role="alert" className="text-destructive">{error}</p>}
+    {error && <InlineAlert>{error}</InlineAlert>}
     {!revisionId && <BlueprintSpecEdit workspace={workspace} deployment={app} permissions={permissions} navigation={navigation} disabled={blocked} onSaved={() => setReload((n) => n + 1)} />}
     {!revisionId && app.target_kind === "blueprint" && <BlueprintTopology workspace={workspace} deployment={app} permissions={permissions} onDone={() => setReload(n => n + 1)} />}
     {!revisionId && app.target_kind === "blueprint" && <FailoverTimeline key={`${workspace}/${app.id}`} workspace={workspace} deployment={app} />}

@@ -5,6 +5,7 @@ import { commonText as t } from "../../shared/i18n/i18n";
 import type { AnyRow } from "../../shared/resources/config";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 const key = (name: string) => `notifications:${name}`;
 
@@ -46,7 +47,7 @@ export function WebhookAddress({ workspace, draft, readOnly, onPatch, canReveal 
     <AutoField label={label}>
       <div className="space-y-1">
         {current || <p className="text-sm text-muted-foreground">{t("common.notSet")}</p>}
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        {error && <InlineAlert>{error}</InlineAlert>}
       </div>
     </AutoField>
   );
@@ -63,7 +64,7 @@ export function WebhookAddress({ workspace, draft, readOnly, onPatch, canReveal 
           placeholder={saved ? t(key("webhookKeep")) : "https://"}
           onChange={(event) => onPatch({ webhook: event.target.value })}
         />
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        {error && <InlineAlert>{error}</InlineAlert>}
       </div>
     </AutoField>
   );

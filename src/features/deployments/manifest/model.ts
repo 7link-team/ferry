@@ -1,5 +1,6 @@
 import { parseDocument, visit } from "yaml";
 import { hostRepositoryText } from "../../../shared/i18n/i18n";
+import { yamlError } from "../../../shared/yaml-error";
 
 export type Path = (string | number)[];
 
@@ -13,7 +14,7 @@ export const object = (value: unknown): value is Row =>
  */
 export function readManifest(source: string) {
   const doc = parseDocument(source, { uniqueKeys: true });
-  if (doc.errors.length) throw new Error(doc.errors[0]!.message);
+  if (doc.errors.length) throw yamlError(doc.errors);
   let alias = false;
   visit(doc, {
     Alias: () => {

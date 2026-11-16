@@ -930,6 +930,14 @@
     "다이어그램 소스",
     "Sumber rajah"
   ],
+  "toolRawResult": [
+    "Tool output (raw data)",
+    "工具返回（原始数据）",
+    "工具回傳（原始資料）",
+    "ツールの出力（生データ）",
+    "도구 출력(원시 데이터)",
+    "Output alat (data mentah)"
+  ],
   "platformResult": [
     "Platform tool result",
     "平台工具结果",

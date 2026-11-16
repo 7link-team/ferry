@@ -10,6 +10,7 @@ import { useTheme } from "../../shared/theme/theme";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
 import { TagBadge } from "../tags/TagBadge";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 export { sanitizeRichText } from "./value-content";
 
 const Editor = lazy(async () => { await import("../../shared/editor/runtime"); return import("@monaco-editor/react"); });
@@ -129,7 +130,7 @@ export function TypedValueEditor(props: Props) {
       : type === "richtext" ? <AutoField label={typedText("richValue")}><Suspense fallback={<LoadingSkeleton variant="editor" label={typedText("loadingRich")} />}><RichTextEditor value={text} readOnly={readOnly} onChange={emit} /></Suspense></AutoField>
       : <AutoField label={typedText("value")}><textarea aria-label={typedText("value")} className="min-h-36 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={text} maxLength={Number(schema.maxLength) || undefined} disabled={readOnly} onChange={event => emit(event.target.value)} /></AutoField>}
     {["markdown", "html", "richtext"].includes(type) && <details open={readOnly}><summary className="cursor-pointer text-sm font-medium">{typedText("preview")}</summary><SafePreview value={text} markdown={type === "markdown"} /></details>}
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {error && <InlineAlert>{error}</InlineAlert>}
   </div>;
 }
 
@@ -199,7 +200,7 @@ function MediaEditor({ workspace, resource, type, schema, value, readOnly, onCha
   };
   return <div className="space-y-3"><div className="flex flex-wrap items-center gap-3"><span className="text-sm">{typedText("attachments", { count: files.length, limit: Number.isFinite(maxFiles) ? maxFiles : typedText("unlimited") })}</span>{!readOnly && <><input ref={input} type="file" hidden aria-label={typedText("chooseFile")} multiple={maxFiles > 1} accept={accept} onChange={event => void upload(Array.from(event.target.files ?? []))} /><Button type="button" variant="outline" disabled={busy || files.length >= maxFiles} onClick={() => input.current?.click()}><Upload className="size-4" />{busy ? typedText("uploading") : typedText("upload")}</Button></>}</div>
     {files.map((file, index) => <div key={file.id ?? index} className="flex min-w-0 items-center gap-3 rounded-md border p-3"><FilePreview file={file} type={type} /><a href={safeFileUrl(file.url)} className="min-w-0 flex-1 break-all text-sm text-primary underline" download={file.name}>{file.name || typedText("attachment")}</a><span className="text-xs text-muted-foreground">{Math.ceil(Number(file.size ?? 0) / 1024)} KB</span>{!readOnly && <Button type="button" size="icon" variant="ghost" disabled={busy} aria-label={typedText("removeFile", { index: index + 1 })} onClick={() => onChange(files.filter((_, i) => i !== index))}><Trash2 className="size-4" /></Button>}</div>)}
-    {error && <p role="alert" className="text-sm text-destructive">{typeof error === "string" ? error : typedText(error.key, error.values)}</p>}
+    {error && <InlineAlert>{typeof error === "string" ? error : typedText(error.key, error.values)}</InlineAlert>}
   </div>;
 }
 function safeFileUrl(value: unknown): string | undefined { const raw = String(value ?? ""); return /^\/api\/workspaces\/[^/]+\/value-files\/[^/?#]+$/.test(raw) ? raw : undefined; }

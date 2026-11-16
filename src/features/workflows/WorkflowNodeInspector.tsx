@@ -36,6 +36,7 @@ import {
   type NodeExecutionData,
   type WorkflowItem,
 } from "./workflow-data";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 type Run = { id: string; number: number; state: string; revision_id: string };
 type Attempt = { id: string; node_id: string; state: string; attempt: number };
@@ -835,9 +836,7 @@ export function WorkflowNodeInspector({
                       {t("inspector.previewHelp")}
                     </p>
                     {previewError && (
-                      <p role="alert" className="text-sm text-destructive">
-                        {previewError}
-                      </p>
+                      <InlineAlert>{previewError}</InlineAlert>
                     )}
                     <WorkflowDataView
                       items={(preview ?? []).map((json) => ({ json }))}

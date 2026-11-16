@@ -13,6 +13,7 @@ import type { RepositorySelection } from "../repositories/ConnectionRepositoryFi
 import { ConnectionRepositoryFields,useConnectionRepositories } from "../repositories/ConnectionRepositoryFields";
 import { addActionCheckouts,editActionStep,parseActions,type CheckoutRepositoryChoice } from "./actions-workflow";
 import { DropdownMenu,DropdownMenuTrigger,DropdownMenuContent,DropdownMenuCheckboxItem } from "../../shared/ui/dropdown-menu";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 type Binding = {job_id:string;step_id:string;connection_id:string;repository_url:string;ref:string;path:string};
 type Props = { canCreateConnection?:boolean; navigation: Navigation; workspace:string;draft:Record<string,unknown>;options?:Option[];jobId?:string;stepIndex?:number;readOnly:boolean;onChange:(patch:Record<string,unknown>)=>void;onValidityChange:(blocked:boolean)=>void };
@@ -64,7 +65,7 @@ export function PipelineRepositories({navigation,workspace,draft,jobId,readOnly,
     })}</DropdownMenuContent></DropdownMenu></div>}
     </div>
     <div className="flex flex-wrap items-center gap-2"><span className="text-sm">{t("actions.selectedRepositories").replace("{{count}}",String(selected.length))}</span><Button type="button" variant="outline" disabled={!selected.length} onClick={()=>setSelected([])}>{t("actions.clearSelection")}</Button><Button type="button" disabled={!selected.length||data.loading||!!data.error} onClick={()=>{try{onChange(addActionCheckouts(String(draft.definition),jobId,selected,(draft.checkout_bindings??[]) as Binding[],replaceIndex));setSelected([]);setError("");}catch(cause){setError(errorText(cause));}}}>{t("actions.addCheckouts")}</Button></div>
-    {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
+    {error&&<InlineAlert>{error}</InlineAlert>}
     </>}
   </details>;
 }
@@ -118,7 +119,7 @@ function CheckoutRepository({navigation,workspace,draft,jobId,stepIndex,readOnly
       <AutoField label={<span className="text-sm">{hostRepositoryText("repository.005")}</span>} className="block space-y-2">{connection&&connection.provider!=='git'?<SelectRefresh label={hostRepositoryText("repository.014")} loading={loadingBranches} onRefresh={()=>setBranchRequest({source:branchSource,page:branchData?.error?branchData.page+1:1,revision:branchRequest.revision+1})}>{branchInput}</SelectRefresh>:branchInput}<datalist id={branchList}>{branchData?.items.map(name=><option key={name} value={name}>{name}</option>)}</datalist></AutoField>
       {loadingBranches&&!branchData?.items.length&&<LoadingSkeleton variant="inline" label={hostRepositoryText("repository.012")} />}
       {branchData?.hasMore&&!branchData.error&&<Button type="button" variant="outline" disabled={loadingBranches} onClick={()=>setBranchRequest({source:branchSource,page:branchData.page+1,revision:branchRequest.revision})}>{hostRepositoryText("repository.013")}</Button>}
-      {branchData?.error&&<p role="alert" className="text-sm text-destructive">{branchData.error}</p>}
+      {branchData?.error&&<InlineAlert>{branchData.error}</InlineAlert>}
       <AutoField label={<span className="text-sm">{hostRepositoryText("repository.007")}</span>} className="block space-y-2"><Input aria-label={hostRepositoryText("repository.007")} value={current.path} placeholder={hostRepositoryText("repository.015")} onChange={event=>change({path:event.target.value})}/></AutoField>
     </>}
     {!current&&legacy&&<p className="text-xs text-muted-foreground">{hostRepositoryText("repository.016")}</p>}

@@ -7,6 +7,7 @@ import { workflowText as t } from "../../shared/i18n/i18n";
 import { Input } from "../../shared/ui/input";
 import { WorkflowAssetContext } from "./WorkflowAssets";
 import type { GraphNode } from "./graph";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 type Params = Record<string, unknown>;
 export type AgentOption = {
@@ -118,7 +119,7 @@ export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
       </select>
     </label>
     {agent && !usable(agent) && <p role="alert" className="text-sm text-destructive">{READ_ONLY_UNSUPPORTED.has(agent.runtime) ? t("agent.readOnlyUnsupported") : t("agent.disabled")}</p>}
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {error && <InlineAlert>{error}</InlineAlert>}
     <label className="block min-w-0 space-y-2 text-sm">
       <span className="block font-medium"><FieldCaption label={<>{t("agent.prompt")}</>} /></span>
       <textarea aria-label={t("agent.prompt")} className={`${control} min-h-32 py-3`} readOnly={readOnly} required value={prompt}

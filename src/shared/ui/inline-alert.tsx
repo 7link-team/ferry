@@ -1,12 +1,19 @@
 import { CircleAlert, X } from "lucide-react";
-import { commonText } from "../i18n/i18n";
+import type { ReactNode } from "react";
+import { commonText, i18n } from "../i18n/i18n";
 import { cn } from "cn";
 
-/** An error shown next to the control it belongs to, with an optional close button. */
-export function InlineAlert({ children, onDismiss, className }: {
-  children: React.ReactNode;
-  onDismiss?: () => void;
-  className?: string;
+/**
+ * An error shown next to the page, section or control it belongs to.
+ * `action` holds a recovery control such as Retry; `detail` keeps technical text
+ * (e.g. a parser's own message) out of the main sentence but still available.
+ */
+export function InlineAlert({ children, onDismiss, action, detail, className }: {
+  children: ReactNode;
+  onDismiss?: (() => void) | undefined;
+  action?: ReactNode;
+  detail?: string | undefined;
+  className?: string | undefined;
 }) {
   return (
     <div
@@ -17,7 +24,16 @@ export function InlineAlert({ children, onDismiss, className }: {
       )}
     >
       <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-      <p className="min-w-0 flex-1 break-words">{children}</p>
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="break-words">{children}</div>
+        {detail && (
+          <details className="text-xs text-destructive/80">
+            <summary className="cursor-pointer select-none">{i18n.t("errors.detail")}</summary>
+            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono">{detail}</pre>
+          </details>
+        )}
+      </div>
+      {action && <div className="shrink-0 self-center">{action}</div>}
       {onDismiss && (
         <button
           type="button"
@@ -30,5 +46,19 @@ export function InlineAlert({ children, onDismiss, className }: {
         </button>
       )}
     </div>
+  );
+}
+
+/** Retry control for an InlineAlert action slot. */
+export function RetryButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean | undefined }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded-md border border-destructive/40 px-2.5 py-1 text-xs font-medium hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+    >
+      {commonText("common.retry")}
+    </button>
   );
 }

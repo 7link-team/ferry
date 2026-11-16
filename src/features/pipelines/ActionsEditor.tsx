@@ -24,6 +24,7 @@ import { Input } from "../../shared/ui/input";
 import { ContextMenu } from "radix-ui";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../shared/ui/dropdown-menu";
 import { addActionJob,addActionStep,connectActionJobs,duplicateActionJob,duplicateActionStep,editActionJob,editActionStep,editActionWorkflow,insertActionJob,parseActions,removeActionJob,removeActionStep,setActionJobApproval,type ActionJob } from "./actions-workflow";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 type Binding = { job_id: string; target_kind: string; target_ref: string; image: string };
 type Selection = { job: string; step?: number };
@@ -308,6 +309,6 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
         {!step && <ActionFragmentYaml key={job.id} source={source} job={job.id} original={originalSource.current} readOnly={readOnly} onChange={definition => change(() => definition)} />}
       </aside>}
     </div>}
-    {(parsed.error || error || !parsed.jobs.length) && <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">{parsed.error || error || executionText("workflow.jobsRequired")}</p>}
+    {(parsed.error || error || !parsed.jobs.length) && <InlineAlert>{parsed.error || error || executionText("workflow.jobsRequired")}</InlineAlert>}
   </div></FieldHelpContext.Provider>;
 }

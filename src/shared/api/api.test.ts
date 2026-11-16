@@ -4,15 +4,42 @@ import { api,localizedFetch } from "./api";
 
 afterEach(() => { localStorage.clear(); vi.unstubAllGlobals(); });
 
-it("shows the server's plain-text request rejection instead of a generic error", async () => {
+it("shows Ferry's own localized plain-text rejection instead of a generic error", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response("不允许此来源发起操作。", {
     status: 403,
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
+    headers: { "Content-Type": "text/plain; charset=utf-8", "Content-Language": "zh-CN" },
   })));
   await expect(api("/users", { method: "POST", body: "{}" })).rejects.toMatchObject({
     status: 403,
     message: "不允许此来源发起操作。",
   });
+});
+
+it("keeps proxy and framework bodies out of the UI and names the HTTP status", async () => {
+  setLocale("zh-CN", false);
+  const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("Bad Gateway", {
+    status: 502,
+    headers: { "Content-Type": "text/plain" },
+  })));
+  await expect(api("/users")).rejects.toMatchObject({ status: 502, message: "请求失败（HTTP 502），请稍后重试。" });
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("<html><body>502</body></html>", {
+    status: 502,
+    headers: { "Content-Type": "text/plain", "Content-Language": "en-US" },
+  })));
+  await expect(api("/users")).rejects.toMatchObject({ message: "请求失败（HTTP 502），请稍后重试。" });
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("<!doctype html>oops", {
+    status: 500,
+    headers: { "Content-Type": "text/html" },
+  })));
+  await expect(api("/users")).rejects.toMatchObject({ status: 500, message: "请求失败（HTTP 500），请稍后重试。" });
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "服务器给出的原因" }), {
+    status: 409,
+    headers: { "Content-Type": "application/json" },
+  })));
+  await expect(api("/users")).rejects.toMatchObject({ message: "服务器给出的原因" });
+  expect(debug).toHaveBeenCalled();
+  debug.mockRestore();
 });
 
 it("sends the selected URL locale while preserving caller headers and raw upload bodies", async () => {

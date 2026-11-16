@@ -24,7 +24,7 @@
     "refresh": "Muat semula",
     "retry": "Cuba lagi"
   },
-  "errors": {
+  "errors": { "http": "Permintaan gagal (HTTP {{status}}). Sila cuba lagi nanti.", "yaml": "YAML baris {{line}}, lajur {{column}}: {{reason}}", "yamlNoPosition": "Ralat format YAML: {{reason}}", "yamlIndent": "inden tidak sejajar dengan baris sekitarnya", "yamlDuplicate": "kunci yang sama muncul dua kali pada aras yang sama", "yamlTab": "tab tidak boleh digunakan untuk inden; gunakan ruang", "yamlUnclosed": "petikan atau kurungan tidak ditutup", "yamlToken": "kandungan yang tidak dijangka pada kedudukan ini", "yamlOther": "kandungan bukan YAML yang sah", "detail": "Butiran",
     "network": "Tidak dapat menyambung ke perkhidmatan. Semak rangkaian anda dan cuba lagi.",
     "operation": "Operasi gagal. Sila cuba lagi."
   }

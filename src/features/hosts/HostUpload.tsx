@@ -12,6 +12,7 @@ import {
   uploadPercent,
   type UploadSelection,
 } from "./host-upload";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 type Transfer = UploadSelection & {
   state:
@@ -369,9 +370,7 @@ export function HostUpload({
               </p>
             )}
             {error && (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
+              <InlineAlert>{error}</InlineAlert>
             )}
             {!!rows.length && (
               <section
@@ -392,9 +391,7 @@ export function HostUpload({
                   <span>{transferSize(speed)}/s</span>
                 </div>
                 {failed > 0 && (
-                  <p role="alert" className="text-sm text-destructive">
-                    {t("host-files.uploadFailedCount", { count: failed })}
-                  </p>
+                  <InlineAlert>{t("host-files.uploadFailedCount", { count: failed })}</InlineAlert>
                 )}
               </section>
             )}

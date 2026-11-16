@@ -10,6 +10,7 @@ import type { Navigation } from "../../shared/routing/types";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
 import { RepositorySource, repositoryProviderLabel } from "../repositories/RepositorySource";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 type Connection = {id:string;name:string;provider:string;state:string;url?:string};
 type Remote = {name:string;full_name:string;url:string;default_branch:string;remote_id?:string};
@@ -98,7 +99,7 @@ function CreateRepositoryConnection({workspace,provider,onClose,onCreated}:{work
         <fieldset disabled={busy} className="dialog-body min-w-0 space-y-4">
           <AutoField label={commonText("resource-domain:repository.connectionName")}><Input aria-label={commonText("resource-domain:repository.connectionName")} required maxLength={200} value={String(draft.name)} onChange={event=>update({name:event.target.value})}/></AutoField>
           <RepositorySource credentialHref={credentialHref} fixedProvider={!!provider} workspace={workspace} draft={draft} readOnly={false} onChange={update} onValidityChange={setBlocked} onAuthorized={id=>void authorized(id)}/>
-          {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
+          {error&&<InlineAlert>{error}</InlineAlert>}
         </fieldset>
         <div className="dialog-footer mt-4"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>{commonText("common.cancel")}</Button><Button type="submit" disabled={busy||blocked||!String(draft.name).trim()}>{busy?commonText("common.saving"):commonText("common.create")}</Button></div>
       </AutoForm>
@@ -122,6 +123,6 @@ export function ConnectionRepositoryFields({ canCreateConnection=true,workspace,
     {hasMore&&!error&&<Button type="button" variant="outline" disabled={loading} onClick={()=>setPage(value=>value+1)}>{hostRepositoryText("repository.026")}</Button>}
     {loading&&!repositories.length&&<LoadingSkeleton variant="inline" label={hostRepositoryText("repository.024")} />}
     {connection&&connection.provider!=='git'&&!loading&&!error&&!repositories.length&&<p role="status" className="text-sm text-muted-foreground">{hostRepositoryText("repository.noVisibleRepositories")}</p>}
-    {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
+    {error&&<InlineAlert>{error}</InlineAlert>}
   </>;
 }

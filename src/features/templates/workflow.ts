@@ -1,10 +1,11 @@
 import { commonText } from "../../shared/i18n/i18n";
 import { parseDocument } from "yaml";
+import { yamlError } from "../../shared/yaml-error";
 
 /** Templates persist an envelope; the shared workflow editor edits its contents. */
 export function templateWorkflow(content: string): Record<string, unknown> {
   const document = parseDocument(content);
-  if (document.errors.length) throw document.errors[0];
+  if (document.errors.length) throw yamlError(document.errors);
   const value: unknown = document.toJS();
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error(commonText("resource-domain:template.invalidActions"));

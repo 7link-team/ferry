@@ -24,7 +24,7 @@
     "refresh": "重新整理",
     "retry": "重試"
   },
-  "errors": {
+  "errors": { "http": "請求失敗（HTTP {{status}}），請稍後重試。", "yaml": "YAML 第 {{line}} 行第 {{column}} 欄：{{reason}}", "yamlNoPosition": "YAML 格式錯誤：{{reason}}", "yamlIndent": "縮排與上下文不一致", "yamlDuplicate": "同一層級出現了重複的鍵", "yamlTab": "不能用 Tab 縮排，請改用空格", "yamlUnclosed": "引號或括號沒有閉合", "yamlToken": "此處出現了無法識別的內容", "yamlOther": "內容不是有效的 YAML", "detail": "詳細資訊",
     "network": "無法連線至服務，請檢查網路後重試。",
     "operation": "操作失敗，請重試。"
   }

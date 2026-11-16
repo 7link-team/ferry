@@ -80,6 +80,7 @@ import {
   WorkflowNodeParameters,
   WorkflowRunInputs,
 } from "./WorkflowNodeParameters";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export interface WorkflowRow extends Record<string, unknown> {
   id: string;
@@ -1428,9 +1429,7 @@ export function WorkflowEditor({
                   <p className="text-sm">{t("unpublish")}?</p>
                 )}
                 {error && (
-                  <p role="alert" className="text-sm text-destructive">
-                    {error}
-                  </p>
+                  <InlineAlert>{error}</InlineAlert>
                 )}
 
               </div>

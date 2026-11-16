@@ -27,6 +27,7 @@ import type {
   FormConfig,
   ListConfig,
 } from "../../shared/resources/types";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 interface Agent {
   avatar?: AvatarValue | undefined;
@@ -183,9 +184,7 @@ function AgentModel({
           </Select>
         )}
         {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
+          <InlineAlert>{error}</InlineAlert>
         )}
       </AutoField>
       <AutoField label={text("model")}>
@@ -267,7 +266,7 @@ function AgentHostPin({
           {text("unpinHost")}
         </Button>
       )}
-      {error && <p role="alert" className="text-destructive">{error}</p>}
+      {error && <InlineAlert className="basis-full" onDismiss={() => setError("")}>{error}</InlineAlert>}
     </div>
   );
 }

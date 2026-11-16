@@ -5,6 +5,7 @@ import { Button } from "../../shared/ui/button";
 import { Checkbox } from "../../shared/ui/checkbox";
 import { api, errorText } from "../../shared/api/api";
 import { hostRepositoryText as t } from "../../shared/i18n/i18n";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export function HostPermissions({
   endpoint,
@@ -108,9 +109,7 @@ export function HostPermissions({
                 {mode.toString(8).padStart(3, "0")}
               </p>
               {error && (
-                <p role="alert" className="text-sm text-destructive">
-                  {error}
-                </p>
+                <InlineAlert>{error}</InlineAlert>
               )}
             </div>
             <div className="dialog-footer flex shrink-0 gap-3 border-t p-4">

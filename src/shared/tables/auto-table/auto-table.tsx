@@ -33,6 +33,7 @@ type ColumnConfig,
 type TableOptions,
 } from "./types";
 import { useAutoTable } from "./use-auto-table";
+import { InlineAlert, RetryButton } from "../../ui/inline-alert";
 
 const interactive =
   "a,button,input,select,textarea,[role=button],[role=checkbox],[role=combobox],[contenteditable=true]";
@@ -423,16 +424,7 @@ function AutoTableInner<T>(
                 >
                   <div className="sticky left-0 w-[100cqw] max-w-full px-4">
                   {error ? (
-                    <div role="alert" className="space-y-3 text-destructive">
-                      <p>{error}</p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={retry}
-                      >
-                        {commonText("common.retry")}</Button>
-                    </div>
+                    <InlineAlert className="mx-auto max-w-xl text-left" action={<RetryButton onClick={retry} />}>{error}</InlineAlert>
                   ) : (
                     <EmptyState filtered={filtered}>{options.empty ?? commonText(filtered ? "table.empty" : "common.noRecords")}</EmptyState>
                   )}

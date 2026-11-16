@@ -9,6 +9,7 @@ import type { Navigation } from "../../shared/routing/types";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
 import type { Credential } from "../credentials/types";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 const platforms = [["github", "GitHub"], ["gitlab", "GitLab"], ["gitee", "Gitee"], ["gitea", "Gitea"], ["codeup", "Codeup"], ["git", "Git"]] as const;
 export const repositoryProviderLabel = (value: string) => selectDisplay(value, { options: platforms.map(([value, label]) => ({ value, label: value === "git" ? hostRepositoryText("repository.001") : label })) });
@@ -173,6 +174,6 @@ export function RepositorySource({ navigation, workspace, draft, readOnly, onCha
     </div>}
     {provider && provider !== "git" && loadingPlatform && <LoadingSkeleton variant="inline" label={hostRepositoryText("repository.070")} />}
     {provider && provider !== "git" && !loadingPlatform && !platform?.web_available && !platformError && <p className="text-xs text-muted-foreground">{platform?.setup || hostRepositoryText("repository.071")}</p>}
-    {[credentialError, platformError, authorizationError].filter(Boolean).map((error, index) => <p key={index} role="alert" className="text-sm text-destructive">{error}</p>)}
+    {[credentialError, platformError, authorizationError].filter(Boolean).map((error, index) => <InlineAlert key={index}>{error}</InlineAlert>)}
   </div>;
 }

@@ -9,6 +9,7 @@ import { currentLocale } from "../../shared/i18n/locale";
 import { Button } from "../../shared/ui/button";
 import { DeleteConfirmDialog } from "../../shared/ui/DeleteConfirmDialog";
 import { DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuTrigger } from "../../shared/ui/dropdown-menu";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export type GroupNode = { id: string; name: string; description: string; parent_id?: string; position?: number; version: number; count?: number };
 export function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect, groups: suppliedGroups, total }: {
@@ -87,7 +88,7 @@ export function GroupSidebar({ workspace, permissions, resource, noun, active, o
     <button type="button" aria-current={active === "" ? "page" : undefined} className={cn("flex items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm", active === "" ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent hover:text-accent-foreground")} onClick={() => onSelect("")}>{commonText("group.all")}{total !== undefined && <span className="tabular-nums opacity-70">{total}</span>}</button>
     {suppliedGroups === undefined && <button type="button" aria-current={active === "0" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "0" ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent hover:text-accent-foreground")} onClick={() => onSelect("0")}>{commonText("group.ungrouped")}</button>}
     {(resource === "host-groups" ? groups.filter(group => !group.parent_id || group.parent_id === "0" || !groups.some(parent => parent.id === group.parent_id)) : groups).sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.name.localeCompare(b.name, currentLocale())).map(group => renderGroup(group, 0))}
-    {error && <p role="alert" className="px-2 text-xs text-destructive">{error}</p>}
+    {error && <InlineAlert className="mx-1 text-xs">{error}</InlineAlert>}
 
   </aside>;
 }

@@ -8,6 +8,7 @@ import { FormActions } from "../shared/forms/auto-form/form-actions";
 import { commonText as t, useCommonTranslation } from "../shared/i18n/i18n";
 import { Button } from "../shared/ui/button";
 import { Input } from "../shared/ui/input";
+import { InlineAlert } from "../shared/ui/inline-alert";
 
 type Status = { enabled: boolean; enrollment_enabled: boolean; recovery_remaining: number };
 type Enrollment = { secret: string; qr_svg: string };
@@ -55,7 +56,7 @@ export function OtpLogin({ token, onReady, onCancel }: { token: string; onReady:
         }).finally(() => setBusy(false));
     }}>
       <CodeInput recovery={recovery} value={code} change={setCode} />
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {error && <InlineAlert>{error}</InlineAlert>}
       <Button type="button" variant="link" disabled={busy || expired} className="min-h-11 px-0" onClick={() => { setRecovery(!recovery); setCode(""); }}>{t(recovery ? "otp:useOtp" : "otp:useRecovery")}</Button>
     </AutoForm>
   </SecurityDialog>;
@@ -139,7 +140,7 @@ export function AccountOtp() {
         </>}
         {(enrollment || mode !== "bind") && <CodeInput recovery={recovery} value={code} change={setCode} />}
         {mode !== "bind" && <Button type="button" variant="link" className="min-h-11 px-0" disabled={busy} onClick={() => { setRecovery(!recovery); setCode(""); }}>{t(recovery ? "otp:useOtp" : "otp:useRecovery")}</Button>}
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        {error && <InlineAlert>{error}</InlineAlert>}
       </AutoForm>}
     </SecurityDialog>}
   </div>;

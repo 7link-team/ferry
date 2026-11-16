@@ -7,6 +7,7 @@ import { commonText, insightText } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { analysisState } from "./analysis-config";
 import { time, type Row } from "./config";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export function sourceTaskState(source: Row) {
   const job = source.job as Row | undefined;
@@ -98,8 +99,8 @@ export function CodeInsightStatus({ workspace, insightId, permissions, onConfigu
         <Button size="sm" variant="ghost" disabled={refreshing} onClick={() => { setRevision(value => value + 1); onPublished(); }}><RefreshCw className={refreshing ? "animate-spin" : ""} />{commonText("common.refresh")}</Button>
         {permissions.has("code-insights.sync") && <Button size="sm" variant="outline" disabled={busy} onClick={() => void retry()}><RefreshCw className={busy ? "animate-spin" : ""} />{insightText("重新核对 / 重试同步")}</Button>}<Button size="sm" variant="ghost" onClick={onConfigure}>{insightText("配置与同步")}</Button></div>
     </div>
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    {row?.last_error ? <p role="alert" className="text-sm text-destructive">{String(row.last_error)}</p> : null}
+    {error && <InlineAlert>{error}</InlineAlert>}
+    {row?.last_error ? <InlineAlert>{String(row.last_error)}</InlineAlert> : null}
     {row && <dl className="grid gap-3 text-sm sm:grid-cols-3">
       <div><dt className="text-xs text-muted-foreground">{insightText("最近成功分析")}</dt><dd className="mt-1 tabular-nums">{successes.length ? time(Math.max(...successes)) : insightText("尚未成功")}</dd></div>
       <div><dt className="text-xs text-muted-foreground">{insightText("下次计划更新")}</dt><dd className="mt-1 tabular-nums">{!row ? "—" : row.enabled === false ? insightText("分析已暂停") : row.update_mode === "event" ? insightText("仓库事件触发") : time(row.next_run_at)}</dd></div>

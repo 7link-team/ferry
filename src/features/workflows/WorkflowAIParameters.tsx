@@ -16,6 +16,7 @@ export {
   type Provider,
   type Price,
 } from "../../shared/forms/ai-provider-fields";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 const control =
   "h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm";
 function CallLedger() {
@@ -108,9 +109,7 @@ function CallLedger() {
         </div>
       ))}
       {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
+        <InlineAlert>{error}</InlineAlert>
       )}
     </section>
   );
@@ -330,9 +329,7 @@ export function WorkflowAIParameters({
         </>
       )}
       {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
+        <InlineAlert>{error}</InlineAlert>
       )}
       {!readOnly && !providerOnly && <CallLedger />}
     </div>

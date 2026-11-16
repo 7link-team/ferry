@@ -11,6 +11,7 @@ import { AutoTable } from "../../shared/tables/auto-table";
 import { Button } from "../../shared/ui/button";
 import { DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuTrigger } from "../../shared/ui/dropdown-menu";
 import { Input } from "../../shared/ui/input";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export const importResources = new Set(["hosts", "host-groups", "tags", "credentials", "repositories", "pipelines", "pipeline-groups", "pipeline-environments", "deployments", "variables", "cron-jobs", "alert-rules", "dictionaries", "roles", "marketplace-sources", "app-templates", "pipeline-templates", "config-templates"]);
 export const exportResources = new Set([...importResources, "activity", "members", "settings", "marketplace", "alert-events", "cron-runs", "pipeline-runs", "pipeline-artifacts", "deployment-revisions"]);
@@ -75,7 +76,7 @@ export function ResourceTransfer({ workspace, resource, params, columns, canImpo
             </div>
             <Input ref={fileInput} type="file" className="sr-only" accept=".csv,.xlsx" disabled={busy} onChange={e => { setFile(e.target.files?.[0]); setError(""); }} />
           </AutoField>}
-          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          {error && <InlineAlert>{error}</InlineAlert>}
           {busy && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" /> {commonText("transfer.processing")}</p>}
           {preview && <>
             <p role="status" className="text-sm">{preview.valid ? commonText("transfer.valid", { count: preview.count }) : commonText("transfer.invalid")}</p>

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { errorText } from "../api/api";
 import { commonText,useCommonTranslation } from "../i18n/i18n";
 import { Button } from "./button";
+import { InlineAlert } from "./inline-alert";
 
 export function DeleteConfirmDialog({ action = commonText("common.delete"), target, description = commonText("delete.help"), onClose, onConfirm }: {
   action?: string;
@@ -21,7 +22,7 @@ export function DeleteConfirmDialog({ action = commonText("common.delete"), targ
         <Dialog.Title className="line-clamp-2 break-all text-base font-semibold">{commonText("common.confirm")}{action}“{target}”？</Dialog.Title>
         <div className="dialog-body mt-2"><p className="break-all text-sm">{target}</p>
         <Dialog.Description className="mt-2 text-sm text-muted-foreground">{description}</Dialog.Description>
-        {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
+        {error && <InlineAlert className="mt-3">{error}</InlineAlert>}
         </div>
         <div className="dialog-footer mt-5">
           <Button variant="outline" disabled={busy} onClick={onClose}>{commonText("common.cancel")}</Button>
