@@ -215,5 +215,6 @@
   "workflow.agentPermission": "Larian ini dimulakan oleh ejen AI yang peranannya tiada kebenaran yang diperlukan (contohnya pelaksanaan hos atau menggunakan ejen). Berikan kebenaran kepada peranan ejen, atau minta ahli yang berkebenaran menjalankannya.",
   "workflow.agentNoJson": "Jawapan akhir ejen AI tiada objek JSON. Jawapan: {text}",
   "workflow.agentInvalidOutput": "JSON ejen AI tidak sepadan dengan skema output di {path}: {reason}. Jawapan: {text}",
-  "workflow.agentOutputTooLarge": "Output JSON ejen AI melebihi 1 MiB."
+  "workflow.agentOutputTooLarge": "Output JSON ejen AI melebihi 1 MiB.",
+  "storage.unavailable": "Storan fail tidak tersedia. Minta pentadbir menyemak Storan fail dalam Tetapan platform; butirannya ada dalam log pelayan."
 }

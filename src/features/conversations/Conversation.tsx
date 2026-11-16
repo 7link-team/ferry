@@ -1,4 +1,5 @@
 import { ConversationMembers, type ConversationMember } from "./ConversationMembers";
+import { InlineAlert } from "../../shared/ui/inline-alert";
 import { cliToolLabel } from "../../shared/forms/cli-tools";
 import { IdentityAvatar, type AvatarValue } from "../../shared/ui/identity-avatar";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
@@ -1206,12 +1207,12 @@ export function Conversation({
       {data.state === "archived" && (
         <p role="status" className="px-3 text-sm text-muted-foreground sm:px-6">{t("archived")}</p>
       )}
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
       <div className="shrink-0 px-3 pb-3 pt-2 sm:px-6 sm:pb-5">
+        {error && (
+          <InlineAlert className="mb-2" onDismiss={() => setError("")}>
+            {error}
+          </InlineAlert>
+        )}
         <Composer
           endpoint={endpoint}
           draft={{

@@ -1452,3 +1452,33 @@ async fn stopping_requires_receipt_and_permission_revocation_stops_instead_of_di
         .unwrap();
     assert!(run::heartbeat(&s, &row, &owner).await.unwrap().0);
 }
+
+#[tokio::test]
+async fn plain_messages_send_while_file_storage_is_unavailable_and_storage_errors_are_named() {
+    let (_dir, s, id) = seeded().await;
+    // An S3 configuration without a bucket cannot be opened.
+    let broken = s
+        .vault
+        .seal(
+            r#"{"kind":"s3","endpoint":"https://s3.example.invalid"}"#,
+            "platform:file-storage",
+        )
+        .unwrap();
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::FileStorage,
+            sea_orm::sea_query::Expr::value(Some(broken)),
+        )
+        .filter(crate::entities::platform_state::Column::Id.eq(1))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let error = crate::artifact_store::ArtifactStore::for_state(&s)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(format!("{error:?}").contains("storage.unavailable"));
+    // A message without file attachments never needs the store.
+    sent(&s, id, "plain-while-storage-down").await;
+}

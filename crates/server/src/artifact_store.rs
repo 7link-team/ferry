@@ -285,9 +285,14 @@ impl ArtifactStore {
             })
         };
         if s.cluster.is_some() && std::env::var("FERRY_ARTIFACT_STORE").is_ok_and(|v| v != "s3") {
-            return Err(crate::content_assets::unavailable());
+            tracing::error!("file storage unavailable: a cluster requires FERRY_ARTIFACT_STORE=s3");
+            return Err(storage_unavailable());
         }
-        backend.map_err(|_| crate::content_assets::unavailable())
+        backend.map_err(|error| {
+            // The reason can name configuration; it goes to the server log, not the client.
+            tracing::error!(error = %format!("{error:#}"), "file storage unavailable");
+            storage_unavailable()
+        })
     }
     pub(crate) fn local(root: &FsPath) -> anyhow::Result<Self> {
         std::fs::create_dir_all(root)?;
@@ -464,4 +469,12 @@ mod prefix_tests {
             Configuration::update(&s, &s.db, Some(&sealed), fields.as_object().unwrap()).await;
         assert_eq!(result.unwrap_err().0, axum::http::StatusCode::CONFLICT);
     }
+}
+
+/// File storage could not be opened; administrators fix it in platform settings.
+pub(crate) fn storage_unavailable() -> crate::error::ApiError {
+    crate::error::ApiError::localized(
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        crate::i18n::Message::new("storage.unavailable"),
+    )
 }

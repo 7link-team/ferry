@@ -215,5 +215,6 @@
   "workflow.agentPermission": "This run was started by an AI agent whose role lacks a permission the run needs (for example host execution or using agents). Grant it to the agent role, or have a member with the permission run it.",
   "workflow.agentNoJson": "The AI agent's final answer contains no JSON object. Answer: {text}",
   "workflow.agentInvalidOutput": "The AI agent's JSON does not match the output schema at {path}: {reason}. Answer: {text}",
-  "workflow.agentOutputTooLarge": "The AI agent's JSON output exceeds 1 MiB."
+  "workflow.agentOutputTooLarge": "The AI agent's JSON output exceeds 1 MiB.",
+  "storage.unavailable": "File storage is unavailable. Ask an administrator to check File storage in Platform settings; the server log has the details."
 }

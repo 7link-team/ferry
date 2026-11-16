@@ -227,6 +227,14 @@ pub(super) async fn canonicalize(
     id: Id,
     attachments: &mut [Attachment],
 ) -> Result<()> {
+    // Plain messages never touch file storage, so they work even while it is unavailable.
+    if attachments.iter().all(|a| a.file_id.is_none()) {
+        for a in attachments.iter_mut() {
+            a.mime.clear();
+            a.size = 0;
+        }
+        return Ok(());
+    }
     let backend = ArtifactStore::for_state(s).await?;
     let mut text_budget = 24 * 1024;
     for a in attachments {

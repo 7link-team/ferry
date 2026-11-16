@@ -215,5 +215,6 @@
   "workflow.agentPermission": "此執行由智能體發起，智能體角色缺少本次執行所需的權限（例如主機執行、使用智能體）。請為智能體角色授權，或由有權限的成員直接執行。",
   "workflow.agentNoJson": "智能體最終回答中沒有 JSON 物件。原文：{text}",
   "workflow.agentInvalidOutput": "智能體輸出的 JSON 不符合輸出 Schema（{path}：{reason}）。原文：{text}",
-  "workflow.agentOutputTooLarge": "智能體輸出的 JSON 超過 1 MiB 上限。"
+  "workflow.agentOutputTooLarge": "智能體輸出的 JSON 超過 1 MiB 上限。",
+  "storage.unavailable": "檔案儲存不可用。請聯絡管理員在「平台管理 → 檔案儲存」中檢查設定，詳細原因見伺服器日誌。"
 }
