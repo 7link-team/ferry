@@ -19,6 +19,7 @@ mod deployments;
 mod entities;
 mod error;
 mod executions;
+mod file_links;
 mod holes;
 mod hosts;
 mod i18n;
@@ -30,6 +31,7 @@ mod monitoring;
 mod notifications;
 mod pipelines;
 mod platform_monitor;
+mod report_pdf;
 mod repositories;
 mod resources;
 mod snowflake;
@@ -340,6 +342,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/runners/install.ps1", get(hosts::runner::install::powershell))
         .route("/api/runners/install/{target}", get(hosts::runner::install::artifact))
         .route("/api/runners/sessions/{session}", get(hosts::runner::session))
+        // Generated files shared by expiring, sealed links (e.g. in notifications).
+        .merge(file_links::routes())
         // Preview holes are public by token; see docs/preview-holes-design.md.
         .route("/holes/{token}", any(holes::serve_root))
         .route("/holes/{token}/", any(holes::serve))

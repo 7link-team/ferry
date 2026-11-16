@@ -1,19 +1,124 @@
 {
-  "emailChannels": ["Email", "邮件", "郵件", "メール", "이메일", "E-mel"],
-  "smsChannels": ["SMS", "短信", "簡訊", "SMS", "SMS", "SMS"],
-  "platformChannels": ["Third-party platforms", "第三方平台", "第三方平台", "外部プラットフォーム", "외부 플랫폼", "Platform pihak ketiga"],
-  "smsConfiguration": ["SMS provider", "短信服务配置", "簡訊服務設定", "SMS サービス設定", "SMS 서비스 설정", "Konfigurasi penyedia SMS"],
-  "sms_access_key": ["Access key ID / SecretId", "AccessKey ID / SecretId", "AccessKey ID / SecretId", "AccessKey ID / SecretId", "AccessKey ID / SecretId", "AccessKey ID / SecretId"],
-  "sms_secret_key": ["Access key secret / SecretKey", "AccessKey Secret / SecretKey", "AccessKey Secret / SecretKey", "AccessKey Secret / SecretKey", "AccessKey Secret / SecretKey", "AccessKey Secret / SecretKey"],
-  "sms_region": ["Region", "地域", "地域", "リージョン", "리전", "Wilayah"],
-  "sms_app_id": ["SMS SDK App ID", "短信 SDK App ID", "簡訊 SDK App ID", "SMS SDK App ID", "SMS SDK App ID", "SMS SDK App ID"],
-  "sms_sign_name": ["Approved signature name", "已审核的短信签名", "已核准的簡訊簽名", "承認済み署名", "승인된 SMS 서명", "Nama tandatangan diluluskan"],
-  "sms_template_code": ["Approved provider template ID", "服务商已审核的模板编号", "服務商已核准的範本編號", "承認済みテンプレート ID", "승인된 제공업체 템플릿 ID", "ID templat penyedia diluluskan"],
-  "sms_parameter_names": ["Template parameter names (in order)", "模板参数名称（按顺序）", "範本參數名稱（依序）", "テンプレート変数名（順序付き）", "템플릿 매개변수 이름 (순서대로)", "Nama parameter templat (mengikut urutan)"],
-  "smsParameterNamesHelp": ["One name per line, up to 20, letters/digits/_/-. For Tencent, follow the approved template's parameter order. Aliyun uses named parameters. Subscriptions can map subject and body to the notification title and body.", "每行一个，最多20个，仅字母、数字、_、-。腾讯云按审核模板的参数顺序填写；阿里云使用命名参数。订阅通知可用 subject、body 引用标题和正文。", "每行一個，最多20個，限字母、數字、_、-。騰訊雲依核准範本順序；阿里雲使用命名參數。訂閱通知可用 subject、body 引用標題和內文。", "1行1変数、最大20個。英数字・_・-。Tencent は承認済みテンプレート順、Aliyun は名前で指定。通知では subject、body を利用できます。", "한 줄에 하나, 최대 20개. 영문·숫자·_·-만 사용. Tencent는 승인된 템플릿 순서, Aliyun은 이름을 사용합니다. 알림의 subject, body를 사용할 수 있습니다.", "Satu nama setiap baris, maksimum 20, huruf/nombor/_/-. Tencent mengikut urutan templat diluluskan; Aliyun menggunakan nama. Langganan boleh menggunakan subject dan body."],
-  "smsRecipientsHelp": ["One E.164 phone number per line, e.g. +8613800000000; up to 20. Aliyun supports mainland China numbers here. Leave empty to use channel defaults.", "每行一个带国家码的号码，例如 +8613800000000，最多20个。本接入的阿里云支持中国大陆号码；留空使用渠道默认收件人。", "每行一個含國碼號碼，例如 +8613800000000，最多20個。此阿里雲接入支援中國大陸號碼；留空使用預設收件人。", "国番号付き E.164 形式で1行1番号、最大20件。Aliyun は中国本土の番号に対応。空欄は既定の宛先を使用。", "국가 코드 포함 E.164 번호를 줄마다 입력, 최대 20개. Aliyun은 중국 본토 번호 지원. 비워 두면 채널 기본 수신자를 사용합니다.", "Satu nombor E.164 setiap baris, contoh +8613800000000; maksimum 20. Aliyun menyokong nombor tanah besar China. Kosongkan untuk penerima lalai."],
-  "smsDefaultRecipientsHelp": ["One recipient per line. SMTP uses email addresses; SMS uses E.164 phone numbers with country code. Up to 20 recipients.", "每行一个，最多20个。邮件填写邮箱；短信填写带国家码的 E.164 手机号码。", "每行一個，最多20個。郵件填電子郵件地址；簡訊填含國碼的 E.164 號碼。", "1行1宛先、最大20件。SMTP はメール、SMS は国番号付き E.164 番号。", "한 줄에 하나, 최대 20개. SMTP는 이메일, SMS는 국가 코드 포함 E.164 번호.", "Satu penerima setiap baris, maksimum 20. SMTP menggunakan alamat e-mel; SMS menggunakan nombor E.164 dengan kod negara."],
-  "smsSendHelp": ["The provider sends its approved template with these parameters, not the free-text notification body. Success means accepted by the provider, not delivered to a handset. Ambiguous results are never automatically retried.", "服务商按已审核模板和以下参数发送，通知正文不会作为自由文本发送。成功表示服务商受理，不代表手机已收到；结果不确定时不会自动重发。", "服務商依核准範本及以下參數發送，不發送自由文字內文。成功表示受理，不代表手機已收到；不確定結果不自動重送。", "承認済みテンプレートと変数で送信します。成功は受付を示し、端末への配信確認ではありません。不明な結果は自動再送しません。", "승인된 템플릿과 매개변수로 전송합니다. 성공은 제공업체 접수이며 단말 수신 확인이 아닙니다. 불확실한 결과는 자동 재전송하지 않습니다.", "Penyedia menghantar templat diluluskan dengan parameter ini, bukan teks bebas. Berjaya bermaksud diterima penyedia, bukan dihantar ke telefon. Keputusan tidak pasti tidak dicuba semula secara automatik."],
+  "emailChannels": [
+    "Email",
+    "邮件",
+    "郵件",
+    "メール",
+    "이메일",
+    "E-mel"
+  ],
+  "smsChannels": [
+    "SMS",
+    "短信",
+    "簡訊",
+    "SMS",
+    "SMS",
+    "SMS"
+  ],
+  "platformChannels": [
+    "Third-party platforms",
+    "第三方平台",
+    "第三方平台",
+    "外部プラットフォーム",
+    "외부 플랫폼",
+    "Platform pihak ketiga"
+  ],
+  "smsConfiguration": [
+    "SMS provider",
+    "短信服务配置",
+    "簡訊服務設定",
+    "SMS サービス設定",
+    "SMS 서비스 설정",
+    "Konfigurasi penyedia SMS"
+  ],
+  "sms_access_key": [
+    "Access key ID / SecretId",
+    "AccessKey ID / SecretId",
+    "AccessKey ID / SecretId",
+    "AccessKey ID / SecretId",
+    "AccessKey ID / SecretId",
+    "AccessKey ID / SecretId"
+  ],
+  "sms_secret_key": [
+    "Access key secret / SecretKey",
+    "AccessKey Secret / SecretKey",
+    "AccessKey Secret / SecretKey",
+    "AccessKey Secret / SecretKey",
+    "AccessKey Secret / SecretKey",
+    "AccessKey Secret / SecretKey"
+  ],
+  "sms_region": [
+    "Region",
+    "地域",
+    "地域",
+    "リージョン",
+    "리전",
+    "Wilayah"
+  ],
+  "sms_app_id": [
+    "SMS SDK App ID",
+    "短信 SDK App ID",
+    "簡訊 SDK App ID",
+    "SMS SDK App ID",
+    "SMS SDK App ID",
+    "SMS SDK App ID"
+  ],
+  "sms_sign_name": [
+    "Approved signature name",
+    "已审核的短信签名",
+    "已核准的簡訊簽名",
+    "承認済み署名",
+    "승인된 SMS 서명",
+    "Nama tandatangan diluluskan"
+  ],
+  "sms_template_code": [
+    "Approved provider template ID",
+    "服务商已审核的模板编号",
+    "服務商已核准的範本編號",
+    "承認済みテンプレート ID",
+    "승인된 제공업체 템플릿 ID",
+    "ID templat penyedia diluluskan"
+  ],
+  "sms_parameter_names": [
+    "Template parameter names (in order)",
+    "模板参数名称（按顺序）",
+    "範本參數名稱（依序）",
+    "テンプレート変数名（順序付き）",
+    "템플릿 매개변수 이름 (순서대로)",
+    "Nama parameter templat (mengikut urutan)"
+  ],
+  "smsParameterNamesHelp": [
+    "One name per line, up to 20, letters/digits/_/-. For Tencent, follow the approved template's parameter order. Aliyun uses named parameters. Subscriptions can map subject and body to the notification title and body.",
+    "每行一个，最多20个，仅字母、数字、_、-。腾讯云按审核模板的参数顺序填写；阿里云使用命名参数。订阅通知可用 subject、body 引用标题和正文。",
+    "每行一個，最多20個，限字母、數字、_、-。騰訊雲依核准範本順序；阿里雲使用命名參數。訂閱通知可用 subject、body 引用標題和內文。",
+    "1行1変数、最大20個。英数字・_・-。Tencent は承認済みテンプレート順、Aliyun は名前で指定。通知では subject、body を利用できます。",
+    "한 줄에 하나, 최대 20개. 영문·숫자·_·-만 사용. Tencent는 승인된 템플릿 순서, Aliyun은 이름을 사용합니다. 알림의 subject, body를 사용할 수 있습니다.",
+    "Satu nama setiap baris, maksimum 20, huruf/nombor/_/-. Tencent mengikut urutan templat diluluskan; Aliyun menggunakan nama. Langganan boleh menggunakan subject dan body."
+  ],
+  "smsRecipientsHelp": [
+    "One E.164 phone number per line, e.g. +8613800000000; up to 20. Aliyun supports mainland China numbers here. Leave empty to use channel defaults.",
+    "每行一个带国家码的号码，例如 +8613800000000，最多20个。本接入的阿里云支持中国大陆号码；留空使用渠道默认收件人。",
+    "每行一個含國碼號碼，例如 +8613800000000，最多20個。此阿里雲接入支援中國大陸號碼；留空使用預設收件人。",
+    "国番号付き E.164 形式で1行1番号、最大20件。Aliyun は中国本土の番号に対応。空欄は既定の宛先を使用。",
+    "국가 코드 포함 E.164 번호를 줄마다 입력, 최대 20개. Aliyun은 중국 본토 번호 지원. 비워 두면 채널 기본 수신자를 사용합니다.",
+    "Satu nombor E.164 setiap baris, contoh +8613800000000; maksimum 20. Aliyun menyokong nombor tanah besar China. Kosongkan untuk penerima lalai."
+  ],
+  "smsDefaultRecipientsHelp": [
+    "One recipient per line. SMTP uses email addresses; SMS uses E.164 phone numbers with country code. Up to 20 recipients.",
+    "每行一个，最多20个。邮件填写邮箱；短信填写带国家码的 E.164 手机号码。",
+    "每行一個，最多20個。郵件填電子郵件地址；簡訊填含國碼的 E.164 號碼。",
+    "1行1宛先、最大20件。SMTP はメール、SMS は国番号付き E.164 番号。",
+    "한 줄에 하나, 최대 20개. SMTP는 이메일, SMS는 국가 코드 포함 E.164 번호.",
+    "Satu penerima setiap baris, maksimum 20. SMTP menggunakan alamat e-mel; SMS menggunakan nombor E.164 dengan kod negara."
+  ],
+  "smsSendHelp": [
+    "The provider sends its approved template with these parameters, not the free-text notification body. Success means accepted by the provider, not delivered to a handset. Ambiguous results are never automatically retried.",
+    "服务商按已审核模板和以下参数发送，通知正文不会作为自由文本发送。成功表示服务商受理，不代表手机已收到；结果不确定时不会自动重发。",
+    "服務商依核准範本及以下參數發送，不發送自由文字內文。成功表示受理，不代表手機已收到；不確定結果不自動重送。",
+    "承認済みテンプレートと変数で送信します。成功は受付を示し、端末への配信確認ではありません。不明な結果は自動再送しません。",
+    "승인된 템플릿과 매개변수로 전송합니다. 성공은 제공업체 접수이며 단말 수신 확인이 아닙니다. 불확실한 결과는 자동 재전송하지 않습니다.",
+    "Penyedia menghantar templat diluluskan dengan parameter ini, bukan teks bebas. Berjaya bermaksud diterima penyedia, bukan dihantar ke telefon. Keputusan tidak pasti tidak dicuba semula secara automatik."
+  ],
   "notification-channels": [
     "Notifications",
     "通知",
@@ -238,8 +343,22 @@
     "{{variable_name}} 자리 표시자를 사용하세요. 전송 시 별도로 입력하며 HTML 값은 이스케이프됩니다.",
     "Gunakan ruang letak {{variable_name}}. Nilai dimasukkan secara berasingan semasa menghantar; nilai HTML dilepaskan."
   ],
-  "webhookCurrent": ["Current address", "当前地址", "目前位址", "現在のアドレス", "현재 주소", "Alamat semasa"],
-  "webhookKeep": ["Leave empty to keep the current address; enter a new one to replace it", "留空则保持当前地址；填写新地址即替换", "留空則保留目前位址；填寫新位址即取代", "空欄のままなら現在のアドレスを維持し、新しいアドレスを入力すると置き換えます", "비워 두면 현재 주소가 유지되고, 새 주소를 입력하면 교체됩니다", "Biarkan kosong untuk mengekalkan alamat semasa; masukkan alamat baharu untuk menggantikannya"],
+  "webhookCurrent": [
+    "Current address",
+    "当前地址",
+    "目前位址",
+    "現在のアドレス",
+    "현재 주소",
+    "Alamat semasa"
+  ],
+  "webhookKeep": [
+    "Leave empty to keep the current address; enter a new one to replace it",
+    "留空则保持当前地址；填写新地址即替换",
+    "留空則保留目前位址；填寫新位址即取代",
+    "空欄のままなら現在のアドレスを維持し、新しいアドレスを入力すると置き換えます",
+    "비워 두면 현재 주소가 유지되고, 새 주소를 입력하면 교체됩니다",
+    "Biarkan kosong untuk mengekalkan alamat semasa; masukkan alamat baharu untuk menggantikannya"
+  ],
   "webhook": [
     "Webhook URL",
     "Webhook 地址",
@@ -487,5 +606,29 @@
     "通知チャネルを選択し、本文またはテンプレート変数を入力してください。",
     "채널을 선택하고 본문 또는 템플릿 변수를 입력하세요.",
     "Pilih saluran dan lengkapkan mesej atau pemboleh ubah templat."
+  ],
+  "attachments": [
+    "Attachments",
+    "附件",
+    "附件",
+    "添付ファイル",
+    "첨부 파일",
+    "Lampiran"
+  ],
+  "attachmentsHelp": [
+    "Any file from an earlier node, by its file field (e.g. file from 'Report file'); * attaches every file. WeCom, Telegram and email receive the file; other channels get an expiring download link.",
+    "上游节点产生的任意文件，填写其文件字段（如“生成报告文件”的 file）；* 表示全部文件。企业微信、Telegram 和邮件直接收到文件，其他渠道收到有时效的下载链接。",
+    "上游節點產生的任意檔案，填寫其檔案欄位（如「產生報告檔案」的 file）；* 表示全部檔案。企業微信、Telegram 和郵件直接收到檔案，其他管道收到有時效的下載連結。",
+    "前のノードが生成した任意のファイルを、そのファイルフィールド（例：「レポートファイル」の file）で指定します。* はすべてのファイル。WeCom・Telegram・メールはファイルを直接受け取り、その他は期限付きダウンロードリンクになります。",
+    "이전 노드가 만든 파일을 파일 필드(예: '보고서 파일'의 file)로 지정합니다. *는 모든 파일. WeCom, Telegram, 이메일은 파일을 직접 받고, 다른 채널은 기한이 있는 다운로드 링크를 받습니다.",
+    "Mana-mana fail daripada nod terdahulu, mengikut medan failnya (cth. file daripada 'Fail laporan'); * melampirkan semua fail. WeCom, Telegram dan e-mel menerima fail; saluran lain menerima pautan muat turun bertempoh."
+  ],
+  "attachmentsSms": [
+    "SMS cannot carry files; leave this empty.",
+    "短信不能携带文件，请留空。",
+    "簡訊不能攜帶檔案，請留空。",
+    "SMS ではファイルを送れません。空欄にしてください。",
+    "SMS는 파일을 보낼 수 없으니 비워 두세요.",
+    "SMS tidak boleh membawa fail; biarkan kosong."
   ]
 }

@@ -129,5 +129,10 @@
   "platform.storageCheckFailed": "存储读写检查未通过（步骤：{step}），请检查存储服务。",
   "platform.storageConfigUnreadable": "已保存的文件存储配置无法解密（可能更换过主密钥），请重新填写并保存。",
   "platform.storageClusterRequiresS3": "多实例部署必须使用 S3 文件存储，本机文件无法在实例间共享。",
-  "platform.storageFieldInvalid": "文件存储设置 {field} 必须是文本。"
+  "platform.storageFieldInvalid": "文件存储设置 {field} 必须是文本。",
+  "notification.attachmentFailed": "消息已发送，但{provider}未接收文件 {file}：{reason}",
+  "notification.attachmentTooLarge": "文件 {file} 超过该渠道允许的大小（{limit}）。",
+  "notification.attachmentUnsupported": "{provider} 消息不能携带文件，请去掉附件或改用其他渠道。",
+  "notification.attachmentNeedsLink": "该渠道不能直接接收文件，{file} 需以下载链接发送，这需要平台对外访问地址；请在“平台设置”中配置。",
+  "notification.attachmentMissing": "输入中没有名为“{field}”的文件，请检查产生文件的上游节点及其输出字段。"
 }

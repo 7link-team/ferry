@@ -233,5 +233,14 @@
   "workflow.integrationRemoteReason": "{reason}",
   "workflow.integrationNotJson": "應用回傳了 HTTP {status}，但回應不是 JSON。請檢查要求位址和參數；該呼叫可能已生效。",
   "workflow.integrationTooLarge": "應用的回應超過 1 MiB 上限，請縮小查詢範圍或分頁讀取；該呼叫可能已生效。",
-  "workflow.integrationSecretEcho": "應用的回應中包含本次呼叫使用的憑據，已拒絕且未儲存該結果。"
+  "workflow.integrationSecretEcho": "應用的回應中包含本次呼叫使用的憑據，已拒絕且未儲存該結果。",
+  "workflow.fileTooLarge": "產生的檔案超過 {limit} 上限。",
+  "workflow.reportTitleRequired": "報告需要標題。",
+  "workflow.reportTooManySections": "報告章節超過 {limit} 個。",
+  "workflow.reportTooManyMetrics": "報告關鍵指標超過 {limit} 個。",
+  "workflow.reportTooLarge": "報告內容超過 {limit}，請精簡或拆分為多份報告。",
+  "workflow.reportTooManyPages": "報告將超過 {limit} 頁，請精簡或拆分為多份報告。",
+  "workflow.reportTimeout": "報告排版超過 {seconds} 秒未完成，請精簡內容或重試。",
+  "workflow.reportContentInvalid": "報告內容格式不符合要求：{reason}",
+  "fileLink.unavailable": "下載連結已過期，或檔案已無法使用。"
 }

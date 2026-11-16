@@ -1,35 +1,6 @@
 import { FieldCaption } from "../../shared/forms/FieldHelp";
 import { Dialog } from "radix-ui";
-import {
-  ArrowDownWideNarrow,
-  ArrowRight,
-  Braces,
-  Clock,
-  Filter,
-  GitBranch,
-  Layers,
-  ListFilter,
-  Merge,
-  Plus,
-  Search,
-  Square,
-  Text,
-  Workflow,
-  X,
-  Zap,
-  File,
-  Image,
-  Music,
-  Video,
-  Plug,
-  ChevronLeft,
-  ArrowUp,
-  Terminal,
-  Eye,
-  Bell,
-  Database,
-  Bot,
-} from "lucide-react";
+import { ArrowDownWideNarrow, ArrowRight, Braces, Clock, Filter, GitBranch, Layers, ListFilter, Merge, Plus, Search, Square, Text, Workflow, X, Zap, File, Image, Music, Video, Plug, ChevronLeft, ArrowUp, Terminal, Eye, Bell, Database, Bot, FileText } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { workflowText as t } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
@@ -45,6 +16,7 @@ import {
 
 const builtinCatalog = [
   { type: "notification.send", key: "notificationSend", group: "data", icon: Bell },
+  { type: "report.render", key: "reportRender", group: "media", icon: FileText },
   { type: "host.command", key: "hostCommand", group: "build", icon: Terminal },
   { type: "host.preview", key: "hostPreview", group: "build", icon: Eye },
   { type: "ai.llm.chat", key: "aiChat", group: "ai", icon: Braces },

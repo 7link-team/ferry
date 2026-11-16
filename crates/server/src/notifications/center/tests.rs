@@ -629,3 +629,120 @@ async fn the_saved_webhook_is_echoed_masked_and_revealed_only_to_editors_with_au
         .any(|a| a.action == "reveal" && a.resource == "notification-channels");
     assert!(audited);
 }
+
+#[test]
+fn email_carries_files_as_mime_attachments_of_their_own_type() {
+    let builder = lettre::Message::builder()
+        .from("ops@example.com".parse().unwrap())
+        .to("lead@example.com".parse().unwrap())
+        .subject("Weekly report");
+    let body: SendBody = serde_json::from_value(
+        json!({"client_id":"x","subject":"Weekly report","body":"See attached."}),
+    )
+    .unwrap();
+    let files = [Attachment {
+        name: "周报.pdf".into(),
+        mime: "application/pdf".into(),
+        sha256: "00".into(),
+        bytes: b"%PDF-1.7 body".to_vec(),
+        link: None,
+    }];
+    let text = String::from_utf8(email(builder, &body, &files).unwrap().formatted()).unwrap();
+    assert!(text.contains("multipart/mixed"));
+    assert!(text.contains("Content-Type: application/pdf"));
+    assert!(text.contains("Content-Disposition: attachment"));
+    assert!(text.contains("See attached."));
+}
+
+async fn capturing_receiver() -> (String, Arc<std::sync::Mutex<Vec<Value>>>) {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let app = axum::Router::new().route(
+        "/notify",
+        axum::routing::post(move |Json(body): Json<Value>| {
+            let log = log.clone();
+            async move {
+                log.lock().unwrap().push(body);
+                (StatusCode::OK, "{}")
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/notify", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (url, seen)
+}
+
+#[tokio::test]
+async fn channels_without_file_support_get_download_links_or_a_named_error() {
+    let (_dir, s) = setup().await;
+    let scope = admin(1);
+    let (url, seen) = capturing_receiver().await;
+    let (_, Json(created)) = create(State(s.clone()), scope.clone(), Json(channel_body(&url)))
+        .await
+        .unwrap();
+    let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let file = |link: Option<&str>| Attachment {
+        name: "周报.pdf".into(),
+        mime: "application/pdf".into(),
+        sha256: "ab12".into(),
+        bytes: b"%PDF-1.7".to_vec(),
+        link: link.map(str::to_owned),
+    };
+    let sent = send_message_with_files(
+        &s,
+        &scope,
+        id,
+        request("with-link"),
+        "test",
+        "1",
+        vec![file(Some("https://ferry.example/api/files/TOKEN"))],
+    )
+    .await
+    .unwrap();
+    assert_eq!(sent["state"], "succeeded");
+    let body = seen.lock().unwrap()[0].clone();
+    assert_eq!(body["attachments"][0]["name"], "周报.pdf");
+    assert_eq!(
+        body["attachments"][0]["url"],
+        "https://ferry.example/api/files/TOKEN"
+    );
+    // The delivery record lists the file.
+    let record = deliveries::Entity::find()
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(record.body.contains("📎 周报.pdf"));
+    // Without a public address there is no link: refused before anything is sent.
+    let error = send_message_with_files(
+        &s,
+        &scope,
+        id,
+        request("no-link"),
+        "test",
+        "1",
+        vec![file(None)],
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        error.2.as_ref().unwrap().key,
+        "notification.attachmentNeedsLink"
+    );
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    // A retry with the same client id and files is the same delivery.
+    let again = send_message_with_files(
+        &s,
+        &scope,
+        id,
+        request("with-link"),
+        "test",
+        "1",
+        vec![file(Some("https://ferry.example/api/files/TOKEN"))],
+    )
+    .await
+    .unwrap();
+    assert_eq!(again["id"], sent["id"]);
+    assert_eq!(seen.lock().unwrap().len(), 1);
+}

@@ -129,5 +129,10 @@
   "platform.storageCheckFailed": "The storage read/write check failed at step {step}. Check the storage service.",
   "platform.storageConfigUnreadable": "The saved file storage settings cannot be decrypted (the master key may have changed). Enter them again and save.",
   "platform.storageClusterRequiresS3": "A multi-instance deployment needs S3 file storage; local files are not shared between instances.",
-  "platform.storageFieldInvalid": "The file storage setting {field} must be text."
+  "platform.storageFieldInvalid": "The file storage setting {field} must be text.",
+  "notification.attachmentFailed": "The message was sent, but {provider} did not accept the file {file}: {reason}",
+  "notification.attachmentTooLarge": "The file {file} is larger than this channel allows ({limit}).",
+  "notification.attachmentUnsupported": "{provider} messages cannot carry files; remove the attachments or use another channel.",
+  "notification.attachmentNeedsLink": "This channel cannot receive files, so {file} is sent as a download link, which needs the platform public address. Set it in Platform settings.",
+  "notification.attachmentMissing": "The input has no file named \"{field}\"; check which earlier node produced the file and its output field."
 }

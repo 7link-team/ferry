@@ -1253,6 +1253,231 @@
         },
         "field": "file"
       }
+    },
+    {
+      "type": "report.render",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "search_aliases": [
+        "report",
+        "pdf",
+        "document",
+        "render",
+        "export",
+        "报告",
+        "周报",
+        "文档",
+        "导出"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "pdf"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "subtitle": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "period": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 200000
+          },
+          "metrics": {
+            "type": "array",
+            "maxItems": 24,
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 80
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ],
+                  "maxLength": 2000
+                },
+                "note": {
+                  "type": "string",
+                  "maxLength": 160
+                }
+              },
+              "required": [
+                "label",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "sections": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "markdown": {
+                  "type": "string",
+                  "maxLength": 500000
+                },
+                "table": {
+                  "type": "object",
+                  "properties": {
+                    "columns": {
+                      "type": "array",
+                      "maxItems": 30,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    },
+                    "rows": {
+                      "type": "array",
+                      "maxItems": 2000,
+                      "items": {
+                        "type": "array",
+                        "maxItems": 30,
+                        "items": {
+                          "type": [
+                            "string",
+                            "number",
+                            "boolean",
+                            "null"
+                          ],
+                          "maxLength": 2000
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "columns",
+                    "rows"
+                  ],
+                  "additionalProperties": false
+                },
+                "page_break": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "zh",
+              "en"
+            ]
+          },
+          "file_name": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "output_field": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+          },
+          "link_ttl_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          }
+        },
+        "required": [
+          "format",
+          "title",
+          "output_field"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/title",
+        "/subtitle",
+        "/period",
+        "/summary",
+        "/metrics",
+        "/metrics/*/label",
+        "/metrics/*/value",
+        "/metrics/*/note",
+        "/sections",
+        "/sections/*/title",
+        "/sections/*/markdown",
+        "/sections/*/table",
+        "/file_name"
+      ],
+      "semantic_rule": "Renders one document file per input item from structured content: title, optional subtitle/period, key figures (metrics), a Markdown summary and sections (Markdown: headings, lists, emphasis, code, links, tables, > [!NOTE] callouts; optional structured table per section). Typically fed by an ai.agent.run step whose output_schema yields {title, summary, metrics, sections}; use expressions like ={{ $json.sections }}. Output: the input item plus a file artifact under output_field ({artifact_id, name, mime, size, sha256, download_url, expires_at, meta:{pages}}) and the matching binary entry, which notification.send can attach. format is extensible; pdf is available now.",
+      "example_params": {
+        "format": "pdf",
+        "title": "={{ $json.title }}",
+        "subtitle": "",
+        "period": "",
+        "summary": "={{ $json.summary }}",
+        "metrics": [
+          {
+            "label": "Commits",
+            "value": "={{ $json.commits }}",
+            "note": ""
+          }
+        ],
+        "sections": [
+          {
+            "title": "={{ $json.title }}",
+            "markdown": "={{ $json.summary }}",
+            "page_break": false
+          }
+        ],
+        "language": "zh",
+        "file_name": "",
+        "output_field": "file",
+        "link_ttl_days": 7
+      }
     }
   ],
   "source_members": [

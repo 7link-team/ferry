@@ -875,15 +875,18 @@ async fn execute_notification(
         if body["template_id"] == "" {
             body.as_object_mut().unwrap().remove("template_id");
         }
+        let fields = body.as_object_mut().unwrap().remove("attachments");
+        let files = attachments(s, run, item, fields.as_ref()).await?;
         body["client_id"] = json!(format!("workflow:{}:{node_run}:{index}", run.id));
         let body = serde_json::from_value(body).map_err(|_| invalid())?;
-        let result = crate::notifications::center::send_message(
+        let result = crate::notifications::center::send_message_with_files(
             s,
             &scope,
             channel_id,
             body,
             "workflow",
             &run.id.to_string(),
+            files,
         )
         .await?;
         if result["state"] != "succeeded" {
@@ -903,6 +906,68 @@ async fn execute_notification(
         });
     }
     Ok(output)
+}
+
+/// The files a notification attaches: the item's file artifacts named in
+/// `fields` (binary field names; `"*"` means every file on the item), whatever
+/// node produced them.
+async fn attachments(
+    s: &AppState,
+    run: &workflow_executions::Model,
+    item: &Item,
+    fields: Option<&Value>,
+) -> Result<Vec<crate::notifications::center::Attachment>> {
+    let names: Vec<&str> = fields
+        .and_then(Value::as_array)
+        .map(|list| list.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    if names.is_empty() {
+        return Ok(vec![]);
+    }
+    let mut chosen = Vec::new();
+    if names.contains(&"*") {
+        chosen.extend(item.binary.values());
+    } else {
+        for name in names {
+            let file = item.binary.get(name).ok_or_else(|| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("notification.attachmentMissing").with("field", name),
+                )
+            })?;
+            chosen.push(file);
+        }
+    }
+    let backend = crate::artifact_store::ArtifactStore::for_state(s).await?;
+    let store = crate::content_assets::Store {
+        db: &s.db,
+        backend: &backend,
+        vault: &s.vault,
+        ids: &s.ids,
+        quota: crate::content_assets::DEFAULT_QUOTA,
+    };
+    let mut files = Vec::new();
+    for file in chosen {
+        let asset = super::media::resolve(s, run.workspace_id, run.workflow_id, file).await?;
+        let bytes = store.read_bytes(&s.db, run.workspace_id, asset.id).await?;
+        let link = crate::file_links::sign(
+            s,
+            run.workspace_id,
+            &asset.sha256,
+            &file.name,
+            &asset.mime,
+            crate::file_links::DEFAULT_TTL_DAYS,
+        )
+        .await?;
+        files.push(crate::notifications::center::Attachment {
+            name: file.name.clone(),
+            mime: asset.mime.clone(),
+            sha256: asset.sha256.clone(),
+            bytes,
+            link: link.map(|(url, _)| url),
+        });
+    }
+    Ok(files)
 }
 
 #[derive(Deserialize)]

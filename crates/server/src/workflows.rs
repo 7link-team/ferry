@@ -2,6 +2,7 @@
 //! a draft write never grants production authority or changes an in-flight run.
 mod agent;
 pub(crate) mod ai;
+pub(crate) mod artifacts;
 mod condition;
 pub(crate) mod expression;
 pub(crate) mod extensions;
@@ -14,6 +15,7 @@ pub(crate) mod plan;
 mod platform;
 pub(crate) mod preview;
 pub(crate) mod publication;
+pub(crate) mod report;
 pub(crate) mod run;
 mod transform;
 

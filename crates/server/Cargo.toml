@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+typst = "=0.15.1"
+typst-pdf = "=0.15.1"
+typst-layout = "=0.15.1"
+md-5 = "0.10.6"
+pulldown-cmark = { version = "0.13.6", default-features = false }
 ferry-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true

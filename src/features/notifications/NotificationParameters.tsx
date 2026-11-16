@@ -11,9 +11,11 @@ import { NotificationVariables } from "./NotificationVariables";
 import { InlineAlert } from "../../shared/ui/inline-alert";
 
 /** Shared message parameters for workflow nodes and build notifications. */
-export function NotificationParameters({ workspace, value, readOnly, onChange, invalid }: {
+export function NotificationParameters({ workspace, value, readOnly, onChange, invalid, fileAttachments = false }: {
   workspace: string; value: Record<string, unknown>; readOnly: boolean;
   onChange: (value: Record<string, unknown>) => void; invalid: (blocked: boolean) => void;
+  /** Workflow nodes can attach file artifacts produced by earlier nodes. */
+  fileAttachments?: boolean;
 }) {
   const [channels, setChannels] = useState<Option[]>([]);
   const [templates, setTemplates] = useState<Option[]>([]);
@@ -44,6 +46,10 @@ export function NotificationParameters({ workspace, value, readOnly, onChange, i
     format: { name: t("notifications:format"), type: "select", show: () => !sms && !value.template_id, config: { options: [{ value: "text", label: t("notifications:text") }, { value: "html", label: "HTML" }] } },
     body: { name: t("notifications:body"), type: "custom", col: 2, show: () => !sms && !value.template_id, render: props => <NotificationBody value={String(props.value ?? "")} format={String(value.format ?? "text")} readOnly={props.readonly} onChange={props.onChange} /> },
     to: { name: t("notifications:to_text"), type: "custom", col: 2, help: t(sms ? "notifications:smsRecipientsHelp" : "notifications:recipientsHelp"), render: props => props.readonly ? <span>{(props.value as string[] ?? []).join(", ") || "—"}</span> : <textarea aria-label={t("notifications:to_text")} className="min-h-24 w-full rounded-md border bg-background p-3 text-sm" value={(props.value as string[] ?? []).join("\n")} onChange={e => props.onChange(e.target.value.split("\n"))} /> },
+    attachments: { name: t("notifications:attachments"), type: "custom", col: 2, help: t(sms ? "notifications:attachmentsSms" : "notifications:attachmentsHelp"), show: () => fileAttachments, render: props => props.readonly
+      ? <span>{(props.value as string[] ?? []).join(", ") || "—"}</span>
+      : <input aria-label={t("notifications:attachments")} className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" placeholder="file" value={(props.value as string[] ?? []).join(", ")}
+          onChange={e => props.onChange(e.target.value.split(",").map(item => item.trim()).filter(Boolean))} /> },
     variables: { name: t("notifications:variables"), type: "custom", col: 2, show: () => sms || !!value.template_id, render: props => sms ? <SmsParameters names={channel?.sms_parameter_names ?? []} values={(props.value ?? {}) as Record<string,string>} readOnly={props.readonly} onChange={props.onChange} /> : <NotificationVariables workspace={workspace} templateId={String(value.template_id ?? "")} values={(props.value ?? {}) as Record<string,string>} readOnly={props.readonly} onChange={props.onChange} onValidityChange={setVariablesBlocked} /> },
   };
   return <div className="min-w-0 space-y-3">{(error || channelError) && <InlineAlert>{error || channelError}</InlineAlert>}<AutoFields fields={fields} values={value} readonly={readOnly} onChange={patch => {const next={...value,...patch}; if(next.channel_id !== value.channel_id) {next.template_id="";next.format="text";next.variables={};} else if(sms) {next.template_id="";next.format="text";} onChange(next);}} /></div>;

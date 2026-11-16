@@ -121,7 +121,7 @@ async fn upload(
         ),
     ))
 }
-pub(super) async fn resolve(
+pub(crate) async fn resolve(
     s: &AppState,
     workspace: i64,
     workflow: i64,

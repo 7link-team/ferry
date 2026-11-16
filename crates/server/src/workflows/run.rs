@@ -85,6 +85,7 @@ pub(crate) fn runnable(spec: &Value) -> bool {
         || super::platform::supports(spec)
         || super::agent::supports(spec)
         || super::media::supports(spec)
+        || super::report::supports(spec)
         || super::ai::supports(spec)
         || super::integration::supports(spec)
         || super::condition::supports(spec)
@@ -1308,6 +1309,7 @@ async fn dispatch_inner(
                 .collect();
             let selections = if spec["type"] == "data.set"
                 || super::media::supports(spec)
+                || super::report::supports(spec)
                 || super::ai::supports(spec)
                 || (super::integration::supports(spec) && spec["type"] != "host.command")
                 || super::transform::per_item(spec)
@@ -1393,6 +1395,24 @@ async fn dispatch_inner(
                         &run,
                         node_id,
                         spec,
+                        &items[..selected],
+                        &active.snapshot.params,
+                    )
+                    .await?
+                }
+                _ if super::report::supports(spec) => {
+                    let (clock, _) =
+                        super::expression::clock(&graph["settings"], active.snapshot.frozen_at_ms)?;
+                    super::report::execute(
+                        s,
+                        &store,
+                        &super::artifacts::Origin {
+                            workspace: run.workspace_id,
+                            workflow: run.workflow_id,
+                            execution: run.id,
+                            node: spec["id"].as_str().unwrap(),
+                        },
+                        &clock,
                         &items[..selected],
                         &active.snapshot.params,
                     )
