@@ -246,7 +246,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
     />
   );
 
-  const saveForm = async (runAfterSave = false, throwOnError = false) => {
+  const saveForm = async (runAfterSave = false, throwOnError = false, actAfterSave = false) => {
     if (groupContent || readOnly || !canEdit || loading || optionsBlocked || saving || templateDialog) return;
     setSaving(true);
     setError("");
@@ -278,6 +278,10 @@ export function ResourceForm<T extends Record<string, unknown>>({
         draftAssets.clear();
       }
       onSaved?.(savedId);
+      if (actAfterSave && savedId && config.saveAndAct) {
+        await config.saveAndAct.run(await getResource<T>(workspace, config.resource, savedId, config.endpoint));
+        return;
+      }
       if (config.editor && savedId) {
         const row = await getResource<T>(workspace, config.resource, savedId, config.endpoint);
         setDraft(row);
@@ -321,7 +325,8 @@ export function ResourceForm<T extends Record<string, unknown>>({
   };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    await saveForm(workspaceEditor && (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "save-run");
+    const value = (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value");
+    await saveForm(workspaceEditor && value === "save-run", false, value === "save-act");
   };
 
   if (loading) return <div className="min-w-0">{pipelineWorkspace && <div className="flex justify-end border-b px-4 py-2">{headerActions}</div>}<LoadingSkeleton variant={config.editor ? "editor" : "form"} /></div>;
@@ -435,6 +440,9 @@ export function ResourceForm<T extends Record<string, unknown>>({
               {saving && <Loader2 className="animate-spin" />}
               {creating ? config.resource === "hosts" ? commonText("form.addHost") : commonText("common.create") : commonText("common.save")}
             </Button>
+            {config.saveAndAct && (!config.saveAndAct.permission || permissions.has(config.saveAndAct.permission)) && (!config.saveAndAct.when || config.saveAndAct.when(draft)) && <Button type="submit" value="save-act" variant="outline" disabled={saving || !canEdit || optionsBlocked}>
+              {configText(config.saveAndAct.label, config.saveAndAct.labelKey)}
+            </Button>}
       </FormActions>}
   </>;
   const formContent = <>

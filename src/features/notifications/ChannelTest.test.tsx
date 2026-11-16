@@ -46,3 +46,29 @@ it("shows whether a channel was tested and how it went", async () => {
   await act(async () => root.render(<ResourceForm config={config} workspace="ops" permissions={permissions} />));
   expect(host.textContent).toContain("测试未成功：无法连接企业微信");
 });
+
+it("saves the channel and then sends a test message from the edit form", async () => {
+  const navigate = vi.fn();
+  const permissions = new Set(["notifications.read", "notifications.update"]);
+  const config = notificationForms({ workspace: "ops", navigate, permissions } as never)["notification-channels"]!;
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/notification-channels/15/edit");
+  await act(async () => root.render(<ResourceForm config={config} workspace="ops" permissions={permissions} />));
+  const button = [...host.querySelectorAll<HTMLButtonElement>('button[type="submit"]')].find((b) => b.textContent === "保存并测试")!;
+  expect(button).toBeTruthy();
+  await act(async () => { button.form!.requestSubmit(button); });
+  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  const save = requests.findIndex((r) => r.method === "PATCH" && r.url.endsWith("/notification-channels/15"));
+  const test = requests.findIndex((r) => r.method === "POST" && r.url.endsWith("/notification-channels/15/tests"));
+  expect(save).toBeGreaterThanOrEqual(0);
+  expect(test).toBeGreaterThan(save);
+  expect(navigate).toHaveBeenCalledWith({ group: "ops", item: "notification-deliveries", id: "77", mode: "view" });
+});
+
+it("offers no save-and-test for SMS channels or without edit permission", async () => {
+  const config = (permissions: string[]) => notificationForms({ workspace: "ops", navigate: vi.fn(), permissions: new Set(permissions) } as never)["notification-channels"]!;
+  const act_ = config(["notifications.update"]).saveAndAct!;
+  expect(act_.when!({ enabled: true, provider: "WeCom" })).toBe(true);
+  expect(act_.when!({ enabled: true, provider: "Aliyun SMS" })).toBe(false);
+  expect(act_.when!({ enabled: false, provider: "WeCom" })).toBe(false);
+  expect(act_.permission).toBe("notifications.update");
+});

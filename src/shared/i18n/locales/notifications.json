@@ -1,4 +1,5 @@
 {
+  "saveAndTest": ["Save and test", "保存并测试", "儲存並測試", "保存してテスト", "저장 후 테스트", "Simpan dan uji"],
   "emailChannels": [
     "Email",
     "邮件",

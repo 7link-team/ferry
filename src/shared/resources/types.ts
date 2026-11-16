@@ -241,6 +241,8 @@ export interface FormConfig<T> {
   /** Normalize persisted values for the edit form, retaining the row version. */
   editValues?: (row: T) => Partial<T>;
   viewActions?: (RowAction<T> & { section?: string; iconOnly?: boolean })[];
+  /** A second submit button: save, then run this on the saved record (e.g. "save and test"). */
+  saveAndAct?: { label: string; labelKey?: string; permission?: string; when?: (draft: Partial<T>) => boolean; run: (row: T) => Promise<void> };
   pollMs?: (row: Partial<T>) => number;
   generator?: {
     list: (query: { page: number; pageSize: number; search: string; signal: AbortSignal }) => Promise<Envelope<{ id: string; name: string; description?: string; version: number }>>;

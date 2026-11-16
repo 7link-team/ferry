@@ -113,6 +113,9 @@ export function notificationForms({ workspace, navigate, permissions }: Resource
       blank: { name: "", description: "", provider: "WeCom", enabled: true, language: "en-US", role_ids: [], security: "starttls", port: 587, recipients: [], sms_region: "ap-guangzhou", sms_parameter_names: [] },
       editValues: r => ({ ...r, webhook: "", password: "", signing_secret: "", bearer_token: "", bot_token: "", sms_secret_key: "" }),
       viewActions: [sendAction(workspace, navigate), testAction(workspace, navigate)],
+      // Settings that must work are proven when saved: save, then send a real test message.
+      saveAndAct: { label: "保存并测试", labelKey: key("saveAndTest"), permission: "notifications.update",
+        when: d => !!d.enabled && !isSms(String(d.provider ?? "")), run: row => testAction(workspace, navigate).action!(row) },
       sections: [{ titleKey: key("basics"), fields: [field("name", "text", { required: true, max: 120 }), field("enabled", "switch"), field("provider", "select", { required: true, options: notificationProviders, resetOnChange: ["webhook", "signing_secret", "bot_token", "bearer_token", "chat_id", "thread_id"] }), field("description", "textarea", { span: 2, max: 2048 })] },
         { titleKey: key("connection"), fields: [
           field("last_test", "custom", { when: r => !!r.id && !isSms(String(r.provider ?? "")), span: 2, render: ({ draft }) => <AutoField label={t(key("lastTest"))}><p role="status" className="text-sm text-muted-foreground">{lastTest(draft)}</p></AutoField> }),
