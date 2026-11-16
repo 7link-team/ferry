@@ -1,5 +1,5 @@
 use super::*;
-use ferry_protocol::agent::{Event, Input, Outcome, Request};
+use ferry_protocol::agent::{Event, Input, Outcome, Permission, Request};
 use std::time::Duration;
 use tokio::{
     sync::{mpsc, watch},
@@ -535,7 +535,15 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             host,
             channel,
             fresh,
+            files: capability,
         } = placement::place(&s, &scope, &row, &c, &agent, login_usable).await?;
+        // Files the user asks for are written to ./output of the Runner-managed
+        // directory (never a chosen one) and attached to the reply. A read-only
+        // conversation may then write only inside that directory.
+        let confinable = crate::workflows::agent_files::runtime_supported(config.runtime);
+        let pinned = config.directory_pinned(c.id, c.agent_id);
+        let files = capability.write_workdir && confinable && !pinned;
+        let confined = files && config.permission == Permission::ReadOnly;
         // A new host or binding cannot resume the old native session; the
         // conversation's history in Ferry is sent instead.
         let native_session_id = if fresh {
@@ -582,8 +590,29 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             .await?;
             prompt = format!("{history}{prompt}");
         }
+        // Either how to deliver files, or why this conversation cannot, so the
+        // Agent explains it instead of pretending.
+        let contract = if files {
+            crate::workflows::agent_files::conversation_contract(
+                config.runtime,
+                confined,
+                &capability.tools,
+            )
+        } else {
+            crate::workflows::agent_files::conversation_unavailable(if !confinable {
+                "this Agent's CLI cannot be confined to a working directory; only Codex and Claude Code agents can deliver files"
+            } else if pinned {
+                "this conversation works in a directory chosen for it, where files are not collected; start a conversation without a chosen directory"
+            } else {
+                "the Runner on this host is too old to deliver files; it must be upgraded"
+            })
+        };
+        if prompt.len() + contract.len() <= 64 * 1024 {
+            prompt = format!("{contract}{prompt}");
+        }
         Ok((
             channel,
+            files,
             Request {
                 binding: Some(binding),
                 runtime: config.runtime,
@@ -596,14 +625,14 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
                 platform_tools: true,
                 provider,
                 timezone,
-                write_workdir: false,
+                write_workdir: confined,
             },
         ))
     };
     // Admission is bounded; choosing a host may probe several Runners, so the
     // lease is renewed meanwhile and it cannot dispatch after losing it.
     let prepared = tokio::time::timeout(ADMISSION, renewing(&s, &row, &owner, prepare)).await;
-    let (channel, request) = match prepared {
+    let (channel, files, request) = match prepared {
         Ok(Ok(value)) => value,
         Ok(Err(e)) => {
             finish(&s, &row, &owner, None, &e.stored(), false).await?;
@@ -622,6 +651,7 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             return Ok(());
         }
     };
+    let workdir = request.cwd.clone();
     let (cancel, cancelled) = watch::channel(false);
     let (events, mut receiver) = mpsc::channel(32);
     let (inputs, commands) = mpsc::channel(16);
@@ -703,5 +733,58 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
     }
     tool_tasks.abort_all();
     while tool_tasks.join_next().await.is_some() {}
+    if files && failure.is_empty() && matches!(outcome, Some(Outcome::Completed)) {
+        deliver_files(&s, &row, &owner, channel.as_ref(), &workdir).await?;
+    }
     finish(&s, &row, &owner, outcome, &failure, true).await
+}
+
+/// Attaches what the Agent left in ./output to its reply and removes it from
+/// the host. A limit or type problem becomes a notice; the reply stays.
+async fn deliver_files(
+    s: &AppState,
+    row: &turns::Model,
+    owner: &str,
+    channel: &dyn crate::hosts::channel::HostChannel,
+    workdir: &str,
+) -> Result<()> {
+    use crate::workflows::agent_files;
+    let mode = agent_files::FileMode::conversation();
+    let produced = match agent_files::collect_any(channel, workdir, &mode).await {
+        Ok(produced) => produced,
+        Err(error) => {
+            tracing::warn!(turn = row.id, error = %error.1, "agent files rejected");
+            let (tx, current, c) = leased(s, row, owner).await?;
+            let execution = groups::execution(&tx, &current, c).await?;
+            let message = error
+                .2
+                .clone()
+                .unwrap_or_else(|| Message::new("workflow.agentFilesTotal"));
+            placement::notice(
+                s,
+                &tx,
+                current.workspace_id,
+                current.conversation_id,
+                current.owner_id,
+                execution.agent_id,
+                message,
+            )
+            .await?;
+            tx.commit().await?;
+            return Ok(());
+        }
+    };
+    if produced.is_empty() {
+        return Ok(());
+    }
+    let mut attachments = Vec::new();
+    for file in &produced {
+        attachments.push(files::produced(s, row, file).await?);
+    }
+    let (tx, current, c) = leased(s, row, owner).await?;
+    let execution = groups::execution(&tx, &current, c).await?;
+    messages::attach_files(&tx, &current, &execution, s.next_id()?.into(), attachments).await?;
+    tx.commit().await?;
+    agent_files::remove(channel, workdir, &produced).await;
+    Ok(())
 }

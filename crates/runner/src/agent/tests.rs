@@ -1165,6 +1165,12 @@ fn working_directory_writes_are_confined_and_refused_where_they_cannot_be() {
     assert!(!after("--tools").contains("Bash"));
     assert!(after("--allowedTools").contains("Write(./**)"));
     assert!(after("--allowedTools").contains("Edit(./**)"));
+    assert!(after("--allowedTools").contains("Read(./**)"));
+    assert!(
+        !after("--allowedTools")
+            .split(',')
+            .any(|tool| tool == "Read" || tool == "Glob")
+    );
     assert!(
         !after("--allowedTools")
             .split(',')

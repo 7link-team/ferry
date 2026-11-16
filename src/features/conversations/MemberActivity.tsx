@@ -27,10 +27,12 @@ export function duration(ms: number) {
  * What one Agent did in this conversation, derived from data the page already
  * has: the running turn right now and its last five results.
  */
-export function MemberActivity({ turns, items, onJump }: {
+export function MemberActivity({ turns, items, files, onJump }: {
   /** This Agent's turns in the conversation, oldest first. */
   turns: ActivityTurn[];
   items: ActivityItems;
+  /** Files delivered on each turn's reply, by turn id. */
+  files?: ReadonlyMap<string, number> | undefined;
   onJump: (turnId: string) => void;
 }) {
   const current = turns.find((turn) => running(turn.state));
@@ -73,6 +75,7 @@ export function MemberActivity({ turns, items, onJump }: {
           <ul className="space-y-1">
             {history.map((turn) => {
               const calls = items.get(turn.id)?.size ?? 0;
+              const produced = files?.get(turn.id) ?? 0;
               return (
                 <li key={turn.id}>
                   <button
@@ -92,7 +95,9 @@ export function MemberActivity({ turns, items, onJump }: {
                       {turn.created_at && turn.updated_at && (
                         <span className="text-xs text-muted-foreground">{duration(turn.updated_at - turn.created_at)}</span>
                       )}
-                      <span className="ml-auto text-xs text-muted-foreground">{calls} {t("activityCalls")}</span>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {calls} {t("activityCalls")}{produced ? ` · ${produced} ${t("activityFiles")}` : ""}
+                      </span>
                     </span>
                     {turn.state !== "completed" && turn.error && (
                       <span className="line-clamp-2 break-words text-xs text-muted-foreground">{turn.error}</span>

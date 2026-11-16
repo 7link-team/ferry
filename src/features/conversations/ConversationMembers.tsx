@@ -27,7 +27,7 @@ export function memberWorkState(turns: MemberTurn[], connected: boolean) {
   return current.state;
 }
 export function ConversationMembers({ open, onOpenChange, selected, onSelect, title, members, turns, connected,
-  ownerId, viewerId, primaryAgentId, workspace, permissions, onOpenConversation, manage, executionDetails, activity, onJumpToTurn }: {
+  ownerId, viewerId, primaryAgentId, workspace, permissions, onOpenConversation, manage, executionDetails, activity, files, onJumpToTurn }: {
   open: boolean; onOpenChange: (value: boolean) => void;
   selected: string; onSelect: (value: string) => void; title: string;
   members: ConversationMember[]; turns: MemberTurn[]; connected: boolean;
@@ -36,6 +36,8 @@ export function ConversationMembers({ open, onOpenChange, selected, onSelect, ti
   manage: ReactNode; executionDetails: ReactNode;
   /** Execution items per turn, as already indexed by the conversation. */
   activity?: ActivityItems | undefined;
+  /** Files delivered on each turn's reply, by turn id. */
+  files?: ReadonlyMap<string, number> | undefined;
   /** Shows a turn's message in the conversation. */
   onJumpToTurn?: ((turnId: string) => void) | undefined;
 }) {
@@ -73,7 +75,7 @@ export function ConversationMembers({ open, onOpenChange, selected, onSelect, ti
               {member.kind === "agent" && <><dt className="text-muted-foreground">{t("memberWorkStatus")}</dt><dd>{t(status(member))}</dd><dt className="text-muted-foreground">{t("lastResult")}</dt><dd>{memberTurns(member).filter(turn => !["queued", "running", "stopping"].includes(turn.state)).at(-1)?.state ? t(memberTurns(member).filter(turn => !["queued", "running", "stopping"].includes(turn.state)).at(-1)!.state) : t("noExecution")}</dd><dt className="text-muted-foreground">{t("runtime")}</dt><dd className="break-words">{member.runtime || "—"}</dd><dt className="text-muted-foreground">{t("model")}</dt><dd className="break-words">{member.model || t("nativeModel")}</dd>{member.host && <><dt className="text-muted-foreground">{t("executionHost")}</dt><dd className="break-words">{member.host}</dd></>}{member.revision_id && <><dt className="text-muted-foreground">{t("revision")}</dt><dd className="break-all">{member.revision_id}</dd></>}</>}
               {member.kind === "user" && <><dt className="text-muted-foreground">{t("memberRole")}</dt><dd>{t(member.id === ownerId ? "conversationOwner" : "member")}</dd></>}
             </dl>
-            {member.kind === "agent" && <MemberActivity turns={memberTurns(member)} items={activity ?? NO_ACTIVITY} onJump={turnId => { onOpenChange(false); onJumpToTurn?.(turnId); }} />}
+            {member.kind === "agent" && <MemberActivity turns={memberTurns(member)} items={activity ?? NO_ACTIVITY} files={files} onJump={turnId => { onOpenChange(false); onJumpToTurn?.(turnId); }} />}
             <p className="mt-3 text-xs leading-relaxed text-muted-foreground">{t(member.kind === "agent" ? "memberStatusScope" : "humanPresenceUnavailable")}</p>
           </> : <>
             <div className="relative mb-4"><Search className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" /><Input className="min-h-11 pl-9" value={search} onChange={event => setSearch(event.target.value)} placeholder={t("searchMembers")} aria-label={t("searchMembers")} /></div>

@@ -384,3 +384,167 @@ async fn candidates_follow_request_pin_and_model_order() {
         vec![a, b, offline]
     );
 }
+
+fn producing(session: &str, writes: &[(&str, &str)], text: &str) -> Vec<AgentStep> {
+    let mut steps = vec![AgentStep::Event(Event::Session {
+        native_session_id: session.into(),
+    })];
+    for (path, content) in writes {
+        steps.push(AgentStep::Write((*path).into(), (*content).into()));
+    }
+    steps.push(AgentStep::Event(Event::Text {
+        item_id: "answer".into(),
+        text: text.into(),
+        replace: true,
+    }));
+    steps.push(AgentStep::Event(Event::Finished {
+        outcome: Outcome::Completed,
+        usage: None,
+    }));
+    steps
+}
+
+async fn reply_attachments(s: &AppState, id: Id) -> Vec<Value> {
+    let reply = chat::Entity::find()
+        .filter(chat::Column::ConversationId.eq(id))
+        .filter(chat::Column::Role.eq("assistant"))
+        .order_by_desc(chat::Column::Id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    serde_json::from_str(&reply.attachments).unwrap()
+}
+
+#[tokio::test]
+async fn files_an_agent_writes_to_output_are_attached_to_its_reply_and_removed_from_the_host() {
+    let (_dir, s, _) = seeded().await;
+    let agent = floating_agent(&s).await;
+    let (_, alpha_fake) = runner(&s, "alpha").await;
+    alpha_fake.browsable.store(true, Ordering::SeqCst);
+    let id = conversation(&s, &agent, json!({})).await;
+    alpha_fake
+        .agent_scripts
+        .lock()
+        .unwrap()
+        .push_back(producing(
+            "s1",
+            &[
+                ("output/计划.md", "# 本周计划"),
+                ("output/data.csv", "名称,值\nA,1\n"),
+                ("notes/draft.txt", "not delivered"),
+            ],
+            "Wrote 计划.md and data.csv.",
+        ));
+    assert_eq!(turn(&s, id, "make-files").await.state, "completed");
+    // A read-only conversation writes only inside its managed directory.
+    let request = &requests(&alpha_fake)[0];
+    assert!(request.write_workdir);
+    assert!(request.prompt.contains("./output/"));
+    assert!(
+        request
+            .prompt
+            .contains("You may write only inside your working directory")
+    );
+    // The files are downloadable conversation files on the Agent's reply.
+    let attachments = reply_attachments(&s, id).await;
+    let names: Vec<_> = attachments
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["data.csv", "计划.md"]);
+    assert_eq!(attachments[0]["mime"], "text/csv");
+    assert_eq!(attachments[1]["size"], "# 本周计划".len());
+    let file: Id = serde_json::from_value(attachments[1]["file_id"].clone()).unwrap();
+    let stored_file = super::super::files::resolve(&s.db, 1.into(), id, file)
+        .await
+        .unwrap();
+    assert_eq!(stored_file.name, "计划.md");
+    // Delivered files leave the host; other working files stay for later turns.
+    let dir = format!("/fake/workspaces/{id}-{}", agent.id);
+    let left: Vec<String> = alpha_fake.files.lock().unwrap().keys().cloned().collect();
+    assert_eq!(left, [format!("{dir}/notes/draft.txt")]);
+    // A turn that produces nothing adds nothing.
+    alpha_fake
+        .agent_scripts
+        .lock()
+        .unwrap()
+        .push_back(reply("s1", "just text"));
+    assert_eq!(turn(&s, id, "text-only").await.state, "completed");
+    assert!(reply_attachments(&s, id).await.is_empty());
+}
+
+#[tokio::test]
+async fn file_limits_become_a_notice_and_unconfinable_or_chosen_directories_never_collect() {
+    let (dir, s, _) = seeded().await;
+    let agent = floating_agent(&s).await;
+    let (_, alpha_fake) = runner(&s, "alpha").await;
+    alpha_fake.browsable.store(true, Ordering::SeqCst);
+    let id = conversation(&s, &agent, json!({})).await;
+    let many: Vec<(String, String)> = (0..11)
+        .map(|i| (format!("output/{i}.md"), format!("# {i}")))
+        .collect();
+    let writes: Vec<(&str, &str)> = many.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    alpha_fake
+        .agent_scripts
+        .lock()
+        .unwrap()
+        .push_back(producing("s1", &writes, "made eleven"));
+    assert_eq!(turn(&s, id, "too-many").await.state, "completed");
+    assert!(reply_attachments(&s, id).await.is_empty());
+    let notes = notices(&s, id).await;
+    assert!(
+        notes.iter().any(|n| n.contains("more files than allowed")),
+        "{notes:?}"
+    );
+    // Content that does not match its extension is refused the same way.
+    alpha_fake
+        .agent_scripts
+        .lock()
+        .unwrap()
+        .push_back(producing(
+            "s1",
+            &[("output/deck.pptx", "slides as text")],
+            "made a deck",
+        ));
+    alpha_fake.files.lock().unwrap().clear();
+    assert_eq!(turn(&s, id, "fake-deck").await.state, "completed");
+    assert!(
+        notices(&s, id)
+            .await
+            .iter()
+            .any(|n| n.contains("does not match its file type"))
+    );
+    // A chosen directory is never written to or collected from by this mode.
+    let cwd = dir.path().to_string_lossy().replace('\\', "/");
+    let chosen = conversation(&s, &agent, json!({"cwd":cwd})).await;
+    alpha_fake
+        .agent_scripts
+        .lock()
+        .unwrap()
+        .push_back(producing("s2", &[("output/x.md", "# x")], "wrote x"));
+    assert_eq!(turn(&s, chosen, "chosen").await.state, "completed");
+    let last = requests(&alpha_fake).last().cloned().unwrap();
+    assert!(!last.write_workdir);
+    assert!(last.prompt.contains("cannot deliver files"));
+    assert!(reply_attachments(&s, chosen).await.is_empty());
+    // A Runner that cannot confine writes gets the same explanation.
+    let other = conversation(&s, &agent, json!({})).await;
+    alpha_fake.agent_probe.lock().unwrap().replace({
+        let mut probe = fake::probe_answer(
+            ferry_protocol::agent::Runtime::Claude,
+            &format!("/fake/workspaces/{other}-{}", agent.id),
+        );
+        probe.write_workdir = false;
+        probe
+    });
+    alpha_fake
+        .agent_scripts
+        .lock()
+        .unwrap()
+        .push_back(reply("s3", "cannot"));
+    assert_eq!(turn(&s, other, "old-runner").await.state, "completed");
+    let last = requests(&alpha_fake).last().cloned().unwrap();
+    assert!(!last.write_workdir);
+    assert!(last.prompt.contains("too old to deliver files"));
+}

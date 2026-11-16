@@ -119,12 +119,12 @@ fn claude_tools(request: &Request) -> (&'static str, &'static str) {
         return if request.platform_tools {
             (
                 "Read,Glob,Grep,Edit,Write,mcp__ferry__ferry_discover,mcp__ferry__ferry_request",
-                "Read,Glob,Grep,Edit(./**),Write(./**),mcp__ferry__ferry_discover,mcp__ferry__ferry_request",
+                "Read(./**),Edit(./**),Write(./**),mcp__ferry__ferry_discover,mcp__ferry__ferry_request",
             )
         } else {
             (
                 "Read,Glob,Grep,Edit,Write",
-                "Read,Glob,Grep,Edit(./**),Write(./**)",
+                "Read(./**),Edit(./**),Write(./**)",
             )
         };
     }
@@ -185,8 +185,8 @@ fn command_with(request: &Request, environment: &provision::Environment) -> Comm
             });
             // Claude tool filtering is not an OS sandbox. Read-only disables all
             // tools; on-request has no pre-approved tools or session-wide grant.
-            // A working-directory write turn may read and search, and edit or
-            // create files only under the working directory; there is no Bash,
+            // A working-directory write turn may read, search, edit and create
+            // files only under the working directory (Read rules cover Glob/Grep); there is no Bash,
             // so nothing can write elsewhere, and anything else is refused
             // without asking (dontAsk).
             let (tools, allowed) = claude_tools(request);

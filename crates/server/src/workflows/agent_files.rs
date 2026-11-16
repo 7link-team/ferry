@@ -15,7 +15,7 @@ use futures::StreamExt;
 use serde_json::{Value, json};
 
 /// One stored file may not exceed the content store's object limit.
-pub(super) const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
+pub(crate) const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const DEFAULT_FILES: u64 = 10;
 const MAX_FILES: u64 = 50;
 const DEFAULT_TOTAL_MB: u64 = 100;
@@ -25,16 +25,27 @@ const MAX_FORMATS: usize = 30;
 /// Bounds on what is walked under `output/`.
 const MAX_DEPTH: usize = 4;
 const MAX_ENTRIES: usize = 500;
-pub(super) const OUTPUT_DIR: &str = "output";
+pub(crate) const OUTPUT_DIR: &str = "output";
 
 /// The node's `files` settings, when file output is enabled.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct FileMode {
+pub(crate) struct FileMode {
     /// Lower-case extensions; empty means any format.
     pub formats: Vec<String>,
     pub max_files: usize,
     pub max_bytes: u64,
     pub instructions: String,
+}
+impl FileMode {
+    /// A conversation turn: any format, the node defaults.
+    pub(crate) fn conversation() -> Self {
+        Self {
+            formats: Vec::new(),
+            max_files: DEFAULT_FILES as usize,
+            max_bytes: DEFAULT_TOTAL_MB * 1024 * 1024,
+            instructions: String::new(),
+        }
+    }
 }
 
 fn invalid(path: String) -> ApiError {
@@ -99,7 +110,7 @@ pub(super) fn mode(params: &Value, base: &str) -> Result<Option<FileMode>> {
 }
 
 /// CLIs whose writes the Runner can confine to the working directory.
-pub(super) fn runtime_supported(runtime: Runtime) -> bool {
+pub(crate) fn runtime_supported(runtime: Runtime) -> bool {
     matches!(runtime, Runtime::Codex | Runtime::Claude)
 }
 
@@ -148,7 +159,7 @@ pub(super) fn contract(mode: &FileMode, runtime: Runtime, tools: &[String]) -> S
 }
 
 /// Media type by extension; unknown extensions are generic bytes.
-pub(super) fn mime(name: &str) -> &'static str {
+pub(crate) fn mime(name: &str) -> &'static str {
     let extension = name
         .rsplit_once('.')
         .map(|(_, ext)| ext.to_ascii_lowercase())
@@ -222,7 +233,7 @@ pub(super) fn matches_content(mime: &str, bytes: &[u8]) -> bool {
 }
 
 /// A display-safe file name: no separators, control or reserved characters.
-pub(super) fn sanitize(name: &str) -> String {
+pub(crate) fn sanitize(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| {
@@ -242,7 +253,7 @@ pub(super) fn sanitize(name: &str) -> String {
 }
 
 /// `dir` and `rest` joined with the separator the Runner's path already uses.
-pub(super) fn join(dir: &str, rest: &str) -> String {
+pub(crate) fn join(dir: &str, rest: &str) -> String {
     let separator = if dir.contains('\\') && !dir.contains('/') {
         '\\'
     } else {
@@ -265,12 +276,82 @@ fn rejected(status: StatusCode, message: Message) -> ApiError {
 }
 
 /// One collected file, still in memory.
-pub(super) struct Collected {
+pub(crate) struct Collected {
     /// Path under `output/`, `/`-separated.
     pub path: String,
     pub name: String,
     pub mime: &'static str,
     pub bytes: Vec<u8>,
+}
+
+/// Like `collect`, but no files is not an error: a conversation turn produces
+/// files only when the user asked for some.
+pub(crate) async fn collect_any(
+    channel: &dyn HostChannel,
+    dir: &str,
+    mode: &FileMode,
+) -> Result<Vec<Collected>> {
+    match collect(channel, dir, mode).await {
+        Err(error) if error.2.as_ref().map(|m| m.key.as_str()) == Some("workflow.agentNoFiles") => {
+            Ok(Vec::new())
+        }
+        other => other,
+    }
+}
+
+/// Deletes collected files from the host's output folder (best effort), so the
+/// next turn starts with an empty one.
+pub(crate) async fn remove(channel: &dyn HostChannel, dir: &str, files: &[Collected]) {
+    for file in files {
+        let _ = channel
+            .delete_file(&join(dir, &format!("{OUTPUT_DIR}/{}", file.path)))
+            .await;
+    }
+}
+
+/// The prompt section when this conversation cannot deliver files, and why.
+pub(crate) fn conversation_unavailable(reason: &str) -> String {
+    format!(
+        "<file_output>\nThis conversation cannot deliver files: {reason}. If the user asks for a file, say so plainly with that reason and offer the content as text instead. Do not claim to have created a file.\n</file_output>\n\n"
+    )
+}
+
+/// The prompt section for a conversation turn that may produce files.
+pub(crate) fn conversation_contract(runtime: Runtime, confined: bool, tools: &[String]) -> String {
+    let mode = FileMode::conversation();
+    let mut text = String::from(
+        "<file_output>\nIf the user asks you to create a file (document, spreadsheet, slides, chart, image, video, Markdown, JSON...), write the finished file into the ./output/ directory of your current working directory; every file there is attached to your reply and then removed from the host, so do not leave drafts in it. ",
+    );
+    if confined {
+        text.push_str(
+            "You may write only inside your working directory and have no network access. ",
+        );
+    }
+    text.push_str(&format!(
+        "At most {} files, each at most {} MiB, {} MiB in total.\n",
+        mode.max_files,
+        MAX_FILE_BYTES / 1024 / 1024,
+        mode.max_bytes / 1024 / 1024
+    ));
+    if runtime == Runtime::Claude && confined {
+        text.push_str("You can create text files directly (Markdown, CSV, JSON, HTML, SVG), but you cannot run programs here, so say so instead of producing binary formats.\n");
+    } else {
+        text.push_str("Use only tools that already exist on this host; do not install anything.\n");
+    }
+    if !tools.is_empty() {
+        text.push_str("File-production tools on this host: ");
+        text.push_str(
+            &tools
+                .iter()
+                .take(20)
+                .map(|tool| tool.chars().take(200).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("; "),
+        );
+        text.push('\n');
+    }
+    text.push_str("Name each file you produced in your reply.\n</file_output>\n\n");
+    text
 }
 
 /// Every regular file under `<dir>/output`, within the node's limits. Symbolic
