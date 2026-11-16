@@ -1921,7 +1921,7 @@
     "source": "crates/server/src/main.rs",
     "signature": "async fn create_source(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(b): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct Body {\n    name: String,\n    #[serde(default)]\n    repository_id: String,\n    #[serde(default)]\n    repository_selection: Option<RepositorySelection>,\n    #[serde(flatten)]\n    source: Source,\n    #[serde(default)]\n    version: i64,\n}",
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    repository_id: String,\n    #[serde(default)]\n    repository_selection: Option<RepositorySelection>,\n    #[serde(flatten)]\n    source: Source,\n    #[serde(default)]\n    version: i64,\n    /// Save without reading the index (e.g. it is not published yet). Never stored.\n    #[serde(default)]\n    skip_check: bool,\n}",
       "struct RepositorySelection {\n    connection_id: Id,\n    name: String,\n    url: String,\n    #[serde(default)]\n    default_branch: String,\n}",
       "struct Source {\n    pub provider: String,\n    pub api_base: String,\n    pub project: String,\n    #[serde(default)]\n    pub organization: String,\n    pub branch: String,\n    pub index_path: String,\n}"
     ],
@@ -1962,7 +1962,7 @@
     "source": "crates/server/src/main.rs",
     "signature": "async fn update_source(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(mut b): Json<Body>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct Body {\n    name: String,\n    #[serde(default)]\n    repository_id: String,\n    #[serde(default)]\n    repository_selection: Option<RepositorySelection>,\n    #[serde(flatten)]\n    source: Source,\n    #[serde(default)]\n    version: i64,\n}",
+      "struct Body {\n    name: String,\n    #[serde(default)]\n    repository_id: String,\n    #[serde(default)]\n    repository_selection: Option<RepositorySelection>,\n    #[serde(flatten)]\n    source: Source,\n    #[serde(default)]\n    version: i64,\n    /// Save without reading the index (e.g. it is not published yet). Never stored.\n    #[serde(default)]\n    skip_check: bool,\n}",
       "struct RepositorySelection {\n    connection_id: Id,\n    name: String,\n    url: String,\n    #[serde(default)]\n    default_branch: String,\n}",
       "struct Source {\n    pub provider: String,\n    pub api_base: String,\n    pub project: String,\n    #[serde(default)]\n    pub organization: String,\n    pub branch: String,\n    pub index_path: String,\n}"
     ],
