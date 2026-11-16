@@ -88,20 +88,53 @@ pub(crate) struct Reasons(Vec<Message>);
 
 impl Reasons {
     pub(crate) fn push(&mut self, host: &hosts::Model, reason: Message) {
+        self.push_named(host.name.clone(), reason);
+    }
+    pub(crate) fn push_named(&mut self, host: String, reason: Message) {
         self.0.push(
             Message::new("models.hostReason")
-                .with("host", host.name.clone())
+                .with("host", host)
                 .with_message("reason", reason),
         );
     }
     pub(crate) fn len(&self) -> usize {
         self.0.len()
     }
+    /// After the bound host failed: it is named first with its own reason, then
+    /// every other candidate. A bound host that is merely offline is said so.
+    pub(crate) fn into_failover_error(self, host: String, reason: Message) -> ApiError {
+        let offline = matches!(
+            reason.key.as_str(),
+            "models.reasonOffline" | "models.reasonUnreachable"
+        );
+        if !offline {
+            let mut all = Reasons::default();
+            all.push_named(host, reason);
+            all.0.extend(self.0);
+            return all.into_error();
+        }
+        let message = if self.0.is_empty() {
+            Message::new("conversations.boundHostOfflineNoOthers")
+        } else {
+            Message::new("conversations.boundHostOffline").with_message("others", self.chain())
+        };
+        ApiError::localized(
+            StatusCode::CONFLICT,
+            message.with("host", host).with_message("reason", reason),
+        )
+    }
     /// One error naming each host and its reason, or "no Runner" when none was tried.
     pub(crate) fn into_error(self) -> ApiError {
         if self.0.is_empty() {
             return ApiError::localized(StatusCode::CONFLICT, Message::new("models.noRunner"));
         }
+        ApiError::localized(
+            StatusCode::CONFLICT,
+            Message::new("models.noHost").with_message("reasons", self.chain()),
+        )
+    }
+    /// The listed reasons as one message, capped with a "and N more" tail.
+    fn chain(self) -> Message {
         let total = self.0.len();
         let mut listed: Vec<Message> = self.0.into_iter().take(LISTED_REASONS).collect();
         if total > LISTED_REASONS {
@@ -116,10 +149,7 @@ impl Reasons {
                 .with_message("first", previous)
                 .with_message("rest", chain);
         }
-        ApiError::localized(
-            StatusCode::CONFLICT,
-            Message::new("models.noHost").with_message("reasons", chain),
-        )
+        chain
     }
 }
 
@@ -168,7 +198,16 @@ pub(crate) fn check(
 /// send only the bare words, and anything else is passed on as detail.
 pub(crate) fn cli_problem(error: &str, cli: &str, user: &str) -> Message {
     let error = error.trim();
-    if error.is_empty() || error == "missing" {
+    // New Runners name where they looked: "missing: <places>".
+    if let Some(places) = error.strip_prefix("missing:") {
+        let places = truncate(places);
+        if !places.is_empty() {
+            return reason("models.reasonCliMissingSearched", cli)
+                .with("user", truncate(user))
+                .with("places", places);
+        }
+    }
+    if error.is_empty() || error == "missing" || error == "missing:" {
         return if user.is_empty() {
             reason("models.reasonCliMissing", cli)
         } else {
@@ -358,6 +397,67 @@ mod tests {
         assert_eq!(
             check(probe, "codex", usable).unwrap().canonical_directory,
             "/w"
+        );
+    }
+
+    #[test]
+    fn a_failed_failover_names_the_bound_host_first_and_says_when_it_is_only_offline() {
+        use crate::i18n::{Locale, render};
+        let missing = cli_problem("missing", "codex", "aspeed");
+        // Offline bound host, other candidates also unusable.
+        let mut others = Reasons::default();
+        others.push_named("Aspeeds-Mac-mini.local".into(), missing.clone());
+        let error =
+            others.into_failover_error("ASPEED".into(), Message::new("models.reasonOffline"));
+        let message = crate::i18n::decode_stored(&error.stored()).unwrap();
+        assert_eq!(message.key, "conversations.boundHostOffline");
+        let text = render(Locale::ZhCn, &message);
+        assert!(text.starts_with("绑定主机 ASPEED 当前离线"), "{text}");
+        assert!(
+            text.contains("Aspeeds-Mac-mini.local") && text.contains("aspeed"),
+            "{text}"
+        );
+        // Offline bound host and nothing else to try.
+        let alone = Reasons::default()
+            .into_failover_error("ASPEED".into(), Message::new("models.reasonOffline"));
+        assert_eq!(
+            crate::i18n::decode_stored(&alone.stored()).unwrap().key,
+            "conversations.boundHostOfflineNoOthers"
+        );
+        // Any other reason: the usual list, bound host first.
+        let mut rest = Reasons::default();
+        rest.push_named("Mac".into(), missing);
+        let listed = rest.into_failover_error(
+            "ASPEED".into(),
+            cli_problem("failed: node: not found", "codex", "u"),
+        );
+        let message = crate::i18n::decode_stored(&listed.stored()).unwrap();
+        assert_eq!(message.key, "models.noHost");
+        let text = render(Locale::ZhCn, &message);
+        assert!(
+            text.find("ASPEED").unwrap() < text.find("Mac").unwrap(),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_missing_cli_says_where_the_runner_looked() {
+        use crate::i18n::{Locale, render};
+        let searched = cli_problem(
+            "missing: /opt/homebrew/bin, ~/.nvm/versions/node/*/bin",
+            "codex",
+            "aspeed",
+        );
+        assert_eq!(searched.key, "models.reasonCliMissingSearched");
+        let text = render(Locale::ZhCn, &searched);
+        assert!(
+            text.contains("aspeed") && text.contains("/opt/homebrew/bin"),
+            "{text}"
+        );
+        // An empty list falls back to the plain message.
+        assert_eq!(
+            cli_problem("missing:", "codex", "aspeed").key,
+            "models.reasonCliMissingUser"
         );
     }
 }

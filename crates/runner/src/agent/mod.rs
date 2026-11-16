@@ -1,5 +1,6 @@
 //! Structured native CLI execution. The caller owns authorization, persistence,
 //! directory exclusion and host/user/native-session binding; no shell is used.
+pub(crate) mod paths;
 pub(crate) mod platform;
 pub(super) mod probe;
 mod protocol;
@@ -240,15 +241,11 @@ fn acp_args(runtime: Runtime) -> &'static [&'static str] {
 fn native_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let program = std::path::Path::new(program.as_ref());
     let mut command = if node_script(program) {
-        let node = std::env::var_os("PATH")
-            .and_then(|path| {
-                std::env::split_paths(&path)
-                    .filter(|directory| directory.is_absolute())
-                    .map(|directory| {
-                        directory.join(if cfg!(windows) { "node.exe" } else { "node" })
-                    })
-                    .find(|path| path.is_file())
-            })
+        let node = paths::search()
+            .iter()
+            .filter(|directory| directory.is_absolute())
+            .map(|directory| directory.join(if cfg!(windows) { "node.exe" } else { "node" }))
+            .find(|path| path.is_file())
             .unwrap_or_else(|| program.with_extension("requires-node-exe"));
         let mut command = Command::new(node);
         command.arg(native_path(program));
@@ -262,8 +259,7 @@ fn native_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     for (key, value) in std::env::vars_os() {
         if matches!(
             key.to_string_lossy().to_ascii_uppercase().as_str(),
-            "PATH"
-                | "HOME"
+            "HOME"
                 | "USERPROFILE"
                 | "APPDATA"
                 | "LOCALAPPDATA"
@@ -279,6 +275,9 @@ fn native_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
             command.env(key, value);
         }
     }
+    // The full search path, so a CLI found outside the service PATH (Homebrew,
+    // nvm, npm-global…) also finds the `node` it runs on.
+    command.env("PATH", paths::child_path());
     command
 }
 

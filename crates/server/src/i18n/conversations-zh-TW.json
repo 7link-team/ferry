@@ -24,5 +24,7 @@
   "conversations.hostSwitched": "已從主機 {from} 切換到 {to} 執行。CLI 工作階段已用 Ferry 中的聊天記錄重建；{from} 工作目錄中的檔案不會帶過來。",
   "conversations.hostReleased": "已解除與主機 {host} 的綁定，下一則訊息將改用其他主機執行；CLI 工作階段將用 Ferry 中的聊天記錄重建，{host} 工作目錄中的檔案不會帶過來。",
   "conversations.hostUnavailable": "執行主機 {host} 目前無法執行：{reason}。此會話固定了工作目錄，不會自動換主機；可選擇「改用其他主機」。",
-  "conversations.executionFailedOn": "{cli} 在主機 {host} 上執行失敗或連線中斷。請先查看已產生的結果再重試；詳細原因見該主機的 Runner 日誌。"
+  "conversations.executionFailedOn": "{cli} 在主機 {host} 上執行失敗或連線中斷。請先查看已產生的結果再重試；詳細原因見該主機的 Runner 日誌。",
+  "conversations.boundHostOffline": "綁定主機 {host} 目前離線（{reason}）；其他候選主機：{others}",
+  "conversations.boundHostOfflineNoOthers": "綁定主機 {host} 目前離線（{reason}），且沒有其他候選主機；請等它恢復上線後重試。"
 }

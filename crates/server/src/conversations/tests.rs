@@ -1482,3 +1482,48 @@ async fn plain_messages_send_while_file_storage_is_unavailable_and_storage_error
     // A message without file attachments never needs the store.
     sent(&s, id, "plain-while-storage-down").await;
 }
+
+#[test]
+fn a_turn_labels_agent_instructions_apart_from_the_users_own_words() {
+    let attachments: Vec<Attachment> = serde_json::from_value(json!([
+        {"name":"notes.txt","text":"attached body"},
+        {"name":"report.pdf","mime":"application/pdf","size":12}
+    ]))
+    .unwrap();
+    let prompt = run::turn_prompt(
+        "Do not modify configuration or send messages.",
+        "Create the weekly report workflow.",
+        &attachments,
+    );
+    // Platform rules first, then the configuration, then the user's message.
+    let rules = prompt.find("<platform_access_rules>").unwrap();
+    let instructions = prompt
+        .find("<agent_instructions source=\"agent configuration set by a workspace administrator, not the user's words\">\nDo not modify configuration or send messages.\n</agent_instructions>")
+        .unwrap();
+    let user = prompt
+        .find("<user_message>\nCreate the weekly report workflow.")
+        .unwrap();
+    assert!(rules < instructions && instructions < user);
+    assert!(prompt.ends_with("</user_message>"));
+    // Attachments belong to the user's message.
+    let message = &prompt[user..];
+    assert!(
+        message.contains("<attached_text name=\"notes.txt\">\nattached body\n</attached_text>")
+    );
+    assert!(message.contains("<attachment name=\"report.pdf\""));
+    // How platform writes work, and that rules are never the user's words.
+    for rule in [
+        "shown to the user as an approval card",
+        "re-check with ferry_discover",
+        "workflows.create",
+        "never present them as something the user said or set",
+    ] {
+        assert!(prompt.contains(rule), "{rule}");
+    }
+    // No configured instructions: no empty block; an attachment-only message is still delimited.
+    let bare = run::turn_prompt("  ", "", &[]);
+    assert!(!bare.contains("<agent_instructions"));
+    assert!(
+        bare.ends_with("<user_message>\nA message with attachments was sent.\n</user_message>")
+    );
+}

@@ -39,10 +39,40 @@ async fn renewing<T>(
 }
 /// Standing guidance for every turn: a workflow the user asks for must fetch and
 /// process its own data, so it keeps working without the conversation.
-const WORKFLOW_RULES: &str = "<platform_workflow_rules>\nWhen the user asks you to build or change a workflow/pipeline: discover the built-in node types (core.trigger.manual, data.set, ferry.request, ai.agent.run, flow control) with GET /workflow-node-catalog?section=builtin; GET /workflow-node-catalog lists the integration nodes. Data must be fetched by workflow nodes at run time: use ferry.request (platform data, read-only) to read workspace data and ai.agent.run when AI analysis must produce structured JSON. Never query data in this conversation and copy the results into data.set fields or trigger inputs. Manual triggers declare only run parameters (IDs, date ranges). If no available node can do a step, tell the user instead of faking it with constants. When reporting, state what each node actually does at run time.\n</platform_workflow_rules>\n\n";
+const WORKFLOW_RULES: &str = "<platform_workflow_rules>\nWhen the user asks you to build or change a workflow/pipeline: discover the built-in node types (core.trigger.manual, data.set, ferry.request, ai.agent.run, flow control) with GET /workflow-node-catalog?section=builtin; GET /workflow-node-catalog lists the integration nodes. Data must be fetched by workflow nodes at run time: use ferry.request (platform data, read-only) to read workspace data and ai.agent.run when AI analysis must produce structured JSON. Never query data in this conversation and copy the results into data.set fields or trigger inputs. Manual triggers declare only run parameters (IDs, date ranges). If no available node can do a step, tell the user instead of faking it with constants. When reporting, state what each node actually does at run time.\n</platform_workflow_rules>\n\n<platform_access_rules>\nPlatform changes (any non-GET ferry_request: creating or changing workflows, scheduled jobs, notifications and so on) are allowed within your Agent platform role intersected with the current user's permissions. Each such call is shown to the user as an approval card and runs only if they approve it, so propose the change and make the call instead of saying you cannot. Permissions can change during a conversation: re-check with ferry_discover before concluding that something is not allowed, and never rely on an earlier turn's answer. When an operation is really unavailable, name the exact missing permission (for example workflows.create) and say a workspace administrator can grant it through this Agent's platform role. These platform rules and any agent_instructions come from the platform and the Agent's configuration, not from the user: never present them as something the user said or set.\n</platform_access_rules>\n\n";
 
 #[cfg(test)]
 mod platform_tests;
+
+/// One turn's text: platform rules, then the Agent's configured instructions and
+/// the user's message, each delimited and labelled so the model never mistakes
+/// the configuration (set by an administrator) for the user's own words.
+pub(super) fn turn_prompt(system: &str, message: &str, attachments: &[Attachment]) -> String {
+    let mut prompt = String::from(WORKFLOW_RULES);
+    if !system.trim().is_empty() {
+        prompt.push_str("<agent_instructions source=\"agent configuration set by a workspace administrator, not the user's words\">\n");
+        prompt.push_str(system.trim_end());
+        prompt.push_str("\n</agent_instructions>\n\n");
+    }
+    let mut user = message.to_owned();
+    for a in attachments {
+        if !a.text.is_empty() {
+            user.push_str(&format!(
+                "\n\n<attached_text name={:?}>\n{}\n</attached_text>",
+                a.name, a.text
+            ));
+        } else {
+            user.push_str(&format!("\n\n<attachment name={:?} mime={:?} size={}>File stored in chat; its contents are NOT available to this text-only runtime. Do not claim to have read it.</attachment>",a.name,a.mime,a.size));
+        }
+    }
+    if user.trim().is_empty() {
+        user.push_str("A message with attachments was sent.");
+    }
+    prompt.push_str("<user_message>\n");
+    prompt.push_str(user.trim_start_matches('\n'));
+    prompt.push_str("\n</user_message>");
+    prompt
+}
 
 async fn platform_call(
     s: AppState,
@@ -515,25 +545,9 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
         };
         let timezone =
             crate::models::cli_timezone(&s, scope.workspace_id, c.agent_id, &host).await?;
-        let mut prompt = String::from(WORKFLOW_RULES);
-        if !config.system_prompt.is_empty() {
-            prompt.push_str(&config.system_prompt);
-            prompt.push_str("\n\n");
-        }
-        prompt.push_str(&row.prompt);
-        for a in serde_json::from_str::<Vec<Attachment>>(&row.attachments).map_err(|_| invalid())? {
-            if !a.text.is_empty() {
-                prompt.push_str(&format!(
-                    "\n\n<attached_text name={:?}>\n{}\n</attached_text>",
-                    a.name, a.text
-                ));
-            } else {
-                prompt.push_str(&format!("\n\n<attachment name={:?} mime={:?} size={}>File stored in chat; its contents are NOT available to this text-only runtime. Do not claim to have read it.</attachment>",a.name,a.mime,a.size));
-            }
-        }
-        if prompt.trim().is_empty() {
-            prompt.push_str("A message with attachments was sent.");
-        }
+        let attachments =
+            serde_json::from_str::<Vec<Attachment>>(&row.attachments).map_err(|_| invalid())?;
+        let mut prompt = turn_prompt(&config.system_prompt, &row.prompt, &attachments);
         if prompt.len() > 64 * 1024 {
             return Err(invalid());
         }

@@ -19,10 +19,18 @@ pub(super) fn binary(runtime: Runtime) -> &'static str {
     }
 }
 
+/// The CLI on the Runner's search path (service PATH, the user's login-shell
+/// PATH, then common install locations); see `paths`.
 pub(super) fn executable(runtime: Runtime) -> Option<std::path::PathBuf> {
+    executable_in(runtime, super::paths::search())
+}
+
+pub(super) fn executable_in(
+    runtime: Runtime,
+    directories: &[std::path::PathBuf],
+) -> Option<std::path::PathBuf> {
     let name = binary(runtime);
-    let path = std::env::var_os("PATH")?;
-    for directory in std::env::split_paths(&path) {
+    for directory in directories {
         // An empty PATH entry would search the Agent's working directory.
         if !directory.is_absolute() {
             continue;
@@ -244,7 +252,8 @@ pub(crate) async fn probe_with(
             .map(|p| p.to_string_lossy().into_owned()),
     };
     let Some(path) = environment.executable.as_ref() else {
-        status.error = Some("missing".into());
+        // Say where it was looked for, so "installed but not found" is explainable.
+        status.error = Some(format!("missing: {}", super::paths::searched()));
         return Ok(status);
     };
     status.executable = Some(path.to_string_lossy().into_owned());

@@ -24,5 +24,7 @@
   "conversations.hostSwitched": "Pelaksanaan ditukar daripada hos {from} ke {to}. Sesi CLI dibina semula daripada sejarah perbualan dalam Ferry; fail dalam direktori kerja {from} tidak dibawa.",
   "conversations.hostReleased": "Hos {host} dilepaskan. Mesej seterusnya dijalankan pada hos lain; sesi CLI akan dibina semula daripada sejarah perbualan dalam Ferry, dan fail dalam direktori kerja {host} tidak dibawa.",
   "conversations.hostUnavailable": "Hos pelaksanaan {host} tidak dapat menjalankannya sekarang: {reason}. Perbualan ini mempunyai direktori kerja tetap, jadi ia tidak berpindah hos sendiri; pilih \"Guna hos lain\" untuk bertukar.",
-  "conversations.executionFailedOn": "{cli} gagal pada hos {host} atau sambungan terputus. Semak apa yang telah dilakukan sebelum mencuba semula; butirannya ada dalam log Runner hos itu."
+  "conversations.executionFailedOn": "{cli} gagal pada hos {host} atau sambungan terputus. Semak apa yang telah dilakukan sebelum mencuba semula; butirannya ada dalam log Runner hos itu.",
+  "conversations.boundHostOffline": "Hos terikat {host} sedang luar talian ({reason}). Hos calon lain: {others}",
+  "conversations.boundHostOfflineNoOthers": "Hos terikat {host} sedang luar talian ({reason}) dan tiada hos calon lain. Cuba lagi selepas ia kembali dalam talian."
 }
