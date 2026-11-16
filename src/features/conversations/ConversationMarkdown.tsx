@@ -1,4 +1,4 @@
-import { Children, createContext, isValidElement, useContext, useEffect, useId, useRef, useState } from "react";
+import { Children, createContext, isValidElement, memo, useContext, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -108,7 +108,8 @@ export function ConversationMarkdown({ children, endpoint }: { children: string;
 }
 
 /** Keep deliverable cards reachable even when the accompanying answer is folded. */
-export function ConversationMessage({ children, endpoint, streaming }: { children: string; endpoint: string; streaming: boolean }) {
+/** Memoized: an unchanged message is not re-parsed when the conversation polls. */
+export const ConversationMessage = memo(function ConversationMessage({ children, endpoint, streaming }: { children: string; endpoint: string; streaming: boolean }) {
   const reports: { name: string; href: string }[] = [];
   const prefix = `/api${endpoint}/files/`;
   const text = children.replace(/\[([^\]\n]+\.md)\]\(([^)\s]+)\)/gi, (original, name: string, href: string) => {
@@ -117,4 +118,4 @@ export function ConversationMessage({ children, endpoint, streaming }: { childre
     return "";
   });
   return <><CollapsibleMessage streaming={streaming}><ConversationMarkdown endpoint={endpoint}>{text}</ConversationMarkdown></CollapsibleMessage>{reports.map(report => <ConversationReport key={report.href} {...report} renderContent={value => <ConversationMarkdown endpoint={endpoint}>{value}</ConversationMarkdown>} />)}</>;
-}
+});

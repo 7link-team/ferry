@@ -2,7 +2,8 @@ import { ConversationMembers, type ConversationMember } from "./ConversationMemb
 import { InlineAlert } from "../../shared/ui/inline-alert";
 import { cliToolLabel } from "../../shared/forms/cli-tools";
 import { IdentityAvatar, type AvatarValue } from "../../shared/ui/identity-avatar";
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { LazyDetails, LongText } from "./LazyDetails";
 import { ApiError, api, errorText } from "../../shared/api/api";
 import { base } from "../../shared/api/resource";
 import { AlertDialog, Dialog } from "radix-ui";
@@ -54,6 +55,8 @@ interface Turn {
   error_key?: string | null;
   usage: { input_tokens: number; output_tokens: number } | null;
   decisions: Record<string, Decision>;
+  created_at?: number;
+  updated_at?: number;
 }
 interface BoundHost {
   id: string;
@@ -119,6 +122,8 @@ interface Event {
 }
 const active = (value: string) =>
   ["queued", "running", "stopping"].includes(value);
+type ExecutionItem = { name?: string | undefined; state?: string | undefined; result?: unknown };
+const NO_ITEMS: ReadonlyMap<string, ExecutionItem> = new Map();
 // Keep a room's human messages and concurrent Agent replies in actual arrival
 // order. A reply link is metadata, not permission to move a later reply backwards.
 export function conversationTimeline(messages: ChatMessage[], turns: Turn[]) {
@@ -257,6 +262,29 @@ export function Conversation({
     undefined,
   );
   const cursor = useRef(0);
+  // The last conversation snapshot applied, so an unchanged poll renders nothing.
+  const applied = useRef("");
+  // A private message typed while a reply runs is sent once that reply finishes.
+  const [queue, setQueue] = useState<{ after: string; state: "waiting" | "paused" }>();
+  const queueSent = useRef("");
+  // Execution items per turn, built once per event change instead of per row.
+  const turnItems = useMemo(() => {
+    const index = new Map<string, Map<string, ExecutionItem>>();
+    for (const { turn_id, event } of events) {
+      const key =
+        event.type === "tool" ? event.item_id : event.type === "platform_result" ? event.request_id : undefined;
+      if (!key) continue;
+      let items = index.get(turn_id);
+      if (!items) index.set(turn_id, (items = new Map()));
+      items.set(
+        key,
+        event.type === "tool"
+          ? { name: event.name, state: event.state }
+          : { name: t("platformResult"), result: event.result },
+      );
+    }
+    return index;
+  }, [events]);
   const scroll = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   const readCursor = useRef("");
@@ -301,7 +329,11 @@ export function Conversation({
           signal: controller.signal,
         });
         if (controller.signal.aborted) return;
-        setData(row);
+        const snapshot = JSON.stringify(row);
+        if (snapshot !== applied.current) {
+          applied.current = snapshot;
+          setData(row);
+        }
         let more = true;
         while (more && !controller.signal.aborted) {
           const result = await api<{
@@ -314,10 +346,8 @@ export function Conversation({
           if (controller.signal.aborted) return;
           const previous = cursor.current;
           cursor.current = result.next;
-          setEvents((old) => [
-            ...old,
-            ...result.items.filter((event) => event.sequence > previous),
-          ]);
+          const fresh = result.items.filter((event) => event.sequence > previous);
+          if (fresh.length) setEvents((old) => [...old, ...fresh]);
           more = result.has_more;
         }
         setConnection("");
@@ -330,6 +360,7 @@ export function Conversation({
           setData(undefined);
           setEvents([]);
           cursor.current = 0;
+          applied.current = "";
         }
         setConnection(errorText(cause));
       } finally {
@@ -337,6 +368,7 @@ export function Conversation({
           timer = setTimeout(() => void refresh(), 1000);
       }
     }
+    applied.current = "";
     void refresh();
     return () => {
       controller.abort();
@@ -368,6 +400,21 @@ export function Conversation({
     data.owner_id === data.viewer_id && permissions.has("conversations.update");
   const runnable = permissions.has("conversations.run") &&
     (data?.state === "active" || recoverable);
+  useEffect(() => {
+    if (!queue || queue.state !== "waiting" || !data || busy) return;
+    if (data.turns.some((turn) => active(turn.state) && turn.owner_id === data.viewer_id)) return;
+    const after = data.turns.find((turn) => turn.id === queue.after);
+    if (after && after.state !== "completed") {
+      setQueue({ ...queue, state: "paused" });
+      return;
+    }
+    if (queueSent.current === queue.after) return;
+    queueSent.current = queue.after;
+    setQueue(undefined);
+    if (draft.trim() || attachments.length) void send();
+    // send reads the latest draft and data of this render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, data, busy]);
   const lastTurn = data?.turns.at(-1);
   const retryable = lastTurn && ["failed", "interrupted", "timed_out", "cancelled"].includes(lastTurn.state);
   async function act(path: string, body: unknown = {}) {
@@ -389,13 +436,12 @@ export function Conversation({
     const prompt = retry?.prompt ?? draft;
     const files = retry?.attachments ?? attachments;
     const replyTo = retry ? data?.messages.find(message => message.role === "user" && message.turn_id === retry.id)?.reply_to : thread;
-    if (
-      (!prompt.trim() && !files.length) ||
-      (current && data?.kind !== "group") ||
-      !runnable ||
-      busy
-    )
+    if ((!prompt.trim() && !files.length) || !runnable || busy) return;
+    if (current && data?.kind !== "group") {
+      // Keep the draft; it is sent once this reply finishes.
+      if (!retry) setQueue({ after: current.id, state: "waiting" });
       return;
+    }
     const signature = JSON.stringify({
       prompt,
       attachments: files,
@@ -687,7 +733,14 @@ export function Conversation({
         title={data.title} workspace={workspace} permissions={permissions} members={[
           ...data.members.map(member => ({ ...member, kind: "user" as const })),
           ...(data.kind === "group" ? data.agents : [{ id: data.agent_id, name: data.config.name, avatar: data.agent_avatar, runtime: data.config.runtime, model: data.config.model, revision_id: data.revision_id, host: data.host }]).map(agent => ({ ...agent, host: agent.host?.name || t("hostPending"), kind: "agent" as const })),
-        ] satisfies ConversationMember[]} turns={data.turns} connected={!connection} ownerId={data.owner_id} viewerId={data.viewer_id} primaryAgentId={data.agent_id}
+        ] satisfies ConversationMember[]} turns={data.turns} connected={!connection}
+        activity={turnItems}
+        onJumpToTurn={turnId => {
+          setActivity("allMessages");
+          requestAnimationFrame(() => [...(scroll.current?.querySelectorAll("[data-turn-id]") ?? [])]
+            .find(node => node.getAttribute("data-turn-id") === turnId)
+            ?.scrollIntoView({ block: "center", behavior: "smooth" }));
+        }} ownerId={data.owner_id} viewerId={data.viewer_id} primaryAgentId={data.agent_id}
         onOpenConversation={onOpenConversation}
         manage={data.kind === "group" && data.can_manage ? <Button variant="outline" disabled={busy || data.turns.some(turn => active(turn.state))} onClick={() => { setInfoOpen(false); void openMembers(); }}>{t("manageMembers")}</Button> : null}
         executionDetails={<>            <details className="mt-5 border-t pt-3 text-xs text-muted-foreground">
@@ -809,28 +862,8 @@ export function Conversation({
                   new Date(previous.created_at).toDateString() !==
                     date.toDateString());
               const reply = m?.role === "assistant" ? m : undefined;
-              const items = new Map<
-                string,
-                {
-                  text?: string | undefined;
-                  name?: string | undefined;
-                  state?: string | undefined;
-                }
-              >();
-              for (const { event } of events.filter(
-                (event) => m?.role !== "user" && event.turn_id === turn?.id,
-              )) {
-                if (event.type === "tool" && event.item_id)
-                  items.set(event.item_id, {
-                    name: event.name,
-                    state: event.state,
-                  });
-                if (event.type === "platform_result" && event.request_id)
-                  items.set(event.request_id, {
-                    name: t("platformResult"),
-                    text: JSON.stringify(event.result, null, 2),
-                  });
-              }
+              const items =
+                (m?.role !== "user" && turn ? turnItems.get(turn.id) : undefined) ?? NO_ITEMS;
               return (
                 <Fragment key={m?.id ?? `turn-${turn!.id}`}>
                   {newDay && (
@@ -961,26 +994,24 @@ export function Conversation({
                           </div>
                         )}
                         {(!!items.size || (turn && m?.role !== "user" && (turn.usage || Object.values(turn.decisions).some(decision => decision.decision !== null || turn.state !== "running")))) && (
-                          <details data-execution-details className="text-xs text-muted-foreground">
-                            <summary className="min-h-11 cursor-pointer py-3">
-                              {t("executionDetails")}
-                            </summary>
-                            <div className="mt-2 space-y-1">
-                              {[...items].map(([key, item]) => (
-                                <div key={key} className="min-w-0 rounded border p-2">
-                                  <p>{item.name}{item.state ? ` · ${item.state}` : ""}</p>
-                                  {item.text && <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all">{item.text}</pre>}
-                                </div>
-                              ))}
-                              {turn && m?.role !== "user" && Object.entries(turn.decisions).filter(([, decision]) => decision.decision !== null || turn.state !== "running").map(([request, decision]) => (
-                                <details key={request} className="rounded-md border p-2">
-                                  <summary className="min-h-11 cursor-pointer break-words py-2">{decision.tool} · {decision.sent ? t("decisionSent") : decision.decision !== null ? t("decisionQueued") : t("decisionExpired")}</summary>
-                                  <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(decision.input, null, 2)}</pre>
-                                </details>
-                              ))}
-                              {turn?.usage && <p className="py-2">{t(turn.state)} · {t("inputTokens")}: {turn.usage.input_tokens} · {t("outputTokens")}: {turn.usage.output_tokens}</p>}
-                            </div>
-                          </details>
+                          <LazyDetails data-execution-details className="text-xs text-muted-foreground" summaryClassName="min-h-11 cursor-pointer py-3" summary={t("executionDetails")}>
+                            {() => (
+                              <div className="mt-2 space-y-1">
+                                {[...items].map(([key, item]) => (
+                                  <div key={key} className="min-w-0 rounded border p-2">
+                                    <p>{item.name}{item.state ? ` · ${item.state}` : ""}</p>
+                                    {item.result !== undefined && <LongText value={item.result} className="mt-2 max-h-64" />}
+                                  </div>
+                                ))}
+                                {turn && m?.role !== "user" && Object.entries(turn.decisions).filter(([, decision]) => decision.decision !== null || turn.state !== "running").map(([request, decision]) => (
+                                  <LazyDetails key={request} className="rounded-md border p-2" summaryClassName="min-h-11 cursor-pointer break-words py-2" summary={<>{decision.tool} · {decision.sent ? t("decisionSent") : decision.decision !== null ? t("decisionQueued") : t("decisionExpired")}</>}>
+                                    {() => <LongText value={decision.input} className="mt-2 max-h-56" />}
+                                  </LazyDetails>
+                                ))}
+                                {turn?.usage && <p className="py-2">{t(turn.state)} · {t("inputTokens")}: {turn.usage.input_tokens} · {t("outputTokens")}: {turn.usage.output_tokens}</p>}
+                              </div>
+                            )}
+                          </LazyDetails>
                         )}
                         {turn && m?.role !== "user" && (
                           <>
@@ -1239,6 +1270,11 @@ export function Conversation({
           })() : undefined}
           onCancelReply={() => setThread("")}
           onSend={() => send()}
+          queue={queue && data.kind !== "group" ? {
+            state: queue.state,
+            onCancel: () => setQueue(undefined),
+            onSendNow: () => { setQueue(undefined); void send(); },
+          } : undefined}
           disabled={!runnable}
           busy={busy}
           current={current}

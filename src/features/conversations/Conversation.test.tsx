@@ -136,6 +136,9 @@ it("folds settled tool calls into one audit section and keeps pending approvals 
         await act(()=>root.render(<Conversation workspace="1" id="2" permissions={new Set(['conversations.read','conversations.run'])} />));
         const audit=host.querySelector('details[data-execution-details]') as HTMLDetailsElement;
         expect(audit).not.toBeNull();expect(audit.open).toBe(false);
+        // Closed details build nothing; opening them renders the audit.
+        expect(audit.textContent).not.toContain('ferry_request');
+        await act(async()=>{audit.open=true;audit.dispatchEvent(new Event('toggle'));});
         expect(audit.textContent).toContain('ferry_request');
         const approvals=[...host.querySelectorAll('button')].filter(button=>button.textContent===conversationText('allow'));
         expect(approvals).toHaveLength(next==='running'?1:0);

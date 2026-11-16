@@ -1199,12 +1199,12 @@
     "Pemilik"
   ],
   "memberStatusScope": [
-    "Activity in this conversation only; refreshed with the conversation.",
-    "仅显示本会话内的活动，随会话实时刷新。",
-    "僅顯示本會話內的活動，隨會話即時更新。",
-    "この会話内の状態のみ表示し、会話とともに更新します。",
-    "이 대화의 활동만 표시하며 대화와 함께 갱신합니다.",
-    "Aktiviti dalam perbualan ini sahaja; dikemas kini bersama perbualan."
+    "Status and activity cover this conversation only and refresh with it.",
+    "状态和活动仅统计本会话，随会话自动刷新。",
+    "狀態和活動僅統計本會話，隨會話自動更新。",
+    "状態とアクティビティはこの会話のみを対象とし、会話とともに更新されます。",
+    "상태와 활동은 이 대화만 집계하며 대화와 함께 갱신됩니다.",
+    "Status dan aktiviti merangkumi perbualan ini sahaja dan dikemas kini bersamanya."
   ],
   "humanPresenceUnavailable": [
     "Online presence is not collected for human members.",
@@ -1277,5 +1277,23 @@
     "別のホストを使う",
     "다른 호스트 사용",
     "Guna hos lain"
-  ]
+  ],
+  "queueWithEnter": ["Queue (Enter)", "排队发送（Enter）", "排隊傳送（Enter）", "待機送信（Enter）", "대기 전송 (Enter)", "Beratur (Enter)"],
+  "queueWithCtrlEnter": ["Queue (Ctrl+Enter)", "排队发送（Ctrl+Enter）", "排隊傳送（Ctrl+Enter）", "待機送信（Ctrl+Enter）", "대기 전송 (Ctrl+Enter)", "Beratur (Ctrl+Enter)"],
+  "queuedWaiting": ["Will be sent when the current reply finishes. You can keep editing.", "将在当前回复结束后发送，仍可继续编辑。", "將在目前回覆結束後傳送，仍可繼續編輯。", "現在の返信が終わると送信されます。編集は続けられます。", "현재 답변이 끝나면 전송됩니다. 계속 편집할 수 있습니다.", "Akan dihantar apabila balasan semasa selesai. Anda boleh terus mengedit."],
+  "queuedPaused": ["The previous reply did not finish, so your message was not sent.", "上一回复未完成，消息未发送。", "上一則回覆未完成，訊息未傳送。", "前の返信が完了しなかったため、メッセージは送信されていません。", "이전 답변이 완료되지 않아 메시지가 전송되지 않았습니다.", "Balasan sebelumnya tidak selesai, jadi mesej anda tidak dihantar."],
+  "queuedSendNow": ["Send now", "立即发送", "立即傳送", "今すぐ送信", "지금 전송", "Hantar sekarang"],
+  "queuedCancel": ["Cancel queue", "取消排队", "取消排隊", "待機を取り消す", "대기 취소", "Batalkan baris gilir"],
+  "showAll": ["Show all", "显示全部", "顯示全部", "すべて表示", "모두 표시", "Tunjuk semua"],
+  "truncatedNote": ["Long content: only the beginning is shown.", "内容较长，仅显示开头部分。", "內容較長，僅顯示開頭部分。", "内容が長いため先頭のみ表示しています。", "내용이 길어 앞부분만 표시합니다.", "Kandungan panjang: hanya bahagian awal ditunjukkan."],
+  "copyAll": ["Copy all", "复制全部", "複製全部", "すべてコピー", "모두 복사", "Salin semua"],
+  "memberActivity": ["Activity in this conversation", "本会话活动", "本會話活動", "この会話でのアクティビティ", "이 대화의 활동", "Aktiviti dalam perbualan ini"],
+  "activityNow": ["Working now", "正在执行", "正在執行", "実行中", "실행 중", "Sedang berjalan"],
+  "activityThinking": ["Preparing a reply", "正在准备回复", "正在準備回覆", "返信を準備しています", "답변을 준비하는 중", "Sedang menyediakan balasan"],
+  "activityWaitingApproval": ["Waiting for your approval: ", "等待你批准：", "等待你核准：", "承認待ち：", "승인 대기 중: ", "Menunggu kelulusan anda: "],
+  "activityElapsed": ["Elapsed", "已用时", "已用時", "経過", "경과", "Masa berlalu"],
+  "activityHistory": ["Recent runs (newest first)", "最近执行（最新在前）", "最近執行（最新在前）", "最近の実行（新しい順）", "최근 실행 (최신순)", "Larian terkini (terbaru dahulu)"],
+  "activityCalls": ["tool calls", "次调用", "次呼叫", "回の呼び出し", "회 호출", "panggilan alat"],
+  "activityEmpty": ["No runs in this conversation yet.", "本会话中还没有执行记录。", "本會話中還沒有執行記錄。", "この会話ではまだ実行されていません。", "이 대화에는 아직 실행 기록이 없습니다.", "Belum ada larian dalam perbualan ini."],
+  "activityJump": ["Show this message", "定位到这条消息", "定位到這則訊息", "このメッセージを表示", "이 메시지로 이동", "Tunjukkan mesej ini"]
 }

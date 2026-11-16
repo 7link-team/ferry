@@ -70,7 +70,10 @@ export function Composer({
   people = [],
   reply,
   onCancelReply,
+  queue,
 }: {
+  /** A private message waiting for the running reply to finish. */
+  queue?: { state: "waiting" | "paused"; onCancel: () => void; onSendNow: () => void } | undefined;
   reply?: { name: string; text: string } | undefined;
   onCancelReply?: () => void;
   endpoint: string;
@@ -131,7 +134,10 @@ export function Composer({
       r?.stream.getTracks().forEach((track) => track.stop());
     };
   }, []);
-  const locked = disabled || busy || uploading || (!group && !!current);
+  // Typing, attaching and mentioning stay available while an agent replies;
+  // a private message sent meanwhile is queued by the conversation.
+  const locked = disabled || busy || uploading;
+  const queues = !group && !!current;
   async function attach(files: File[]) {
     if (!files.length || locked || recording) return;
     setError("");
@@ -787,7 +793,9 @@ export function Composer({
                   (!draft.prompt.trim() && !draft.attachments.length)
                 }
               >
-                {t(mode === "enter" ? "sendWithEnter" : "sendWithCtrlEnter")}
+                {queues
+                  ? t(mode === "enter" ? "queueWithEnter" : "queueWithCtrlEnter")
+                  : t(mode === "enter" ? "sendWithEnter" : "sendWithCtrlEnter")}
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -833,6 +841,25 @@ export function Composer({
           onPick={pickAgent}
           onDismiss={dismissMention}
         />
+      )}
+      {queue && (
+        <div
+          role="status"
+          data-composer-queue={queue.state}
+          className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+        >
+          <span className="min-w-0 flex-1">
+            {t(queue.state === "waiting" ? "queuedWaiting" : "queuedPaused")}
+          </span>
+          {queue.state === "paused" && (
+            <Button type="button" size="sm" variant="outline" disabled={locked} onClick={queue.onSendNow}>
+              {t("queuedSendNow")}
+            </Button>
+          )}
+          <Button type="button" size="sm" variant="ghost" onClick={queue.onCancel}>
+            {t("queuedCancel")}
+          </Button>
+        </div>
       )}
       {(error || uploading || recording) && (
         <p
