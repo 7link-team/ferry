@@ -1016,7 +1016,14 @@ pub(crate) fn builtin_nodes() -> Vec<Value> {
             let probe = json!({"type": kind, "type_version": spec["type_version"].clone(), "params": spec["example_params"].clone()});
             !integrations.contains(kind) && super::run::runnable(&probe)
         })
-        .cloned()
+        .map(|spec| {
+            // Only nodes the executor runs are listed; their contract files may
+            // still carry the draft "design_only" label, which agents read as
+            // "cannot run" and then refuse to build.
+            let mut spec = spec.clone();
+            spec["status"] = json!("implemented");
+            spec
+        })
         .collect()
 }
 async fn options(

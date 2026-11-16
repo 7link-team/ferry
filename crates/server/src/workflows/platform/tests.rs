@@ -522,6 +522,15 @@ fn node_catalog_lists_every_runnable_node_and_only_those() {
         assert!(types.contains(required), "catalog misses {required}");
     }
     assert_eq!(types.len(), nodes.len(), "a node type is listed twice");
+    // Everything listed runs, so nothing may still carry the draft label that
+    // makes agents refuse to build with it.
+    for node in &nodes {
+        assert_eq!(
+            node["status"], "implemented",
+            "{} is labelled {}",
+            node["type"], node["status"]
+        );
+    }
     for node in &nodes {
         let probe = serde_json::json!({"type": node["type"], "type_version": node["type_version"], "params": node["example_params"]});
         assert!(
