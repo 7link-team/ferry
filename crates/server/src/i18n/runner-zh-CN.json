@@ -92,5 +92,14 @@
   "runner.release.payloadHash": "更新文件哈希不匹配。",
   "runner.release.urlControl": "下载地址包含控制字符。",
   "runner.timezoneInvalid": "无法识别的时区。请使用 IANA 名称（如 Asia/Shanghai），或留空。",
-  "runner.timezoneUpgrade": "该模型要求时区 {timezone}，但此主机的 Runner 版本过旧，无法应用。请升级 Runner 后重试。"
+  "runner.timezoneUpgrade": "该模型要求时区 {timezone}，但此主机的 Runner 版本过旧，无法应用。请升级 Runner 后重试。",
+  "runner.reason.timeout": "新版本 {seconds} 秒内未连上平台",
+  "runner.reason.exit": "新版本启动后退出（退出码 {code}）",
+  "runner.reason.signal": "新版本启动时被信号 {signal} 终止",
+  "runner.reason.invalidEvent": "新版本输出了无法识别的控制消息",
+  "runner.reason.versionMismatch": "新版本报告的版本 {version} 与升级包不一致",
+  "runner.reason.spawn": "新版本无法启动（{detail}）",
+  "runner.reason.missingBinary": "新版本文件缺失或校验失败",
+  "runner.reason.interrupted": "激活完成前服务已重启",
+  "runner.reason.other": "{detail}"
 }

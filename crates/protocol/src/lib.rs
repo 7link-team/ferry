@@ -141,6 +141,10 @@ pub enum Report {
     UpdateHealth {
         version: String,
         failed_version: Option<String>,
+        /// Why activating `failed_version` failed (`code[:detail]`, e.g.
+        /// `timeout:60`, `exit:1`). Absent from older runners.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failed_reason: Option<String>,
     },
     UpdateFailed {
         request: String,
@@ -375,6 +379,56 @@ mod tests {
         assert_eq!(session, "s");
         assert_eq!(error, "代理正在准备升级");
         assert!(!serde_json::to_string(&old).unwrap().contains("message"));
+    }
+
+    #[test]
+    fn a_rollback_reason_is_optional_on_the_wire_in_both_directions() {
+        // An older runner never sends a reason.
+        let legacy =
+            r#"{"type":"update_health","version":"0.8.1-alpha","failed_version":"0.9.0-alpha"}"#;
+        assert!(matches!(
+            serde_json::from_str::<super::Report>(legacy).unwrap(),
+            super::Report::UpdateHealth {
+                failed_reason: None,
+                ..
+            }
+        ));
+        // Without a reason nothing new is written, so older servers read the same frame.
+        let plain = super::Report::UpdateHealth {
+            version: "0.9.0-alpha".into(),
+            failed_version: None,
+            failed_reason: None,
+        };
+        assert!(
+            !serde_json::to_string(&plain)
+                .unwrap()
+                .contains("failed_reason")
+        );
+        let reported = super::Report::UpdateHealth {
+            version: "0.8.1-alpha".into(),
+            failed_version: Some("0.9.0-alpha".into()),
+            failed_reason: Some("timeout:60".into()),
+        };
+        let encoded = serde_json::to_string(&reported).unwrap();
+        assert!(matches!(
+            serde_json::from_str::<super::Report>(&encoded).unwrap(),
+            super::Report::UpdateHealth { failed_reason: Some(reason), .. } if reason == "timeout:60"
+        ));
+        // A server that predates the field still accepts the frame.
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum OlderReport {
+            UpdateHealth {
+                version: String,
+                failed_version: Option<String>,
+            },
+        }
+        let OlderReport::UpdateHealth {
+            version,
+            failed_version,
+        } = serde_json::from_str::<OlderReport>(&encoded).unwrap();
+        assert_eq!(version, "0.8.1-alpha");
+        assert_eq!(failed_version.as_deref(), Some("0.9.0-alpha"));
     }
 
     use super::*;

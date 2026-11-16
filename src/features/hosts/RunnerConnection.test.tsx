@@ -550,6 +550,13 @@ it("shows automatic upgrade policy, drain and persisted retry status", async () 
   expect(host.textContent).toContain("升级到 0.2.0 未完成，已恢复 0.1.0");
   expect(host.textContent).not.toContain("已回退 · ");
   expect(host.textContent).not.toContain("下次尝试");
+  // When the Runner reported why, the sentence ends with the reason; the generic
+  // "did not activate" line would only repeat it.
+  value.update = { state: "rolled_back", version: "0.2.0", message: "新版本未完成激活，已恢复原版本", auto: { attempts: 2, next_retry_at: 0 } };
+  Object.assign(value.update, { reason: "新版本 60 秒内未连上平台" });
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  expect(host.textContent).toContain("升级到 0.2.0 未完成，已恢复 0.1.0：新版本 60 秒内未连上平台");
+  expect(host.textContent).not.toContain("新版本未完成激活");
   value.update.state = "some_new_state";
   await act(async () => vi.advanceTimersByTimeAsync(5000));
   expect(host.textContent).not.toContain("some_new_state");

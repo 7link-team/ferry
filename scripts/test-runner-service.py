@@ -19,6 +19,11 @@ if os.name != 'nt': signal.signal(signal.SIGTERM, interrupted)
 system = platform.system()
 name = 'ferry-runner-test-' + str(os.getpid())
 windows_user = system == 'Windows' and os.environ.get('RUNNER_TEST_USER_SERVICE') == '1'
+# RUNNER_TEST_CROSS_VERSION=1: RUNNER_BINARY is a previous release; stop after its
+# own updater has activated the candidate built from this source.
+cross_version = os.environ.get('RUNNER_TEST_CROSS_VERSION') == '1'
+class CrossVersionDone(Exception):
+    pass
 user = ['--user'] if windows_user or system == 'Darwin' and not os.environ.get('RUNNER_TEST_SYSTEM_SERVICE') else []
 
 def command(*args, check=True):
@@ -369,6 +374,9 @@ jobs:
             assert journal['current']['version']=='9.9.9' and journal['pending'] is None
             assert (state/'runner.json').read_bytes()==original
             print('PASS signed update downloads over TLS and confirms real new-version handshake', flush=True)
+            if cross_version:
+                print('PASS previous-release service activates the candidate through its own updater', flush=True)
+                raise CrossVersionDone()
             if os.environ.get('RUNNER_TEST_AUTO_UPDATE') == 'success':
                 assert api(update_path)['update']['auto']['attempts'] >= 2
                 print('PASS automatic upgrade drains busy native service and activates exact server version', flush=True)
@@ -391,6 +399,8 @@ jobs:
                     journal = json.loads((state/'versions.json').read_text())
                     assert journal['current']['version']=='9.9.9' and journal['failed_version']==version
                     assert (state/'runner.json').read_bytes()==original
+                    # The supervisor says why; the restarted worker reports it to the server.
+                    wait(lambda: api(update_path)['update'].get('reason'), 'rollback reason reaches the server', seconds=60)
                 print('PASS invalid executable and wrong-version health check restore confirmed version', flush=True)
                 upgrade('9.9.12')
                 def pending_activation():
@@ -491,6 +501,8 @@ jobs:
         wait(lambda: pid()==0, 'uninstalled service should finish stopping')
         assert (state/'runner.json').read_bytes()==original, 'uninstall must preserve identity data'
         print('PASS uninstall removes only service registration', flush=True)
+    except CrossVersionDone:
+        pass
     except Exception:
         try:
             if 'update_path' in locals(): print('Upgrade status:', json.dumps(api(update_path)), flush=True)

@@ -367,7 +367,7 @@ type RunnerUpdate = {
   enabled: boolean;
   auto_update: "inherit" | "on" | "off";
   global_auto_update: boolean;
-  update: null | { state: string; version: string; message: string; auto?: { attempts: number; next_retry_at: number } };
+  update: null | { state: string; version: string; message: string; reason?: string; auto?: { attempts: number; next_retry_at: number } };
 };
 
 export function HostAgentVersion({ workspace, hostId, version, available, updateState, online, canUpdate }: {
@@ -424,8 +424,10 @@ export function RunnerUpdateStatus({ workspace, hostId, canUpdate = false }: { w
   const offline = !!status && !status.ready && !inProgress;
   const sentence = (update: NonNullable<RunnerUpdate["update"]>) => {
     const known = ["draining", "updating", "unknown", ...finished];
-    return commonText(`resource-domain:runner.sentence.${known.includes(update.state) ? update.state : "other"}`,
-      { to: update.version || "—", from: status?.agent_version || "—" });
+    // A rollback says why when the Runner reported it.
+    const key = update.state === "rolled_back" && update.reason ? "rolled_backReason" : known.includes(update.state) ? update.state : "other";
+    return commonText(`resource-domain:runner.sentence.${key}`,
+      { to: update.version || "—", from: status?.agent_version || "—", reason: update.reason ?? "" });
   };
   return <section aria-label={commonText("resource-domain:runner.updateStatus")} className="space-y-2 rounded-xl border bg-card p-5 text-sm">
     <h2 className="font-semibold">{commonText("resource-domain:runner.updateTitle")}</h2>
@@ -436,7 +438,7 @@ export function RunnerUpdateStatus({ workspace, hostId, canUpdate = false }: { w
       <p>{commonText("resource-domain:runner.autoPolicy")}{status.enabled ? commonText("resource-domain:status.enabled") : commonText("resource-domain:status.off")}{status.auto_update === "inherit" ? commonText("resource-domain:runner.inherited") : commonText("resource-domain:runner.overridden")}</p>
       {offline ? <p role="status" className="text-amber-700 dark:text-amber-400">{commonText("resource-domain:runner.offlineNow", { version: status.agent_version || "—" })}</p>
         : <>
-          {status.update && <div role="status" aria-live="polite"><p>{sentence(status.update)}</p>{status.update.message && <p className="text-muted-foreground">{status.update.message}</p>}
+          {status.update && <div role="status" aria-live="polite"><p>{sentence(status.update)}</p>{status.update.message && status.update.state !== "rolled_back" && <p className="text-muted-foreground">{status.update.message}</p>}
             {!!status.update.auto?.next_retry_at && <p>{commonText("resource-domain:runner.nextRetry")}{new Date(status.update.auto.next_retry_at).toLocaleString(currentLocale())}</p>}
           </div>}
           {!status.ready && <p className="text-muted-foreground">{commonText("resource-domain:runner.waitHealthy")}</p>}

@@ -118,6 +118,8 @@ jobs:
         shell: bash
         env:
           RUNNER_TEST_ACTIONS: ${{ runner.os == 'Linux' && '1' || '' }}
+          # Also upgrade a service installed from this previous release's source.
+          RUNNER_UPGRADE_FROM: v0.8.1-alpha
         run: |
           mkdir -p harness-logs
           set +e

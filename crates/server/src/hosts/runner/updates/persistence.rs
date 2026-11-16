@@ -120,6 +120,9 @@ pub(super) async fn transition_update(
 ) -> bool {
     job.state = state.into();
     job.message = message.as_ref().to_owned();
+    if state != "rolled_back" {
+        job.reason = None;
+    }
     if let Some(retry) = &mut job.auto {
         retry.next_retry_at = if state == "failed" {
             db::now() + retry_delay(retry.attempts)

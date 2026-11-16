@@ -18,6 +18,26 @@ struct Settings {
     user_service: bool,
 }
 
+/// Whether two files have identical bytes (the installer and the installed service binary).
+fn same_contents(left: &Path, right: &Path) -> anyhow::Result<bool> {
+    use std::io::Read;
+    if std::fs::metadata(left)?.len() != std::fs::metadata(right)?.len() {
+        return Ok(false);
+    }
+    let (mut left, mut right) = (std::fs::File::open(left)?, std::fs::File::open(right)?);
+    let (mut a, mut b) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
+    loop {
+        let read = left.read(&mut a)?;
+        if read == 0 {
+            return Ok(true);
+        }
+        right.read_exact(&mut b[..read])?;
+        if a[..read] != b[..read] {
+            return Ok(false);
+        }
+    }
+}
+
 fn regular_file(path: &Path) -> anyhow::Result<bool> {
     match std::fs::symlink_metadata(path) {
         Ok(meta) => {
@@ -315,6 +335,20 @@ pub fn dispatch() -> anyhow::Result<bool> {
                             .into(),
                         ),
                         confirmation: Some(confirmation),
+                        // Set by the supervisor after a failed activation; never a flag,
+                        // so older workers started after a rollback ignore it.
+                        failed_reason: failed_version.as_ref().and_then(|_| {
+                            std::env::var("FERRY_FAILED_REASON")
+                                .ok()
+                                .map(|reason| {
+                                    reason
+                                        .chars()
+                                        .filter(|c| !c.is_control())
+                                        .take(200)
+                                        .collect()
+                                })
+                                .filter(|reason: &String| !reason.is_empty())
+                        }),
                         failed_version,
                     },
                     stopped,
@@ -499,7 +533,19 @@ impl Identity {
                 "ferry-runner-service"
             })
         };
-        if rebound || !regular_file(&binary)? {
+        // Reinstalling a different (normally newer) runner must replace the
+        // service binary even when the connection settings are unchanged.
+        let present = regular_file(&binary)?;
+        let differs = present && !same_contents(&std::env::current_exe()?, &binary)?;
+        if differs && !rebound {
+            println!("正在停止旧 Runner 服务，等待进程退出…");
+            // Not registered or already stopped is fine; a binary still in use
+            // makes the replacement below fail with its own error.
+            if let Err(error) = self.control("stop") {
+                eprintln!("停止旧 Runner 服务未成功，继续替换：{error:#}");
+            }
+        }
+        if rebound || differs || !present {
             let mut temporary = tempfile::NamedTempFile::new_in(root)?;
             std::io::copy(
                 &mut std::fs::File::open(std::env::current_exe()?)?,
@@ -513,12 +559,14 @@ impl Identity {
                     .set_permissions(std::fs::Permissions::from_mode(0o700))?;
             }
             temporary.as_file().sync_all()?;
-            if rebound {
+            if rebound || differs {
                 temporary.persist(&binary).map_err(|e| e.error)?;
             } else {
                 temporary.persist_noclobber(&binary).map_err(|e| e.error)?;
             }
         }
+        // Older versions staged by earlier automatic updates must not take over again.
+        supervisor::reconcile_installed(root, env!("CARGO_PKG_VERSION"))?;
         self.register(&binary, &config)?;
         println!("正在启动 Runner 服务…");
         self.control("start")

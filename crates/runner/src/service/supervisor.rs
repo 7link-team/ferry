@@ -51,6 +51,94 @@ impl Journal {
         self.current = self.pending.take();
         self.failed_version = None;
     }
+    /// A reinstalled service binary at least as new as the staged versions wins:
+    /// staged older versions stop being selected, and a failure record only
+    /// survives when it concerns a newer version. Returns whether anything changed.
+    fn reconcile(&mut self, installed: &str) -> bool {
+        let Ok(installed) = semver::Version::parse(installed) else {
+            return false;
+        };
+        // An unreadable staged version cannot outrank the installed binary.
+        let not_newer = |version: &str| {
+            semver::Version::parse(version)
+                .map(|version| installed.cmp_precedence(&version).is_ge())
+                .unwrap_or(true)
+        };
+        let mut changed = false;
+        if self.pending.as_ref().is_some_and(|v| not_newer(&v.version)) {
+            self.pending = None;
+            changed = true;
+        }
+        if self.current.as_ref().is_some_and(|v| not_newer(&v.version)) {
+            self.current = None;
+            self.previous = None;
+            changed = true;
+        }
+        if self.current.is_none()
+            && self
+                .previous
+                .as_ref()
+                .is_some_and(|v| not_newer(&v.version))
+        {
+            self.previous = None;
+            changed = true;
+        }
+        if self.failed_version.as_deref().is_some_and(not_newer) {
+            self.failed_version = None;
+            changed = true;
+        }
+        changed
+    }
+}
+
+/// Makes the installed binary win over older staged versions; used when the
+/// service is (re)installed and whenever the supervisor starts.
+pub(super) fn reconcile_installed(root: &Path, installed: &str) -> anyhow::Result<()> {
+    let mut journal = Journal::load(root)?;
+    if journal.reconcile(installed) {
+        journal.store(root)?;
+        clear_failure(root);
+    }
+    Ok(())
+}
+
+/// Why the last activation failed, kept beside the journal (older supervisors
+/// reject unknown journal fields) and handed to the restarted worker.
+#[derive(Serialize, Deserialize)]
+struct Failure {
+    version: String,
+    reason: String,
+}
+const FAILURE_FILE: &str = "activation-failure.json";
+fn sanitize(reason: &str) -> String {
+    reason
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(200)
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
+fn record_failure(root: &Path, version: &str, reason: &str) {
+    let failure = Failure {
+        version: version.into(),
+        reason: sanitize(reason),
+    };
+    if let Ok(bytes) = serde_json::to_vec(&failure) {
+        let _ = std::fs::write(root.join(FAILURE_FILE), bytes);
+    }
+}
+fn failure_reason(root: &Path, version: Option<&str>) -> Option<String> {
+    let version = version?;
+    let path = root.join(FAILURE_FILE);
+    if !super::regular_file(&path).unwrap_or(false) {
+        return None;
+    }
+    let failure: Failure = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    (failure.version == version).then(|| sanitize(&failure.reason))
+}
+fn clear_failure(root: &Path) {
+    let _ = std::fs::remove_file(root.join(FAILURE_FILE));
 }
 
 #[derive(Serialize, Deserialize)]
@@ -94,7 +182,13 @@ pub(super) fn foreground(config: PathBuf) -> anyhow::Result<()> {
         })
 }
 
-fn spawn(binary: &Path, config: &Path, name: &str, failed: Option<&str>) -> anyhow::Result<Child> {
+fn spawn(
+    binary: &Path,
+    config: &Path,
+    name: &str,
+    failed: Option<&str>,
+    reason: Option<&str>,
+) -> anyhow::Result<Child> {
     let mut command = Command::new(binary);
     command
         .args(["service", "worker", "--config"])
@@ -107,6 +201,12 @@ fn spawn(binary: &Path, config: &Path, name: &str, failed: Option<&str>) -> anyh
         .kill_on_drop(true);
     if let Some(version) = failed {
         command.arg("--failed-version").arg(version);
+    }
+    // An environment variable, not a flag: the worker restarted after a rollback
+    // is the previous version, which may not know any new flag.
+    command.env_remove("FERRY_FAILED_REASON");
+    if let Some(reason) = reason.filter(|_| failed.is_some()) {
+        command.env("FERRY_FAILED_REASON", reason);
     }
     #[cfg(windows)]
     {
@@ -127,7 +227,22 @@ enum Outcome {
     Retry,
     Stopped,
     Activate(Installed),
-    Failed,
+    /// Why the worker did not become (or stay) healthy, as `code[:detail]`.
+    Failed(String),
+}
+
+fn exited(status: std::process::ExitStatus) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return format!("signal:{signal}");
+        }
+    }
+    match status.code() {
+        Some(code) => format!("exit:{code}"),
+        None => "exit:unknown".into(),
+    }
 }
 
 async fn monitor(
@@ -161,20 +276,31 @@ async fn monitor(
                 // Stdout may already contain activation when process exit wins.
                 if output_open {
                     while let Some(line) = output.next_line().await? {
-                        if let Event::Activate { version, digest } = parse(&line)? {
-                            activation = Some(Installed { version, digest });
+                        match parse(&line) {
+                            Ok(Event::Activate { version, digest }) => activation = Some(Installed { version, digest }),
+                            Ok(_) => {}
+                            Err(_) => return Ok(Outcome::Failed("invalid_event".into())),
                         }
                     }
                 }
                 return Ok(if status.success() && confirmed {
-                    activation.map(Outcome::Activate).unwrap_or(Outcome::Failed)
-                } else { Outcome::Failed });
+                    activation.map(Outcome::Activate).unwrap_or_else(|| Outcome::Failed(exited(status)))
+                } else { Outcome::Failed(exited(status)) });
             }
             line = output.next_line(), if output_open => {
                 match line? {
-                    Some(line) => match parse(&line)? {
-                        Event::Ready { version } => {
-                            ensure!(version == expected, "新代理报告的版本与签名清单不一致");
+                    Some(line) => match parse(&line) {
+                        Err(_) => {
+                            child.kill().await?;
+                            child.wait().await?;
+                            return Ok(Outcome::Failed("invalid_event".into()));
+                        }
+                        Ok(Event::Ready { version }) => {
+                            if version != expected {
+                                child.kill().await?;
+                                child.wait().await?;
+                                return Ok(Outcome::Failed(format!("version_mismatch:{version}")));
+                            }
                             if !confirmed {
                                 ensure!(child.try_wait()?.is_none(), "新代理已退出");
                                 ready()?;
@@ -182,7 +308,7 @@ async fn monitor(
                             }
                             input.as_mut().context("worker stdin unavailable")?.write_all(b"confirm\n").await?;
                         }
-                        Event::Activate { version, digest } => activation = Some(Installed { version, digest }),
+                        Ok(Event::Activate { version, digest }) => activation = Some(Installed { version, digest }),
                     },
                     None => output_open = false,
                 }
@@ -192,7 +318,7 @@ async fn monitor(
                 // the server's exclusive update reservation. Terminate it before rollback.
                 child.kill().await?;
                 child.wait().await?;
-                return Ok(Outcome::Failed);
+                return Ok(Outcome::Failed(format!("timeout:{}", timeout.as_secs())));
             }
         }
     }
@@ -207,7 +333,14 @@ pub(super) async fn run(config: PathBuf, mut stopped: watch::Receiver<bool>) -> 
     let settings = Settings::load(&config)?;
     let root = &settings.state_dir;
     let mut journal = Journal::load(root)?;
-    if journal.pending.is_some() {
+    // A reinstalled newer service binary must not keep running an older staged version.
+    if journal.reconcile(env!("CARGO_PKG_VERSION")) {
+        tracing::info!("已安装的代理不低于暂存版本，改用已安装版本");
+        clear_failure(root);
+        journal.store(root)?;
+    }
+    if let Some(pending) = &journal.pending {
+        record_failure(root, &pending.version, "interrupted");
         journal.rollback();
         journal.store(root)?;
     }
@@ -226,7 +359,8 @@ pub(super) async fn run(config: PathBuf, mut stopped: watch::Receiver<bool>) -> 
                 Ok(binary) => binary,
                 Err(error) => {
                     tracing::warn!(%error, "版本文件不可用，恢复上一个已确认版本");
-                    if journal.pending.is_some() {
+                    if let Some(pending) = &journal.pending {
+                        record_failure(root, &pending.version, "missing_binary");
                         journal.rollback();
                     } else {
                         journal.failed_version = journal.current.take().map(|v| v.version);
@@ -239,13 +373,16 @@ pub(super) async fn run(config: PathBuf, mut stopped: watch::Receiver<bool>) -> 
             None => std::env::current_exe()?,
         };
         let execution = async {
+            let reason = failure_reason(root, journal.failed_version.as_deref());
             let mut child = match spawn(
                 &binary,
                 &config,
                 &settings.service_name,
                 journal.failed_version.as_deref(),
+                reason.as_deref(),
             ) {
                 Ok(child) => child,
+                Err(error) if checking => return Ok(Outcome::Failed(format!("spawn:{error}"))),
                 Err(error) if journal.pending.is_none() && journal.current.is_some() => {
                     tracing::warn!(%error, "已确认版本无法启动，恢复上一版本");
                     journal.failed_version = journal.current.take().map(|v| v.version);
@@ -265,6 +402,7 @@ pub(super) async fn run(config: PathBuf, mut stopped: watch::Receiver<bool>) -> 
                 &mut stopped,
                 || {
                     journal.confirm();
+                    clear_failure(root);
                     journal.store(root)
                 },
             )
@@ -300,12 +438,22 @@ pub(super) async fn run(config: PathBuf, mut stopped: watch::Receiver<bool>) -> 
                 journal.store(root)?;
             }
             outcome if journal.pending.is_some() => {
-                tracing::warn!(error=?outcome.err(), "新代理未通过健康检查，恢复已确认版本");
+                let reason = match outcome {
+                    Ok(Outcome::Failed(reason)) => reason,
+                    Err(error) => format!("error:{error:#}"),
+                    _ => "unknown".into(),
+                };
+                tracing::warn!(%reason, "新代理未通过健康检查，恢复已确认版本");
+                if let Some(pending) = &journal.pending {
+                    record_failure(root, &pending.version, &reason);
+                }
                 journal.rollback();
                 journal.store(root)?;
             }
             Err(error) => return Err(error),
-            Ok(Outcome::Failed) => anyhow::bail!("代理进程意外退出，由系统服务恢复"),
+            Ok(Outcome::Failed(reason)) => {
+                anyhow::bail!("代理进程意外退出（{reason}），由系统服务恢复")
+            }
         }
     }
 }
@@ -335,6 +483,72 @@ mod tests {
         assert_eq!(result.current.unwrap().version, "1.0.0");
         assert!(result.pending.is_none());
         assert_eq!(result.failed_version.as_deref(), Some("2.0.0"));
+    }
+    #[test]
+    fn a_reinstalled_newer_binary_wins_over_older_staged_versions() {
+        let dir = tempfile::tempdir().unwrap();
+        Journal {
+            current: Some(installed("0.4.0-alpha")),
+            previous: Some(installed("0.3.0-alpha")),
+            pending: Some(installed("0.8.0-alpha")),
+            failed_version: Some("0.8.0-alpha".into()),
+        }
+        .store(dir.path())
+        .unwrap();
+        record_failure(dir.path(), "0.8.0-alpha", "timeout:60");
+        reconcile_installed(dir.path(), "0.9.0-alpha").unwrap();
+        let journal = Journal::load(dir.path()).unwrap();
+        // Nothing staged is selected any more, so the installed binary runs.
+        assert!(
+            journal.current.is_none() && journal.pending.is_none() && journal.previous.is_none()
+        );
+        assert!(journal.failed_version.is_none());
+        assert!(failure_reason(dir.path(), Some("0.8.0-alpha")).is_none());
+        // Reinstalling the same version as the confirmed current also uses the installed binary.
+        let mut same = Journal {
+            current: Some(installed("0.9.0-alpha")),
+            ..Default::default()
+        };
+        assert!(same.reconcile("0.9.0-alpha"));
+        assert!(same.current.is_none());
+    }
+    #[test]
+    fn a_newer_confirmed_version_and_a_newer_failure_are_kept() {
+        let mut journal = Journal {
+            current: Some(installed("0.9.0-alpha")),
+            previous: Some(installed("0.8.2-alpha")),
+            failed_version: Some("1.0.0-alpha".into()),
+            ..Default::default()
+        };
+        assert!(!journal.reconcile("0.8.2-alpha"));
+        assert_eq!(journal.current.as_ref().unwrap().version, "0.9.0-alpha");
+        assert_eq!(journal.previous.as_ref().unwrap().version, "0.8.2-alpha");
+        assert_eq!(journal.failed_version.as_deref(), Some("1.0.0-alpha"));
+        // An older failure no longer blocks anything once a newer binary is installed.
+        let mut older = Journal {
+            current: Some(installed("1.1.0-alpha")),
+            failed_version: Some("0.9.0-alpha".into()),
+            ..Default::default()
+        };
+        assert!(older.reconcile("1.0.0-alpha"));
+        assert!(older.failed_version.is_none());
+        assert_eq!(older.current.as_ref().unwrap().version, "1.1.0-alpha");
+    }
+    #[test]
+    fn the_failure_reason_is_kept_per_version_and_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        record_failure(
+            dir.path(),
+            "2.0.0",
+            &format!("spawn:bad\nline{}", "x".repeat(400)),
+        );
+        let reason = failure_reason(dir.path(), Some("2.0.0")).unwrap();
+        assert!(reason.starts_with("spawn:bad line"));
+        assert!(reason.chars().count() <= 200);
+        assert!(failure_reason(dir.path(), Some("3.0.0")).is_none());
+        assert!(failure_reason(dir.path(), None).is_none());
+        clear_failure(dir.path());
+        assert!(failure_reason(dir.path(), Some("2.0.0")).is_none());
     }
     #[test]
     fn confirmation_preserves_previous_version() {
@@ -382,10 +596,17 @@ mod tests {
         assert!(child.try_wait().unwrap().unwrap().success());
     }
     #[tokio::test]
-    async fn wrong_version_and_failed_child_are_never_confirmed() {
-        for script in [
-            "import sys; sys.exit(1)",
-            "import sys; print('{\"event\":\"ready\",\"version\":\"1.0.0\"}',flush=True); sys.stdin.read()",
+    async fn wrong_version_and_failed_child_are_never_confirmed_and_say_why() {
+        for (script, reason) in [
+            ("import sys; sys.exit(1)", "exit:1"),
+            (
+                "import sys; print('{\"event\":\"ready\",\"version\":\"1.0.0\"}',flush=True); sys.stdin.read()",
+                "version_mismatch:1.0.0",
+            ),
+            (
+                "import sys; print('not json',flush=True); sys.stdin.read()",
+                "invalid_event",
+            ),
         ] {
             let mut child = fixture(script);
             let (_stop, mut stopped) = watch::channel(false);
@@ -403,7 +624,10 @@ mod tests {
             )
             .await;
             assert!(!confirmed);
-            assert!(result.is_err() || matches!(result, Ok(Outcome::Failed)));
+            assert!(
+                matches!(&result, Ok(Outcome::Failed(why)) if why == reason),
+                "{script}"
+            );
         }
     }
     #[tokio::test]
@@ -420,7 +644,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(matches!(result, Outcome::Failed));
+        assert!(matches!(&result, Outcome::Failed(why) if why == "timeout:0"));
         assert!(child.try_wait().unwrap().is_some());
     }
     #[tokio::test]

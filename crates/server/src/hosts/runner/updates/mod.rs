@@ -49,6 +49,40 @@ struct UpdateJob {
     message: String,
     #[serde(default)]
     owner: Option<String>,
+    /// Why a rolled-back update did not activate, as a stored message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+/// Turns the supervisor's `code[:detail]` rollback reason into a stored,
+/// per-reader message; unknown codes keep their (bounded) text.
+pub(super) fn rollback_reason(raw: Option<&str>) -> Option<String> {
+    use crate::i18n::Message;
+    let raw: String = raw?.chars().filter(|c| !c.is_control()).take(200).collect();
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let (code, detail) = raw
+        .split_once(':')
+        .map(|(code, detail)| (code, detail.trim()))
+        .unwrap_or((raw, ""));
+    let number =
+        |value: &str| !value.is_empty() && value.chars().all(|c| c.is_ascii_digit() || c == '-');
+    let message = match code {
+        "timeout" if number(detail) => {
+            Message::new("runner.reason.timeout").with("seconds", detail)
+        }
+        "exit" if number(detail) => Message::new("runner.reason.exit").with("code", detail),
+        "signal" if number(detail) => Message::new("runner.reason.signal").with("signal", detail),
+        "invalid_event" => Message::new("runner.reason.invalidEvent"),
+        "version_mismatch" => Message::new("runner.reason.versionMismatch").with("version", detail),
+        "spawn" => Message::new("runner.reason.spawn").with("detail", detail),
+        "missing_binary" => Message::new("runner.reason.missingBinary"),
+        "interrupted" => Message::new("runner.reason.interrupted"),
+        _ => Message::new("runner.reason.other").with("detail", raw),
+    };
+    Some(crate::i18n::store_message(&message))
 }
 
 static UPDATES: LazyLock<Mutex<HashMap<String, UpdateJob>>> = LazyLock::new(Default::default);
@@ -140,6 +174,7 @@ mod tests {
                 version: "1.0.0".into(),
                 ready: std::sync::atomic::AtomicBool::new(true),
                 failed_version: Mutex::new(None),
+                failed_reason: Mutex::new(None),
                 update_error: Mutex::new(None),
             }),
         );
@@ -259,6 +294,7 @@ mod tests {
             version: "2.0.0".into(),
             state: "updating".into(),
             message: String::new(),
+            reason: None,
         };
         persist_update(&s, id, &job).await.unwrap();
         recover_updates(&s).await.unwrap();
@@ -289,6 +325,7 @@ mod tests {
             version: "2.0.0".into(),
             ready: std::sync::atomic::AtomicBool::new(false),
             failed_version: Mutex::new(None),
+            failed_reason: Mutex::new(None),
             update_error: Mutex::new(None),
         });
         live().insert(id.to_string(), peer.clone());
@@ -398,6 +435,7 @@ mod tests {
             version: "2.0.0".into(),
             state: "updating".into(),
             message: String::new(),
+            reason: None,
         };
         persist_update(&sa, id, &old).await.unwrap();
         assert_eq!(

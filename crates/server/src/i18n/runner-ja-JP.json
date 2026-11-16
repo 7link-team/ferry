@@ -92,5 +92,14 @@
   "runner.release.payloadHash": "更新ファイルのハッシュが一致しません。",
   "runner.release.urlControl": "ダウンロードURLに制御文字が含まれています。",
   "runner.timezoneInvalid": "認識できないタイムゾーンです。Asia/Shanghai のような IANA 名を使うか、空欄にしてください。",
-  "runner.timezoneUpgrade": "このモデルはタイムゾーン {timezone} を必要としますが、このホストの Runner は古いため適用できません。Runner をアップグレードしてから再試行してください。"
+  "runner.timezoneUpgrade": "このモデルはタイムゾーン {timezone} を必要としますが、このホストの Runner は古いため適用できません。Runner をアップグレードしてから再試行してください。",
+  "runner.reason.timeout": "新バージョンが {seconds} 秒以内にプラットフォームへ接続できませんでした",
+  "runner.reason.exit": "新バージョンが起動中に終了しました（終了コード {code}）",
+  "runner.reason.signal": "新バージョンが起動中にシグナル {signal} で停止しました",
+  "runner.reason.invalidEvent": "新バージョンが認識できない制御メッセージを出力しました",
+  "runner.reason.versionMismatch": "新バージョンが報告したバージョン {version} が更新内容と一致しません",
+  "runner.reason.spawn": "新バージョンを起動できませんでした（{detail}）",
+  "runner.reason.missingBinary": "新バージョンのファイルがないか検証に失敗しました",
+  "runner.reason.interrupted": "有効化が完了する前にサービスが再起動しました",
+  "runner.reason.other": "{detail}"
 }

@@ -48,6 +48,10 @@ pub async fn update_status(
         })?;
     if let Some(job) = &mut status {
         job.message = crate::i18n::render_stored(crate::i18n::current_locale(), &job.message);
+        job.reason = job
+            .reason
+            .as_deref()
+            .map(|reason| crate::i18n::render_stored(crate::i18n::current_locale(), reason));
     }
     let global = global_auto_update(&s).await?;
     Ok(Json(
@@ -222,6 +226,7 @@ pub(super) async fn begin_update(
         version: body.version.clone(),
         state: "draining".into(),
         message: crate::i18n::store_message(&crate::i18n::Message::new("runner.waiting")),
+        reason: None,
     };
     {
         let mut jobs = UPDATES.lock().unwrap_or_else(|e| e.into_inner());
@@ -502,6 +507,7 @@ pub(super) async fn begin_update(
                                     )),
                                 )
                             } else {
+                                job.reason = super::rollback_reason(info.failed_reason.as_deref());
                                 (
                                     "rolled_back",
                                     crate::i18n::store_message(&crate::i18n::Message::new(
@@ -531,6 +537,13 @@ pub(super) async fn begin_update(
                             )
                             .await;
                         } else {
+                            job.reason = super::rollback_reason(
+                                current
+                                    .failed_reason
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .as_deref(),
+                            );
                             transition_update(
                                 &s,
                                 id,

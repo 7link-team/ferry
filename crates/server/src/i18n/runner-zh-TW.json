@@ -92,5 +92,14 @@
   "runner.release.payloadHash": "更新檔案雜湊不符。",
   "runner.release.urlControl": "下載位址包含控制字元。",
   "runner.timezoneInvalid": "無法識別的時區。請使用 IANA 名稱（如 Asia/Shanghai），或留空。",
-  "runner.timezoneUpgrade": "此模型要求時區 {timezone}，但此主機的 Runner 版本過舊，無法套用。請升級 Runner 後重試。"
+  "runner.timezoneUpgrade": "此模型要求時區 {timezone}，但此主機的 Runner 版本過舊，無法套用。請升級 Runner 後重試。",
+  "runner.reason.timeout": "新版本 {seconds} 秒內未連上平台",
+  "runner.reason.exit": "新版本啟動後結束（結束碼 {code}）",
+  "runner.reason.signal": "新版本啟動時被訊號 {signal} 終止",
+  "runner.reason.invalidEvent": "新版本輸出了無法辨識的控制訊息",
+  "runner.reason.versionMismatch": "新版本回報的版本 {version} 與升級套件不一致",
+  "runner.reason.spawn": "新版本無法啟動（{detail}）",
+  "runner.reason.missingBinary": "新版本檔案遺失或驗證失敗",
+  "runner.reason.interrupted": "啟用完成前服務已重新啟動",
+  "runner.reason.other": "{detail}"
 }
