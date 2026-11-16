@@ -203,8 +203,17 @@ impl Protocol {
             return match value["id"].as_u64() {
                 Some(0) if !self.ready => {
                     self.ready = true;
+                    // A working-directory write turn never asks: anything outside
+                    // the workspace-write sandbox simply fails.
+                    let sandbox = if self.request.permission == Permission::ReadOnly
+                        && !self.request.write_workdir
+                    {
+                        "read-only"
+                    } else {
+                        "workspace-write"
+                    };
                     let mut params = json!({"cwd":self.request.cwd,"approvalPolicy":if self.request.permission==Permission::ReadOnly {"never"} else {"untrusted"},
-                        "sandbox":if self.request.permission==Permission::ReadOnly {"read-only"} else {"workspace-write"}});
+                        "sandbox":sandbox});
                     if let Some(model) = &self.request.model {
                         params["model"] = json!(model);
                     }
@@ -224,7 +233,9 @@ impl Protocol {
                 }
                 Some(1) if self.ready && self.session.is_none() => {
                     let event = self.bind(result["thread"]["id"].as_str().unwrap_or(""))?;
-                    let sandbox = if self.request.permission == Permission::ReadOnly {
+                    let sandbox = if self.request.permission == Permission::ReadOnly
+                        && !self.request.write_workdir
+                    {
                         json!({"type":"readOnly"})
                     } else {
                         json!({"type":"workspaceWrite","writableRoots":[self.request.cwd],"networkAccess":false})

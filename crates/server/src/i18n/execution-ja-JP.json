@@ -233,5 +233,15 @@
   "workflow.integrationRemoteReason": "{reason}",
   "workflow.integrationNotJson": "アプリケーションは HTTP {status} を返しましたが、JSON ではありません。リクエスト先とパラメーターを確認してください（呼び出しは反映済みの可能性があります）。",
   "workflow.integrationTooLarge": "アプリケーションの応答が 1 MiB の上限を超えています。範囲を絞るかページ単位で読み取ってください（呼び出しは反映済みの可能性があります）。",
-  "workflow.integrationSecretEcho": "アプリケーションの応答に呼び出しで使用した認証情報が含まれていたため、結果を拒否し保存しませんでした。"
+  "workflow.integrationSecretEcho": "アプリケーションの応答に呼び出しで使用した認証情報が含まれていたため、結果を拒否し保存しませんでした。",
+  "workflow.agentFilesInvalid": "{path} のファイル出力設定が無効です。ファイルは最大 50 個、合計 1～500 MB、形式は拡張子で指定し、説明は 4 KB 以内にしてください。",
+  "workflow.agentFilesRuntime": "{path}: {cli} は無人でファイルを生成できません。作業ディレクトリ内に書き込みを限定できるのは Codex と Claude Code だけです。どちらかを使うエージェントを選んでください。",
+  "workflow.agentFilesRunnerUpgrade": "{host} の Runner が古いため、{cli} にファイルを生成させられません。Runner を更新してから再実行してください。",
+  "workflow.agentFilesTooMany": "エージェントが生成したファイルが上限（最大 {max} 個）を超えました。上限を上げるか、ファイル数を減らすよう指示してください。",
+  "workflow.agentFileTooLarge": "ファイル「{name}」が 1 ファイルの上限 {limit} MB を超えています。",
+  "workflow.agentFilesTotal": "エージェントが生成したファイルの合計が {limit} MB を超えています。上限を上げるか、より小さいファイルにするよう指示してください。",
+  "workflow.agentFileFormat": "ファイル「{name}」は許可された形式（{formats}）ではありません。",
+  "workflow.agentFileMismatch": "「{name}」の内容がファイル形式と一致しないため、配信しませんでした。その形式の本物のファイルを生成するようエージェントに指示してください。",
+  "workflow.agentNoFiles": "エージェントは終了しましたが、出力フォルダーにファイルがありません。最終メッセージで理由を確認するか、依頼を具体的にしてください。",
+  "hosts.fileToolsRunnerOnly": "ファイル作成ツールを確認できるのは Runner ホストだけです。"
 }

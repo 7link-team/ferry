@@ -1,5 +1,6 @@
 //! Structured native CLI execution. The caller owns authorization, persistence,
 //! directory exclusion and host/user/native-session binding; no shell is used.
+pub(crate) mod file_tools;
 pub(crate) mod paths;
 pub(crate) mod platform;
 pub(super) mod probe;
@@ -59,7 +60,24 @@ pub(super) async fn workspace(
     Ok(path)
 }
 
+/// Runtimes whose writes can be confined to the working directory without a
+/// person approving each step (see `Request::write_workdir`).
+pub(crate) fn confines_writes(runtime: Runtime) -> bool {
+    matches!(runtime, Runtime::Codex | Runtime::Claude)
+}
+
 fn validate(request: &Request) -> Result<()> {
+    if request.write_workdir {
+        ensure!(
+            confines_writes(request.runtime),
+            "{:?} cannot confine its writes to the working directory",
+            request.runtime
+        );
+        ensure!(
+            request.permission == Permission::ReadOnly,
+            "a working-directory write turn is otherwise read-only"
+        );
+    }
     ensure!(
         !matches!(request.runtime, Runtime::Pi) || request.permission == Permission::ReadOnly,
         "Pi currently supports read-only conversations only"
@@ -92,6 +110,32 @@ fn validate(request: &Request) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Claude's `--tools` and `--allowedTools` values for a request.
+fn claude_tools(request: &Request) -> (&'static str, &'static str) {
+    const PLATFORM: &str = "mcp__ferry__ferry_discover,mcp__ferry__ferry_request";
+    if request.write_workdir {
+        return if request.platform_tools {
+            (
+                "Read,Glob,Grep,Edit,Write,mcp__ferry__ferry_discover,mcp__ferry__ferry_request",
+                "Read,Glob,Grep,Edit(./**),Write(./**),mcp__ferry__ferry_discover,mcp__ferry__ferry_request",
+            )
+        } else {
+            (
+                "Read,Glob,Grep,Edit,Write",
+                "Read,Glob,Grep,Edit(./**),Write(./**)",
+            )
+        };
+    }
+    let tools = if request.permission == Permission::ReadOnly && !request.platform_tools {
+        ""
+    } else if request.permission == Permission::ReadOnly {
+        PLATFORM
+    } else {
+        "Read,Glob,Grep,Edit,Write,Bash,mcp__ferry__ferry_discover,mcp__ferry__ferry_request"
+    };
+    (tools, if request.platform_tools { PLATFORM } else { "" })
 }
 
 #[cfg(test)]
@@ -141,18 +185,12 @@ fn command_with(request: &Request, environment: &provision::Environment) -> Comm
             });
             // Claude tool filtering is not an OS sandbox. Read-only disables all
             // tools; on-request has no pre-approved tools or session-wide grant.
-            c.args([
-                "--tools",
-                if request.permission == Permission::ReadOnly && !request.platform_tools {
-                    ""
-                } else if request.permission == Permission::ReadOnly {
-                    "mcp__ferry__ferry_discover,mcp__ferry__ferry_request"
-                } else {
-                    "Read,Glob,Grep,Edit,Write,Bash,mcp__ferry__ferry_discover,mcp__ferry__ferry_request"
-                },
-                "--allowedTools",
-                if request.platform_tools { "mcp__ferry__ferry_discover,mcp__ferry__ferry_request" } else { "" },
-            ]);
+            // A working-directory write turn may read and search, and edit or
+            // create files only under the working directory; there is no Bash,
+            // so nothing can write elsewhere, and anything else is refused
+            // without asking (dontAsk).
+            let (tools, allowed) = claude_tools(request);
+            c.args(["--tools", tools, "--allowedTools", allowed]);
             if let Some(model) = &request.model {
                 c.arg("--model").arg(model);
             }

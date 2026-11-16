@@ -588,6 +588,8 @@ async fn runner_problems_name_the_host_and_the_cli() {
         directory_exists: true,
         error: Some("missing".into()),
         canonical_directory: Some("/w".into()),
+        write_workdir: true,
+        file_tools: vec![],
     });
     let error = fixture.execute().await.unwrap_err();
     assert_eq!(key(&error), "workflow.agentCliMissing");
@@ -609,6 +611,8 @@ async fn runner_problems_name_the_host_and_the_cli() {
         directory_exists: true,
         error: None,
         canonical_directory: Some("/w".into()),
+        write_workdir: true,
+        file_tools: vec![],
     });
     assert_eq!(
         key(&fixture.execute().await.unwrap_err()),
@@ -741,11 +745,12 @@ async fn save_time_validation_bounds_the_prompt_and_requires_an_object_schema() 
         assert_eq!(key(&error), expected, "{field}");
         assert_eq!(error.0, StatusCode::BAD_REQUEST, "{field}");
     }
+    // Without file output the schema is required, and the message says so.
     let mut missing = params(agent);
     missing.as_object_mut().unwrap().remove("output_schema");
     assert_eq!(
         key(&save(missing).await.unwrap_err()),
-        "workflow.graphSchema"
+        "workflow.agentSchema"
     );
 }
 
@@ -886,4 +891,247 @@ async fn model_hosts_are_tried_in_order_and_every_failure_is_named() {
     );
     assert!(a < b, "{text}");
     assert!(text.contains("codex"), "{text}");
+}
+
+fn file_params(agent: i64, files: Value, schema: Option<Value>) -> Value {
+    let mut params = json!({"agent_id":agent.to_string(),"prompt":"Make the weekly deck.",
+        "timeout_s":600,"max_tool_calls":64,"files":files});
+    if let Some(schema) = schema {
+        params["output_schema"] = schema;
+    }
+    params
+}
+
+#[tokio::test]
+async fn files_from_the_output_folder_become_workflow_files_and_the_workdir_is_removed() {
+    let fixture = Fixture::new().await;
+    fixture.fake.browsable.store(true, Ordering::SeqCst);
+    let dir = format!("/fake/workspaces/{}-{}", fixture.run.id, fixture.run.id);
+    fixture.fake.agent_probe.lock().unwrap().replace({
+        let mut probe = fake::probe_answer(Runtime::Codex, &dir);
+        probe.file_tools = vec!["python 3.12.1 (python-pptx, matplotlib)".into()];
+        probe
+    });
+    fixture.script(vec![
+        AgentStep::Write("output/周报.pdf".into(), "%PDF-1.7 weekly".into()),
+        AgentStep::Write(
+            "output/charts/commits.csv".into(),
+            "名称,提交\nA,3\n".into(),
+        ),
+        AgentStep::Write("scratch/build.py".into(), "print('helper')".into()),
+        text(
+            "final",
+            "Wrote 周报.pdf and charts/commits.csv with python-pptx.",
+            true,
+        ),
+        finished(),
+    ]);
+    let params = file_params(fixture.agent.id, json!({"enabled":true}), None);
+    let items = fixture
+        .execute_params(params, Duration::from_secs(30))
+        .await
+        .unwrap();
+    let request = &fixture.requests()[0];
+    // A fresh per-execution directory, writable only there, never asking.
+    assert_eq!(request.cwd, dir);
+    assert!(request.write_workdir);
+    assert_eq!(request.permission, Permission::ReadOnly);
+    assert!(request.prompt.contains("./output/"));
+    assert!(request.prompt.contains("python-pptx"));
+    assert!(!request.prompt.contains("Do not modify files"));
+    let item = &items[0];
+    assert!(item.json["summary"].as_str().unwrap().contains("周报.pdf"));
+    let files = item.json["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2);
+    let names: Vec<_> = files.iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["commits.csv", "周报.pdf"]);
+    assert_eq!(files[1]["mime"], "application/pdf");
+    assert_eq!(files[0]["meta"]["path"], "charts/commits.csv");
+    let sha = files[1]["sha256"].as_str().unwrap();
+    assert_eq!(
+        files[1]["download_url"],
+        format!(
+            "/api/workspaces/{}/workflows/{}/assets/{sha}",
+            fixture.run.workspace_id, fixture.run.workflow_id
+        )
+    );
+    assert_eq!(item.binary.len(), 2);
+    assert_eq!(item.binary["file_2"].asset, format!("sha256:{sha}"));
+    assert_eq!(item.binary["file_2"].name, "周报.pdf");
+    // The stored bytes are the produced file.
+    let asset = crate::entities::content_assets::Entity::find()
+        .filter(crate::entities::content_assets::Column::Sha256.eq(sha))
+        .one(&fixture.s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let backend = crate::artifact_store::ArtifactStore::for_state(&fixture.s)
+        .await
+        .unwrap();
+    let store = crate::content_assets::Store {
+        db: &fixture.s.db,
+        backend: &backend,
+        vault: &fixture.s.vault,
+        ids: &fixture.s.ids,
+        quota: crate::content_assets::DEFAULT_QUOTA,
+    };
+    assert_eq!(
+        store
+            .read_bytes(&fixture.s.db, asset.workspace_id, asset.id)
+            .await
+            .unwrap(),
+        b"%PDF-1.7 weekly"
+    );
+    // Nothing the CLI wrote is left on the host.
+    assert!(
+        !fixture
+            .fake
+            .files
+            .lock()
+            .unwrap()
+            .keys()
+            .any(|path| path.starts_with(&dir)),
+        "{:?}",
+        fixture
+            .fake
+            .files
+            .lock()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn file_output_limits_types_links_and_old_runners_fail_clearly() {
+    let fixture = Fixture::new().await;
+    fixture.fake.browsable.store(true, Ordering::SeqCst);
+    let run = |steps: Vec<AgentStep>, files: Value| {
+        fixture.script(steps);
+        fixture.execute_params(
+            file_params(fixture.agent.id, files, None),
+            Duration::from_secs(30),
+        )
+    };
+    let done = || vec![text("final", "done", true), finished()];
+    let with = |writes: Vec<(&str, &str)>| {
+        let mut steps: Vec<AgentStep> = writes
+            .into_iter()
+            .map(|(path, content)| AgentStep::Write(path.into(), content.into()))
+            .collect();
+        steps.extend(done());
+        steps
+    };
+    // Nothing produced.
+    let error = run(done(), json!({"enabled":true})).await.unwrap_err();
+    assert_eq!(key(&error), "workflow.agentNoFiles");
+    // A disallowed format.
+    let error = run(
+        with(vec![("output/a.md", "# hi")]),
+        json!({"enabled":true,"formats":["pdf"]}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(key(&error), "workflow.agentFileFormat");
+    // A fake binary: text pretending to be a deck.
+    let error = run(
+        with(vec![("output/deck.pptx", "slides as text")]),
+        json!({"enabled":true}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(key(&error), "workflow.agentFileMismatch");
+    // Too many files.
+    let error = run(
+        with(vec![("output/1.md", "a"), ("output/2.md", "b")]),
+        json!({"enabled":true,"max_files":1}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(key(&error), "workflow.agentFilesTooMany");
+    // A link is never followed: only the regular file is delivered.
+    let dir = format!("/fake/workspaces/{}-{}", fixture.run.id, fixture.run.id);
+    fixture
+        .fake
+        .symlinks
+        .lock()
+        .unwrap()
+        .insert(format!("{dir}/output/secret.txt"));
+    let items = run(
+        with(vec![
+            ("output/secret.txt", "host secret"),
+            ("output/ok.md", "# ok"),
+        ]),
+        json!({"enabled":true}),
+    )
+    .await
+    .unwrap();
+    let names: Vec<_> = items[0].json["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["ok.md"]);
+    // An older Runner cannot confine writes: refused before the CLI runs.
+    let before = fixture.requests().len();
+    fixture.fake.agent_probe.lock().unwrap().replace({
+        let mut probe = fake::probe_answer(Runtime::Codex, "/");
+        probe.write_workdir = false;
+        probe
+    });
+    let error = run(done(), json!({"enabled":true})).await.unwrap_err();
+    assert_eq!(key(&error), "workflow.agentFilesRunnerUpgrade");
+    assert_eq!(fixture.requests().len(), before);
+}
+
+#[tokio::test]
+async fn file_output_requires_a_confinable_cli_and_keeps_the_schema_optional_only_then() {
+    // Without files the schema is still required; with files it is optional.
+    let base = json!({"agent_id":"1","prompt":"p","timeout_s":600,"max_tool_calls":64});
+    assert_eq!(
+        key(&validate(&base, "/nodes/1").unwrap_err()),
+        "workflow.agentSchema"
+    );
+    let mut files = base.clone();
+    files["files"] = json!({"enabled":true});
+    validate(&files, "/nodes/1").unwrap();
+    files["files"]["max_files"] = json!(99);
+    assert_eq!(
+        key(&validate(&files, "/nodes/1").unwrap_err()),
+        "workflow.agentFilesInvalid"
+    );
+    // A CLI that cannot confine its writes is refused when saving and running.
+    let fixture = Fixture::new().await;
+    ai_agents::Entity::update_many()
+        .col_expr(ai_agents::Column::Runtime, Expr::value("gemini"))
+        .col_expr(
+            ai_agents::Column::ModelProfileId,
+            Expr::value(crate::agents::tests::test_cli_model(1, "gemini")),
+        )
+        .filter(ai_agents::Column::Id.eq(fixture.agent.id))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    let error = fixture
+        .execute_params(
+            file_params(fixture.agent.id, json!({"enabled":true}), None),
+            Duration::from_secs(30),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(key(&error), "workflow.agentFilesRuntime");
+    let error = create_workflow(
+        &fixture.s,
+        graph(file_params(fixture.agent.id, json!({"enabled":true}), None)),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(key(&error), "workflow.agentFilesRuntime");
+    assert_eq!(error.2.as_ref().unwrap().params["cli"], "gemini");
+    // Gemini can still be saved in a plain read-only node.
+    create_workflow(&fixture.s, graph(params(fixture.agent.id)))
+        .await
+        .unwrap();
+    assert!(fixture.requests().is_empty());
 }

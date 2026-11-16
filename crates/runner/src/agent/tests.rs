@@ -120,6 +120,7 @@ fn request(runtime: Runtime) -> Request {
         platform_tools: false,
         provider: None,
         timezone: None,
+        write_workdir: false,
     }
 }
 
@@ -1119,4 +1120,67 @@ fn acp_selects_config_option_modes_and_ignores_vendor_extensions() {
         g.receive(json!({"id":1,"result":{"sessionId":"g"}}))
             .is_err()
     );
+}
+
+#[test]
+fn working_directory_writes_are_confined_and_refused_where_they_cannot_be() {
+    let files = |runtime| {
+        let mut r = request(runtime);
+        r.permission = Permission::ReadOnly;
+        r.platform_tools = true;
+        r.write_workdir = true;
+        r
+    };
+    // Codex: the OS sandbox may write only the working directory, never asks.
+    let mut p = protocol::Protocol::new(files(Runtime::Codex), "invocation-files".into());
+    let start = p.receive(json!({"id":0,"result":{}})).unwrap();
+    let params = &start.writes[1]["params"];
+    assert_eq!(params["sandbox"], "workspace-write");
+    assert_eq!(params["approvalPolicy"], "never");
+    let turn = p
+        .receive(json!({"id":1,"result":{"thread":{"id":"thread-files"}}}))
+        .unwrap();
+    let policy = &turn.writes[0]["params"]["sandboxPolicy"];
+    assert_eq!(policy["type"], "workspaceWrite");
+    assert_eq!(policy["writableRoots"], json!([files(Runtime::Codex).cwd]));
+    assert_eq!(policy["networkAccess"], false);
+    // A plain read-only turn stays read-only.
+    let mut p = protocol::Protocol::new(
+        Request {
+            write_workdir: false,
+            ..files(Runtime::Codex)
+        },
+        "invocation-read".into(),
+    );
+    let start = p.receive(json!({"id":0,"result":{}})).unwrap();
+    assert_eq!(start.writes[1]["params"]["sandbox"], "read-only");
+    // Claude: file tools scoped to the working directory, no Bash, nothing asked.
+    let args: Vec<String> = command(&files(Runtime::Claude))
+        .as_std()
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    let after = |flag: &str| args[args.iter().position(|arg| arg == flag).unwrap() + 1].clone();
+    assert_eq!(after("--permission-mode"), "dontAsk");
+    assert!(!after("--tools").contains("Bash"));
+    assert!(after("--allowedTools").contains("Write(./**)"));
+    assert!(after("--allowedTools").contains("Edit(./**)"));
+    assert!(
+        !after("--allowedTools")
+            .split(',')
+            .any(|tool| tool == "Write" || tool == "Edit")
+    );
+    // Runtimes that cannot confine writes are refused, and so is a mixed mode.
+    for runtime in [
+        Runtime::Gemini,
+        Runtime::Opencode,
+        Runtime::Dsh,
+        Runtime::Pi,
+    ] {
+        assert!(validate(&files(runtime)).is_err(), "{runtime:?}");
+    }
+    assert!(validate(&files(Runtime::Codex)).is_ok());
+    let mut mixed = files(Runtime::Claude);
+    mixed.permission = Permission::OnRequest;
+    assert!(validate(&mixed).is_err());
 }

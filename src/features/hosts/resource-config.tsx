@@ -1,5 +1,6 @@
 import { TagBadge } from "../tags/TagBadge";
 import { HostAgentVersion } from "./RunnerConnection";
+import { HostFileTools } from "./HostFileTools";
 import { HostTimezone } from "./HostTimezone";
 import { defaultExecutionPolicy, ExecutionPolicyFields, type ExecutionPolicy, type ExecutionStatus } from "./ExecutionPolicy";
 import { FolderOpen, SquareTerminal } from "lucide-react";
@@ -514,6 +515,15 @@ export function hostsForms({
                   onValidityChange={onValidityChange}
                 />
               ),
+            },
+            {
+              key: "file_tools",
+              label: "文件制作能力",
+              labelKey: "resource-domain:fileTools.label",
+              type: "custom",
+              span: 2,
+              when: (row: Partial<Host>) => row.connection === "runner" && !!row.id,
+              render: ({ draft }) => <HostFileTools workspace={workspace} hostId={String(draft.id)} />,
             },
             {
               key: "tag_ids",

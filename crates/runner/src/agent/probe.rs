@@ -250,6 +250,8 @@ pub(crate) async fn probe_with(
             .ok()
             .filter(|p| p.is_dir())
             .map(|p| p.to_string_lossy().into_owned()),
+        write_workdir: super::confines_writes(runtime),
+        file_tools: super::file_tools::report().await,
     };
     let Some(path) = environment.executable.as_ref() else {
         // Say where it was looked for, so "installed but not found" is explainable.

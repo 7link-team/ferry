@@ -233,5 +233,15 @@
   "workflow.integrationRemoteReason": "{reason}",
   "workflow.integrationNotJson": "应用返回了 HTTP {status}，但响应不是 JSON。请检查请求地址和参数；该调用可能已生效。",
   "workflow.integrationTooLarge": "应用的响应超过 1 MiB 上限，请缩小查询范围或分页读取；该调用可能已生效。",
-  "workflow.integrationSecretEcho": "应用的响应中包含本次调用使用的凭据，已拒绝并且未保存该结果。"
+  "workflow.integrationSecretEcho": "应用的响应中包含本次调用使用的凭据，已拒绝并且未保存该结果。",
+  "workflow.agentFilesInvalid": "{path} 的文件输出设置无效：最多 50 个文件、总大小 1–500 MB、格式填写文件扩展名、说明不超过 4 KB。",
+  "workflow.agentFilesRuntime": "{path}：{cli} 无法在无人值守时生成文件，只有 Codex 和 Claude Code 能把写入限制在工作目录内。请选择使用这两者之一的智能体。",
+  "workflow.agentFilesRunnerUpgrade": "主机 {host} 上的 Runner 版本过旧，不支持让 {cli} 生成文件。请升级 Runner 后重新执行。",
+  "workflow.agentFilesTooMany": "智能体生成的文件超过上限（最多 {max} 个）。请提高上限或要求生成更少的文件。",
+  "workflow.agentFileTooLarge": "文件“{name}”超过单个文件上限 {limit} MB。",
+  "workflow.agentFilesTotal": "智能体生成的文件总大小超过 {limit} MB。请提高上限或要求生成更小的文件。",
+  "workflow.agentFileFormat": "文件“{name}”不在允许的格式内（{formats}）。",
+  "workflow.agentFileMismatch": "文件“{name}”的内容与其文件类型不符，未交付。请要求智能体生成真正的该类型文件。",
+  "workflow.agentNoFiles": "智能体已结束，但输出目录中没有任何文件。请查看它的最终回复了解原因，或把要求写得更具体。",
+  "hosts.fileToolsRunnerOnly": "只有 Runner 主机可以检测文件制作能力。"
 }

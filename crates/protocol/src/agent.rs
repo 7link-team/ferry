@@ -74,6 +74,14 @@ pub struct Probe {
     pub error: Option<String>,
     #[serde(default)]
     pub canonical_directory: Option<String>,
+    /// This Runner can run a turn that writes only inside its working directory
+    /// (`Request::write_workdir`). Absent on older Runners.
+    #[serde(default)]
+    pub write_workdir: bool,
+    /// File-production tools this execution user has (python modules, office
+    /// tools, ffmpeg, CLI skills...), as short descriptions. Never installed by Ferry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_tools: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,6 +151,12 @@ pub struct Request {
     /// runner's setting. Absent for older servers and models without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
+    /// Unattended file production: with `Permission::ReadOnly`, the CLI may
+    /// write only inside `cwd` (OS sandbox for Codex, path-scoped edit tools for
+    /// Claude) and is never asked for approval. Sent only to Runners whose probe
+    /// reports `write_workdir`; other runtimes are refused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub write_workdir: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,4 +229,35 @@ pub enum Event {
         outcome: Outcome,
         usage: Option<Usage>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn working_directory_writes_and_file_tools_are_backward_compatible() {
+        let request = json!({"runtime":"codex","cwd":"/w","prompt":"p","model":null,
+            "native_session_id":null,"permission":"read_only","timeout_seconds":60});
+        // Older servers send no flag; older Runners never see it unless it is set.
+        let parsed: Request = serde_json::from_value(request.clone()).unwrap();
+        assert!(!parsed.write_workdir);
+        let sent = serde_json::to_value(&parsed).unwrap();
+        assert!(sent.get("write_workdir").is_none());
+        let mut files = parsed.clone();
+        files.write_workdir = true;
+        assert_eq!(serde_json::to_value(&files).unwrap()["write_workdir"], true);
+        // Older Probes have neither field; empty tools are not sent.
+        let probe = json!({"runtime":"claude","execution_user":"u","executable":null,
+            "version":null,"authentication":"unknown","directory_exists":true,"error":null});
+        let parsed: Probe = serde_json::from_value(probe).unwrap();
+        assert!(!parsed.write_workdir && parsed.file_tools.is_empty());
+        assert!(
+            serde_json::to_value(&parsed)
+                .unwrap()
+                .get("file_tools")
+                .is_none()
+        );
+    }
 }

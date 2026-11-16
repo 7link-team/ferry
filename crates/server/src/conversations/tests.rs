@@ -1495,6 +1495,8 @@ fn a_turn_labels_agent_instructions_apart_from_the_users_own_words() {
         "Create the weekly report workflow.",
         &attachments,
     );
+    // File requests are routed to program nodes or the confined file mode, after a tool check.
+    assert!(prompt.contains("files.enabled") && prompt.contains("/file-tools"));
     // Platform rules first, then the configuration, then the user's message.
     let rules = prompt.find("<platform_access_rules>").unwrap();
     let instructions = prompt

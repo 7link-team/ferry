@@ -2286,6 +2286,19 @@
     "permission": "hosts.files"
   },
   {
+    "path": "/nodes/{id}/file-tools",
+    "method": "GET",
+    "handler": "workflows::agent_files::host_tools",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn host_tools(\n    axum::extract::State(s): axum::extract::State<AppState>,\n    scope: crate::accounts::workspace::Scope,\n    crate::error::Path((_, id)): crate::error::Path<(String, crate::snowflake::Id)>,\n) -> Result<crate::error::Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "ai-agents.probe",
+      "hosts.read"
+    ],
+    "documentation": "`GET /nodes/{id}/file-tools`: what this Runner's execution user can use to\nproduce files, and whether it can confine an Agent's writes to a directory."
+  },
+  {
     "path": "/nodes/{id}/files",
     "method": "DELETE",
     "handler": "hosts::remote::delete_file",

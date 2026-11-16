@@ -233,5 +233,15 @@
   "workflow.integrationRemoteReason": "{reason}",
   "workflow.integrationNotJson": "Aplikasi menjawab HTTP {status} tetapi bukan JSON. Semak alamat dan parameter permintaan; panggilan itu mungkin sudah berkuat kuasa.",
   "workflow.integrationTooLarge": "Respons aplikasi melebihi had 1 MiB. Kecilkan pertanyaan atau baca mengikut halaman; panggilan itu mungkin sudah berkuat kuasa.",
-  "workflow.integrationSecretEcho": "Respons aplikasi mengandungi kelayakan yang digunakan untuk panggilan, jadi hasilnya ditolak dan tidak disimpan."
+  "workflow.integrationSecretEcho": "Respons aplikasi mengandungi kelayakan yang digunakan untuk panggilan, jadi hasilnya ditolak dan tidak disimpan.",
+  "workflow.agentFilesInvalid": "Tetapan output fail di {path} tidak sah: paling banyak 50 fail, jumlah 1–500 MB, format sebagai sambungan fail, arahan paling banyak 4 KB.",
+  "workflow.agentFilesRuntime": "{path}: {cli} tidak boleh menghasilkan fail tanpa pengawasan; hanya Codex dan Claude Code boleh dihadkan kepada direktori kerjanya. Pilih Ejen yang menggunakan salah satunya.",
+  "workflow.agentFilesRunnerUpgrade": "Runner pada {host} terlalu lama untuk membenarkan {cli} menghasilkan fail. Naik taraf Runner dan jalankan semula.",
+  "workflow.agentFilesTooMany": "Ejen menghasilkan lebih banyak fail daripada dibenarkan (paling banyak {max}). Naikkan had atau minta fail yang lebih sedikit.",
+  "workflow.agentFileTooLarge": "Fail \"{name}\" melebihi {limit} MB, had bagi satu fail.",
+  "workflow.agentFilesTotal": "Jumlah fail yang dihasilkan Ejen melebihi {limit} MB. Naikkan had atau minta fail yang lebih kecil.",
+  "workflow.agentFileFormat": "Fail \"{name}\" bukan salah satu format yang diterima ({formats}).",
+  "workflow.agentFileMismatch": "Kandungan \"{name}\" tidak sepadan dengan jenis failnya, jadi ia tidak dihantar. Minta Ejen menghasilkan fail sebenar jenis itu.",
+  "workflow.agentNoFiles": "Ejen selesai tanpa meninggalkan sebarang fail dalam folder outputnya. Semak mesej akhirnya untuk sebabnya, atau buat permintaan lebih khusus.",
+  "hosts.fileToolsRunnerOnly": "Hanya hos Runner melaporkan alat penghasilan fail."
 }
