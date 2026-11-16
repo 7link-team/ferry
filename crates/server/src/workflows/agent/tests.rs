@@ -948,13 +948,12 @@ async fn files_from_the_output_folder_become_workflow_files_and_the_workdir_is_r
     assert_eq!(files[1]["mime"], "application/pdf");
     assert_eq!(files[0]["meta"]["path"], "charts/commits.csv");
     let sha = files[1]["sha256"].as_str().unwrap();
-    assert_eq!(
-        files[1]["download_url"],
-        format!(
-            "/api/workspaces/{}/workflows/{}/assets/{sha}",
-            fixture.run.workspace_id, fixture.run.workflow_id
-        )
-    );
+    // Stored through the shared file-artifact helper: same shape as report.render,
+    // with a signed download link only when a public address is configured.
+    assert_eq!(files[1]["artifact_id"], format!("sha256:{sha}"));
+    let url = files[1]["download_url"].as_str().unwrap();
+    assert!(url.is_empty() || url.contains("/api/files/"), "{url}");
+    assert!(!url.contains("/assets/"), "no session-only asset URL");
     assert_eq!(item.binary.len(), 2);
     assert_eq!(item.binary["file_2"].asset, format!("sha256:{sha}"));
     assert_eq!(item.binary["file_2"].name, "周报.pdf");
