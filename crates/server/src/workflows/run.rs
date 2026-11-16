@@ -853,8 +853,11 @@ async fn current(s: &AppState, id: i64) -> Result<runs::Model> {
 pub(super) fn failure_reason(error: &ApiError) -> &'static str {
     if let Some(message) = &error.2 {
         match message.key.as_str() {
-            "workflow.integrationUnknown" => return "integration_unknown",
-            "workflow.integrationRemote" => return "integration_remote",
+            "workflow.integrationUnknown"
+            | "workflow.integrationNotJson"
+            | "workflow.integrationTooLarge"
+            | "workflow.integrationSecretEcho" => return "integration_unknown",
+            key if super::integration::is_remote(key) => return "integration_remote",
             "workflow.integrationInvalid" => return "integration_invalid",
             "workflow.platformTooLarge" => return "platform_too_large",
             "workflow.platformPageLimit" => return "platform_page_limit",

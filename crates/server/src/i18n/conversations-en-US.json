@@ -10,18 +10,19 @@
   "conversations.busy": "Wait for the active turn to finish or stop it first.",
   "conversations.archived": "This conversation is archived or interrupted. Reopen it or create a new conversation as appropriate.",
   "conversations.staleDecision": "This permission request is no longer active or already has a decision.",
-  "conversations.leaseLost": "Execution ownership expired; further events and decisions were refused.",
+  "conversations.leaseLost": "This turn already ended elsewhere or timed out, so later results were not recorded. Refresh to see the latest state.",
   "conversations.interrupted": "Execution was interrupted. Retry the last message or keep typing to continue with a fresh native session and completed chat history. Check previous operation results before retrying; nothing is replayed automatically.",
   "conversations.preflightFailed": "The execution environment could not be verified. Check the Agent and Runner connection.",
-  "conversations.executionFailed": "The native execution failed or disconnected. Check actual results before continuing.",
+  "conversations.executionFailed": "The CLI run failed or the connection dropped. Check what it already did before retrying.",
   "conversations.outputLimit": "Execution exceeded the output limit and was stopped.",
   "conversations.fileTooLarge": "Each file must be at most 32 MiB.",
   "conversations.groupAgentPrivate": "Group conversations require workspace-shared Agents.",
-  "conversations.apiPending": "API conversation execution is not available yet.",
+  "conversations.apiPending": "This Agent uses an API model, which cannot be used in conversations yet. Choose an Agent with a CLI model.",
   "conversations.noRunner": "No available Runner can execute this model.",
   "conversations.cliPermissionUnsupported": "This CLI supports read-only conversations only. Choose read-only access.",
   "conversations.runnerUpgradeRequired": "Upgrade the host Runner to enable platform tools before starting this conversation.",
   "conversations.hostSwitched": "Switched execution from host {from} to {to}. The CLI session was rebuilt from this conversation's history in Ferry; files in {from}'s working directory were not carried over.",
   "conversations.hostReleased": "Released host {host}. The next message is assigned to another host; the CLI session will be rebuilt from this conversation's history in Ferry, and files in {host}'s working directory are not carried over.",
-  "conversations.hostUnavailable": "Execution host {host} cannot run this now: {reason}. This conversation has a fixed working directory, so it does not move to another host by itself; choose \"Use another host\" to switch."
+  "conversations.hostUnavailable": "Execution host {host} cannot run this now: {reason}. This conversation has a fixed working directory, so it does not move to another host by itself; choose \"Use another host\" to switch.",
+  "conversations.executionFailedOn": "{cli} failed on host {host} or the connection dropped. Check what it already did before retrying; the host's Runner log has the details."
 }

@@ -10,18 +10,19 @@
   "conversations.busy": "現在の実行を停止するか、完了を待ってください。",
   "conversations.archived": "会話はアーカイブ済み、または中断しています。状態を確認して再開するか、新しい会話を作成してください。",
   "conversations.staleDecision": "この許可リクエストは終了したか、すでに決定されています。",
-  "conversations.leaseLost": "実行権限の期限が切れたため、以降のイベントと決定を拒否しました。",
+  "conversations.leaseLost": "このターンは別の場所で終了したかタイムアウトしたため、以降の結果は記録されていません。更新して確認してください。",
   "conversations.interrupted": "実行が中断しました。前のメッセージを再試行するか、新しいメッセージを送信できます。完了済みの履歴を引き継いで新しいセッションを開始します。再試行前に操作結果を確認してください。自動再実行はしません。",
   "conversations.preflightFailed": "実行環境を確認できません。Agent と Runner の接続を確認してください。",
-  "conversations.executionFailed": "実行に失敗したか、接続が切れました。実際の結果を確認してください。",
+  "conversations.executionFailed": "CLI の実行に失敗したか接続が切れました。再試行する前に実行済みの結果を確認してください。",
   "conversations.outputLimit": "出力が上限を超えたため、実行を停止しました。",
   "conversations.fileTooLarge": "各ファイルは32 MiB以下にしてください。",
   "conversations.groupAgentPrivate": "グループにはワークスペース共有のエージェントが必要です。",
-  "conversations.apiPending": "API 会話の実行はまだ利用できません。",
+  "conversations.apiPending": "このエージェントは API モデルを使用しており、まだ会話では使えません。CLI モデルのエージェントを選んでください。",
   "conversations.noRunner": "このモデルを実行できる Runner がありません。",
   "conversations.cliPermissionUnsupported": "このCLIは読み取り専用の会話にのみ対応しています。",
   "conversations.runnerUpgradeRequired": "プラットフォームツールを有効にするには、ホストの Runner を更新してください。",
   "conversations.hostSwitched": "実行をホスト {from} から {to} に切り替えました。CLI セッションは Ferry の会話履歴から再構築されました。{from} の作業ディレクトリのファイルは引き継がれません。",
   "conversations.hostReleased": "ホスト {host} の割り当てを解除しました。次のメッセージは別のホストで実行され、CLI セッションは Ferry の会話履歴から再構築されます。{host} の作業ディレクトリのファイルは引き継がれません。",
-  "conversations.hostUnavailable": "実行ホスト {host} は現在実行できません：{reason}。この会話は作業ディレクトリが固定されているため自動ではホストを変更しません。「別のホストを使う」で切り替えてください。"
+  "conversations.hostUnavailable": "実行ホスト {host} は現在実行できません：{reason}。この会話は作業ディレクトリが固定されているため自動ではホストを変更しません。「別のホストを使う」で切り替えてください。",
+  "conversations.executionFailedOn": "{cli} がホスト {host} で失敗したか接続が切れました。再試行する前に実行済みの結果を確認してください。詳細はそのホストの Runner ログにあります。"
 }

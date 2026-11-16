@@ -6,7 +6,7 @@ export { integrationManifests, type IntegrationManifest, type IntegrationField }
 
 export function installIntegrationCatalog(nodes: IntegrationManifest[]) {
   if (!Array.isArray(nodes) || nodes.some(node => !node.type || !node.ui || !node.params_schema))
-    throw new Error("Invalid workflow node catalog");
+    throw new Error(t("editorError.invalidCatalog"));
   const builtins = new Set(catalog.nodes.map(node => node.type));
   setExtensionManifests(nodes.filter(node => !builtins.has(node.type)) as unknown as Manifest[]);
   integrationManifests.splice(0, integrationManifests.length, ...nodes);

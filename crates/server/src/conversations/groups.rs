@@ -223,12 +223,20 @@ pub(super) async fn detail(
             .and_then(|v| serde_json::from_str::<Value>(v).ok())
     };
     value["agent_avatar"] = json!(avatar(c.agent_id));
+    // Without a configured model the Agent cannot run; the header says so.
+    let has_model = |id| {
+        identities
+            .iter()
+            .find(|a| a.id == id)
+            .is_some_and(|a| a.model_profile_id != 0)
+    };
+    value["agent_has_model"] = json!(has_model(c.agent_id));
     let mut listed = vec![];
     for a in snapshots.iter().filter(|a| a.state != "removed") {
         let config: Value = serde_json::from_str(&a.config).unwrap_or(Value::Null);
         let host = super::placement::host_view(conn, &a.config, &a.binding).await?;
         listed.push(json!({"id":Id::from(a.agent_id),"name":config["name"],"state":a.state,
-            "runtime":config["runtime"],"model":config["model"],"revision_id":Id::from(a.revision_id),"avatar":avatar(a.agent_id),"host":host}));
+            "runtime":config["runtime"],"model":config["model"],"revision_id":Id::from(a.revision_id),"avatar":avatar(a.agent_id),"has_model":has_model(a.agent_id),"host":host}));
     }
     value["agents"] = json!(listed);
     let chat = messages::Entity::find()

@@ -36,6 +36,33 @@ fn unknown() -> ApiError {
 fn remote() -> ApiError {
     error("workflow.integrationRemote")
 }
+/// The application answered with an error status: keep the integration's
+/// "rejected" category (a known failure) and carry the specific reason.
+fn remote_from(error: ApiError) -> ApiError {
+    match error.2 {
+        Some(reason) => ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("workflow.integrationRemoteReason").with_message("reason", reason),
+        ),
+        None => remote(),
+    }
+}
+/// An application rejection: the request was refused, so nothing is in an unknown state.
+pub(super) fn is_remote(key: &str) -> bool {
+    matches!(
+        key,
+        "workflow.integrationRemote"
+            | "workflow.integrationRemoteStatus"
+            | "workflow.integrationRemoteReason"
+    )
+}
+/// A non-2xx status without a host (recorded responses); live calls use upstream::status.
+fn remote_status(status: u16) -> ApiError {
+    ApiError::localized(
+        StatusCode::BAD_REQUEST,
+        Message::new("workflow.integrationRemoteStatus").with("status", status.to_string()),
+    )
+}
 
 fn catalog() -> &'static Value {
     static CATALOG: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
@@ -189,15 +216,22 @@ pub(super) fn validate_declaration(http: &Value, params: &Value) -> anyhow::Resu
 }
 
 async fn response(http: &Value, mut response: reqwest::Response, secret: &str) -> Result<Value> {
-    // Never log/persist upstream error text, URLs or credentials.
-    if !response.status().is_success() {
-        return Err(remote());
-    }
+    // Never log/persist upstream error text, URLs or credentials: host and status only.
+    let host = response.url().host_str().unwrap_or("?").to_owned();
     let status = response.status().as_u16();
+    if !response.status().is_success() {
+        return Err(remote_from(crate::upstream::status(
+            "integration",
+            &host,
+            status,
+            false,
+        )));
+    }
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|_| unknown())? {
         if chunk.len() > (1024 * 1024_usize).saturating_sub(bytes.len()) {
-            return Err(unknown());
+            tracing::warn!(host, "integration response exceeds 1 MiB");
+            return Err(error("workflow.integrationTooLarge"));
         }
         bytes.extend_from_slice(&chunk);
     }
@@ -206,22 +240,32 @@ async fn response(http: &Value, mut response: reqwest::Response, secret: &str) -
 
 fn response_bytes(http: &Value, status: u16, bytes: &[u8], secret: &str) -> Result<Value> {
     if !(200..300).contains(&status) {
-        return Err(remote());
+        return Err(remote_status(status));
     }
     if bytes.len() > 1024 * 1024 {
-        return Err(unknown());
+        return Err(error("workflow.integrationTooLarge"));
     }
     if !secret.is_empty()
         && bytes
             .windows(secret.len())
             .any(|window| window == secret.as_bytes())
     {
-        return Err(unknown());
+        tracing::warn!(
+            status,
+            "integration response echoed its credential; result rejected"
+        );
+        return Err(error("workflow.integrationSecretEcho"));
     }
     let value: Value = if bytes.is_empty() {
         json!({"status_code":status})
     } else {
-        serde_json::from_slice(&bytes).map_err(|_| unknown())?
+        serde_json::from_slice(bytes).map_err(|_| {
+            tracing::warn!(status, "integration response is not JSON");
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("workflow.integrationNotJson").with("status", status.to_string()),
+            )
+        })?
     };
     if let Some(pointer) = http["success"]["pointer"].as_str() {
         if value.pointer(pointer) != Some(&http["success"]["equals"]) {
@@ -768,7 +812,19 @@ pub(super) async fn execute(
         } else {
             match builder.ok_or_else(invalid)?.send().await {
                 Ok(reply) => response(&http, reply, &secret).await,
-                Err(_) => Err(unknown()),
+                Err(e) => {
+                    let host = e
+                        .url()
+                        .and_then(|url| url.host_str().map(str::to_owned))
+                        .unwrap_or_else(|| "?".into());
+                    // Only a request that never reached the application is a known failure.
+                    Err(
+                        match crate::upstream::unreachable("integration", &host, &e) {
+                            Some(error) if e.is_connect() => remote_from(error),
+                            _ => unknown(),
+                        },
+                    )
+                }
             }
         };
         let (state, sealed) = match &result {
@@ -779,14 +835,7 @@ pub(super) async fn execute(
                         .seal(&value.to_string(), &aad(run.workspace_id, id))?,
                 ),
             ),
-            Err(error)
-                if error
-                    .2
-                    .as_ref()
-                    .is_some_and(|m| m.key == "workflow.integrationRemote") =>
-            {
-                ("failed", None)
-            }
+            Err(error) if error.2.as_ref().is_some_and(|m| is_remote(&m.key)) => ("failed", None),
             Err(_) => ("unknown", None),
         };
         calls::Entity::update_many()

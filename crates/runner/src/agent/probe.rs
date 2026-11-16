@@ -105,6 +105,23 @@ pub(super) fn executable(runtime: Runtime) -> Option<std::path::PathBuf> {
     None
 }
 
+/// The first non-empty output line, without control characters, at most 200 bytes.
+fn first_line(text: &str) -> String {
+    let line: String = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect();
+    let mut end = line.len().min(200);
+    while !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    line[..end].trim_end().to_owned()
+}
+
 pub(super) async fn capture_with(
     executable: &std::path::Path,
     args: &[&str],
@@ -243,8 +260,17 @@ pub(crate) async fn probe_with(
                 .filter(|line| line.len() <= 256 && !line.chars().any(char::is_control))
                 .map(str::to_owned)
         }
-        _ => {
-            status.error = Some("failed".into());
+        failure => {
+            let detail = match failure {
+                Ok((_, text)) => first_line(&text),
+                Err(error) => first_line(&format!("{error:#}")),
+            };
+            // "failed" stays the prefix: older servers match on it.
+            status.error = Some(if detail.is_empty() {
+                "failed".into()
+            } else {
+                format!("failed: {detail}")
+            });
             return Ok(status);
         }
     }
@@ -407,6 +433,18 @@ fn codex_authentication(success: bool, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_failed_version_check_reports_one_bounded_line() {
+        assert_eq!(
+            first_line("\n  env: node: No such file or directory\nat line 2\n"),
+            "env: node: No such file or directory"
+        );
+        assert_eq!(first_line("bad\u{1b}[31mcolor"), "bad[31mcolor");
+        assert_eq!(first_line(""), "");
+        let long = "é".repeat(300);
+        let line = first_line(&long);
+        assert!(line.len() <= 200 && line.chars().all(|c| c == 'é'));
+    }
     #[tokio::test]
     #[ignore = "requires an installed native Codex CLI and its execution user's configuration"]
     async fn native_codex_catalog_is_discoverable_without_inference() {

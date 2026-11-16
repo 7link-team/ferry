@@ -379,12 +379,28 @@
     "Alat / model"
   ],
   "nativeModel": [
-    "Native default",
-    "原生默认模型",
-    "原生預設模型",
-    "ネイティブの既定値",
-    "기본 모델",
-    "Lalai asal"
+    "Model default",
+    "模型默认值",
+    "模型預設值",
+    "モデルの既定値",
+    "모델 기본값",
+    "Lalai model"
+  ],
+  "apiAgentsHidden": [
+    "Agents that use an API model cannot hold conversations yet and are not listed.",
+    "使用 API 模型的智能体暂不能用于会话，未列出。",
+    "使用 API 模型的智慧體暫不能用於會話，未列出。",
+    "API モデルを使うエージェントはまだ会話に使えないため、一覧に表示していません。",
+    "API 모델을 사용하는 에이전트는 아직 대화에 사용할 수 없어 목록에 표시하지 않습니다.",
+    "Ejen yang menggunakan model API belum boleh digunakan dalam perbualan dan tidak disenaraikan."
+  ],
+  "noModel": [
+    "No model configured",
+    "未配置模型",
+    "未設定模型",
+    "モデル未設定",
+    "모델 미구성",
+    "Tiada model dikonfigurasi"
   ],
   "messages": [
     "Messages",

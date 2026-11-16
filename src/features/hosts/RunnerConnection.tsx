@@ -417,19 +417,31 @@ export function RunnerUpdateStatus({ workspace, hostId, canUpdate = false }: { w
     const timer = window.setInterval(refresh, 5000);
     return () => { controller.abort(); window.clearInterval(timer); };
   }, [workspace, hostId]);
-  const labels: Record<string, string> = { draining: commonText("resource-domain:runner.draining"), updating: commonText("resource-domain:runner.updating"), unknown: commonText("resource-domain:runner.verifyReconnect"), succeeded: commonText("resource-domain:runner.updated"), rolled_back: commonText("resource-domain:runner.rolledBack"), failed: commonText("resource-domain:runner.updateFailed"), retrying: commonText("resource-domain:runner.retrying"), cancelled: commonText("common-domain:dashboard.cancelled") };
+  // A finished update says nothing about a Runner that is offline now; only an
+  // update still in progress stays visible while the Runner reconnects.
+  const finished = ["succeeded", "rolled_back", "failed", "cancelled", "retrying"];
+  const inProgress = !!status?.update && !finished.includes(status.update.state);
+  const offline = !!status && !status.ready && !inProgress;
+  const sentence = (update: NonNullable<RunnerUpdate["update"]>) => {
+    const known = ["draining", "updating", "unknown", ...finished];
+    return commonText(`resource-domain:runner.sentence.${known.includes(update.state) ? update.state : "other"}`,
+      { to: update.version || "—", from: status?.agent_version || "—" });
+  };
   return <section aria-label={commonText("resource-domain:runner.updateStatus")} className="space-y-2 rounded-xl border bg-card p-5 text-sm">
     <h2 className="font-semibold">{commonText("resource-domain:runner.updateTitle")}</h2>
     {error ? <p role="alert" className="text-destructive">{commonText("resource-domain:runner.refreshFailed")}{error}</p> : !status ? <LoadingSkeleton variant="inline" label={commonText("resource-domain:runner.loadingUpdate")} /> : null}
     {status && <>
       <HostAgentVersion workspace={workspace} hostId={hostId} version={status.agent_version} available={status.available && status.supported} updateState={status.update?.state} online={status.ready} canUpdate={canUpdate} />
-      <p className="text-xs text-muted-foreground">{commonText("resource-domain:runner.versions", { current: status.agent_version || "—", server: status.target_version })}</p>
+      <p className="text-xs text-muted-foreground">{commonText(offline ? "resource-domain:runner.versionsOffline" : "resource-domain:runner.versions", { current: status.agent_version || "—", server: status.target_version })}</p>
       <p>{commonText("resource-domain:runner.autoPolicy")}{status.enabled ? commonText("resource-domain:status.enabled") : commonText("resource-domain:status.off")}{status.auto_update === "inherit" ? commonText("resource-domain:runner.inherited") : commonText("resource-domain:runner.overridden")}</p>
-      {status.update && <div role="status" aria-live="polite"><p>{labels[status.update.state] ?? status.update.state} · {status.update.version}</p><p className="text-muted-foreground">{status.update.message}</p>
-        {!!status.update.auto?.next_retry_at && <p>{commonText("resource-domain:runner.nextRetry")}{new Date(status.update.auto.next_retry_at).toLocaleString(currentLocale())}</p>}
-      </div>}
-      {!status.ready && <p className="text-muted-foreground">{commonText("resource-domain:runner.waitHealthy")}</p>}
-      {!status.supported && <p className="text-muted-foreground">{commonText("resource-domain:runner.unsupportedHelp")}</p>}
+      {offline ? <p role="status" className="text-amber-700 dark:text-amber-400">{commonText("resource-domain:runner.offlineNow", { version: status.agent_version || "—" })}</p>
+        : <>
+          {status.update && <div role="status" aria-live="polite"><p>{sentence(status.update)}</p>{status.update.message && <p className="text-muted-foreground">{status.update.message}</p>}
+            {!!status.update.auto?.next_retry_at && <p>{commonText("resource-domain:runner.nextRetry")}{new Date(status.update.auto.next_retry_at).toLocaleString(currentLocale())}</p>}
+          </div>}
+          {!status.ready && <p className="text-muted-foreground">{commonText("resource-domain:runner.waitHealthy")}</p>}
+          {!status.supported && <p className="text-muted-foreground">{commonText("resource-domain:runner.unsupportedHelp")}</p>}
+        </>}
     </>}
   </section>;
 }

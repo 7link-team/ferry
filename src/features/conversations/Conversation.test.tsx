@@ -223,6 +223,34 @@ it("shows the bound host, platform notices, and offers another host when a chose
   }
 });
 
+it("says when the Agent has no model instead of claiming a default model", async () => {
+  Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT:true});
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  let row: Record<string, unknown> = {
+    id:"2",title:"No model",kind:"private",state:"active",viewer_id:"2",owner_id:"2",agent_has_model:false,
+    can_manage:true,members:[],agents:[],messages:[],turns:[],version:2,revision_id:"1",members_version:"1",
+    config:{name:"Agent",runtime:"codex",model:"",cwd:""},binding:null,host:{id:"31",name:"alpha"},
+  };
+  const mocked = vi.spyOn(apiModule,"api").mockImplementation(async (path) => {
+    if (String(path).includes("/events?")) return {items:[],next:0,has_more:false} as never;
+    return structuredClone(row) as never;
+  });
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+  try {
+    await act(async()=>root.render(<Conversation workspace="1" id="2" permissions={new Set(["conversations.read"])} />));
+    const header = host.querySelector("header")?.textContent ?? "";
+    expect(header).toContain(conversationText("noModel"));
+    expect(header).not.toContain(conversationText("nativeModel"));
+    // With a configured model and no explicit choice, the model's default is used.
+    row = {...row,agent_has_model:true,version:3};
+    await act(async()=>root.render(<Conversation key="again" workspace="1" id="2" permissions={new Set(["conversations.read"])} />));
+    expect(host.querySelector("header")?.textContent).toContain(conversationText("nativeModel"));
+    expect(conversationText("nativeModel")).not.toContain("原生");
+  } finally {
+    await act(async()=>root.unmount());host.remove();mocked.mockRestore();vi.unstubAllGlobals();
+  }
+});
+
 it("offers another host only for that failure", async () => {
   Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT:true});
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });

@@ -85,6 +85,8 @@ interface ConversationData {
   can_manage: boolean;
   agent_id: string;
   agent_avatar?: AvatarValue;
+  /** False when the Agent has no configured model and therefore cannot run. */
+  agent_has_model?: boolean;
   members: { id: string; name: string; avatar?: AvatarValue }[];
   agents: { id: string; name: string; state: string; avatar?: AvatarValue; runtime?: string; model?: string; revision_id?: string; host?: BoundHost | null }[];
   messages: ChatMessage[];
@@ -578,7 +580,7 @@ export function Conversation({
               <p className="mt-0.5 truncate text-xs text-muted-foreground">
                 {data.kind === "group"
                   ? `${t("group")} · ${data.members.length + data.agents.length} ${t("participants")}${data.agents.length ? ` · ${t("executionHost")} ${data.agents.map(agent => `${agent.name}: ${agent.host?.name || t("hostPending")}`).join(", ")}` : ""}`
-                  : `${data.config.name} · ${data.config.model || t("nativeModel")} · ${t("executionHost")} ${data.host?.name || t("hostPending")}`}
+                  : <>{data.config.name} · <ModelLabel model={data.config.model} hasModel={data.agent_has_model} /> · {t("executionHost")} {data.host?.name || t("hostPending")}</>}
               </p>
             </div>
           </button>
@@ -696,7 +698,7 @@ export function Conversation({
                 <dt>{t("runtime")}</dt>
                 <dd>
                   {cliToolLabel(data.config.runtime)}{" "}
-                  · {data.config.model || t("nativeModel")}
+                  · <ModelLabel model={data.config.model} hasModel={data.agent_has_model} />
                 </dd>
                 <dt>{t("revision")}</dt>
                 <dd className="break-all">{data.revision_id}</dd>
@@ -1455,4 +1457,10 @@ export function Conversation({
       </AlertDialog.Root>
     </section>
   );
+}
+
+/** The model a private conversation runs with; an Agent without a model is called out. */
+function ModelLabel({ model, hasModel }: { model: string; hasModel?: boolean | undefined }) {
+  if (hasModel === false) return <span className="text-amber-700 dark:text-amber-400">{t("noModel")}</span>;
+  return <>{model || t("nativeModel")}</>;
 }

@@ -10,18 +10,19 @@
   "conversations.busy": "请先等待当前回合结束，或停止当前回合。",
   "conversations.archived": "此会话已归档或中断，请按实际情况恢复归档或新建会话。",
   "conversations.staleDecision": "此授权请求已失效或已有决定。",
-  "conversations.leaseLost": "执行租约已失效，后续事件与决定已被拒绝。",
+  "conversations.leaseLost": "此回合已在其他位置结束或超时，后续结果未写入；请刷新查看。",
   "conversations.interrupted": "执行已中断。可重试上一条消息，或继续输入并发送；将重新建立原生会话并带入已完成的聊天记录。重试前请核对先前操作结果，不会自动重放。",
   "conversations.preflightFailed": "无法验证执行环境，请检查 智能体 和 Runner 连接。",
-  "conversations.executionFailed": "原生执行失败或连接中断，请先核对实际结果。",
+  "conversations.executionFailed": "CLI 执行失败或连接中断，请先查看已产生的结果再重试。",
   "conversations.outputLimit": "执行输出超过限制，已停止执行。",
   "conversations.fileTooLarge": "每个附件不能超过 32 MiB。",
   "conversations.groupAgentPrivate": "群聊只能添加工作空间共享的智能体。",
-  "conversations.apiPending": "API 会话执行尚未接通。",
+  "conversations.apiPending": "该智能体使用 API 模型，暂不能用于会话；请改用 CLI 模型的智能体。",
   "conversations.noRunner": "没有可执行此模型的可用 Runner。",
   "conversations.cliPermissionUnsupported": "此CLI当前仅支持只读会话，请选择只读权限。",
   "conversations.runnerUpgradeRequired": "请先升级主机 Runner 以启用平台工具，再运行此会话。",
   "conversations.hostSwitched": "已从主机 {from} 切换到 {to} 执行。CLI 会话已用 Ferry 中的聊天记录重建；{from} 工作目录中的文件不会带过来。",
   "conversations.hostReleased": "已解除与主机 {host} 的绑定，下一条消息将改用其他主机执行；CLI 会话将用 Ferry 中的聊天记录重建，{host} 工作目录中的文件不会带过来。",
-  "conversations.hostUnavailable": "执行主机 {host} 当前无法运行：{reason}。此会话固定了工作目录，不会自动换主机；可选择“改用其他主机”。"
+  "conversations.hostUnavailable": "执行主机 {host} 当前无法运行：{reason}。此会话固定了工作目录，不会自动换主机；可选择“改用其他主机”。",
+  "conversations.executionFailedOn": "{cli} 在主机 {host} 上执行失败或连接中断。请先查看已产生的结果再重试；详细原因见该主机的 Runner 日志。"
 }

@@ -35,6 +35,7 @@ mod resources;
 mod snowflake;
 mod state;
 mod templates;
+mod upstream;
 mod variables;
 mod vault;
 mod worker;

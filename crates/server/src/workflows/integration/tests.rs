@@ -164,12 +164,12 @@ async fn http_failures_do_not_leak_provider_details_redirect_credentials_or_clai
 {
     let (origin, requests, task) = server().await;
     for (path, key) in [
-        ("/redirect", "workflow.integrationRemote"),
-        ("/rate", "workflow.integrationRemote"),
+        ("/redirect", "workflow.integrationRemoteReason"),
+        ("/rate", "workflow.integrationRemoteReason"),
         ("/rejected", "workflow.integrationRemote"),
-        ("/invalid", "workflow.integrationUnknown"),
-        ("/echo", "workflow.integrationUnknown"),
-        ("/large", "workflow.integrationUnknown"),
+        ("/invalid", "workflow.integrationNotJson"),
+        ("/echo", "workflow.integrationSecretEcho"),
+        ("/large", "workflow.integrationTooLarge"),
     ] {
         let mut declaration = http(&origin, path);
         if path == "/rejected" {
@@ -190,6 +190,23 @@ async fn http_failures_do_not_leak_provider_details_redirect_credentials_or_clai
             .unwrap_err();
         assert_eq!(error.2.as_ref().unwrap().key, key);
         assert!(!format!("{error:?}").contains("PRIVATE_TOKEN"));
+        // Rejections name the status and host, never the provider's own text.
+        let text = crate::i18n::render(crate::i18n::Locale::ZhCn, error.2.as_ref().unwrap());
+        assert!(
+            !text.contains("secret upstream detail") && !text.contains('{'),
+            "{text}"
+        );
+        if path == "/rate" {
+            assert!(text.contains("429") && text.contains("127.0.0.1"), "{text}");
+        }
+        assert_eq!(
+            super::super::run::failure_reason(&error),
+            if path == "/rejected" || path == "/redirect" || path == "/rate" {
+                "integration_remote"
+            } else {
+                "integration_unknown"
+            }
+        );
     }
     assert_eq!(requests.lock().unwrap().len(), 6);
     let declaration = http(&origin, "/empty");
@@ -274,6 +291,8 @@ fn all_bundled_operations_use_generic_registration_validation_and_request_mappin
             "workflow.integrationInvalid",
             "workflow.integrationUnknown",
             "workflow.integrationRemote",
+            "workflow.integrationTooLarge",
+            "workflow.integrationSecretEcho",
         ] {
             assert!(!crate::i18n::render(locale, &Message::new(key)).contains("workflow."));
         }

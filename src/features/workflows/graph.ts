@@ -1,3 +1,4 @@
+import { workflowText } from "../../shared/i18n/i18n";
 import { insertLayout } from "../../shared/editor/insertion-layout";
 import core from "../../shared/workflow-contracts/workflow-core-nodes.json";
 import data from "../../shared/workflow-contracts/workflow-data-nodes.json";
@@ -91,7 +92,7 @@ export function parseGraph(source: string): Graph {
     !Array.isArray(value.nodes) ||
     !Array.isArray(value.connections)
   )
-    throw new Error("Invalid workflow graph");
+    throw new Error(workflowText("editorError.invalidGraph"));
   return value;
 }
 export const emptyGraph = (): Graph => ({
@@ -102,7 +103,7 @@ export const emptyGraph = (): Graph => ({
 });
 export function newNode(graph: Graph, type: string, name: string): GraphNode {
   const spec = manifest(type);
-  if (!spec) throw new Error("Unknown node type");
+  if (!spec) throw new Error(workflowText("editorError.unknownNodeType"));
   const base = type.replaceAll(".", "_").slice(0, 56);
   let id = base,
     number = 2;
@@ -286,7 +287,7 @@ export function addAdjacentNode(
     (!terminal && (!output || inputs.length !== 1)) ||
     graph.nodes.some((item) => item.id === node.id)
   )
-    throw new Error("Incompatible adjacent node");
+    throw new Error(workflowText("editorError.incompatibleAdjacent"));
   const size = (item: GraphNode) =>
     sizes[item.id] ?? {
       width: 224,
@@ -324,7 +325,7 @@ export function addAdjacentNode(
   if (terminal) return next;
   const to = { node: node.id, port: input.port, index: input.index ?? 0 };
   if (!canConnect(next, from, to))
-    throw new Error("Invalid adjacent connection");
+    throw new Error(workflowText("editorError.invalidAdjacent"));
   return { ...next, connections: [...graph.connections, { from, to }] };
 }
 export function insertionPorts(
@@ -353,10 +354,10 @@ export function insertNode(
   sizes: Record<string, { width: number; height: number }> = {},
 ): Graph {
   const link = graph.connections[index];
-  if (!link) throw new Error("Connection no longer exists");
+  if (!link) throw new Error(workflowText("editorError.connectionGone"));
   const compatible = insertionPorts(graph, link, node.type);
   if (!compatible || graph.nodes.some((existing) => existing.id === node.id))
-    throw new Error("Incompatible insertion");
+    throw new Error(workflowText("editorError.incompatibleInsertion"));
   const size = (item: GraphNode) => sizes[item.id] ?? { width: 224, height: Math.max(160, Math.max(ports(item, "inputs").length, ports(item, "outputs").length) * 30 + 72) };
   const positions = insertLayout(graph.nodes.map(item => ({ id:item.id,x:item.position[0],y:item.position[1],...size(item) })), graph.connections.map(edge => ({from:edge.from.node,to:edge.to.node})), link.from.node, link.to.node, {id:node.id,x:0,y:0,...size(node)}, connectionDirection(graph,link));
   return {

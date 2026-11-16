@@ -604,19 +604,34 @@ async fn discover(
     } else {
         request.bearer_auth(secret)
     };
-    let mut response = request.send().await.map_err(|_| unavailable())?;
+    let host = crate::upstream::host(base_url);
+    let mut response = request.send().await.map_err(|e| {
+        crate::upstream::unreachable("model-list", &host, &e).unwrap_or_else(unavailable)
+    })?;
     if !response.status().is_success() {
-        return Err(unavailable());
+        return Err(crate::upstream::status(
+            "model-list",
+            &host,
+            response.status().as_u16(),
+            true,
+        ));
     }
+    let format = || {
+        tracing::warn!(host, "model list response is not a model catalog");
+        ApiError::localized(
+            StatusCode::BAD_GATEWAY,
+            Message::new("models.catalogFormat").with("host", host.clone()),
+        )
+    };
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|_| unavailable())? {
         if bytes.len() + chunk.len() > 1024 * 1024 {
-            return Err(unavailable());
+            return Err(format());
         }
         bytes.extend_from_slice(&chunk);
     }
-    let data: Value = serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
-    let rows = data["data"].as_array().ok_or_else(unavailable)?;
+    let data: Value = serde_json::from_slice(&bytes).map_err(|_| format())?;
+    let rows = data["data"].as_array().ok_or_else(format)?;
     let mut models = rows
         .iter()
         .filter_map(|v| v["id"].as_str())
@@ -630,8 +645,14 @@ async fn discover(
         .collect::<Vec<_>>();
     models.sort();
     models.dedup();
-    if models.is_empty() || models.len() > 2000 {
-        return Err(unavailable());
+    if models.is_empty() {
+        return Err(ApiError::localized(
+            StatusCode::BAD_GATEWAY,
+            Message::new("models.catalogEmpty").with("host", host.clone()),
+        ));
+    }
+    if models.len() > 2000 {
+        return Err(format());
     }
     let current = Scope::for_actor(&s, scope.workspace_id, scope.user.id).await?;
     if !current.permissions.contains("ai-models.create") {

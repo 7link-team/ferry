@@ -666,16 +666,24 @@ pub(super) async fn execute(
         if claimed != 1 {
             return Err(error("workflow.aiUnknown"));
         }
+        let host = crate::upstream::host(&provider.base_url);
         let response = match request.send().await {
             Ok(v) => v,
-            Err(_) => {
+            Err(e) => {
                 state(s, &call, "unknown", 0, None).await?;
-                return Err(error("workflow.aiUnknown"));
+                // Never reached: nothing was sent. Otherwise the outcome is unknown.
+                return Err(crate::upstream::unreachable("ai", &host, &e)
+                    .unwrap_or_else(|| error("workflow.aiUnknown")));
             }
         };
         if !response.status().is_success() {
             state(s, &call, "unknown", 0, None).await?;
-            return Err(error("workflow.aiRemote"));
+            return Err(crate::upstream::status(
+                "ai",
+                &host,
+                response.status().as_u16(),
+                true,
+            ));
         }
         let parsed = finish(
             s, storage, run, spec, item, p, operation, response, &price, known,

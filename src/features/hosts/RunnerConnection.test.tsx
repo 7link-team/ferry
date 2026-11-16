@@ -546,8 +546,31 @@ it("shows automatic upgrade policy, drain and persisted retry status", async () 
   expect(host.textContent).toContain(new Date(1800000000000).toLocaleString("zh-CN"));
   value.update.state = "rolled_back"; value.update.auto.next_retry_at = 0;
   await act(async () => vi.advanceTimersByTimeAsync(5000));
-  expect(host.textContent).toContain("已回退");
+  // One unambiguous sentence: which update did not finish and what is running now.
+  expect(host.textContent).toContain("升级到 0.2.0 未完成，已恢复 0.1.0");
+  expect(host.textContent).not.toContain("已回退 · ");
   expect(host.textContent).not.toContain("下次尝试");
+  value.update.state = "some_new_state";
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  expect(host.textContent).not.toContain("some_new_state");
+  expect(host.textContent).toContain("升级到 0.2.0：状态暂不可用");
+});
+
+it("does not present a finished update as current while the Runner is offline", async () => {
+  const value = { agent_version: "0.4.0-alpha", target_version: "0.8.0-alpha", supported: true, ready: false, enabled: true,
+    auto_update: "inherit", global_auto_update: true,
+    update: { state: "rolled_back", version: "0.8.0-alpha", message: "新版本未完成激活，已恢复原版本" } };
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => structuredClone(value) })));
+  await act(async () => root.render(<RunnerUpdateStatus workspace="ops" hostId="h1" />));
+  expect(host.textContent).toContain("主机代理当前离线。最后上报版本 0.4.0-alpha");
+  expect(host.textContent).toContain("最后上报版本 0.4.0-alpha · 服务版本 0.8.0-alpha");
+  expect(host.textContent).not.toContain("新版本未完成激活");
+  expect(host.textContent).not.toContain("升级到 0.8.0-alpha 未完成");
+  // An update still in progress stays visible while the Runner reconnects.
+  value.update = { state: "unknown", version: "0.8.0-alpha", message: "" };
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  expect(host.textContent).toContain("正在确认是否已升级到 0.8.0-alpha");
+  expect(host.textContent).not.toContain("主机代理当前离线");
 });
 
 it("reports upgrade status fetch errors and stops polling after unmount", async () => {

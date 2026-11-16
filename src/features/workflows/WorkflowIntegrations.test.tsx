@@ -458,7 +458,7 @@ it("runtime packages join the existing picker and graph without retaining remove
     await act(async () => button("Repository").click());
     expect(button("Sample connector v1 · Repository · Read")).toBeDefined();
     installIntegrationCatalog(bundled);
-    expect(() => newNode(emptyGraph(), extension.type, "Removed")).toThrow("Unknown node type");
+    expect(() => newNode(emptyGraph(), extension.type, "Removed")).toThrow(t("editorError.unknownNodeType"));
   } finally { installIntegrationCatalog(bundled); }
 });
 

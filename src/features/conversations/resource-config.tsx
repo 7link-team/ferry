@@ -7,10 +7,25 @@ import {
   type AnyRow,
   type ResourceConfigContext,
 } from "../../shared/resources/config";
-import type { FormConfig, ListConfig } from "../../shared/resources/types";
+import type { FormConfig, ListConfig, Option } from "../../shared/resources/types";
+import { listResource } from "../../shared/api/resource";
 export const conversationText = (key: string) =>
   commonText(`conversations:${key}`);
 const key = (value: string) => `conversations:${value}`;
+/**
+ * Agents a conversation can run: API-model Agents cannot hold a conversation
+ * yet, so they are not offered (the server refuses them with the same reason).
+ */
+export const conversationAgentOptions = (workspace: string, conditions: Record<string, string>) =>
+  async (): Promise<Option[]> => {
+    const items: Option[] = [];
+    for (let page = 1; ; page += 1) {
+      const result = await listResource<{ id: string; name: string; runtime?: string }>(
+        workspace, "ai-agents", { ...conditions, page, page_size: 200 });
+      items.push(...result.items.filter(row => row.runtime !== "api").map(row => ({ value: row.id, label: row.name })));
+      if (!result.items.length || page * result.page_size >= result.total) return items;
+    }
+  };
 export function conversationLists(
   _: ResourceConfigContext,
 ): Record<string, ListConfig<AnyRow>> {
@@ -107,9 +122,8 @@ export function conversationForms({
               required: true,
               immutable: true,
               when: (r) => r.kind !== "group",
-              options: namedOptions(workspace, "ai-agents", undefined, {
-                for_use: "true",
-              }),
+              options: conversationAgentOptions(workspace, { for_use: "true" }),
+              helpKey: key("apiAgentsHidden"),
               display: (r) => r.agent_name,
             },
             {
@@ -129,7 +143,7 @@ export function conversationForms({
               searchable: true,
               required: true,
               when: (r) => !r.id && r.kind === "group",
-              options: namedOptions(workspace, "ai-agents", undefined, {
+              options: conversationAgentOptions(workspace, {
                 for_use: "true",
                 visibility: "workspace",
               }),

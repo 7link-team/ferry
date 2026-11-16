@@ -974,6 +974,7 @@ mod tests {
                         | "models.reasonError"
                         | "models.hostReason"
                         | "models.hostReasonList"
+                        | "workflow.integrationRemoteReason"
                 ) || (Locale::ALL[index] == Locale::MsMy
                     && matches!(
                         key.as_str(),

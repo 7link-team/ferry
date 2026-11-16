@@ -10,18 +10,19 @@
   "conversations.busy": "Tunggu giliran aktif selesai atau hentikannya dahulu.",
   "conversations.archived": "Perbualan ini diarkibkan atau terganggu. Pulihkan arkib atau cipta perbualan baharu mengikut keadaan.",
   "conversations.staleDecision": "Permintaan kebenaran ini tidak lagi aktif atau sudah mempunyai keputusan.",
-  "conversations.leaseLost": "Pemilikan pelaksanaan tamat; acara dan keputusan seterusnya ditolak.",
+  "conversations.leaseLost": "Giliran ini telah tamat di tempat lain atau tamat masa, jadi hasil seterusnya tidak direkodkan. Muat semula untuk melihat keadaan terkini.",
   "conversations.interrupted": "Pelaksanaan terganggu. Cuba semula mesej terakhir atau hantar mesej baharu untuk meneruskan dengan sesi natif baharu dan sejarah sembang yang selesai. Semak hasil operasi terdahulu sebelum mencuba semula; tiada ulangan automatik.",
   "conversations.preflightFailed": "Persekitaran pelaksanaan tidak dapat disahkan. Semak sambungan ejen dan Runner.",
-  "conversations.executionFailed": "Pelaksanaan asal gagal atau terputus. Semak hasil sebenar dahulu.",
+  "conversations.executionFailed": "Larian CLI gagal atau sambungan terputus. Semak apa yang telah dilakukan sebelum mencuba semula.",
   "conversations.outputLimit": "Output melebihi had dan pelaksanaan dihentikan.",
   "conversations.fileTooLarge": "Setiap fail mestilah tidak melebihi 32 MiB.",
   "conversations.groupAgentPrivate": "Kumpulan memerlukan ejen yang dikongsi dalam ruang kerja.",
-  "conversations.apiPending": "Pelaksanaan perbualan API belum tersedia.",
+  "conversations.apiPending": "Ejen ini menggunakan model API, yang belum boleh digunakan dalam perbualan. Pilih Ejen dengan model CLI.",
   "conversations.noRunner": "Tiada Runner tersedia untuk melaksanakan model ini.",
   "conversations.cliPermissionUnsupported": "CLI ini hanya menyokong perbualan baca sahaja. Pilih akses baca sahaja.",
   "conversations.runnerUpgradeRequired": "Naik taraf Runner hos untuk mendayakan alat platform sebelum menjalankan perbualan ini.",
   "conversations.hostSwitched": "Pelaksanaan ditukar daripada hos {from} ke {to}. Sesi CLI dibina semula daripada sejarah perbualan dalam Ferry; fail dalam direktori kerja {from} tidak dibawa.",
   "conversations.hostReleased": "Hos {host} dilepaskan. Mesej seterusnya dijalankan pada hos lain; sesi CLI akan dibina semula daripada sejarah perbualan dalam Ferry, dan fail dalam direktori kerja {host} tidak dibawa.",
-  "conversations.hostUnavailable": "Hos pelaksanaan {host} tidak dapat menjalankannya sekarang: {reason}. Perbualan ini mempunyai direktori kerja tetap, jadi ia tidak berpindah hos sendiri; pilih \"Guna hos lain\" untuk bertukar."
+  "conversations.hostUnavailable": "Hos pelaksanaan {host} tidak dapat menjalankannya sekarang: {reason}. Perbualan ini mempunyai direktori kerja tetap, jadi ia tidak berpindah hos sendiri; pilih \"Guna hos lain\" untuk bertukar.",
+  "conversations.executionFailedOn": "{cli} gagal pada hos {host} atau sambungan terputus. Semak apa yang telah dilakukan sebelum mencuba semula; butirannya ada dalam log Runner hos itu."
 }

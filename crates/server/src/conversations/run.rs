@@ -405,6 +405,29 @@ pub(super) async fn heartbeat(
     tx.commit().await?;
     Ok((cancel, inputs))
 }
+/// "{cli} failed on {host}" for a private conversation's bound host; a group
+/// turn or an unbound conversation gets the general message.
+async fn failed_on(conn: &impl ConnectionTrait, c: &conversations::Model) -> Message {
+    let general = Message::new("conversations.executionFailed");
+    if groups::is_group(conn, c.id.into()).await.unwrap_or(true) {
+        return general;
+    }
+    let Ok(config) = serde_json::from_str::<Configuration>(&c.config) else {
+        return general;
+    };
+    let host = crate::entities::hosts::Entity::find_by_id(i64::from(config.host_id))
+        .filter(crate::entities::hosts::Column::WorkspaceId.eq(c.workspace_id))
+        .one(conn)
+        .await
+        .ok()
+        .flatten();
+    match host {
+        Some(host) => Message::new("conversations.executionFailedOn")
+            .with("cli", crate::agent_hosts::cli_name(config.runtime))
+            .with("host", host.name),
+        None => general,
+    }
+}
 pub(super) async fn finish(
     s: &AppState,
     row: &turns::Model,
@@ -423,12 +446,17 @@ pub(super) async fn finish(
         None => "failed",
     }
     .into();
-    let failure = if failure.is_empty() && matches!(outcome, Some(Outcome::Failed)) {
-        "conversations.executionFailed"
-    } else {
-        failure
-    };
-    current.error = if failure.starts_with("conversations.") {
+    let unexplained = failure.is_empty() && matches!(outcome, Some(Outcome::Failed));
+    current.error = if unexplained {
+        // The Runner gave no reason: name the CLI and host so the user knows where to look.
+        let message = failed_on(&tx, &c).await;
+        tracing::warn!(
+            conversation = c.id,
+            turn = current.id,
+            "CLI turn failed without a reported reason"
+        );
+        crate::i18n::store_message(&message)
+    } else if failure.starts_with("conversations.") {
         crate::i18n::store_message(&Message::new(failure))
     } else {
         failure.into()

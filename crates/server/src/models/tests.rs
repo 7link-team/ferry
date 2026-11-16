@@ -573,3 +573,86 @@ async fn cli_hosts_are_ordered_deduplicated_runner_hosts_of_the_workspace() {
     b.validate(&s.db, &admin(1)).await.unwrap();
     assert_eq!(b.hosts.len(), 1);
 }
+
+#[tokio::test]
+async fn loading_a_model_list_says_what_went_wrong() {
+    use axum::{Router, http::StatusCode as S, response::IntoResponse, routing::get};
+    let (_dir, s) = setup().await;
+    let app = Router::new()
+        .route("/key/v1/models", get(|| async { S::UNAUTHORIZED }))
+        .route("/missing/models", get(|| async { S::NOT_FOUND }))
+        .route("/busy/v1/models", get(|| async { S::TOO_MANY_REQUESTS }))
+        .route(
+            "/down/v1/models",
+            get(|| async { (S::BAD_GATEWAY, "upstream secret text") }),
+        )
+        .route(
+            "/html/v1/models",
+            get(|| async { "<html>login</html>".into_response() }),
+        )
+        .route(
+            "/empty/v1/models",
+            get(|| async { axum::Json(json!({"data":[]})) }),
+        )
+        .route(
+            "/ok/v1/models",
+            get(|| async { axum::Json(json!({"data":[{"id":"gpt-x"}]})) }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let closed = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        format!("http://127.0.0.1:{port}/v1")
+    };
+    let load = |base: String| {
+        let s = s.clone();
+        async move {
+            let body: Discovery = serde_json::from_value(json!({"connection":{
+                "name":"probe","protocol":"openai","base_url":base,"api_key":"k-private","qps":1,"concurrency":1}}))
+            .unwrap();
+            discover(State(s), admin(1), Json(body)).await
+        }
+    };
+    for (base, key) in [
+        (format!("{origin}/key/v1"), "upstream.keyRejected"),
+        (format!("{origin}/missing"), "upstream.modelNotFound"),
+        (format!("{origin}/busy/v1"), "upstream.rateLimited"),
+        (format!("{origin}/down/v1"), "upstream.serverError"),
+        (format!("{origin}/html/v1"), "models.catalogFormat"),
+        (format!("{origin}/empty/v1"), "models.catalogEmpty"),
+        (closed, "upstream.unreachable"),
+    ] {
+        let error = load(base.clone()).await.unwrap_err();
+        let message = error.2.as_ref().unwrap();
+        assert_eq!(message.key, key, "{base}");
+        let text = crate::i18n::render(crate::i18n::Locale::ZhCn, message);
+        assert!(text.contains("127.0.0.1"), "{text}");
+        assert!(
+            !text.contains("upstream secret text") && !text.contains("k-private"),
+            "{text}"
+        );
+    }
+    // A successful load re-checks the caller's live role.
+    crate::entities::workspace_roles::Entity::insert(
+        crate::entities::workspace_roles::Model {
+            id: 1,
+            workspace_id: 1,
+            name: "Manager".into(),
+            permissions: serde_json::to_string(&admin(1).permissions).unwrap(),
+            builtin: 0,
+            created_at: 0,
+            updated_at: 0,
+            version: 1,
+        }
+        .into_active_model(),
+    )
+    .exec(&s.db)
+    .await
+    .unwrap();
+    let Json(ok) = load(format!("{origin}/ok/v1")).await.unwrap();
+    assert_eq!(ok["models"], json!(["gpt-x"]));
+    task.abort();
+}

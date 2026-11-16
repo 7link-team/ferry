@@ -10,18 +10,19 @@
   "conversations.busy": "請先等待目前回合結束，或停止目前回合。",
   "conversations.archived": "此會話已封存或中斷，請依實際情況解除封存或建立新會話。",
   "conversations.staleDecision": "此授權請求已失效或已有決定。",
-  "conversations.leaseLost": "執行租約已失效，後續事件與決定已遭拒絕。",
+  "conversations.leaseLost": "此回合已在其他位置結束或逾時，後續結果未寫入；請重新整理查看。",
   "conversations.interrupted": "執行已中斷。可重試上一則訊息，或繼續輸入並傳送；將重新建立原生會話並帶入已完成的聊天記錄。重試前請核對先前操作結果，不會自動重播。",
   "conversations.preflightFailed": "無法驗證執行環境，請檢查 智慧體 與 Runner 連線。",
-  "conversations.executionFailed": "原生執行失敗或連線中斷，請先核對實際結果。",
+  "conversations.executionFailed": "CLI 執行失敗或連線中斷，請先查看已產生的結果再重試。",
   "conversations.outputLimit": "執行輸出超過限制，已停止執行。",
   "conversations.fileTooLarge": "每個附件不能超過 32 MiB。",
   "conversations.groupAgentPrivate": "群聊只能新增工作空間共用的智慧體。",
-  "conversations.apiPending": "API 會話執行尚未接通。",
+  "conversations.apiPending": "該智慧體使用 API 模型，暫不能用於會話；請改用 CLI 模型的智慧體。",
   "conversations.noRunner": "沒有可執行此模型的可用 Runner。",
   "conversations.cliPermissionUnsupported": "此CLI目前僅支援唯讀會話，請選擇唯讀權限。",
   "conversations.runnerUpgradeRequired": "請先升級主機 Runner 以啟用平台工具，再執行此會話。",
   "conversations.hostSwitched": "已從主機 {from} 切換到 {to} 執行。CLI 工作階段已用 Ferry 中的聊天記錄重建；{from} 工作目錄中的檔案不會帶過來。",
   "conversations.hostReleased": "已解除與主機 {host} 的綁定，下一則訊息將改用其他主機執行；CLI 工作階段將用 Ferry 中的聊天記錄重建，{host} 工作目錄中的檔案不會帶過來。",
-  "conversations.hostUnavailable": "執行主機 {host} 目前無法執行：{reason}。此會話固定了工作目錄，不會自動換主機；可選擇「改用其他主機」。"
+  "conversations.hostUnavailable": "執行主機 {host} 目前無法執行：{reason}。此會話固定了工作目錄，不會自動換主機；可選擇「改用其他主機」。",
+  "conversations.executionFailedOn": "{cli} 在主機 {host} 上執行失敗或連線中斷。請先查看已產生的結果再重試；詳細原因見該主機的 Runner 日誌。"
 }

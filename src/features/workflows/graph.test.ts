@@ -1,3 +1,4 @@
+import { workflowText } from "../../shared/i18n/i18n";
 import { describe, expect, it } from "vitest";
 import {
   arrangeGraph,
@@ -74,7 +75,7 @@ describe("workflow connection editing", () => {
     for (const type of ["core.trigger.manual", "core.merge"])
       expect(() =>
         addAdjacentNode(graph, from, "right", newNode(graph, type, type)),
-      ).toThrow("Incompatible");
+      ).toThrow(workflowText("editorError.incompatibleAdjacent"));
     expect(() =>
       addAdjacentNode(
         graph,
@@ -82,7 +83,7 @@ describe("workflow connection editing", () => {
         "right",
         newNode(graph, "core.no_op", "Next"),
       ),
-    ).toThrow("Incompatible");
+    ).toThrow(workflowText("editorError.incompatibleAdjacent"));
   });
   it("places a node beside a terminal without inventing an output connection", () => {
     const graph = fixture();
@@ -236,7 +237,7 @@ describe("workflow connection editing", () => {
       expect(insertionPorts(graph, link, type)).toBeUndefined();
     expect(() =>
       insertNode(graph, 0, newNode(graph, "core.if", "Branch")),
-    ).toThrow("Incompatible insertion");
+    ).toThrow(workflowText("editorError.incompatibleInsertion"));
     expect(() =>
       insertNode(graph, 99, newNode(graph, "core.no_op", "Gone")),
     ).toThrow("no longer exists");

@@ -249,7 +249,7 @@ export function AdvancedJson({
           setSource(event.target.value);
           try {
             const next: unknown = JSON.parse(event.target.value);
-            if (!validate(next)) throw new Error("Invalid parameter shape");
+            if (!validate(next)) throw new Error(t("editorError.invalidParameters"));
             change(next);
             committed.current = JSON.stringify(next, null, 2);
             setError(false);

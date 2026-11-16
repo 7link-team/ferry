@@ -139,14 +139,11 @@ pub(crate) fn check(
         return Err(Message::new("models.reasonDirectory"));
     };
     let Some(executable) = probe.executable.clone().filter(|_| probe.error.is_none()) else {
-        return Err(
-            match probe.error.filter(|detail| !detail.trim().is_empty()) {
-                Some(detail) => {
-                    reason("models.reasonCliFailed", cli).with("detail", truncate(&detail))
-                }
-                None => reason("models.reasonCliMissing", cli),
-            },
-        );
+        return Err(cli_problem(
+            probe.error.as_deref().unwrap_or_default(),
+            cli,
+            &probe.execution_user,
+        ));
     };
     if !probe.platform_tools
         || probe.execution_user.is_empty()
@@ -163,6 +160,33 @@ pub(crate) fn check(
         canonical_directory: directory,
         executable,
     })
+}
+
+/// Why a CLI cannot run, from the Runner's probe answer. Runners send
+/// "missing" (not on the execution user's PATH), "failed" or
+/// "failed: <first output line>" (`--version` did not succeed); older Runners
+/// send only the bare words, and anything else is passed on as detail.
+pub(crate) fn cli_problem(error: &str, cli: &str, user: &str) -> Message {
+    let error = error.trim();
+    if error.is_empty() || error == "missing" {
+        return if user.is_empty() {
+            reason("models.reasonCliMissing", cli)
+        } else {
+            reason("models.reasonCliMissingUser", cli).with("user", truncate(user))
+        };
+    }
+    if error == "failed" {
+        return reason("models.reasonCliBroken", cli);
+    }
+    if let Some(detail) = error.strip_prefix("failed:") {
+        let detail = truncate(detail);
+        return if detail.is_empty() {
+            reason("models.reasonCliBroken", cli)
+        } else {
+            reason("models.reasonCliBrokenDetail", cli).with("detail", detail)
+        };
+    }
+    reason("models.reasonCliFailed", cli).with("detail", truncate(error))
 }
 
 /// Runner-reported detail, bounded and on one line.
@@ -211,7 +235,10 @@ mod tests {
             Message::new("models.reasonRunnerOld"),
             Message::new("models.reasonNotRunner"),
             reason("models.reasonCliMissing", "codex"),
-            reason("models.reasonCliFailed", "codex").with("detail", "failed"),
+            cli_problem("missing", "codex", "SYSTEM"),
+            cli_problem("failed", "codex", "SYSTEM"),
+            cli_problem("failed: node: not found", "codex", "SYSTEM"),
+            reason("models.reasonCliFailed", "codex").with("detail", "unexpected"),
             reason("models.reasonLogin", "codex"),
             Message::new("conversations.bindingChanged"),
         ];
@@ -271,6 +298,43 @@ mod tests {
         assert!(text.contains("h07") && !text.contains("h08"), "{text}");
         assert!(text.contains('4'), "{text}");
         assert!(!text.contains('{'), "{text}");
+    }
+
+    #[test]
+    fn cli_problems_name_the_execution_user_and_the_failure_for_new_and_old_runners() {
+        // Old Runners send bare words; new ones add the first output line.
+        let missing = cli_problem("missing", "codex", "SYSTEM");
+        assert_eq!(missing.key, "models.reasonCliMissingUser");
+        assert!(render(Locale::ZhCn, &missing).contains("SYSTEM"));
+        assert_eq!(
+            cli_problem("missing", "codex", "").key,
+            "models.reasonCliMissing"
+        );
+        assert_eq!(
+            cli_problem("", "codex", "u").key,
+            "models.reasonCliMissingUser"
+        );
+        let broken = cli_problem("failed", "codex", "u");
+        assert_eq!(broken.key, "models.reasonCliBroken");
+        let detailed = cli_problem("failed: env: node: No such file\n", "codex", "u");
+        assert_eq!(detailed.key, "models.reasonCliBrokenDetail");
+        assert_eq!(detailed.params["detail"], "env: node: No such file");
+        assert_eq!(
+            cli_problem("failed:  ", "codex", "u").key,
+            "models.reasonCliBroken"
+        );
+        for message in [missing, broken, detailed] {
+            for locale in [Locale::EnUs, Locale::ZhCn, Locale::JaJp] {
+                let rendered = render(locale, &message);
+                assert!(
+                    !rendered.contains('{')
+                        && !rendered.contains("models.")
+                        && !rendered.contains("(failed")
+                        && !rendered.contains("（failed"),
+                    "{rendered}"
+                );
+            }
+        }
     }
 
     #[test]

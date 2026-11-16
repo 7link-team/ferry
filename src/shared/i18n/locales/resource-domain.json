@@ -1174,7 +1174,18 @@
     "timezone.invalid": "Choose a time zone from the list (an IANA name such as Asia/Shanghai).",
     "platform.storageStatus": "Current status",
     "platform.storageStatusOk": "Available: a test file was written, read back and deleted.",
-    "platform.storageStatusFailed": "Unavailable: {{reason}} File uploads, attachments and workflow data fail until this is fixed."
+    "platform.storageStatusFailed": "Unavailable: {{reason}} File uploads, attachments and workflow data fail until this is fixed.",
+    "runner.sentence.draining": "Waiting for running tasks to finish, then updating to {{to}}",
+    "runner.sentence.updating": "Updating to {{to}}",
+    "runner.sentence.unknown": "Confirming the update to {{to}} (waiting for HostAgent to reconnect)",
+    "runner.sentence.succeeded": "Updated to {{to}}",
+    "runner.sentence.rolled_back": "The update to {{to}} did not finish; {{from}} was restored",
+    "runner.sentence.failed": "The update to {{to}} failed",
+    "runner.sentence.retrying": "The update to {{to}} failed; waiting to retry",
+    "runner.sentence.cancelled": "The update to {{to}} was cancelled",
+    "runner.sentence.other": "Update to {{to}}: status not available",
+    "runner.versionsOffline": "Last reported version {{current}} · Server version {{server}}",
+    "runner.offlineNow": "HostAgent is offline. Last reported version {{version}}; the current update status appears once it reconnects."
   },
   "zh-CN": {
     "runner.scopeFallback": "节点未上报服务安装方式。下方默认生成系统服务安装命令，不代表现有代理以系统服务运行；需要安装到当前用户时可切换。",
@@ -2351,7 +2362,18 @@
     "timezone.invalid": "请从列表中选择时区（IANA 名称，如 Asia/Shanghai）。",
     "platform.storageStatus": "当前状态",
     "platform.storageStatusOk": "可用：已成功写入、读回并删除测试文件。",
-    "platform.storageStatusFailed": "不可用：{{reason}} 修复前文件上传、会话附件和工作流数据都会失败。"
+    "platform.storageStatusFailed": "不可用：{{reason}} 修复前文件上传、会话附件和工作流数据都会失败。",
+    "runner.sentence.draining": "等待当前任务结束，随后升级到 {{to}}",
+    "runner.sentence.updating": "正在升级到 {{to}}",
+    "runner.sentence.unknown": "正在确认是否已升级到 {{to}}（等待主机代理重新连接）",
+    "runner.sentence.succeeded": "已升级到 {{to}}",
+    "runner.sentence.rolled_back": "升级到 {{to}} 未完成，已恢复 {{from}}",
+    "runner.sentence.failed": "升级到 {{to}} 失败",
+    "runner.sentence.retrying": "升级到 {{to}} 失败，等待重试",
+    "runner.sentence.cancelled": "已取消升级到 {{to}}",
+    "runner.sentence.other": "升级到 {{to}}：状态暂不可用",
+    "runner.versionsOffline": "最后上报版本 {{current}} · 服务版本 {{server}}",
+    "runner.offlineNow": "主机代理当前离线。最后上报版本 {{version}}；重新连接后显示最新升级状态。"
   },
   "zh-TW": {
     "runner.scopeFallback": "節點未回報服務安裝方式。下方預設產生系統服務安裝命令，不代表現有代理以系統服務運行；需要安裝到目前使用者時可切換。",
@@ -3528,7 +3550,18 @@
     "timezone.invalid": "請從清單中選擇時區（IANA 名稱，如 Asia/Shanghai）。",
     "platform.storageStatus": "目前狀態",
     "platform.storageStatusOk": "可用：已成功寫入、讀回並刪除測試檔案。",
-    "platform.storageStatusFailed": "不可用：{{reason}} 修復前檔案上傳、對話附件和工作流程資料都會失敗。"
+    "platform.storageStatusFailed": "不可用：{{reason}} 修復前檔案上傳、對話附件和工作流程資料都會失敗。",
+    "runner.sentence.draining": "等待目前任務結束，隨後升級到 {{to}}",
+    "runner.sentence.updating": "正在升級到 {{to}}",
+    "runner.sentence.unknown": "正在確認是否已升級到 {{to}}（等待主機代理重新連線）",
+    "runner.sentence.succeeded": "已升級到 {{to}}",
+    "runner.sentence.rolled_back": "升級到 {{to}} 未完成，已還原 {{from}}",
+    "runner.sentence.failed": "升級到 {{to}} 失敗",
+    "runner.sentence.retrying": "升級到 {{to}} 失敗，等待重試",
+    "runner.sentence.cancelled": "已取消升級到 {{to}}",
+    "runner.sentence.other": "升級到 {{to}}：狀態暫不可用",
+    "runner.versionsOffline": "最後回報版本 {{current}} · 服務版本 {{server}}",
+    "runner.offlineNow": "主機代理目前離線。最後回報版本 {{version}}；重新連線後顯示最新升級狀態。"
   },
   "ja-JP": {
     "runner.scopeFallback": "ノードからサービスのインストール範囲が報告されていません。コマンドの既定値はシステムサービスですが、現在のエージェントの実行方式を示すものではありません。必要に応じて現在のユーザーに切り替えてください。",
@@ -4705,7 +4738,18 @@
     "timezone.invalid": "一覧からタイムゾーンを選択してください（Asia/Shanghai などの IANA 名）。",
     "platform.storageStatus": "現在の状態",
     "platform.storageStatusOk": "利用可能：テストファイルの書き込み・読み戻し・削除に成功しました。",
-    "platform.storageStatusFailed": "利用不可：{{reason}} 修正するまで、ファイルのアップロード、添付ファイル、ワークフローのデータは失敗します。"
+    "platform.storageStatusFailed": "利用不可：{{reason}} 修正するまで、ファイルのアップロード、添付ファイル、ワークフローのデータは失敗します。",
+    "runner.sentence.draining": "実行中のタスクの終了を待ってから {{to}} に更新します",
+    "runner.sentence.updating": "{{to}} に更新しています",
+    "runner.sentence.unknown": "{{to}} への更新を確認しています（ホストエージェントの再接続待ち）",
+    "runner.sentence.succeeded": "{{to}} に更新しました",
+    "runner.sentence.rolled_back": "{{to}} への更新は完了せず、{{from}} に戻しました",
+    "runner.sentence.failed": "{{to}} への更新に失敗しました",
+    "runner.sentence.retrying": "{{to}} への更新に失敗しました。再試行を待っています",
+    "runner.sentence.cancelled": "{{to}} への更新はキャンセルされました",
+    "runner.sentence.other": "{{to}} への更新：状態を取得できません",
+    "runner.versionsOffline": "最終報告バージョン {{current}} · サーバーバージョン {{server}}",
+    "runner.offlineNow": "ホストエージェントはオフラインです。最終報告バージョンは {{version}} です。再接続すると最新の更新状況が表示されます。"
   },
   "ko-KR": {
     "runner.scopeFallback": "노드가 서비스 설치 범위를 보고하지 않았습니다. 명령의 기본값은 시스템 서비스이며 현재 에이전트의 실행 방식을 뜻하지 않습니다. 필요하면 현재 사용자로 전환하세요.",
@@ -5882,7 +5926,18 @@
     "timezone.invalid": "목록에서 시간대를 선택하세요(Asia/Shanghai 같은 IANA 이름).",
     "platform.storageStatus": "현재 상태",
     "platform.storageStatusOk": "사용 가능: 테스트 파일을 쓰고, 다시 읽고, 삭제했습니다.",
-    "platform.storageStatusFailed": "사용 불가: {{reason}} 수정 전까지 파일 업로드, 첨부 파일, 워크플로 데이터가 실패합니다."
+    "platform.storageStatusFailed": "사용 불가: {{reason}} 수정 전까지 파일 업로드, 첨부 파일, 워크플로 데이터가 실패합니다.",
+    "runner.sentence.draining": "실행 중인 작업이 끝나면 {{to}}(으)로 업데이트합니다",
+    "runner.sentence.updating": "{{to}}(으)로 업데이트하는 중",
+    "runner.sentence.unknown": "{{to}}(으)로의 업데이트를 확인하는 중(호스트 에이전트 재연결 대기)",
+    "runner.sentence.succeeded": "{{to}}(으)로 업데이트됨",
+    "runner.sentence.rolled_back": "{{to}}(으)로의 업데이트가 완료되지 않아 {{from}}을(를) 복원했습니다",
+    "runner.sentence.failed": "{{to}}(으)로의 업데이트 실패",
+    "runner.sentence.retrying": "{{to}}(으)로의 업데이트 실패, 재시도 대기 중",
+    "runner.sentence.cancelled": "{{to}}(으)로의 업데이트가 취소됨",
+    "runner.sentence.other": "{{to}}(으)로 업데이트: 상태를 확인할 수 없음",
+    "runner.versionsOffline": "마지막 보고 버전 {{current}} · 서버 버전 {{server}}",
+    "runner.offlineNow": "호스트 에이전트가 오프라인입니다. 마지막 보고 버전 {{version}}; 다시 연결되면 최신 업데이트 상태가 표시됩니다."
   },
   "ms-MY": {
     "runner.scopeFallback": "Nod belum melaporkan skop pemasangan perkhidmatan. Arahan lalai ialah perkhidmatan sistem; ini tidak menerangkan ejen yang sedang berjalan. Pilih Pengguna semasa jika diperlukan.",
@@ -7059,6 +7114,17 @@
     "timezone.invalid": "Pilih zon waktu daripada senarai (nama IANA seperti Asia/Shanghai).",
     "platform.storageStatus": "Status semasa",
     "platform.storageStatusOk": "Tersedia: fail ujian berjaya ditulis, dibaca semula dan dipadam.",
-    "platform.storageStatusFailed": "Tidak tersedia: {{reason}} Muat naik fail, lampiran dan data aliran kerja gagal sehingga ini dibaiki."
+    "platform.storageStatusFailed": "Tidak tersedia: {{reason}} Muat naik fail, lampiran dan data aliran kerja gagal sehingga ini dibaiki.",
+    "runner.sentence.draining": "Menunggu tugas semasa selesai, kemudian mengemas kini ke {{to}}",
+    "runner.sentence.updating": "Sedang mengemas kini ke {{to}}",
+    "runner.sentence.unknown": "Mengesahkan kemas kini ke {{to}} (menunggu HostAgent menyambung semula)",
+    "runner.sentence.succeeded": "Dikemas kini ke {{to}}",
+    "runner.sentence.rolled_back": "Kemas kini ke {{to}} tidak selesai; {{from}} dipulihkan",
+    "runner.sentence.failed": "Kemas kini ke {{to}} gagal",
+    "runner.sentence.retrying": "Kemas kini ke {{to}} gagal; menunggu untuk mencuba semula",
+    "runner.sentence.cancelled": "Kemas kini ke {{to}} dibatalkan",
+    "runner.sentence.other": "Kemas kini ke {{to}}: status tidak tersedia",
+    "runner.versionsOffline": "Versi terakhir dilaporkan {{current}} · Versi pelayan {{server}}",
+    "runner.offlineNow": "HostAgent di luar talian. Versi terakhir dilaporkan {{version}}; status kemas kini terkini dipaparkan selepas ia menyambung semula."
   }
 }
