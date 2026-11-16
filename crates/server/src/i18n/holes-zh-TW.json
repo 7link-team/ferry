@@ -25,5 +25,10 @@
   "holes.targetInvalid": "請輸入 IP 或主機名稱，不要包含協定、連接埠或路徑。",
   "holes.targetRunnerUpgrade": "轉發到區域網路位址需要該主機的 Runner 為 0.5.0-alpha 或更新版本。請升級 Runner，或將目標位址留空以使用本機連接埠。",
   "holes.lastCheck": "最近一次檢測：",
-  "holes.macLocalNetwork": "macOS 可能阻止了主機代理存取區域網路：請在「系統設定 → 隱私權與安全性 → 區域網路」中允許 ferry-runner；若清單中沒有，請改用「目前使用者」方式重新安裝主機代理。"
+  "holes.macLocalNetwork": "macOS 可能阻止了主機代理存取區域網路：請在「系統設定 → 隱私權與安全性 → 區域網路」中允許 ferry-runner；若清單中沒有，請改用「目前使用者」方式重新安裝主機代理。",
+  "holes.targetSchemeInvalid": "目標協定只能是 HTTP 或 HTTPS。",
+  "holes.insecureNeedsHttps": "「允許不安全憑證」只適用於 HTTPS 目標。",
+  "holes.tlsUntrusted": "目標的 HTTPS 憑證不受信任（{detail}）。如果是使用自簽憑證的裝置（如 PVE、NAS），請為此預覽開啟「允許不安全憑證」。",
+  "holes.tlsPlainHttp": "目標回應的是一般 HTTP，不是 HTTPS。請將目標協定改為 HTTP。",
+  "holes.tlsHandshake": "無法與目標建立 HTTPS 連線：{detail}"
 }

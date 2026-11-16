@@ -25,5 +25,10 @@
   "holes.targetInvalid": "Masukkan alamat IP atau nama hos tanpa skema, port atau laluan.",
   "holes.targetRunnerUpgrade": "Pemajuan ke alamat LAN memerlukan Runner 0.5.0-alpha atau lebih baharu pada hos ini. Naik taraf Runner, atau biarkan sasaran kosong untuk menggunakan port hos ini.",
   "holes.lastCheck": "Semakan terkini: ",
-  "holes.macLocalNetwork": "macOS mungkin menyekat HostAgent daripada rangkaian setempat: dalam Tetapan Sistem → Privasi & Keselamatan → Rangkaian Setempat, benarkan ferry-runner. Jika tiada dalam senarai, pasang semula HostAgent untuk pengguna semasa."
+  "holes.macLocalNetwork": "macOS mungkin menyekat HostAgent daripada rangkaian setempat: dalam Tetapan Sistem → Privasi & Keselamatan → Rangkaian Setempat, benarkan ferry-runner. Jika tiada dalam senarai, pasang semula HostAgent untuk pengguna semasa.",
+  "holes.targetSchemeInvalid": "Protokol sasaran mestilah HTTP atau HTTPS.",
+  "holes.insecureNeedsHttps": "\"Benarkan sijil tidak selamat\" hanya untuk sasaran HTTPS.",
+  "holes.tlsUntrusted": "Sijil HTTPS sasaran tidak dipercayai ({detail}). Untuk peranti dengan sijil tandatangan sendiri (seperti PVE atau NAS), hidupkan \"Benarkan sijil tidak selamat\" untuk pratonton ini.",
+  "holes.tlsPlainHttp": "Sasaran menjawab dengan HTTP biasa, bukan HTTPS. Tetapkan protokol sasaran kepada HTTP.",
+  "holes.tlsHandshake": "Sambungan HTTPS ke sasaran tidak dapat diwujudkan: {detail}"
 }

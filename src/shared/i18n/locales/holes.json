@@ -1,4 +1,8 @@
 {
+  "targetScheme": ["Target protocol", "目标协议", "目標協定", "ターゲットのプロトコル", "대상 프로토콜", "Protokol sasaran"],
+  "targetSchemeHelp": ["HTTPS for services that only accept HTTPS, such as Proxmox VE on 8006 or a NAS; Ferry connects to them over TLS through the Runner.", "目标只接受 HTTPS 时选 HTTPS（如 8006 端口的 Proxmox VE、NAS 管理页）；Ferry 会经 Runner 以 TLS 连接目标。", "目標只接受 HTTPS 時選 HTTPS（如 8006 連接埠的 Proxmox VE、NAS 管理頁）；Ferry 會經 Runner 以 TLS 連線目標。", "HTTPS しか受け付けないサービス（8006 番ポートの Proxmox VE や NAS の管理画面など）には HTTPS を選びます。Ferry が Runner 経由で TLS 接続します。", "HTTPS만 받는 서비스(8006 포트의 Proxmox VE, NAS 관리 화면 등)에는 HTTPS를 선택하세요. Ferry가 Runner를 거쳐 TLS로 연결합니다.", "HTTPS untuk perkhidmatan yang hanya menerima HTTPS, seperti Proxmox VE pada 8006 atau NAS; Ferry menyambung melalui TLS menerusi Runner."],
+  "targetTlsInsecure": ["Allow insecure certificate (self-signed)", "允许不安全证书（自签名）", "允許不安全憑證（自簽）", "安全でない証明書を許可（自己署名）", "안전하지 않은 인증서 허용(자체 서명)", "Benarkan sijil tidak selamat (tandatangan sendiri)"],
+  "targetTlsInsecureHelp": ["Only turn this on if you trust this local-network device. Ferry then no longer verifies its certificate and cannot detect a man-in-the-middle.", "仅在信任该局域网设备时开启；Ferry 不再校验证书，无法发现中间人。", "僅在信任該區域網路裝置時開啟；Ferry 不再驗證憑證，無法發現中間人。", "このローカルネットワーク機器を信頼できる場合のみオンにしてください。Ferry は証明書を検証しなくなり、中間者攻撃を検出できません。", "이 로컬 네트워크 장비를 신뢰할 때만 켜세요. Ferry가 더 이상 인증서를 검증하지 않아 중간자 공격을 알아챌 수 없습니다.", "Hidupkan hanya jika anda mempercayai peranti rangkaian setempat ini. Ferry tidak lagi mengesahkan sijilnya dan tidak dapat mengesan serangan orang tengah."],
   "title": ["Preview tunnels", "预览穿透", "預覽穿透", "プレビュートンネル", "미리보기 터널", "Terowong pratonton"],
   "create": ["New preview tunnel", "新建预览穿透", "新增預覽穿透", "プレビュートンネルを作成", "미리보기 터널 만들기", "Cipta terowong pratonton"],
   "empty": [

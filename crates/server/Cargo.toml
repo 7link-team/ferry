@@ -60,6 +60,9 @@ chrono-tz = "0.10"
 croner = "4.0.2"
 base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+# HTTPS preview targets: TLS over the Runner's forward tunnel, ring like the rest of the tree.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+webpki-roots = "1"
 percent-encoding = "2"
 csv = "1"
 calamine = "0.37"

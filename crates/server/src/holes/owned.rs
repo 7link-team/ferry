@@ -72,6 +72,8 @@ pub(crate) async fn open_owned(
             name,
             target_port: request.port,
             target_host: String::new(),
+            target_scheme: "http".into(),
+            target_tls_insecure: false,
             strip_prefix: request.strip_prefix,
             expires_at,
             source: (

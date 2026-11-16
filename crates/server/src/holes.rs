@@ -11,6 +11,7 @@ mod owned;
 mod proxy;
 #[cfg(test)]
 mod tests;
+mod tls;
 
 pub(crate) use domain::{dispatch, token as preview_token};
 pub(crate) use owned::{OwnedRequest, open_owned, revoke_source, wait_ready, wait_review};
@@ -145,6 +146,8 @@ pub(crate) async fn views(
             "name": row.name,
             "target_port": row.target_port,
             "target_host": row.target_host,
+            "target_scheme": row.target_scheme,
+            "target_tls_insecure": row.target_tls_insecure,
             "strip_prefix": row.strip_prefix,
             "url": url,
             "ingress_mode": mode,
@@ -274,6 +277,12 @@ pub struct CreateBody {
     /// Empty: the Runner's own loopback. Otherwise a private-network IP or name.
     #[serde(default)]
     target_host: String,
+    /// "http" (default) or "https".
+    #[serde(default)]
+    target_scheme: String,
+    /// HTTPS only: skip certificate verification (self-signed devices).
+    #[serde(default)]
+    target_tls_insecure: bool,
     #[serde(default = "default_strip")]
     strip_prefix: bool,
     ttl_hours: i64,
@@ -304,6 +313,8 @@ pub async fn create(
         return Err(invalid());
     }
     let target_host = checked_target_host(&body.target_host)?;
+    let (target_scheme, target_tls_insecure) =
+        checked_scheme(&body.target_scheme, body.target_tls_insecure)?;
     let mut row = prepare_row(
         &s,
         &scope,
@@ -312,6 +323,8 @@ pub async fn create(
             name,
             target_port: body.target_port,
             target_host,
+            target_scheme,
+            target_tls_insecure,
             strip_prefix: body.strip_prefix,
             expires_at: db::now() + ttl,
             source: ("manual", 0, String::new()),
@@ -333,7 +346,8 @@ pub async fn create(
         "holes",
         &id,
         json!({"name": row.name, "host_id": body.host_id, "target_port": row.target_port,
-               "target_host": row.target_host,
+               "target_host": row.target_host, "target_scheme": row.target_scheme,
+               "target_tls_insecure": row.target_tls_insecure,
                "strip_prefix": row.strip_prefix, "ttl_hours": body.ttl_hours,
                "ingress_mode": mode, "public_access_acknowledged":body.public_access_acknowledged}),
     )
@@ -341,6 +355,28 @@ pub async fn create(
     tx.commit().await?;
     ingress::publish(&s, &row, prepared);
     Ok((StatusCode::CREATED, Json(view(&s, &scope, id).await?)))
+}
+
+/// "http" (the default) or "https"; skipping certificate checks only makes
+/// sense, and is only allowed, for HTTPS.
+fn checked_scheme(scheme: &str, insecure: bool) -> Result<(String, bool)> {
+    let scheme = match scheme.trim().to_ascii_lowercase().as_str() {
+        "" | "http" => "http",
+        "https" => "https",
+        _ => {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("holes.targetSchemeInvalid"),
+            ));
+        }
+    };
+    if insecure && scheme != "https" {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("holes.insecureNeedsHttps"),
+        ));
+    }
+    Ok((scheme.to_owned(), insecure))
 }
 
 /// An IP literal or DNS name, without scheme, port or path. Public IP literals
@@ -389,6 +425,8 @@ pub(crate) struct NewHole {
     pub name: String,
     pub target_port: i64,
     pub target_host: String,
+    pub target_scheme: String,
+    pub target_tls_insecure: bool,
     pub strip_prefix: bool,
     pub expires_at: i64,
     /// kind, id, ref: see design section 3.
@@ -416,6 +454,8 @@ async fn prepare_row(s: &AppState, scope: &Scope, new: NewHole) -> Result<holes:
         name: new.name,
         target_port: new.target_port,
         target_host: new.target_host,
+        target_scheme: new.target_scheme,
+        target_tls_insecure: new.target_tls_insecure,
         strip_prefix: new.strip_prefix,
         token_hash: crate::hosts::runner::fingerprint(&token),
         token_sealed: String::new(),
@@ -462,6 +502,8 @@ pub struct UpdateBody {
     version: i64,
     name: Option<String>,
     strip_prefix: Option<bool>,
+    target_scheme: Option<String>,
+    target_tls_insecure: Option<bool>,
     /// Present means "extend": the new expiry counts from now.
     ttl_hours: Option<i64>,
     ingress_mode: Option<String>,
@@ -542,6 +584,23 @@ pub async fn update(
         details.insert("strip_prefix".into(), json!(strip));
         row.strip_prefix = Set(strip);
     }
+    // How Ferry talks to the target; live connections are cut after commit so
+    // nothing keeps using the old scheme or certificate policy.
+    let mut transport_changed = false;
+    if body.target_scheme.is_some() || body.target_tls_insecure.is_some() {
+        let scheme = body.target_scheme.as_deref().unwrap_or(&old.target_scheme);
+        let insecure = body
+            .target_tls_insecure
+            .unwrap_or(old.target_tls_insecure && scheme == "https");
+        let (scheme, insecure) = checked_scheme(scheme, insecure)?;
+        if scheme != old.target_scheme || insecure != old.target_tls_insecure {
+            transport_changed = true;
+            details.insert("target_scheme".into(), json!(scheme));
+            details.insert("target_tls_insecure".into(), json!(insecure));
+            row.target_scheme = Set(scheme);
+            row.target_tls_insecure = Set(insecure);
+        }
+    }
     if let Some(hours) = body.ttl_hours {
         details.insert("ttl_hours".into(), json!(hours));
         row.expires_at = Set(now + checked_ttl(hours)?);
@@ -561,6 +620,9 @@ pub async fn update(
     )
     .await?;
     tx.commit().await?;
+    if transport_changed {
+        proxy::close(old.id);
+    }
     if let Some((row, prepared)) = replacement {
         proxy::close(old.id);
         ingress::stop(&s, old.id).await;

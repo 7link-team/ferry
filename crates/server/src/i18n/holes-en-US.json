@@ -25,5 +25,10 @@
   "holes.targetInvalid": "Enter an IP address or host name without scheme, port or path.",
   "holes.targetRunnerUpgrade": "Forwarding to a LAN address needs Runner 0.5.0-alpha or later on this host. Upgrade the Runner, or leave the target empty to use this host's own port.",
   "holes.lastCheck": "Latest check: ",
-  "holes.macLocalNetwork": "macOS may be blocking the HostAgent from the local network: in System Settings → Privacy & Security → Local Network, allow ferry-runner. If it isn't listed, reinstall the HostAgent for the current user."
+  "holes.macLocalNetwork": "macOS may be blocking the HostAgent from the local network: in System Settings → Privacy & Security → Local Network, allow ferry-runner. If it isn't listed, reinstall the HostAgent for the current user.",
+  "holes.targetSchemeInvalid": "The target protocol must be HTTP or HTTPS.",
+  "holes.insecureNeedsHttps": "Allowing an untrusted certificate only applies to HTTPS targets.",
+  "holes.tlsUntrusted": "The target's HTTPS certificate is not trusted ({detail}). For a device with a self-signed certificate (such as PVE or a NAS), turn on \"Allow insecure certificate\" for this preview.",
+  "holes.tlsPlainHttp": "The target answered with plain HTTP, not HTTPS. Set the target protocol to HTTP.",
+  "holes.tlsHandshake": "The HTTPS connection to the target could not be established: {detail}"
 }

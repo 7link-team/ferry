@@ -25,5 +25,10 @@
   "holes.targetInvalid": "프로토콜, 포트, 경로 없이 IP 주소나 호스트 이름을 입력하세요.",
   "holes.targetRunnerUpgrade": "LAN 주소로 전달하려면 이 호스트의 Runner가 0.5.0-alpha 이상이어야 합니다. Runner를 업그레이드하거나 대상을 비워 호스트 자체 포트를 사용하세요.",
   "holes.lastCheck": "최근 확인: ",
-  "holes.macLocalNetwork": "macOS가 호스트 에이전트의 로컬 네트워크 접근을 차단했을 수 있습니다. '시스템 설정 → 개인정보 보호 및 보안 → 로컬 네트워크'에서 ferry-runner를 허용하세요. 목록에 없으면 '현재 사용자' 방식으로 다시 설치하세요."
+  "holes.macLocalNetwork": "macOS가 호스트 에이전트의 로컬 네트워크 접근을 차단했을 수 있습니다. '시스템 설정 → 개인정보 보호 및 보안 → 로컬 네트워크'에서 ferry-runner를 허용하세요. 목록에 없으면 '현재 사용자' 방식으로 다시 설치하세요.",
+  "holes.targetSchemeInvalid": "대상 프로토콜은 HTTP 또는 HTTPS만 가능합니다.",
+  "holes.insecureNeedsHttps": "'안전하지 않은 인증서 허용'은 HTTPS 대상에만 적용됩니다.",
+  "holes.tlsUntrusted": "대상의 HTTPS 인증서를 신뢰할 수 없습니다({detail}). 자체 서명 인증서를 쓰는 장비(PVE, NAS 등)라면 이 미리보기에서 '안전하지 않은 인증서 허용'을 켜세요.",
+  "holes.tlsPlainHttp": "대상이 HTTPS가 아닌 일반 HTTP로 응답했습니다. 대상 프로토콜을 HTTP로 바꾸세요.",
+  "holes.tlsHandshake": "대상과 HTTPS 연결을 맺을 수 없습니다: {detail}"
 }

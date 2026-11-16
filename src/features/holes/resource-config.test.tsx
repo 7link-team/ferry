@@ -8,7 +8,7 @@ import messages from "../../shared/i18n/locales/holes.json";
 import { label } from "../../shared/resources/config";
 import { nav } from "../../app/nav";
 import { href, parse } from "../../app/router";
-import { HOLE_STATES, holesForms, holesLists, PROBE_STATES, REVIEW_STATES, type Hole } from "./resource-config";
+import { HOLE_STATES, holesForms, holesLists, PROBE_STATES, REVIEW_STATES, targetLabel, type Hole } from "./resource-config";
 
 vi.mock("../../shared/api/api", async (original) => ({
   ...(await original<typeof import("../../shared/api/api")>()),
@@ -139,7 +139,7 @@ const byKeyEarly = (key: string) => fields().filter((field) => field.key === key
 
 it("starts creation with a 24-hour validity and prefix stripping, and locks host and port after creation", () => {
   const config = formConfig();
-  expect(config.blank).toEqual({ name: "", host_id: "", target_host: "", strip_prefix: true, ttl_hours: 24 });
+  expect(config.blank).toEqual({ name: "", host_id: "", target_host: "", target_scheme: "http", target_tls_insecure: false, strip_prefix: true, ttl_hours: 24 });
   // Optional LAN target: empty means the host's own 127.0.0.1; fixed after creation.
   expect(byKeyEarly("target_host")[0]).toMatchObject({ type: "text", immutable: true, placeholder: "127.0.0.1" });
   expect(byKeyEarly("target_host")[0]!.required).toBeUndefined();
@@ -162,10 +162,10 @@ it("edits only name, path mode and validity, and treats revoked records as read-
   expect(edit).toMatchObject({ name: "Web", strip_prefix: true, version: 4 });
   expect(edit.ttl_hours).toBeUndefined();
   const visible = (draft: Partial<Hole>) => fields().filter((field) => !field.when || field.when(draft)).map((field) => field.key);
-  expect(visible(edit)).toEqual(["ingress_mode", "name", "host_id", "target_host", "target_port", "ttl_hours"]);
-  expect(visible(config.blank)).toEqual(["ingress_mode", "name", "host_id", "target_host", "target_port", "ttl_hours"]);
+  expect(visible(edit)).toEqual(["ingress_mode", "name", "host_id", "target_host", "target_port", "target_scheme", "ttl_hours"]);
+  expect(visible(config.blank)).toEqual(["ingress_mode", "name", "host_id", "target_host", "target_port", "target_scheme", "ttl_hours"]);
   expect(visible(row())).toEqual([
-    "ingress_mode", "name", "host_id", "target_host", "target_port", "url", "state", "probe_state", "probe_error",
+    "ingress_mode", "name", "host_id", "target_host", "target_port", "target_scheme", "url", "state", "probe_state", "probe_error",
     "active_connections", "expires_at", "created_by_name", "created_at", "updated_at", "usage",
   ]);
   expect(visible(row({ state: "revoked", revoked_at: 5, probe_error: "" }))).toContain("revoked_at");
@@ -238,4 +238,27 @@ it.each([
   expect(label(PROBE_STATES, "runner_offline")).toBe(offline);
   expect(label(REVIEW_STATES, "waiting")).toBe(waiting);
   expect(i18n.t("source.pipeline", { ns: "holes", ref: "build" })).toBe(pipeline);
+});
+
+it("asks about the certificate only for HTTPS targets and keeps it with the scheme", () => {
+  const config = formConfig();
+  const scheme = fields().find((field) => field.key === "target_scheme")!;
+  const insecure = fields().find((field) => field.key === "target_tls_insecure")!;
+  expect(scheme).toMatchObject({ type: "select", resetOnChange: ["target_tls_insecure"] });
+  expect(scheme.immutable).toBeUndefined();
+  expect(scheme.options).toEqual([{ value: "http", label: "HTTP" }, { value: "https", label: "HTTPS" }]);
+  expect(insecure.type).toBe("switch");
+  expect(insecure.when!({ target_scheme: "http" })).toBe(false);
+  expect(insecure.when!({ target_scheme: "https" })).toBe(true);
+  expect(insecure.when!(config.blank)).toBe(false);
+  // Editing sends the current transport so it can be changed later.
+  const edit = config.editValues!(row({ target_scheme: "https", target_tls_insecure: true }));
+  expect(edit).toMatchObject({ target_scheme: "https", target_tls_insecure: true });
+});
+
+it("shows the target with https:// when Ferry talks HTTPS to it", () => {
+  expect(targetLabel({ target_host: "192.168.0.2", target_port: 8006, target_scheme: "https" })).toBe("https://192.168.0.2:8006");
+  expect(targetLabel({ target_host: "192.168.0.2", target_port: 8006, target_scheme: "http" })).toBe("192.168.0.2:8006");
+  expect(targetLabel({ target_host: "", target_port: 5173 })).toBe("5173");
+  expect(targetLabel({ target_host: "fd00::5", target_port: 443, target_scheme: "https" })).toBe("https://[fd00::5]:443");
 });

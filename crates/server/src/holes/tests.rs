@@ -1585,3 +1585,268 @@ fn a_blocked_lan_connection_on_macos_explains_the_local_network_permission() {
     let linux = crate::i18n::store_raw("No route to host (os error 113)");
     assert!(!crate::holes::explain_probe_error(locale, &linux).contains("本地网络"));
 }
+
+// ---------------------------------------------------------- HTTPS targets
+
+/// A local HTTPS service with a self-signed certificate (localhost/127.0.0.1),
+/// like Proxmox VE or a NAS: `/` echoes Host and Origin, `/redirect` points at
+/// its own https:// origin, and `Upgrade: echo` switches to an echo stream.
+async fn https_upstream() -> u16 {
+    use tokio_rustls::rustls::{
+        self,
+        pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
+    };
+    let cert = CertificateDer::from(include_bytes!("fixtures/self-signed.der").to_vec());
+    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+        include_bytes!("fixtures/self-signed.key.der").to_vec(),
+    ));
+    let config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(vec![cert], key)
+    .unwrap();
+    let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(config));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((tcp, _)) = listener.accept().await {
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let Ok(mut tls) = acceptor.accept(tcp).await else {
+                    return;
+                };
+                loop {
+                    let mut head = Vec::new();
+                    let mut byte = [0u8; 1];
+                    while !head.ends_with(b"\r\n\r\n") {
+                        match tls.read(&mut byte).await {
+                            Ok(1) => head.push(byte[0]),
+                            _ => return,
+                        }
+                    }
+                    let head = String::from_utf8_lossy(&head).to_string();
+                    let lower = head.to_ascii_lowercase();
+                    let header = |name: &str| {
+                        lower
+                            .lines()
+                            .find_map(|line| line.strip_prefix(&format!("{name}: ")))
+                            .unwrap_or("")
+                            .to_owned()
+                    };
+                    let path = head.split(' ').nth(1).unwrap_or("/").to_owned();
+                    if header("upgrade") == "echo" {
+                        let _ = tls
+                            .write_all(
+                                b"HTTP/1.1 101 Switching Protocols\r\nConnection: upgrade\r\nUpgrade: echo\r\n\r\n",
+                            )
+                            .await;
+                        let mut buffer = [0u8; 1024];
+                        while let Ok(n) = tls.read(&mut buffer).await {
+                            if n == 0 || tls.write_all(&buffer[..n]).await.is_err() {
+                                break;
+                            }
+                        }
+                        return;
+                    }
+                    let response = if path == "/redirect" {
+                        format!(
+                            "HTTP/1.1 301 Moved Permanently\r\nLocation: https://localhost:{port}/target\r\nContent-Length: 0\r\n\r\n"
+                        )
+                    } else {
+                        let body =
+                            format!("secure host={} origin={}", header("host"), header("origin"));
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{body}",
+                            body.len()
+                        )
+                    };
+                    if tls.write_all(response.as_bytes()).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    port
+}
+
+async fn create_https_hole(s: &AppState, host: i64, port: u16, insecure: bool) -> Value {
+    let (status, Json(created)) = create(
+        State(s.clone()),
+        admin(1),
+        Json(parse(
+            json!({"name":"PVE","host_id":host.to_string(),"target_port":port,
+                   "ttl_hours":24,"target_scheme":"https","target_tls_insecure":insecure}),
+        )),
+    )
+    .await
+    .unwrap();
+    assert_eq!(status, StatusCode::CREATED);
+    created
+}
+
+#[tokio::test]
+async fn target_scheme_defaults_to_http_and_insecure_needs_https() {
+    let (_dir, s) = setup().await;
+    add_host(&s, 41, 1, KEY).await;
+    let plain = create_hole(&s, 41, 8080).await;
+    assert_eq!(plain["target_scheme"], "http");
+    assert_eq!(plain["target_tls_insecure"], false);
+    let row = reload(&s, i64::from(hole_id(&plain))).await;
+    assert_eq!(
+        (row.target_scheme.as_str(), row.target_tls_insecure),
+        ("http", false)
+    );
+    for (body, key) in [
+        (
+            json!({"name":"a","host_id":"41","target_port":80,"ttl_hours":24,"target_tls_insecure":true}),
+            "holes.insecureNeedsHttps",
+        ),
+        (
+            json!({"name":"a","host_id":"41","target_port":80,"ttl_hours":24,"target_scheme":"ftp"}),
+            "holes.targetSchemeInvalid",
+        ),
+    ] {
+        let error = create(State(s.clone()), admin(1), Json(parse(body)))
+            .await
+            .unwrap_err();
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+        assert_eq!(error.2.unwrap().key, key);
+    }
+    // Switching an existing preview to HTTPS with the exception, then back:
+    // leaving HTTPS also drops the exception.
+    let id = hole_id(&plain);
+    let Json(https) = update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id)),
+        Json(parse(
+            json!({"version":1,"target_scheme":"https","target_tls_insecure":true}),
+        )),
+    )
+    .await
+    .unwrap();
+    assert_eq!(https["target_scheme"], "https");
+    assert_eq!(https["target_tls_insecure"], true);
+    let Json(back) = update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id)),
+        Json(parse(json!({"version":2,"target_scheme":"http"}))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(back["target_scheme"], "http");
+    assert_eq!(back["target_tls_insecure"], false);
+    let error = update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id)),
+        Json(parse(json!({"version":3,"target_tls_insecure":true}))),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.2.unwrap().key, "holes.insecureNeedsHttps");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn https_targets_speak_tls_under_their_certificate_policy() {
+    let (_dir, s) = own_ids(setup().await);
+    add_host(&s, 51, 1, KEY).await;
+    let address = server(s.clone()).await;
+    fake_runner(&s, address, 51, KEY, true).await;
+    let secure = https_upstream().await;
+    let client = http();
+
+    // Self-signed, exception on: proxied over TLS, Host/Origin are the target's.
+    let hole = create_https_hole(&s, 51, secure, true).await;
+    let path = hole["url"].as_str().unwrap().to_owned();
+    let response = client
+        .get(format!("{path}status"))
+        .header("origin", "null")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.unwrap();
+    assert!(body.contains(&format!("host=localhost:{secure}")), "{body}");
+    assert!(
+        body.contains(&format!("origin=https://localhost:{secure}")),
+        "{body}"
+    );
+    let row = reload(&s, i64::from(hole_id(&hole))).await;
+    assert_eq!(row.probe_state, "reachable");
+    proxy::reach(&s, &row).await.unwrap();
+
+    // An https:// redirect to the device itself stays inside the preview.
+    let redirect = client.get(format!("{path}redirect")).send().await.unwrap();
+    assert_eq!(redirect.status(), 301);
+    assert_eq!(redirect.headers()["location"], "/target");
+
+    // Upgrades (noVNC's wss://) run over the same TLS connection.
+    let mut stream = upgraded(address, &format!("{path}console")).await;
+    stream.write_all(b"ping").await.unwrap();
+    let mut echoed = [0u8; 4];
+    tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut echoed))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&echoed, b"ping");
+    drop(stream);
+
+    // Same device, exception off: refused, and the reason says what to do.
+    let strict = create_https_hole(&s, 51, secure, false).await;
+    let strict_row = reload(&s, i64::from(hole_id(&strict))).await;
+    let error = proxy::reach(&s, &strict_row).await.unwrap_err();
+    assert_eq!(error.2.as_ref().unwrap().key, "holes.tlsUntrusted");
+    let strict_path = strict["url"].as_str().unwrap().to_owned();
+    let first = client.get(&strict_path).send().await.unwrap();
+    assert_eq!(first.status(), 503);
+    let stored = reload(&s, i64::from(hole_id(&strict))).await;
+    assert_eq!(stored.probe_state, "unreachable");
+    let again = client.get(&strict_path).send().await.unwrap();
+    assert_eq!(again.status(), 503);
+    let text = again.text().await.unwrap();
+    assert!(
+        text.contains("不受信任") || text.contains("not trusted"),
+        "{text}"
+    );
+
+    // HTTPS chosen for a service that only speaks HTTP.
+    let plain = upstream().await;
+    let wrong = create_https_hole(&s, 51, plain, true).await;
+    let wrong_row = reload(&s, i64::from(hole_id(&wrong))).await;
+    let error = proxy::reach(&s, &wrong_row).await.unwrap_err();
+    assert_eq!(error.2.unwrap().key, "holes.tlsPlainHttp");
+}
+
+#[test]
+fn https_redirects_and_refresh_headers_point_back_into_the_preview() {
+    let prefix = "/holes/t";
+    assert_eq!(
+        proxy::location("https://192.168.0.2:8006/", prefix, "192.168.0.2", 8006).as_deref(),
+        Some("/holes/t/")
+    );
+    assert_eq!(
+        proxy::location("https://nas.lan/login", prefix, "nas.lan", 443).as_deref(),
+        Some("/holes/t/login")
+    );
+    assert_eq!(
+        proxy::location("https://other.lan:8006/", prefix, "192.168.0.2", 8006),
+        None
+    );
+    assert_eq!(
+        proxy::refresh(
+            "0; url=https://192.168.0.2:8006/ui",
+            prefix,
+            "192.168.0.2",
+            8006
+        )
+        .as_deref(),
+        Some("0; url=/holes/t/ui")
+    );
+    assert_eq!(proxy::refresh("5", prefix, "192.168.0.2", 8006), None);
+}

@@ -6,6 +6,7 @@
 //! place that counts the connection, re-checks the hole, and closes both
 //! sides, so nothing it owns can outlive it.
 
+use super::tls::{self, Tls};
 use super::{bounded, holes, state};
 use crate::{
     cluster::Socket,
@@ -66,6 +67,8 @@ struct Target {
     /// Empty: the Runner's own loopback. Not carried in the pool authority;
     /// a connection reloads it from the hole, which never changes it.
     address: String,
+    /// Plain HTTP or HTTPS (verified or not); part of the pool authority.
+    tls: Tls,
 }
 
 /// Loopback or private-network addresses only; the Runner applies the same
@@ -109,12 +112,17 @@ impl Target {
             host: row.host_id,
             port: u16::try_from(row.target_port).ok().filter(|p| *p != 0)?,
             address: row.target_host.clone(),
+            tls: Tls::of(&row.target_scheme, row.target_tls_insecure),
         })
     }
     fn authority(&self) -> String {
         format!(
-            "h{}-{}-{}-{}.invalid",
-            self.hole, self.workspace, self.host, self.port
+            "h{}-{}-{}-{}-{}.invalid",
+            self.hole,
+            self.workspace,
+            self.host,
+            self.port,
+            self.tls.code()
         )
     }
     fn parse(uri: &Uri) -> Option<Self> {
@@ -126,6 +134,7 @@ impl Target {
             host: parts.next()?.parse().ok()?,
             port: parts.next()?.parse().ok()?,
             address: String::new(),
+            tls: Tls::from_code(parts.next()?)?,
         };
         parts.next().is_none().then_some(target)
     }
@@ -263,6 +272,7 @@ pub(super) fn tests_hold(hole: i64, host: i64) -> Option<impl Drop> {
         host,
         port: 1,
         address: String::new(),
+        tls: Tls::Plain,
     })
     .map(|(held, _)| held)
 }
@@ -353,12 +363,26 @@ pub(super) async fn probe(s: &AppState, row: &holes::Model) {
     record(s, row.id, outcome, true).await;
 }
 
-/// Opens and immediately closes one forward: the local service accepts.
+/// Opens and closes one forward: the local service accepts. An HTTPS target
+/// must also complete a TLS handshake under its certificate policy.
 pub(super) async fn reach(s: &AppState, row: &holes::Model) -> Result<(), ApiError> {
     let target = Target::of(row).ok_or_else(ApiError::missing)?;
     let mut socket = open(s, &target).await?;
-    let _ = socket.send(Frame::Close(None)).await;
-    Ok(())
+    if target.tls == Tls::Plain {
+        let _ = socket.send(Frame::Close(None)).await;
+        return Ok(());
+    }
+    // A full preview already holds every slot: it is plainly reachable.
+    let Some((held, closing)) = hold(&target) else {
+        let _ = socket.send(Frame::Close(None)).await;
+        return Ok(());
+    };
+    let (near, far) = tokio::io::duplex(CHUNK * 2);
+    tokio::spawn(pump(s.clone(), target.hole, socket, far, held, closing));
+    // Dropping the TLS stream closes the pipe, and the pump closes the session.
+    tls::connect(target.tls, &target.address, near)
+        .await
+        .map(drop)
 }
 
 /// Records the outcome of a readiness check the same way a probe does.
@@ -388,8 +412,8 @@ impl std::fmt::Display for Refused {
 }
 impl std::error::Error for Refused {}
 
-/// The upstream end of a pump, as hyper sees it.
-struct Pipe(TokioIo<DuplexStream>);
+/// The upstream end of a pump, as hyper sees it: the pipe itself, or TLS on it.
+struct Pipe(TokioIo<Box<dyn tls::Io>>);
 
 impl Connection for Pipe {
     fn connected(&self) -> Connected {
@@ -444,13 +468,17 @@ async fn connect(uri: Uri) -> Result<Pipe, Refused> {
         .get(&target.hole)
         .and_then(|(state, _)| state.upgrade())
         .ok_or(Refused::Unavailable)?;
-    target.address = holes::Entity::find_by_id(target.hole)
+    let row = holes::Entity::find_by_id(target.hole)
         .one(&s.db)
         .await
         .ok()
         .flatten()
-        .ok_or(Refused::Unavailable)?
-        .target_host;
+        .ok_or(Refused::Unavailable)?;
+    // The pool key was made under a setting that has since changed.
+    if Tls::of(&row.target_scheme, row.target_tls_insecure) != target.tls {
+        return Err(Refused::Unavailable);
+    }
+    target.address = row.target_host;
     let (held, closing) = hold(&target).ok_or(Refused::Busy)?;
     let socket = match open(&s, &target).await {
         Ok(socket) => socket,
@@ -459,10 +487,18 @@ async fn connect(uri: Uri) -> Result<Pipe, Refused> {
             return Err(Refused::Unavailable);
         }
     };
-    record(&s, target.hole, ("reachable", String::new()), false).await;
     let (near, far) = tokio::io::duplex(CHUNK * 2);
-    tokio::spawn(pump(s, target.hole, socket, far, held, closing));
-    Ok(Pipe(TokioIo::new(near)))
+    tokio::spawn(pump(s.clone(), target.hole, socket, far, held, closing));
+    match tls::connect(target.tls, &target.address, near).await {
+        Ok(io) => {
+            record(&s, target.hole, ("reachable", String::new()), false).await;
+            Ok(Pipe(TokioIo::new(io)))
+        }
+        Err(error) => {
+            record(&s, target.hole, classify(&error), false).await;
+            Err(Refused::Unavailable)
+        }
+    }
 }
 
 /// Still servable: exists, not revoked, not expired. A database error keeps
@@ -713,6 +749,7 @@ pub(super) async fn serve_entry(
         &mut parts.headers,
         &target.address,
         target.port,
+        target.tls.scheme(),
         &external_host,
         &prefix,
         upgrade,
@@ -854,6 +891,7 @@ fn rewrite_request(
     headers: &mut HeaderMap,
     address: &str,
     port: u16,
+    scheme: &str,
     external_host: &HeaderValue,
     prefix: &str,
     upgrade: bool,
@@ -873,7 +911,7 @@ fn rewrite_request(
         headers.insert(header::HOST, value);
     }
     if headers.contains_key(header::ORIGIN)
-        && let Ok(value) = HeaderValue::from_str(&format!("http://{local}"))
+        && let Ok(value) = HeaderValue::from_str(&format!("{scheme}://{local}"))
     {
         headers.insert(header::ORIGIN, value);
     }
@@ -911,26 +949,61 @@ fn rewrite_response(headers: &mut HeaderMap, prefix: &str, address: &str, port: 
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
         HeaderValue::from_static("*"),
     );
-    if let Some(location) = headers
-        .get(header::LOCATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| location(value, prefix, address, port))
-        && let Ok(value) = HeaderValue::from_str(&location)
-    {
-        headers.insert(header::LOCATION, value);
+    for name in [header::LOCATION, header::CONTENT_LOCATION] {
+        if let Some(location) = headers
+            .get(&name)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| location(value, prefix, address, port))
+            && let Ok(value) = HeaderValue::from_str(&location)
+        {
+            headers.insert(name, value);
+        }
     }
+    // `Refresh: 0; url=https://192.168.0.2:8006/` works like a redirect.
+    if let Some(refresh) = headers
+        .get(header::REFRESH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| refresh(value, prefix, address, port))
+        && let Ok(value) = HeaderValue::from_str(&refresh)
+    {
+        headers.insert(header::REFRESH, value);
+    }
+}
+
+/// Rewrites the URL part of a `Refresh` header the same way as `Location`.
+pub(super) fn refresh(value: &str, prefix: &str, address: &str, port: u16) -> Option<String> {
+    let at = value.to_ascii_lowercase().find("url=")?;
+    let (head, url) = value.split_at(at + 4);
+    let url = url.trim().trim_matches(|c| c == '\'' || c == '"');
+    Some(format!("{head}{}", location(url, prefix, address, port)?))
 }
 
 /// Points a redirect from the local service back under the hole's prefix.
 /// Anything that is not the local origin or a root-relative path is left alone.
 pub(super) fn location(value: &str, prefix: &str, address: &str, port: u16) -> Option<String> {
-    let mut local = vec![
-        format!("http://127.0.0.1:{port}"),
-        format!("http://localhost:{port}"),
-        format!("http://[::1]:{port}"),
+    let mut hosts = vec![
+        format!("127.0.0.1:{port}"),
+        format!("localhost:{port}"),
+        format!("[::1]:{port}"),
     ];
     if !address.is_empty() {
-        local.push(format!("http://{}", upstream_authority(address, port)));
+        hosts.push(upstream_authority(address, port));
+    }
+    // Either scheme: an HTTPS-only device (PVE, a NAS) redirects to https://.
+    let mut local: Vec<String> = hosts
+        .iter()
+        .flat_map(|host| [format!("http://{host}"), format!("https://{host}")])
+        .collect();
+    // Default ports are often left out of an absolute URL.
+    if !address.is_empty() && (port == 443 || port == 80) {
+        let authority = upstream_authority(address, port);
+        let bare = authority
+            .rsplit_once(':')
+            .map_or(authority.as_str(), |(host, _)| host);
+        local.push(format!(
+            "{}://{bare}",
+            if port == 443 { "https" } else { "http" }
+        ));
     }
     let path = if let Some(rest) = local
         .iter()
