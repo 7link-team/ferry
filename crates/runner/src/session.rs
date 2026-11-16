@@ -771,7 +771,7 @@ mod tests {
         crate::transport::send(&mut client, &wire::Session::AgentStart { request: Request {
             binding: None,
             runtime, cwd: dir.path().to_string_lossy().into_owned(), model: None,
-            native_session_id: None, permission: Permission::OnRequest, timeout_seconds: 120, platform_tools: false, provider: None, timezone: None,
+            native_session_id: None, permission: Permission::OnRequest, timeout_seconds: 120, platform_tools: false, provider: None, timezone: None, write_workdir: false,
             prompt: if runtime == Runtime::Claude {
                 "Use only the Write tool to create wire-marker.txt containing CANCELLED.".into()
             } else {

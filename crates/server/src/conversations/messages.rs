@@ -191,6 +191,41 @@ fn assistant_message(
         mentions: "[]".into(),
     }
 }
+/// Adds files to the turn's reply, creating the reply if the Agent wrote no text.
+pub(super) async fn attach_files(
+    conn: &impl ConnectionTrait,
+    turn: &turns::Model,
+    c: &conversations::Model,
+    id: i64,
+    attachments: Vec<Attachment>,
+) -> Result<()> {
+    let old = chat::Entity::find()
+        .filter(chat::Column::ConversationId.eq(c.id))
+        .filter(chat::Column::TurnId.eq(turn.id))
+        .filter(chat::Column::Role.eq("assistant"))
+        .one(conn)
+        .await?;
+    let exists = old.is_some();
+    let parent = links::Entity::find_by_id(turn.id)
+        .one(conn)
+        .await?
+        .map(|link| link.message_id)
+        .unwrap_or(turn.id);
+    let mut row = old.unwrap_or_else(|| assistant_message(turn, c, id, db::now(), parent));
+    let mut list: Vec<Attachment> =
+        serde_json::from_str(&row.attachments).map_err(|_| invalid())?;
+    list.extend(attachments);
+    row.attachments = serde_json::to_string(&list).map_err(|_| invalid())?;
+    if exists {
+        row.version += 1;
+        row.into_active_model().reset_all().update(conn).await?;
+    } else {
+        chat::Entity::insert(row.into_active_model())
+            .exec(conn)
+            .await?;
+    }
+    Ok(())
+}
 pub(super) async fn append_text(
     conn: &impl ConnectionTrait,
     turn: &turns::Model,

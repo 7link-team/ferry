@@ -18,10 +18,10 @@ use crate::{
 use axum::http::StatusCode;
 use ferry_protocol::{
     agent::{Binding, Event, Input, Outcome, Permission, Request, Runtime},
-    sandbox::{Item, Paired},
+    sandbox::{Asset, Item, Paired},
 };
 use serde_json::{Map, Value, json};
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use tokio::{
     sync::{mpsc, watch},
     task::JoinSet,
@@ -75,7 +75,11 @@ pub(super) fn validate(params: &Value, base: &str) -> Result<()> {
             format!("{base}/params/prompt"),
         ));
     }
-    output_schema(&params["output_schema"], base)?;
+    // With file output the JSON answer is optional; without it, it is the output.
+    let files = super::agent_files::mode(params, base)?;
+    if files.is_none() || !params["output_schema"].is_null() {
+        output_schema(&params["output_schema"], base)?;
+    }
     Ok(())
 }
 
@@ -117,6 +121,7 @@ async fn usable(
     scope: &Scope,
     id: Id,
     path: &str,
+    files: bool,
 ) -> Result<(ai_agents::Model, ai_agents::Model)> {
     let agent = crate::conversations::available(conn, scope, id)
         .await
@@ -136,6 +141,15 @@ async fn usable(
         return Err(ApiError::localized(
             StatusCode::BAD_REQUEST,
             Message::new("workflow.agentReadOnly")
+                .with("path", path.to_owned())
+                .with("cli", resolved.runtime.clone()),
+        ));
+    }
+    // Only CLIs whose writes the Runner can confine may produce files unattended.
+    if files && !super::agent_files::runtime_supported(runtime) {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("workflow.agentFilesRuntime")
                 .with("path", path.to_owned())
                 .with("cli", resolved.runtime.clone()),
         ));
@@ -164,7 +178,15 @@ pub(super) async fn validate_agents(
             }
             if supports(node) {
                 let field = format!("{path}/params/agent_id");
-                usable(conn, scope, agent_id(&node["params"], &field)?, &field).await?;
+                let files = super::agent_files::mode(&node["params"], &path)?.is_some();
+                usable(
+                    conn,
+                    scope,
+                    agent_id(&node["params"], &field)?,
+                    &field,
+                    files,
+                )
+                .await?;
             }
         }
     }
@@ -173,7 +195,13 @@ pub(super) async fn validate_agents(
 
 /// Instructions, the user's task, the input items and the output contract in one
 /// prompt; the Runner's prompt limit applies to the whole text.
-fn compose(system: &str, prompt: &str, items: &[Item], schema: &Value) -> Result<String> {
+fn compose(
+    system: &str,
+    prompt: &str,
+    items: &[Item],
+    schema: Option<&Value>,
+    files: bool,
+) -> Result<String> {
     let rows: Vec<_> = items.iter().map(|item| &item.json).collect();
     let mut text = String::new();
     // Labelled so the model never mistakes the Agent's configuration for the task.
@@ -190,11 +218,26 @@ fn compose(system: &str, prompt: &str, items: &[Item], schema: &Value) -> Result
         rows.len(),
         serde_json::to_string(&rows).map_err(|_| ApiError::missing())?
     ));
-    text.push_str(
-        "<output_contract>\nThis is an unattended, read-only workflow step. Read workspace data only with the ferry_discover and ferry_request tools (GET operations only; anything else is refused with 403). Do not modify files. Finish with exactly one JSON object that validates against the JSON Schema below, either as the whole final message or in a ```json fenced block. No other text is required.\n",
-    );
-    text.push_str(&serde_json::to_string(schema).map_err(|_| ApiError::missing())?);
-    text.push_str("\n</output_contract>");
+    text.push_str("<output_contract>\nThis is an unattended workflow step. Read workspace data only with the ferry_discover and ferry_request tools (GET operations only; anything else is refused with 403). ");
+    text.push_str(if files {
+        "Write files only as described in <file_output> below; change nothing else. "
+    } else {
+        "Do not modify files. "
+    });
+    match schema {
+        Some(schema) => {
+            text.push_str("Finish with exactly one JSON object that validates against the JSON Schema below, either as the whole final message or in a ```json fenced block. No other text is required.\n");
+            text.push_str(&serde_json::to_string(schema).map_err(|_| ApiError::missing())?);
+            text.push('\n');
+        }
+        None => text.push_str("Finish with a short summary of what you produced.\n"),
+    }
+    text.push_str("</output_contract>");
+    within_limit(text)
+}
+
+/// The Runner refuses longer prompts.
+fn within_limit(text: String) -> Result<String> {
     if text.len() > RUNNER_PROMPT_BYTES {
         return Err(ApiError::localized(
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -561,7 +604,13 @@ pub(super) async fn execute_with(
     if items.is_empty() {
         return Ok(vec![]);
     }
-    let validator = output_schema(&params["output_schema"], "")?;
+    let files = super::agent_files::mode(params, "")?;
+    // Without file output the JSON answer is the node's output and is required.
+    let validator = if files.is_none() || !params["output_schema"].is_null() {
+        Some(output_schema(&params["output_schema"], "")?)
+    } else {
+        None
+    };
     let max_calls = super::graph::port_index(&params["max_tool_calls"])
         .and_then(|calls| usize::try_from(calls).ok())
         .filter(|calls| (1..=MAX_TOOL_CALLS).contains(calls))
@@ -576,6 +625,7 @@ pub(super) async fn execute_with(
         &scope,
         agent_id(params, "/params/agent_id")?,
         "/params/agent_id",
+        files.is_some(),
     )
     .await?;
     let config = crate::conversations::Configuration::from_agent(&resolved)?;
@@ -583,8 +633,10 @@ pub(super) async fn execute_with(
         &config.system_prompt,
         prompt,
         items,
-        &params["output_schema"],
+        validator.as_ref().map(|_| &params["output_schema"]),
+        files.is_some(),
     )?;
+    let node_name = node["name"].as_str().unwrap_or_default().to_owned();
     let deadline = Instant::now() + limits.timeout;
     let node_run = (node_run > 0).then_some(node_run);
     let paired: Vec<Paired> = items
@@ -593,7 +645,13 @@ pub(super) async fn execute_with(
         .collect();
     let attempt = |target: (i64, bool)| {
         let prompt = prompt.clone();
-        let (resolved, config, validator) = (&resolved, &config, &validator);
+        let (resolved, config, validator, files, node_name) = (
+            &resolved,
+            &config,
+            validator.as_ref(),
+            files.as_ref(),
+            &node_name,
+        );
         host::on_host(s, run, node, target, move |row, lease| async move {
             on_runner(
                 s,
@@ -605,6 +663,7 @@ pub(super) async fn execute_with(
                 lease,
                 prompt,
                 validator,
+                files.map(|mode| (mode, node_name.as_str())),
                 max_calls,
                 deadline,
                 limits.timeout,
@@ -612,17 +671,17 @@ pub(super) async fn execute_with(
             .await
         })
     };
-    let item = |object| {
+    let item = |(object, binary): (Map<String, Value>, BTreeMap<String, Asset>)| {
         vec![Item {
             json: object,
-            binary: Default::default(),
+            binary,
             paired: paired.clone(),
         }]
     };
     // An explicit node (or workflow default) target is used as is.
     if let Some(target) = host::target(node) {
         return match attempt(target).await? {
-            OnHost::Done(object) => Ok(item(object)),
+            OnHost::Done(output) => Ok(item(output)),
             OnHost::Unusable(error) => Err(error),
         };
     }
@@ -638,7 +697,7 @@ pub(super) async fn execute_with(
             continue;
         }
         match attempt((row.id, false)).await? {
-            OnHost::Done(object) => return Ok(item(object)),
+            OnHost::Done(output) => return Ok(item(output)),
             OnHost::Unusable(error) => {
                 reasons.push(&row, unusable_reason(&error, &cli));
                 last = Some(error);
@@ -654,7 +713,8 @@ pub(super) async fn execute_with(
 
 /// What one candidate host did with the node.
 enum OnHost {
-    Done(Map<String, Value>),
+    /// The output item's JSON and its files (empty without file output).
+    Done((Map<String, Value>, BTreeMap<String, Asset>)),
     /// The host cannot run this CLI (offline, missing, not signed in...); the
     /// next candidate is tried. Failures after the CLI started are errors.
     Unusable(ApiError),
@@ -669,6 +729,7 @@ fn unusable_reason(error: &ApiError, cli: &str) -> Message {
         Some("workflow.agentCliMissing") => reason("models.reasonCliMissing", cli),
         Some("workflow.agentRunnerUpgrade") => Message::new("models.reasonRunnerOld"),
         Some("workflow.agentLoginRequired") => reason("models.reasonLogin", cli),
+        Some("workflow.agentFilesRunnerUpgrade") => Message::new("models.reasonRunnerOld"),
         _ => crate::agent_hosts::reason_from(error),
     }
 }
@@ -692,7 +753,8 @@ async fn on_runner(
     row: hosts::Model,
     lease: Arc<Lease>,
     prompt: String,
-    validator: &jsonschema::Validator,
+    validator: Option<&jsonschema::Validator>,
+    files: Option<(&super::agent_files::FileMode, &str)>,
     max_calls: usize,
     deadline: Instant,
     timeout: Duration,
@@ -708,8 +770,17 @@ async fn on_runner(
             Ok(channel) => channel,
             Err(error) => return Ok(OnHost::Unusable(error)),
         };
-    // A managed workspace per workflow and Agent; keys are numeric IDs.
-    let probe = if config.cwd.is_empty() {
+    // A managed workspace per workflow and Agent; keys are numeric IDs. File
+    // output always gets a fresh one per node execution, never the Agent's own
+    // directory, so nothing outside it can be written or collected.
+    let probe = if files.is_some() {
+        channel
+            .agent_workspace(
+                config.runtime,
+                &format!("{}-{}", run.id, node_run.unwrap_or(run.id)),
+            )
+            .await
+    } else if config.cwd.is_empty() {
         channel
             .agent_workspace(config.runtime, &format!("{}-{}", run.workflow_id, agent.id))
             .await
@@ -732,6 +803,16 @@ async fn on_runner(
     {
         return unusable("workflow.agentRunnerUpgrade");
     }
+    if files.is_some() && !probe.write_workdir {
+        return unusable("workflow.agentFilesRunnerUpgrade");
+    }
+    let prompt = match files {
+        Some((mode, _)) => within_limit(format!(
+            "{prompt}\n\n{}",
+            super::agent_files::contract(mode, config.runtime, &probe.file_tools)
+        ))?,
+        None => prompt,
+    };
     let provider =
         crate::models::cli_provider(s, Id::from(run.workspace_id), agent.id, config.runtime)
             .await?;
@@ -803,9 +884,23 @@ async fn on_runner(
         platform_tools: true,
         provider: provider.clone(),
         timezone: timezone.clone(),
+        write_workdir: files.is_some(),
     };
+    if files.is_some() {
+        let output = super::agent_files::join(&directory, super::agent_files::OUTPUT_DIR);
+        let _ = session.channel.create_dir(&output).await;
+    }
     let result = async {
         let answer = session.turn(request(prompt, None)).await?;
+        let Some(validator) = validator else {
+            // File output without a JSON contract: the final message is the summary.
+            let mut object = Map::new();
+            object.insert(
+                "summary".into(),
+                json!(answer.text.trim().chars().take(4000).collect::<String>()),
+            );
+            return Ok(object);
+        };
         match accept(&answer.text, validator) {
             Ok(object) => Ok(object),
             // One correction in the same native session, within the same limits.
@@ -824,8 +919,48 @@ async fn on_runner(
         }
     }
     .await;
+    // Files left under ./output become workflow files; the working directory
+    // is removed afterwards whether or not the node succeeded.
+    let result = match (result, files) {
+        (Ok(mut object), Some((mode, node_name))) => {
+            let collected = async {
+                let found = super::agent_files::collect(session.channel, &directory, mode).await?;
+                let mut listed = Vec::new();
+                let mut binary = BTreeMap::new();
+                for (index, file) in found.iter().enumerate() {
+                    let (reference, info) =
+                        super::agent_files::store(s, run, node_name, file).await?;
+                    session.log.push(
+                        "agent",
+                        format!(
+                            "file: {} ({} bytes, {})",
+                            file.name,
+                            file.bytes.len(),
+                            file.mime
+                        )
+                        .as_bytes(),
+                    );
+                    binary.insert(format!("file_{}", index + 1), reference);
+                    listed.push(info);
+                }
+                Ok::<_, ApiError>((listed, binary))
+            }
+            .await;
+            super::agent_files::cleanup(session.channel, &directory).await;
+            collected.map(|(listed, binary)| {
+                object.insert("files".into(), Value::Array(listed));
+                (object, binary)
+            })
+        }
+        (result, files) => {
+            if files.is_some() {
+                super::agent_files::cleanup(session.channel, &directory).await;
+            }
+            result.map(|object| (object, BTreeMap::new()))
+        }
+    };
     match &result {
-        Ok(object) => session.log.push(
+        Ok((object, _)) => session.log.push(
             "agent",
             format!(
                 "output: {}",

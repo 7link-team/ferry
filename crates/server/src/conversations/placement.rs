@@ -24,6 +24,23 @@ pub(super) struct Placement {
     pub channel: Box<dyn HostChannel>,
     /// The native CLI session cannot be resumed here: a new host or binding.
     pub fresh: bool,
+    /// What the Runner reported for file output (see `Probe::write_workdir`).
+    pub files: FileCapability,
+}
+
+/// Whether the Runner can confine a turn's writes, and its file tools.
+#[derive(Clone, Debug, Default)]
+pub(super) struct FileCapability {
+    pub write_workdir: bool,
+    pub tools: Vec<String>,
+}
+impl FileCapability {
+    fn of(probe: &ferry_protocol::agent::Probe) -> Self {
+        Self {
+            write_workdir: probe.write_workdir,
+            tools: probe.file_tools.clone(),
+        }
+    }
 }
 
 /// Why the bound host cannot run this turn.
@@ -80,13 +97,14 @@ pub(super) async fn place(
         let mut bound_failure = None;
         if let Some(binding) = parse_binding(&stored_binding)? {
             match current(s, scope, &config, &binding, login_usable).await {
-                Ok((host, channel)) => {
+                Ok((host, channel, files)) => {
                     return Ok(Placement {
                         config,
                         binding,
                         host,
                         channel,
                         fresh: false,
+                        files,
                     });
                 }
                 Err(unusable) => {
@@ -135,7 +153,7 @@ pub(super) async fn place(
             candidates.retain(|known| known.id != host.id);
             candidates.insert(0, host);
         }
-        let (host, channel, binding) = match allocate(
+        let (host, channel, binding, files) = match allocate(
             s,
             scope,
             c,
@@ -178,6 +196,7 @@ pub(super) async fn place(
                     host,
                     channel,
                     fresh: true,
+                    files,
                 });
             }
             Stored::Changed(config, binding) => {
@@ -196,7 +215,7 @@ async fn current(
     config: &Configuration,
     binding: &Binding,
     login_usable: impl Fn(&str) -> bool,
-) -> std::result::Result<(hosts::Model, Box<dyn HostChannel>), Unusable> {
+) -> std::result::Result<(hosts::Model, Box<dyn HostChannel>, FileCapability), Unusable> {
     let cli = agent_hosts::cli_name(config.runtime);
     let host = hosts::Entity::find_by_id(config.host_id)
         .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
@@ -234,6 +253,7 @@ async fn current(
         Ok(probe) => probe,
         Err(error) => return Err(unusable(&host, offline(&error), false)),
     };
+    let files = FileCapability::of(&probe);
     let checked = match agent_hosts::check(probe, &cli, &login_usable) {
         Ok(checked) => checked,
         Err(reason) => return Err(unusable(&host, reason, false)),
@@ -246,7 +266,7 @@ async fn current(
         let reason = Message::new("conversations.bindingChanged");
         return Err(unusable(&host, reason, true));
     }
-    Ok((host, channel))
+    Ok((host, channel, files))
 }
 
 fn offline(error: &ApiError) -> Message {
@@ -275,7 +295,7 @@ async fn allocate(
     pinned: bool,
     candidates: Vec<hosts::Model>,
     login_usable: impl Fn(&str) -> bool + Copy,
-) -> std::result::Result<(hosts::Model, Box<dyn HostChannel>, Binding), Unplaced> {
+) -> std::result::Result<(hosts::Model, Box<dyn HostChannel>, Binding, FileCapability), Unplaced> {
     let cli = agent_hosts::cli_name(config.runtime);
     let mut reasons = Reasons::default();
     for host in candidates {
@@ -315,8 +335,9 @@ async fn allocate(
                 continue;
             }
         };
+        let files = FileCapability::of(&probe);
         match agent_hosts::check(probe, &cli, login_usable) {
-            Ok(binding) => return Ok((host, channel, binding)),
+            Ok(binding) => return Ok((host, channel, binding, files)),
             Err(reason) => reasons.push(&host, reason),
         }
     }

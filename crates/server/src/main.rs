@@ -1111,6 +1111,10 @@ fn workspace_routes() -> Router<state::AppState> {
         )
         .route("/{workspace}/nodes/{id}/metrics", get(hosts::monitor::read))
         .route(
+            "/{workspace}/nodes/{id}/file-tools",
+            get(workflows::agent_files::host_tools),
+        )
+        .route(
             "/{workspace}/nodes/{id}/file-systems",
             get(hosts::remote::file_systems),
         )

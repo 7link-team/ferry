@@ -1186,7 +1186,13 @@
     "runner.sentence.cancelled": "The update to {{to}} was cancelled",
     "runner.sentence.other": "Update to {{to}}: status not available",
     "runner.versionsOffline": "Last reported version {{current}} · Server version {{server}}",
-    "runner.offlineNow": "HostAgent is offline. Last reported version {{version}}; the current update status appears once it reconnects."
+    "runner.offlineNow": "HostAgent is offline. Last reported version {{version}}; the current update status appears once it reconnects.",
+    "fileTools.label": "File production tools",
+    "fileTools.check": "Check",
+    "fileTools.checking": "Checking…",
+    "fileTools.none": "No file-production tools found for the Runner's user (such as python-docx, python-pptx, LibreOffice, ffmpeg or CLI skills).",
+    "fileTools.help": "Tools and skills the Runner's user already has. AI agents producing files use them; Ferry never installs anything.",
+    "fileTools.upgrade": "This Runner is too old to let AI agents produce files in a confined directory. Upgrade the Runner."
   },
   "zh-CN": {
     "runner.scopeFallback": "节点未上报服务安装方式。下方默认生成系统服务安装命令，不代表现有代理以系统服务运行；需要安装到当前用户时可切换。",
@@ -2375,7 +2381,13 @@
     "runner.sentence.cancelled": "已取消升级到 {{to}}",
     "runner.sentence.other": "升级到 {{to}}：状态暂不可用",
     "runner.versionsOffline": "最后上报版本 {{current}} · 服务版本 {{server}}",
-    "runner.offlineNow": "主机代理当前离线。最后上报版本 {{version}}；重新连接后显示最新升级状态。"
+    "runner.offlineNow": "主机代理当前离线。最后上报版本 {{version}}；重新连接后显示最新升级状态。",
+    "fileTools.label": "文件制作能力",
+    "fileTools.check": "检测",
+    "fileTools.checking": "检测中…",
+    "fileTools.none": "Runner 执行账号下未发现可用于制作文件的工具（如 python-docx、python-pptx、LibreOffice、ffmpeg 或 CLI 技能）。",
+    "fileTools.help": "Runner 执行账号下已有的工具和技能，AI 生成文件时会使用它们；Ferry 不会安装任何软件。",
+    "fileTools.upgrade": "此 Runner 版本过旧，不支持让 AI 在受限目录中生成文件，请升级 Runner。"
   },
   "zh-TW": {
     "runner.scopeFallback": "節點未回報服務安裝方式。下方預設產生系統服務安裝命令，不代表現有代理以系統服務運行；需要安裝到目前使用者時可切換。",
@@ -3564,7 +3576,13 @@
     "runner.sentence.cancelled": "已取消升級到 {{to}}",
     "runner.sentence.other": "升級到 {{to}}：狀態暫不可用",
     "runner.versionsOffline": "最後回報版本 {{current}} · 服務版本 {{server}}",
-    "runner.offlineNow": "主機代理目前離線。最後回報版本 {{version}}；重新連線後顯示最新升級狀態。"
+    "runner.offlineNow": "主機代理目前離線。最後回報版本 {{version}}；重新連線後顯示最新升級狀態。",
+    "fileTools.label": "檔案製作能力",
+    "fileTools.check": "偵測",
+    "fileTools.checking": "偵測中…",
+    "fileTools.none": "Runner 執行帳號下未發現可用於製作檔案的工具（如 python-docx、python-pptx、LibreOffice、ffmpeg 或 CLI 技能）。",
+    "fileTools.help": "Runner 執行帳號下已有的工具和技能，AI 產生檔案時會使用它們；Ferry 不會安裝任何軟體。",
+    "fileTools.upgrade": "此 Runner 版本過舊，不支援讓 AI 在受限目錄中產生檔案，請升級 Runner。"
   },
   "ja-JP": {
     "runner.scopeFallback": "ノードからサービスのインストール範囲が報告されていません。コマンドの既定値はシステムサービスですが、現在のエージェントの実行方式を示すものではありません。必要に応じて現在のユーザーに切り替えてください。",
@@ -4753,7 +4771,13 @@
     "runner.sentence.cancelled": "{{to}} への更新はキャンセルされました",
     "runner.sentence.other": "{{to}} への更新：状態を取得できません",
     "runner.versionsOffline": "最終報告バージョン {{current}} · サーバーバージョン {{server}}",
-    "runner.offlineNow": "ホストエージェントはオフラインです。最終報告バージョンは {{version}} です。再接続すると最新の更新状況が表示されます。"
+    "runner.offlineNow": "ホストエージェントはオフラインです。最終報告バージョンは {{version}} です。再接続すると最新の更新状況が表示されます。",
+    "fileTools.label": "ファイル作成ツール",
+    "fileTools.check": "確認",
+    "fileTools.checking": "確認中…",
+    "fileTools.none": "Runner の実行ユーザーにファイル作成ツール（python-docx、python-pptx、LibreOffice、ffmpeg、CLI スキルなど）は見つかりませんでした。",
+    "fileTools.help": "Runner の実行ユーザーが既に持つツールとスキルです。AI がファイルを生成するときに使います。Ferry は何もインストールしません。",
+    "fileTools.upgrade": "この Runner は古いため、AI に制限されたディレクトリでファイルを生成させられません。Runner を更新してください。"
   },
   "ko-KR": {
     "runner.scopeFallback": "노드가 서비스 설치 범위를 보고하지 않았습니다. 명령의 기본값은 시스템 서비스이며 현재 에이전트의 실행 방식을 뜻하지 않습니다. 필요하면 현재 사용자로 전환하세요.",
@@ -5942,7 +5966,13 @@
     "runner.sentence.cancelled": "{{to}}(으)로의 업데이트가 취소됨",
     "runner.sentence.other": "{{to}}(으)로 업데이트: 상태를 확인할 수 없음",
     "runner.versionsOffline": "마지막 보고 버전 {{current}} · 서버 버전 {{server}}",
-    "runner.offlineNow": "호스트 에이전트가 오프라인입니다. 마지막 보고 버전 {{version}}; 다시 연결되면 최신 업데이트 상태가 표시됩니다."
+    "runner.offlineNow": "호스트 에이전트가 오프라인입니다. 마지막 보고 버전 {{version}}; 다시 연결되면 최신 업데이트 상태가 표시됩니다.",
+    "fileTools.label": "파일 제작 도구",
+    "fileTools.check": "확인",
+    "fileTools.checking": "확인 중…",
+    "fileTools.none": "Runner 실행 계정에서 파일 제작 도구(python-docx, python-pptx, LibreOffice, ffmpeg, CLI 스킬 등)를 찾지 못했습니다.",
+    "fileTools.help": "Runner 실행 계정에 이미 있는 도구와 스킬입니다. AI가 파일을 만들 때 사용하며 Ferry는 아무것도 설치하지 않습니다.",
+    "fileTools.upgrade": "이 Runner는 오래되어 AI가 제한된 디렉터리에서 파일을 만들 수 없습니다. Runner를 업그레이드하세요."
   },
   "ms-MY": {
     "runner.scopeFallback": "Nod belum melaporkan skop pemasangan perkhidmatan. Arahan lalai ialah perkhidmatan sistem; ini tidak menerangkan ejen yang sedang berjalan. Pilih Pengguna semasa jika diperlukan.",
@@ -7131,6 +7161,12 @@
     "runner.sentence.cancelled": "Kemas kini ke {{to}} dibatalkan",
     "runner.sentence.other": "Kemas kini ke {{to}}: status tidak tersedia",
     "runner.versionsOffline": "Versi terakhir dilaporkan {{current}} · Versi pelayan {{server}}",
-    "runner.offlineNow": "HostAgent di luar talian. Versi terakhir dilaporkan {{version}}; status kemas kini terkini dipaparkan selepas ia menyambung semula."
+    "runner.offlineNow": "HostAgent di luar talian. Versi terakhir dilaporkan {{version}}; status kemas kini terkini dipaparkan selepas ia menyambung semula.",
+    "fileTools.label": "Alat penghasilan fail",
+    "fileTools.check": "Semak",
+    "fileTools.checking": "Menyemak…",
+    "fileTools.none": "Tiada alat penghasilan fail ditemui untuk pengguna Runner (seperti python-docx, python-pptx, LibreOffice, ffmpeg atau kemahiran CLI).",
+    "fileTools.help": "Alat dan kemahiran yang sudah ada pada pengguna Runner. Ejen AI menggunakannya untuk menghasilkan fail; Ferry tidak memasang apa-apa.",
+    "fileTools.upgrade": "Runner ini terlalu lama untuk membenarkan ejen AI menghasilkan fail dalam direktori terhad. Naik taraf Runner."
   }
 }

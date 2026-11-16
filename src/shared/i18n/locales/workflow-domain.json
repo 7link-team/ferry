@@ -6510,5 +6510,93 @@
     "出力：入力データに、出力フィールドのファイル（名前、サイズ、ダウンロードリンク、ページ数）を加えたもの。後続の「通知を送信」でそのフィールド名を添付に指定します。",
     "출력: 입력 데이터에 출력 필드의 파일(이름, 크기, 다운로드 링크, 쪽수)을 더한 것. 이후 '알림 보내기' 단계에서 그 필드 이름을 첨부로 지정하세요.",
     "Output: item input serta fail di bawah medan output (nama, saiz, pautan muat turun, halaman). Lampirkannya dalam langkah 'Hantar pemberitahuan' kemudian dengan nama medan itu."
+  ],
+  "agent.files": [
+    "Produce files",
+    "生成文件",
+    "產生檔案",
+    "ファイルを生成",
+    "파일 생성",
+    "Hasilkan fail"
+  ],
+  "agent.filesHelp": [
+    "The Agent's CLI runs in a fresh working directory on the Runner where it can write only inside that directory, without network, and leaves deliverables (PDF, Word, Excel, PPT, charts, video, Markdown, JSON…) in ./output/. They become workflow files listed in the output's files field. Codex can use programs already on the host; nothing is installed.",
+    "智能体的 CLI 在 Runner 上一个全新的工作目录中运行，只能写入该目录、不能联网，并把交付物（PDF、Word、Excel、PPT、图表、视频、Markdown、JSON 等）放进 ./output/。这些文件成为工作流文件，列在输出的 files 字段中。Codex 可以使用主机上已有的程序，不会安装任何软件。",
+    "智慧體的 CLI 在 Runner 上一個全新的工作目錄中執行，只能寫入該目錄、不能連網，並把交付物（PDF、Word、Excel、PPT、圖表、影片、Markdown、JSON 等）放進 ./output/。這些檔案成為工作流程檔案，列在輸出的 files 欄位中。Codex 可以使用主機上已有的程式，不會安裝任何軟體。",
+    "エージェントの CLI は Runner 上の新しい作業ディレクトリで実行され、そのディレクトリ内にのみ書き込め、ネットワークは使えません。成果物（PDF、Word、Excel、PPT、グラフ、動画、Markdown、JSON など）は ./output/ に置かれ、出力の files フィールドに一覧されるワークフローファイルになります。Codex はホストに既にあるプログラムを使えます。何もインストールしません。",
+    "에이전트의 CLI는 Runner의 새 작업 디렉터리에서 실행되며 그 디렉터리 안에만 쓸 수 있고 네트워크는 쓸 수 없습니다. 결과물(PDF, Word, Excel, PPT, 차트, 동영상, Markdown, JSON 등)은 ./output/에 두며, 출력의 files 필드에 나열되는 워크플로 파일이 됩니다. Codex는 호스트에 이미 있는 프로그램을 쓸 수 있으며 아무것도 설치하지 않습니다.",
+    "CLI Ejen berjalan dalam direktori kerja baharu pada Runner, hanya boleh menulis di dalamnya tanpa rangkaian, dan meninggalkan hasil (PDF, Word, Excel, PPT, carta, video, Markdown, JSON…) dalam ./output/. Ia menjadi fail aliran kerja yang disenaraikan dalam medan files output. Codex boleh menggunakan program sedia ada pada hos; tiada apa yang dipasang."
+  ],
+  "agent.filesRuntime": [
+    "Producing files needs an Agent that uses Codex or Claude Code: only they can be confined to their working directory.",
+    "生成文件需要使用 Codex 或 Claude Code 的智能体：只有它们能把写入限制在工作目录内。",
+    "產生檔案需要使用 Codex 或 Claude Code 的智慧體：只有它們能把寫入限制在工作目錄內。",
+    "ファイルの生成には Codex または Claude Code を使うエージェントが必要です。作業ディレクトリ内に書き込みを限定できるのはこの 2 つだけです。",
+    "파일을 만들려면 Codex 또는 Claude Code를 쓰는 에이전트가 필요합니다. 작업 디렉터리 안으로 쓰기를 제한할 수 있는 것은 이 둘뿐입니다.",
+    "Menghasilkan fail memerlukan Ejen yang menggunakan Codex atau Claude Code: hanya ia boleh dihadkan kepada direktori kerjanya."
+  ],
+  "agent.filesClaude": [
+    "In this mode Claude Code can only write text files (Markdown, CSV, JSON, HTML, SVG). For PDF, Office documents, images or video, use a Codex Agent.",
+    "此模式下 Claude Code 只能写文本类文件（Markdown、CSV、JSON、HTML、SVG）。PDF、Office 文档、图片或视频请使用 Codex 智能体。",
+    "此模式下 Claude Code 只能寫文字類檔案（Markdown、CSV、JSON、HTML、SVG）。PDF、Office 文件、圖片或影片請使用 Codex 智慧體。",
+    "このモードの Claude Code はテキストファイル（Markdown、CSV、JSON、HTML、SVG）しか書けません。PDF、Office 文書、画像、動画には Codex エージェントを使ってください。",
+    "이 모드의 Claude Code는 텍스트 파일(Markdown, CSV, JSON, HTML, SVG)만 쓸 수 있습니다. PDF, Office 문서, 이미지, 동영상은 Codex 에이전트를 쓰세요.",
+    "Dalam mod ini Claude Code hanya boleh menulis fail teks (Markdown, CSV, JSON, HTML, SVG). Untuk PDF, dokumen Office, imej atau video, gunakan Ejen Codex."
+  ],
+  "agent.filesFormats": [
+    "Accepted formats",
+    "允许的格式",
+    "允許的格式",
+    "許可する形式",
+    "허용 형식",
+    "Format diterima"
+  ],
+  "agent.filesFormatsHelp": [
+    "File extensions separated by commas, e.g. pdf, pptx, xlsx. Leave empty to accept any format. Each file's content is checked against its extension.",
+    "用逗号分隔的扩展名，如 pdf, pptx, xlsx；留空表示任意格式。每个文件的内容都会按扩展名校验。",
+    "以逗號分隔的副檔名，如 pdf, pptx, xlsx；留空表示任意格式。每個檔案的內容都會依副檔名校驗。",
+    "カンマ区切りの拡張子（例：pdf, pptx, xlsx）。空欄なら任意の形式。各ファイルの内容は拡張子と照合されます。",
+    "쉼표로 구분한 확장자(예: pdf, pptx, xlsx). 비워 두면 모든 형식을 허용합니다. 각 파일 내용은 확장자와 대조합니다.",
+    "Sambungan fail dipisahkan koma, cth. pdf, pptx, xlsx. Biarkan kosong untuk sebarang format. Kandungan setiap fail disemak berdasarkan sambungannya."
+  ],
+  "agent.filesFormatsInvalid": [
+    "Use up to 30 extensions of letters and digits (at most 10 characters each).",
+    "最多 30 个扩展名，每个只能包含字母和数字、不超过 10 个字符。",
+    "最多 30 個副檔名，每個只能包含字母和數字、不超過 10 個字元。",
+    "拡張子は最大 30 個、英数字のみで各 10 文字以内です。",
+    "확장자는 최대 30개, 각각 영문자와 숫자 10자 이하여야 합니다.",
+    "Gunakan paling banyak 30 sambungan huruf dan digit (paling banyak 10 aksara setiap satu)."
+  ],
+  "agent.filesMax": [
+    "Maximum files",
+    "最多文件数",
+    "最多檔案數",
+    "最大ファイル数",
+    "최대 파일 수",
+    "Fail maksimum"
+  ],
+  "agent.filesTotal": [
+    "Total size limit (MB)",
+    "总大小上限（MB）",
+    "總大小上限（MB）",
+    "合計サイズの上限（MB）",
+    "총 크기 한도(MB)",
+    "Had saiz keseluruhan (MB)"
+  ],
+  "agent.filesInstructions": [
+    "File requirements (optional)",
+    "文件要求（可选）",
+    "檔案要求（選填）",
+    "ファイルの要件（任意）",
+    "파일 요구 사항(선택)",
+    "Keperluan fail (pilihan)"
+  ],
+  "agent.schemaOptional": [
+    "Optional when producing files. With a schema, the final answer must also be one matching JSON object; without one, the output holds the final message as summary plus the files list.",
+    "生成文件时可留空。填写后，最终回答还必须是符合它的一个 JSON 对象；留空时，输出包含最终回复摘要（summary）和文件列表。",
+    "產生檔案時可留空。填寫後，最終回答還必須是符合它的一個 JSON 物件；留空時，輸出包含最終回覆摘要（summary）和檔案清單。",
+    "ファイル生成時は省略できます。指定すると最終回答も一致する JSON オブジェクトである必要があります。省略すると出力は最終メッセージの要約（summary）とファイル一覧になります。",
+    "파일을 만들 때는 비워 둘 수 있습니다. 입력하면 최종 답변도 이에 맞는 JSON 객체여야 하고, 비우면 출력에 최종 메시지 요약(summary)과 파일 목록이 담깁니다.",
+    "Pilihan semasa menghasilkan fail. Dengan skema, jawapan akhir juga mesti satu objek JSON yang sepadan; tanpanya, output mengandungi mesej akhir sebagai ringkasan serta senarai fail."
   ]
 }

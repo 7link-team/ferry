@@ -5,7 +5,7 @@ import { api } from "../../shared/api/api";
 import { i18n, workflowText as t } from "../../shared/i18n/i18n";
 import { WorkflowAssetContext } from "./WorkflowAssets";
 import { WorkflowNodeParameters } from "./WorkflowNodeParameters";
-import { schemaProblem } from "./WorkflowAgentParameters";
+import { formatsProblem, parseFormats, schemaProblem } from "./WorkflowAgentParameters";
 import { emptyGraph, newNode, type GraphNode } from "./graph";
 
 vi.mock("../../shared/api/api", () => ({
@@ -129,4 +129,42 @@ it("is read-only in view mode and localizes the execution location in six langua
     await render(<Harness readOnly />);
     expect(location(), locale).toBe(text);
   }
+});
+
+it("configures file output: formats, limits, an optional schema and confinable CLIs only", async () => {
+  await render(<Harness />);
+  await change(t("agent.agent"), "11");
+  expect(field<HTMLInputElement>(t("agent.filesFormats"))).toBeNull();
+  await act(async () => field<HTMLInputElement>(t("agent.files")).click());
+  expect(current.files).toEqual({ enabled: true });
+  await change(t("agent.filesFormats"), ".PDF, pptx，xlsx pdf");
+  expect(current.files).toMatchObject({ enabled: true, formats: ["pdf", "pptx", "xlsx"] });
+  await change(t("agent.filesMax"), "3");
+  await change(t("agent.filesTotal"), "250");
+  await change(t("agent.filesInstructions"), "用公司配色");
+  expect(current.files).toEqual({ enabled: true, formats: ["pdf", "pptx", "xlsx"], max_files: 3, max_total_mb: 250, instructions: "用公司配色" });
+  // A bad extension is reported and not stored.
+  await change(t("agent.filesFormats"), "pdf, ../x");
+  expect(host.textContent).toContain(t("agent.filesFormatsInvalid"));
+  expect(reported("agentFiles")).toBe(true);
+  expect(current.files).toMatchObject({ formats: ["pdf", "pptx", "xlsx"] });
+  await change(t("agent.filesFormats"), "");
+  expect(current.files).toMatchObject({ formats: "any" });
+  expect(reported("agentFiles")).toBe(false);
+  // With files the schema may be left empty; it is then removed.
+  await change(t("agent.outputSchema"), "");
+  expect(current.output_schema).toBeUndefined();
+  expect(reported("agentSchema")).toBe(false);
+  expect(host.textContent).toContain(t("agent.schemaOptional"));
+  // Claude can only write text formats here; the editor says so.
+  await render(<Harness settings={{ runtime: "host", target_kind: "host", target_ref: "9" }} />);
+  await change(t("agent.agent"), "14");
+  expect(host.textContent).toContain(t("agent.filesClaude"));
+  expect(reported("agentFiles")).toBe(false);
+  // Turning files off makes the schema required again.
+  await act(async () => field<HTMLInputElement>(t("agent.files")).click());
+  expect(current.files).toMatchObject({ enabled: false });
+  expect(reported("agentSchema")).toBe(true);
+  expect(parseFormats(" .Docx ; md;md ")).toEqual(["docx", "md"]);
+  expect(formatsProblem(["toolongextension"])).toBe(true);
 });

@@ -242,5 +242,15 @@
   "workflow.reportTooManyPages": "報告將超過 {limit} 頁，請精簡或拆分為多份報告。",
   "workflow.reportTimeout": "報告排版超過 {seconds} 秒未完成，請精簡內容或重試。",
   "workflow.reportContentInvalid": "報告內容格式不符合要求：{reason}",
-  "fileLink.unavailable": "下載連結已過期，或檔案已無法使用。"
+  "fileLink.unavailable": "下載連結已過期，或檔案已無法使用。",
+  "workflow.agentFilesInvalid": "{path} 的檔案輸出設定無效：最多 50 個檔案、總大小 1–500 MB、格式填寫副檔名、說明不超過 4 KB。",
+  "workflow.agentFilesRuntime": "{path}：{cli} 無法在無人值守時產生檔案，只有 Codex 和 Claude Code 能把寫入限制在工作目錄內。請選擇使用這兩者之一的智慧體。",
+  "workflow.agentFilesRunnerUpgrade": "主機 {host} 上的 Runner 版本過舊，不支援讓 {cli} 產生檔案。請升級 Runner 後重新執行。",
+  "workflow.agentFilesTooMany": "智慧體產生的檔案超過上限（最多 {max} 個）。請提高上限或要求產生更少的檔案。",
+  "workflow.agentFileTooLarge": "檔案「{name}」超過單一檔案上限 {limit} MB。",
+  "workflow.agentFilesTotal": "智慧體產生的檔案總大小超過 {limit} MB。請提高上限或要求產生更小的檔案。",
+  "workflow.agentFileFormat": "檔案「{name}」不在允許的格式內（{formats}）。",
+  "workflow.agentFileMismatch": "檔案「{name}」的內容與其檔案類型不符，未交付。請要求智慧體產生真正的該類型檔案。",
+  "workflow.agentNoFiles": "智慧體已結束，但輸出目錄中沒有任何檔案。請查看它的最終回覆了解原因，或把要求寫得更具體。",
+  "hosts.fileToolsRunnerOnly": "只有 Runner 主機可以偵測檔案製作能力。"
 }

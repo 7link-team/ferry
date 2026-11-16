@@ -633,6 +633,7 @@ mod tests {
                     platform_tools: false,
                     provider: None,
                     timezone: None,
+                    write_workdir: false,
                 },
             },
             Session::AgentInput {
@@ -733,6 +734,7 @@ mod tests {
             platform_tools: false,
             provider: None,
             timezone: None,
+            write_workdir: false,
         };
         let text = serde_json::to_string(&request).unwrap();
         assert!(!text.contains("timezone"), "{text}");

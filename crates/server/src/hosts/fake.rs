@@ -40,6 +40,11 @@ pub(crate) struct FakeHost {
     pub agent_cancelled: AtomicBool,
     /// Overrides the default probe answer (a usable, signed-in CLI with platform tools).
     pub agent_probe: Mutex<Option<ferry_protocol::agent::Probe>>,
+    /// When set, `list_dir` and `read_file` serve `files` as a directory tree
+    /// (off by default so deployment fakes keep their empty listings).
+    pub browsable: AtomicBool,
+    /// Paths `list_dir` reports as symbolic links.
+    pub symlinks: Mutex<std::collections::BTreeSet<String>>,
 }
 
 /// One step of a scripted fake Agent execution.
@@ -52,6 +57,8 @@ pub(crate) enum AgentStep {
     Barrier(Arc<tokio::sync::Barrier>),
     /// Runs until cancelled.
     Hang,
+    /// Writes a file relative to the request's working directory, as the CLI would.
+    Write(String, String),
 }
 
 impl FakeHost {
@@ -189,8 +196,44 @@ impl HostChannel for Channel {
     async fn open_pty(&self, _: PtySize) -> Result<Box<dyn Pty>> {
         Err(ApiError::bad("fake host has no pty"))
     }
-    async fn list_dir(&self, _: &str) -> Result<Vec<DirEntry>> {
-        Ok(Vec::new())
+    async fn list_dir(&self, path: &str) -> Result<Vec<DirEntry>> {
+        if !self.0.browsable.load(Ordering::SeqCst) {
+            return Ok(Vec::new());
+        }
+        let prefix = format!("{}/", path.trim_end_matches('/'));
+        let files = self.0.files.lock().unwrap();
+        let symlinks = self.0.symlinks.lock().unwrap();
+        let mut entries: BTreeMap<String, DirEntry> = BTreeMap::new();
+        for (file, content) in files.iter() {
+            let Some(rest) = file.strip_prefix(&prefix) else {
+                continue;
+            };
+            let (name, nested) = match rest.split_once('/') {
+                Some((name, _)) => (name, true),
+                None => (rest, false),
+            };
+            let kind = if symlinks.contains(&format!("{prefix}{name}")) {
+                "symlink"
+            } else if nested {
+                "directory"
+            } else {
+                "file"
+            };
+            entries.insert(
+                name.into(),
+                DirEntry {
+                    name: name.into(),
+                    kind: kind.into(),
+                    size: if nested { 0 } else { content.len() as u64 },
+                    mode: 0o644,
+                    modified_at: 0,
+                },
+            );
+        }
+        if entries.is_empty() && !files.keys().any(|file| file.starts_with(&prefix)) {
+            return Err(ApiError::bad("no such directory"));
+        }
+        Ok(entries.into_values().collect())
     }
     async fn create_file(&self, _: &str) -> Result<()> {
         Ok(())
@@ -198,8 +241,25 @@ impl HostChannel for Channel {
     async fn create_dir(&self, _: &str) -> Result<()> {
         Ok(())
     }
-    async fn read_file(&self, _: &str) -> Result<(FileMeta, ByteStream)> {
-        Err(ApiError::bad("fake host does not stream files"))
+    async fn read_file(&self, path: &str) -> Result<(FileMeta, ByteStream)> {
+        if !self.0.browsable.load(Ordering::SeqCst) {
+            return Err(ApiError::bad("fake host does not stream files"));
+        }
+        let content = self
+            .0
+            .files
+            .lock()
+            .unwrap()
+            .get(path)
+            .cloned()
+            .ok_or_else(|| ApiError::bad("no such file"))?;
+        let meta = FileMeta {
+            size: content.len() as u64,
+            mode: 0o644,
+            modified_at: 0,
+        };
+        let chunk: Result<bytes::Bytes> = Ok(bytes::Bytes::from(content.into_bytes()));
+        Ok((meta, Box::pin(futures::stream::iter([chunk]))))
     }
     async fn write_file(&self, path: &str, _: u32, mut body: ByteStream) -> Result<()> {
         let mut bytes = Vec::new();
@@ -240,6 +300,7 @@ impl HostChannel for Channel {
         mut cancel: tokio::sync::watch::Receiver<bool>,
     ) -> Result<()> {
         use ferry_protocol::agent::{Event, Input, Outcome};
+        let cwd = request.cwd.trim_end_matches('/').to_owned();
         self.0.agent_requests.lock().unwrap().push(request);
         let script = self
             .0
@@ -274,6 +335,13 @@ impl HostChannel for Channel {
                     let _ = cancel.wait_for(|value| *value).await;
                     cancelled(&self.0);
                     break;
+                }
+                AgentStep::Write(relative, content) => {
+                    self.0
+                        .files
+                        .lock()
+                        .unwrap()
+                        .insert(format!("{cwd}/{relative}"), content);
                 }
             }
         }
@@ -321,6 +389,8 @@ pub(crate) fn probe_answer(
         directory_exists: true,
         error: None,
         canonical_directory: Some(cwd.into()),
+        write_workdir: true,
+        file_tools: vec![],
     }
 }
 

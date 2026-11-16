@@ -148,7 +148,21 @@
         "analysis",
         "structured output",
         "json schema",
-        "智能体"
+        "智能体",
+        "files",
+        "file",
+        "pdf",
+        "word",
+        "excel",
+        "ppt",
+        "pptx",
+        "docx",
+        "xlsx",
+        "chart",
+        "video",
+        "文件",
+        "生成文件",
+        "报告"
       ],
       "params_schema": {
         "type": "object",
@@ -182,12 +196,52 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 128
+          },
+          "files": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "formats": {
+                "oneOf": [
+                  {
+                    "const": "any"
+                  },
+                  {
+                    "type": "array",
+                    "maxItems": 30,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^\\.?[A-Za-z0-9]{1,10}$"
+                    }
+                  }
+                ]
+              },
+              "max_files": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              },
+              "max_total_mb": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 500
+              },
+              "instructions": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            },
+            "required": [
+              "enabled"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
           "agent_id",
           "prompt",
-          "output_schema",
           "timeout_s",
           "max_tool_calls"
         ],
@@ -196,7 +250,7 @@
       "expression_fields": [
         "/prompt"
       ],
-      "semantic_rule": "agent_id names an enabled Agent the saving user may use whose CLI can run read-only (not Kimi or Grok, not an API model profile). prompt is at most 32 KiB; output_schema is a JSON Schema of at most 64 KiB whose root type is object. The node runs once per execution over all input items on the node's host target, or the Agent's own host, with platform tools limited to catalogue GETs under the execution identity intersected with the Agent role.",
+      "semantic_rule": "agent_id names an enabled Agent the saving user may use whose CLI can run read-only (not Kimi or Grok, not an API model profile). prompt is at most 32 KiB; output_schema is a JSON Schema of at most 64 KiB whose root type is object. The node runs once per execution over all input items on the node's host target, or the Agent's own host, with platform tools limited to catalogue GETs under the execution identity intersected with the Agent role. output_schema is required unless files.enabled is true. With files.enabled the Agent's CLI (Codex or Claude only) runs in a fresh Runner-managed working directory where it may write only inside that directory, without network; every regular file it leaves under ./output/ (at most files.max_files, each at most 32 MiB, files.max_total_mb in total, optionally limited to files.formats extensions, content checked against the extension) becomes a workflow file: the single output item gets json.files [{artifact_id,name,mime,size,sha256,download_url,meta}] and binary file_1..file_n, plus the validated JSON object when output_schema is set, otherwise json.summary with the final message. Claude can only write text formats in this mode; Codex can run programs that already exist on the host (python-docx/openpyxl/python-pptx, matplotlib, ffmpeg, LibreOffice...).",
       "example_params": {
         "agent_id": "1",
         "prompt": "Summarize the input items.",

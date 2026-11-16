@@ -9,6 +9,13 @@ export interface Attachment {
   mime?: string;
   size?: number;
 }
+/** A short file type for display: the extension, or the media subtype. */
+export function fileType(a: Pick<Attachment, "name" | "mime">): string {
+  const extension = /\.([A-Za-z0-9]{1,8})$/.exec(a.name)?.[1];
+  if (extension) return extension.toUpperCase();
+  const subtype = a.mime?.split("/")[1]?.split(/[;+.-]/)[0];
+  return subtype && subtype !== "octet" ? subtype.toUpperCase() : "";
+}
 export function AttachmentView({
   attachment: a,
   endpoint,
@@ -94,7 +101,7 @@ export function AttachmentView({
         <span className="min-w-0 flex-1 truncate" title={a.name}>
           {a.name}
         </span>
-        <span className="shrink-0 text-xs text-muted-foreground">{size}</span>
+        <span className="shrink-0 text-xs text-muted-foreground" data-file-meta>{[fileType(a), size].filter(Boolean).join(" · ")}</span>
         <a
           href={download}
           download={a.name}

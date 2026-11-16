@@ -268,6 +268,15 @@ export function Conversation({
   const [queue, setQueue] = useState<{ after: string; state: "waiting" | "paused" }>();
   const queueSent = useRef("");
   // Execution items per turn, built once per event change instead of per row.
+  // Files each turn delivered on its reply, for the member activity summary.
+  const turnFiles = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const message of data?.messages ?? []) {
+      if (message.role === "assistant" && message.turn_id && message.attachments?.length)
+        counts.set(message.turn_id, message.attachments.length);
+    }
+    return counts;
+  }, [data?.messages]);
   const turnItems = useMemo(() => {
     const index = new Map<string, Map<string, ExecutionItem>>();
     for (const { turn_id, event } of events) {
@@ -735,6 +744,7 @@ export function Conversation({
           ...(data.kind === "group" ? data.agents : [{ id: data.agent_id, name: data.config.name, avatar: data.agent_avatar, runtime: data.config.runtime, model: data.config.model, revision_id: data.revision_id, host: data.host }]).map(agent => ({ ...agent, host: agent.host?.name || t("hostPending"), kind: "agent" as const })),
         ] satisfies ConversationMember[]} turns={data.turns} connected={!connection}
         activity={turnItems}
+        files={turnFiles}
         onJumpToTurn={turnId => {
           setActivity("allMessages");
           requestAnimationFrame(() => [...(scroll.current?.querySelectorAll("[data-turn-id]") ?? [])]
@@ -991,6 +1001,17 @@ export function Conversation({
                             <ConversationMessage streaming={!!turn && active(turn.state)} endpoint={endpoint}>
                               {reply.prompt}
                             </ConversationMessage>
+                          </div>
+                        )}
+                        {reply && !reply.retracted_at && !!reply.attachments?.length && (
+                          <div className="grid max-w-xl gap-2" data-agent-files>
+                            {reply.attachments.map((attachment, index) => (
+                              <AttachmentView
+                                key={attachment.file_id ?? index}
+                                attachment={attachment}
+                                endpoint={endpoint}
+                              />
+                            ))}
                           </div>
                         )}
                         {(!!items.size || (turn && m?.role !== "user" && (turn.usage || Object.values(turn.decisions).some(decision => decision.decision !== null || turn.state !== "running")))) && (

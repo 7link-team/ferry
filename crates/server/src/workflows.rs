@@ -1,6 +1,7 @@
 //! Workflow draft resources. Publication and execution use separate entry points;
 //! a draft write never grants production authority or changes an in-flight run.
 mod agent;
+pub(crate) mod agent_files;
 pub(crate) mod ai;
 pub(crate) mod artifacts;
 mod condition;

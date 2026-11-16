@@ -40,6 +40,21 @@ export function schemaProblem(source: string): "" | "agent.schemaJson" | "agent.
 }
 
 const usable = (agent: AgentOption) => agent.state === "enabled" && !READ_ONLY_UNSUPPORTED.has(agent.runtime);
+/** CLIs whose writes the Runner can confine to a working directory (server: agent_files.rs). */
+const FILE_RUNTIMES = new Set(["codex", "claude"]);
+type Files = { enabled?: boolean; formats?: string[] | "any"; max_files?: number; max_total_mb?: number; instructions?: string };
+
+/** "pdf, .PPTX" → ["pdf", "pptx"]; empty means any format. */
+export function parseFormats(text: string): string[] {
+  const seen: string[] = [];
+  for (const part of text.split(/[\s,，;；]+/)) {
+    const value = part.trim().replace(/^\./, "").toLowerCase();
+    if (value && !seen.includes(value)) seen.push(value);
+  }
+  return seen;
+}
+export const formatsProblem = (formats: string[]) =>
+  formats.length > 30 || formats.some((format) => !/^[a-z0-9]{1,10}$/.test(format));
 
 export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
   node: GraphNode;
@@ -79,7 +94,13 @@ export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
 
   const prompt = String(p.prompt ?? "");
   const promptTooLong = !prompt.startsWith("=") && bytes(prompt) > MAX_PROMPT_BYTES;
-  const serialized = JSON.stringify(p.output_schema ?? {}, null, 2);
+  const files = (p.files ?? {}) as Files;
+  const filesOn = files.enabled === true;
+  const [formatsText, setFormatsText] = useState(Array.isArray(files.formats) ? files.formats.join(", ") : "");
+  const formats = parseFormats(formatsText);
+  const badFormats = filesOn && formatsProblem(formats);
+  const patchFiles = (next: Partial<Files>) => patch({ files: { ...files, ...next } });
+  const serialized = p.output_schema === undefined ? (filesOn ? "" : "{}") : JSON.stringify(p.output_schema, null, 2);
   const [source, setSource] = useState(serialized);
   const committed = useRef(serialized);
   useEffect(() => {
@@ -88,12 +109,22 @@ export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
       setSource(serialized);
     }
   }, [serialized]);
-  const problem = schemaProblem(source);
+  // With file output the JSON answer is optional: an empty schema is allowed.
+  const problem = filesOn && source.trim() === "" ? "" : schemaProblem(source);
+  const fileRuntimeProblem = filesOn && !!agent && !FILE_RUNTIMES.has(agent.runtime);
   const report = useRef(invalid);
   report.current = invalid;
   useEffect(() => { report.current("agentSchema", problem !== ""); }, [problem]);
   useEffect(() => { report.current("agentPrompt", promptTooLong); }, [promptTooLong]);
-  useEffect(() => () => { report.current("agentSchema", false); report.current("agentPrompt", false); }, []);
+  useEffect(() => { report.current("agentFiles", badFormats || fileRuntimeProblem); }, [badFormats, fileRuntimeProblem]);
+  useEffect(() => () => { report.current("agentSchema", false); report.current("agentPrompt", false); report.current("agentFiles", false); }, []);
+  const fileNumber = (key: "max_files" | "max_total_mb", label: Parameters<typeof t>[0], min: number, max: number, fallback: number) => (
+    <label className="block min-w-0 space-y-2 text-sm">
+      <span className="block font-medium"><FieldCaption label={<>{t(label)}</>} /></span>
+      <Input aria-label={t(label)} type="number" min={min} max={max} step="1" readOnly={readOnly}
+        value={String(files[key] ?? fallback)} onChange={(event) => patchFiles({ [key]: Number(event.target.value) })} />
+    </label>
+  );
 
   const number = (key: "timeout_s" | "max_tool_calls", label: Parameters<typeof t>[0], min: number, max: number) => (
     <label className="block min-w-0 space-y-2 text-sm">
@@ -127,12 +158,43 @@ export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
     </label>
     {promptTooLong && <p role="alert" className="text-sm text-destructive">{t("agent.promptTooLong")}</p>}
     <p className="text-xs leading-5 text-muted-foreground">{t("agent.promptHelp")}</p>
+    <label className="flex min-h-11 items-center gap-3 text-sm font-medium">
+      <input type="checkbox" aria-label={t("agent.files")} className="size-4" disabled={readOnly} readOnly={readOnly} checked={filesOn}
+        onChange={(event) => patchFiles({ enabled: event.target.checked })} />
+      {t("agent.files")}
+    </label>
+    <p className="text-xs leading-5 text-muted-foreground">{t("agent.filesHelp")}</p>
+    {filesOn && <>
+      {fileRuntimeProblem && <p role="alert" className="text-sm text-destructive">{t("agent.filesRuntime")}</p>}
+      {agent?.runtime === "claude" && <p className="text-xs leading-5 text-amber-700 dark:text-amber-400">{t("agent.filesClaude")}</p>}
+      <label className="block min-w-0 space-y-2 text-sm">
+        <span className="block font-medium"><FieldCaption label={<>{t("agent.filesFormats")}</>} /></span>
+        <Input aria-label={t("agent.filesFormats")} readOnly={readOnly} value={formatsText} placeholder="pdf, pptx, xlsx"
+          onChange={(event) => {
+            setFormatsText(event.target.value);
+            const next = parseFormats(event.target.value);
+            if (!formatsProblem(next)) patchFiles({ formats: next.length ? next : "any" });
+          }} />
+      </label>
+      {badFormats && <p role="alert" className="text-sm text-destructive">{t("agent.filesFormatsInvalid")}</p>}
+      <p className="text-xs leading-5 text-muted-foreground">{t("agent.filesFormatsHelp")}</p>
+      {fileNumber("max_files", "agent.filesMax", 1, 50, 10)}
+      {fileNumber("max_total_mb", "agent.filesTotal", 1, 500, 100)}
+      <label className="block min-w-0 space-y-2 text-sm">
+        <span className="block font-medium"><FieldCaption label={<>{t("agent.filesInstructions")}</>} /></span>
+        <textarea aria-label={t("agent.filesInstructions")} className={`${control} min-h-20 py-3`} readOnly={readOnly} maxLength={4096}
+          value={String(files.instructions ?? "")} onChange={(event) => patchFiles({ instructions: event.target.value })} />
+      </label>
+    </>}
     <label className="block min-w-0 space-y-2 text-sm">
       <span className="block font-medium"><FieldCaption label={<>{t("agent.outputSchema")}</>} /></span>
       <textarea aria-label={t("agent.outputSchema")} className={`${control} min-h-48 py-3 font-mono text-xs`} readOnly={readOnly} spellCheck={false} value={source}
         onChange={(event) => {
           setSource(event.target.value);
-          if (schemaProblem(event.target.value) === "") {
+          if (filesOn && event.target.value.trim() === "") {
+            committed.current = "";
+            patch({ output_schema: undefined });
+          } else if (schemaProblem(event.target.value) === "") {
             const next = JSON.parse(event.target.value) as Params;
             committed.current = JSON.stringify(next, null, 2);
             patch({ output_schema: next });
@@ -140,7 +202,7 @@ export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
         }} />
     </label>
     {problem && <p role="alert" className="text-sm text-destructive">{t(problem)}</p>}
-    <p className="text-xs leading-5 text-muted-foreground">{t("agent.schemaHelp")}</p>
+    <p className="text-xs leading-5 text-muted-foreground">{t(filesOn ? "agent.schemaOptional" : "agent.schemaHelp")}</p>
     {number("timeout_s", "agent.timeout", 30, 1800)}
     {number("max_tool_calls", "agent.maxToolCalls", 1, 128)}
     <p className="text-xs leading-5 text-muted-foreground">{t("agent.help")}</p>

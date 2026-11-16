@@ -1387,6 +1387,9 @@
     "permission": "hosts.files"
   },
   {
+    "path": "/nodes/{id}/file-tools"
+  },
+  {
     "path": "/nodes/{id}/files",
     "query": [
       {

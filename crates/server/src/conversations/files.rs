@@ -127,6 +127,62 @@ async fn upload(
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(view(&file))))
 }
+/// A file an Agent produced in a turn, stored as a conversation file owned by
+/// the turn's sender. Active document types download instead of rendering.
+pub(super) async fn produced(
+    s: &AppState,
+    turn: &turns::Model,
+    file: &crate::workflows::agent_files::Collected,
+) -> Result<Attachment> {
+    let mime = match file.mime {
+        "image/svg+xml" | "text/html" | "application/xhtml+xml" => "application/octet-stream",
+        mime => mime,
+    };
+    let backend = ArtifactStore::for_state(s).await?;
+    let storage = store(s, &backend);
+    let asset = storage
+        .stage_bytes(
+            turn.workspace_id,
+            &file.bytes,
+            mime,
+            0,
+            "conversation-agent-file",
+            turn.owner_id,
+        )
+        .await?;
+    let row = files::Model {
+        id: s.next_id()?.into(),
+        workspace_id: turn.workspace_id,
+        conversation_id: turn.conversation_id,
+        owner_id: turn.owner_id,
+        asset_id: asset.id,
+        size: asset.size,
+        name: file.name.clone(),
+        mime: mime.to_owned(),
+        created_at: db::now(),
+    };
+    let tx = sea_orm::TransactionTrait::begin(&s.db).await?;
+    storage
+        .attach(
+            &tx,
+            row.workspace_id,
+            row.asset_id,
+            "conversation_file",
+            row.id,
+        )
+        .await?;
+    files::Entity::insert(row.clone().into_active_model())
+        .exec(&tx)
+        .await?;
+    tx.commit().await?;
+    Ok(Attachment {
+        name: row.name,
+        text: String::new(),
+        file_id: Some(row.id.into()),
+        mime: row.mime,
+        size: row.size as u64,
+    })
+}
 pub(super) async fn resolve(
     conn: &impl ConnectionTrait,
     workspace: Id,

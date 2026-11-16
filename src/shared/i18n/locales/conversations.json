@@ -1303,5 +1303,6 @@
   "activityHistory": ["Recent runs (newest first)", "最近执行（最新在前）", "最近執行（最新在前）", "最近の実行（新しい順）", "최근 실행 (최신순)", "Larian terkini (terbaru dahulu)"],
   "activityCalls": ["tool calls", "次调用", "次呼叫", "回の呼び出し", "회 호출", "panggilan alat"],
   "activityEmpty": ["No runs in this conversation yet.", "本会话中还没有执行记录。", "本會話中還沒有執行記錄。", "この会話ではまだ実行されていません。", "이 대화에는 아직 실행 기록이 없습니다.", "Belum ada larian dalam perbualan ini."],
-  "activityJump": ["Show this message", "定位到这条消息", "定位到這則訊息", "このメッセージを表示", "이 메시지로 이동", "Tunjukkan mesej ini"]
+  "activityJump": ["Show this message", "定位到这条消息", "定位到這則訊息", "このメッセージを表示", "이 메시지로 이동", "Tunjukkan mesej ini"],
+  "activityFiles": ["files", "个文件", "個檔案", "ファイル", "개 파일", "fail"]
 }

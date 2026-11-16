@@ -242,5 +242,15 @@
   "workflow.reportTooManyPages": "The report would have more than {limit} pages; shorten it or split it into several reports.",
   "workflow.reportTimeout": "Laying out the report took longer than {seconds} seconds; shorten it or try again.",
   "workflow.reportContentInvalid": "The report content does not have the expected shape: {reason}",
-  "fileLink.unavailable": "This download link has expired or the file is no longer available."
+  "fileLink.unavailable": "This download link has expired or the file is no longer available.",
+  "workflow.agentFilesInvalid": "The file output settings at {path} are invalid: up to 50 files, 1–500 MB in total, formats as file extensions, instructions at most 4 KB.",
+  "workflow.agentFilesRuntime": "{cli} cannot produce files unattended at {path}: only Codex and Claude Code can be confined to their working directory. Choose an Agent that uses one of them.",
+  "workflow.agentFilesRunnerUpgrade": "The Runner on {host} is too old to let {cli} produce files. Upgrade the Runner and run again.",
+  "workflow.agentFilesTooMany": "The Agent produced more files than allowed (at most {max}). Raise the limit or ask for fewer files.",
+  "workflow.agentFileTooLarge": "The file \"{name}\" is larger than {limit} MB, the limit for one file.",
+  "workflow.agentFilesTotal": "The files the Agent produced exceed {limit} MB in total. Raise the limit or ask for smaller files.",
+  "workflow.agentFileFormat": "The file \"{name}\" is not one of the accepted formats ({formats}).",
+  "workflow.agentFileMismatch": "The content of \"{name}\" does not match its file type, so it was not delivered. Ask the Agent to produce a real file of that type.",
+  "workflow.agentNoFiles": "The Agent finished without leaving any file in its output folder. Check its final message for why, or make the request more specific.",
+  "hosts.fileToolsRunnerOnly": "Only Runner hosts report file-production tools."
 }

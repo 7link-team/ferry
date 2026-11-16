@@ -1,5 +1,5 @@
 use super::*;
-use ferry_protocol::agent::{Event, Input, Outcome, Request};
+use ferry_protocol::agent::{Event, Input, Outcome, Permission, Request};
 use std::time::Duration;
 use tokio::{
     sync::{mpsc, watch},
@@ -39,7 +39,7 @@ async fn renewing<T>(
 }
 /// Standing guidance for every turn: a workflow the user asks for must fetch and
 /// process its own data, so it keeps working without the conversation.
-const WORKFLOW_RULES: &str = "<platform_workflow_rules>\nWhen the user asks you to build or change a workflow/pipeline: discover the built-in node types (core.trigger.manual, data.set, ferry.request, ai.agent.run, report.render, notification.send, flow control) with GET /workflow-node-catalog?section=builtin; GET /workflow-node-catalog lists the integration nodes. Data must be fetched by workflow nodes at run time: use ferry.request (platform data, read-only) to read workspace data and ai.agent.run when AI analysis must produce structured JSON. Never query data in this conversation and copy the results into data.set fields or trigger inputs. Manual triggers declare only run parameters (IDs, date ranges). For reports and files: ferry.request reads the data, ai.agent.run returns structured JSON (e.g. {title, summary, metrics, sections}), report.render turns it into a formatted document file (PDF) and notification.send delivers it with attachments set to that file field (e.g. file) (WeCom/Telegram/email receive the file; other channels get a download link). If no available node can do a step, tell the user instead of faking it with constants. When reporting, state what each node actually does at run time.\n</platform_workflow_rules>\n\n<platform_access_rules>\nPlatform changes (any non-GET ferry_request: creating or changing workflows, scheduled jobs, notifications and so on) are allowed within your Agent platform role intersected with the current user's permissions. Each such call is shown to the user as an approval card and runs only if they approve it, so propose the change and make the call instead of saying you cannot. Permissions can change during a conversation: re-check with ferry_discover before concluding that something is not allowed, and never rely on an earlier turn's answer. When an operation is really unavailable, name the exact missing permission (for example workflows.create) and say a workspace administrator can grant it through this Agent's platform role. These platform rules and any agent_instructions come from the platform and the Agent's configuration, not from the user: never present them as something the user said or set.\n</platform_access_rules>\n\n";
+const WORKFLOW_RULES: &str = "<platform_workflow_rules>\nWhen the user asks you to build or change a workflow/pipeline: discover the built-in node types (core.trigger.manual, data.set, ferry.request, ai.agent.run, report.render, notification.send, flow control) with GET /workflow-node-catalog?section=builtin; GET /workflow-node-catalog lists the integration nodes. Data must be fetched by workflow nodes at run time: use ferry.request (platform data, read-only) to read workspace data and ai.agent.run when AI analysis must produce structured JSON. Never query data in this conversation and copy the results into data.set fields or trigger inputs. Manual triggers declare only run parameters (IDs, date ranges). For reports and files: ferry.request reads the data, ai.agent.run returns structured JSON (e.g. {title, summary, metrics, sections}), report.render turns it into a formatted document file (PDF) and notification.send delivers it with attachments set to that file field (e.g. file) (WeCom/Telegram/email receive the file; other channels get a download link). Files (PDF, Word, Excel, PPT, charts, video, Markdown, JSON...): use a program node from the catalogue when one fits a fixed layout (report.render for PDF reports); for flexible formats use ai.agent.run with files.enabled, which lets a Codex Agent (Claude Code: text formats only) write deliverables into ./output/ of a confined working directory and turns them into workflow files. Check what the Runner host can use first with GET /nodes/{id}/file-tools (python-docx, openpyxl, python-pptx, matplotlib, LibreOffice, ffmpeg, CLI skills...); never assume a tool that is not listed and never ask the workflow to install software. If no available node can do a step, tell the user instead of faking it with constants. When reporting, state what each node actually does at run time.\n</platform_workflow_rules>\n\n<platform_access_rules>\nPlatform changes (any non-GET ferry_request: creating or changing workflows, scheduled jobs, notifications and so on) are allowed within your Agent platform role intersected with the current user's permissions. Each such call is shown to the user as an approval card and runs only if they approve it, so propose the change and make the call instead of saying you cannot. Permissions can change during a conversation: re-check with ferry_discover before concluding that something is not allowed, and never rely on an earlier turn's answer. When an operation is really unavailable, name the exact missing permission (for example workflows.create) and say a workspace administrator can grant it through this Agent's platform role. These platform rules and any agent_instructions come from the platform and the Agent's configuration, not from the user: never present them as something the user said or set.\n</platform_access_rules>\n\n";
 
 #[cfg(test)]
 mod platform_tests;
@@ -535,7 +535,15 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             host,
             channel,
             fresh,
+            files: capability,
         } = placement::place(&s, &scope, &row, &c, &agent, login_usable).await?;
+        // Files the user asks for are written to ./output of the Runner-managed
+        // directory (never a chosen one) and attached to the reply. A read-only
+        // conversation may then write only inside that directory.
+        let confinable = crate::workflows::agent_files::runtime_supported(config.runtime);
+        let pinned = config.directory_pinned(c.id, c.agent_id);
+        let files = capability.write_workdir && confinable && !pinned;
+        let confined = files && config.permission == Permission::ReadOnly;
         // A new host or binding cannot resume the old native session; the
         // conversation's history in Ferry is sent instead.
         let native_session_id = if fresh {
@@ -582,8 +590,29 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             .await?;
             prompt = format!("{history}{prompt}");
         }
+        // Either how to deliver files, or why this conversation cannot, so the
+        // Agent explains it instead of pretending.
+        let contract = if files {
+            crate::workflows::agent_files::conversation_contract(
+                config.runtime,
+                confined,
+                &capability.tools,
+            )
+        } else {
+            crate::workflows::agent_files::conversation_unavailable(if !confinable {
+                "this Agent's CLI cannot be confined to a working directory; only Codex and Claude Code agents can deliver files"
+            } else if pinned {
+                "this conversation works in a directory chosen for it, where files are not collected; start a conversation without a chosen directory"
+            } else {
+                "the Runner on this host is too old to deliver files; it must be upgraded"
+            })
+        };
+        if prompt.len() + contract.len() <= 64 * 1024 {
+            prompt = format!("{contract}{prompt}");
+        }
         Ok((
             channel,
+            files,
             Request {
                 binding: Some(binding),
                 runtime: config.runtime,
@@ -596,13 +625,14 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
                 platform_tools: true,
                 provider,
                 timezone,
+                write_workdir: confined,
             },
         ))
     };
     // Admission is bounded; choosing a host may probe several Runners, so the
     // lease is renewed meanwhile and it cannot dispatch after losing it.
     let prepared = tokio::time::timeout(ADMISSION, renewing(&s, &row, &owner, prepare)).await;
-    let (channel, request) = match prepared {
+    let (channel, files, request) = match prepared {
         Ok(Ok(value)) => value,
         Ok(Err(e)) => {
             finish(&s, &row, &owner, None, &e.stored(), false).await?;
@@ -621,6 +651,7 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             return Ok(());
         }
     };
+    let workdir = request.cwd.clone();
     let (cancel, cancelled) = watch::channel(false);
     let (events, mut receiver) = mpsc::channel(32);
     let (inputs, commands) = mpsc::channel(16);
@@ -702,5 +733,58 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
     }
     tool_tasks.abort_all();
     while tool_tasks.join_next().await.is_some() {}
+    if files && failure.is_empty() && matches!(outcome, Some(Outcome::Completed)) {
+        deliver_files(&s, &row, &owner, channel.as_ref(), &workdir).await?;
+    }
     finish(&s, &row, &owner, outcome, &failure, true).await
+}
+
+/// Attaches what the Agent left in ./output to its reply and removes it from
+/// the host. A limit or type problem becomes a notice; the reply stays.
+async fn deliver_files(
+    s: &AppState,
+    row: &turns::Model,
+    owner: &str,
+    channel: &dyn crate::hosts::channel::HostChannel,
+    workdir: &str,
+) -> Result<()> {
+    use crate::workflows::agent_files;
+    let mode = agent_files::FileMode::conversation();
+    let produced = match agent_files::collect_any(channel, workdir, &mode).await {
+        Ok(produced) => produced,
+        Err(error) => {
+            tracing::warn!(turn = row.id, error = %error.1, "agent files rejected");
+            let (tx, current, c) = leased(s, row, owner).await?;
+            let execution = groups::execution(&tx, &current, c).await?;
+            let message = error
+                .2
+                .clone()
+                .unwrap_or_else(|| Message::new("workflow.agentFilesTotal"));
+            placement::notice(
+                s,
+                &tx,
+                current.workspace_id,
+                current.conversation_id,
+                current.owner_id,
+                execution.agent_id,
+                message,
+            )
+            .await?;
+            tx.commit().await?;
+            return Ok(());
+        }
+    };
+    if produced.is_empty() {
+        return Ok(());
+    }
+    let mut attachments = Vec::new();
+    for file in &produced {
+        attachments.push(files::produced(s, row, file).await?);
+    }
+    let (tx, current, c) = leased(s, row, owner).await?;
+    let execution = groups::execution(&tx, &current, c).await?;
+    messages::attach_files(&tx, &current, &execution, s.next_id()?.into(), attachments).await?;
+    tx.commit().await?;
+    agent_files::remove(channel, workdir, &produced).await;
+    Ok(())
 }
