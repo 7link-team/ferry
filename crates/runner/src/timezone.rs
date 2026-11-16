@@ -9,14 +9,37 @@
 //! UTC, so on Windows `TZ` is only set when the wanted zone differs from the
 //! host's; there the platform warns that some Windows tools ignore it.
 
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
+use std::time::Duration;
 
 static PINNED: RwLock<Option<String>> = RwLock::new(None);
+static DETECTED: OnceLock<String> = OnceLock::new();
 
 /// The host's IANA zone, or empty when the OS does not say.
+///
+/// Asked once per process and bounded: it runs before Hello, and a runner that
+/// never says Hello fails update activation and is rolled back. A host zone
+/// change is picked up when the runner restarts.
 pub(crate) fn detected() -> String {
-    iana_time_zone::get_timezone()
+    DETECTED
+        .get_or_init(|| {
+            bounded(Duration::from_secs(2), || {
+                iana_time_zone::get_timezone().ok()
+            })
+        })
+        .clone()
+}
+
+/// Runs `lookup` on its own thread; a slow or failing lookup yields "".
+fn bounded(limit: Duration, lookup: impl FnOnce() -> Option<String> + Send + 'static) -> String {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(lookup());
+    });
+    receiver
+        .recv_timeout(limit)
         .ok()
+        .flatten()
         .filter(|zone| valid(zone))
         .unwrap_or_default()
 }
@@ -101,6 +124,28 @@ mod tests {
             resolve(Some("Asia/Tokyo"), None, "Asia/Shanghai", true).as_deref(),
             Some("Asia/Tokyo")
         );
+    }
+
+    #[test]
+    fn a_slow_or_failing_lookup_never_delays_startup() {
+        let started = std::time::Instant::now();
+        let zone = bounded(Duration::from_millis(100), || {
+            std::thread::sleep(Duration::from_secs(5));
+            Some("Asia/Tokyo".to_owned())
+        });
+        assert_eq!(zone, "");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(bounded(Duration::from_secs(1), || None), "");
+        assert_eq!(
+            bounded(Duration::from_secs(1), || Some("bad zone; rm".to_owned())),
+            ""
+        );
+        assert_eq!(
+            bounded(Duration::from_secs(1), || Some("Asia/Tokyo".to_owned())),
+            "Asia/Tokyo"
+        );
+        // Asked once: later calls are answered from the first result.
+        assert_eq!(detected(), detected());
     }
 
     #[test]
