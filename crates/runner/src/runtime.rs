@@ -86,6 +86,8 @@ pub(super) fn foreground(cfg: Config) -> anyhow::Result<()> {
 }
 
 async fn run(cfg: Config) -> anyhow::Result<()> {
+    // The CLI search path may ask the login shell; do it now, off the Hello path.
+    crate::agent::paths::warm();
     let (stop, stopped) = tokio::sync::watch::channel(false);
     tokio::spawn(async move {
         #[cfg(unix)]

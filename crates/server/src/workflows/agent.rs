@@ -176,11 +176,15 @@ pub(super) async fn validate_agents(
 fn compose(system: &str, prompt: &str, items: &[Item], schema: &Value) -> Result<String> {
     let rows: Vec<_> = items.iter().map(|item| &item.json).collect();
     let mut text = String::new();
-    if !system.is_empty() {
-        text.push_str(system);
-        text.push_str("\n\n");
+    // Labelled so the model never mistakes the Agent's configuration for the task.
+    if !system.trim().is_empty() {
+        text.push_str("<agent_instructions source=\"agent configuration set by a workspace administrator\">\n");
+        text.push_str(system.trim_end());
+        text.push_str("\n</agent_instructions>\n\n");
     }
+    text.push_str("<workflow_task source=\"this workflow node's prompt\">\n");
     text.push_str(prompt);
+    text.push_str("\n</workflow_task>");
     text.push_str(&format!(
         "\n\n<workflow_input_items count=\"{}\">\n{}\n</workflow_input_items>\n\n",
         rows.len(),

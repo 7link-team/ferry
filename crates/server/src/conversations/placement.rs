@@ -76,6 +76,8 @@ pub(super) async fn place(
         // and only it when the directory was chosen.
         let mut prefer = None;
         let mut only_preferred = false;
+        // The bound host's own reason leads the error if no other host works.
+        let mut bound_failure = None;
         if let Some(binding) = parse_binding(&stored_binding)? {
             match current(s, scope, &config, &binding, login_usable).await {
                 Ok((host, channel)) => {
@@ -109,6 +111,14 @@ pub(super) async fn place(
                         only_preferred = pinned;
                     } else {
                         exclude.push(host_id);
+                        let name = match unusable.host.as_ref() {
+                            Some(host) => host.name.clone(),
+                            None => hosts::Entity::find_by_id(host_id)
+                                .one(&s.db)
+                                .await?
+                                .map_or_else(|| host_id.to_string(), |h| h.name),
+                        };
+                        bound_failure = Some((name, unusable.reason));
                     }
                     moved_from = Some(host_id);
                 }
@@ -125,7 +135,7 @@ pub(super) async fn place(
             candidates.retain(|known| known.id != host.id);
             candidates.insert(0, host);
         }
-        let (host, channel, binding) = allocate(
+        let (host, channel, binding) = match allocate(
             s,
             scope,
             c,
@@ -135,7 +145,17 @@ pub(super) async fn place(
             candidates,
             login_usable,
         )
-        .await?;
+        .await
+        {
+            Ok(found) => found,
+            Err(Unplaced::Reasons(reasons)) => {
+                return Err(match bound_failure {
+                    Some((name, reason)) => reasons.into_failover_error(name, reason),
+                    None => reasons.into_error(),
+                });
+            }
+            Err(Unplaced::Error(error)) => return Err(error),
+        };
         let mut next = config.clone();
         next.host_id = host.id.into();
         next.cwd = binding.canonical_directory.clone();
@@ -233,6 +253,17 @@ fn offline(error: &ApiError) -> Message {
     Message::new("models.reasonUnreachable").with_message("detail", agent_hosts::reason_from(error))
 }
 
+/// Why no candidate could be used: every host's reason, or a platform error.
+enum Unplaced {
+    Reasons(Reasons),
+    Error(ApiError),
+}
+impl From<ApiError> for Unplaced {
+    fn from(error: ApiError) -> Self {
+        Self::Error(error)
+    }
+}
+
 /// The first candidate host that runs this CLI, or every host and its reason.
 #[allow(clippy::too_many_arguments)]
 async fn allocate(
@@ -244,7 +275,7 @@ async fn allocate(
     pinned: bool,
     candidates: Vec<hosts::Model>,
     login_usable: impl Fn(&str) -> bool + Copy,
-) -> Result<(hosts::Model, Box<dyn HostChannel>, Binding)> {
+) -> std::result::Result<(hosts::Model, Box<dyn HostChannel>, Binding), Unplaced> {
     let cli = agent_hosts::cli_name(config.runtime);
     let mut reasons = Reasons::default();
     for host in candidates {
@@ -289,7 +320,7 @@ async fn allocate(
             Err(reason) => reasons.push(&host, reason),
         }
     }
-    Err(reasons.into_error())
+    Err(Unplaced::Reasons(reasons))
 }
 
 enum Stored {

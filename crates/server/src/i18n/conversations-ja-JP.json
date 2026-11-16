@@ -24,5 +24,7 @@
   "conversations.hostSwitched": "実行をホスト {from} から {to} に切り替えました。CLI セッションは Ferry の会話履歴から再構築されました。{from} の作業ディレクトリのファイルは引き継がれません。",
   "conversations.hostReleased": "ホスト {host} の割り当てを解除しました。次のメッセージは別のホストで実行され、CLI セッションは Ferry の会話履歴から再構築されます。{host} の作業ディレクトリのファイルは引き継がれません。",
   "conversations.hostUnavailable": "実行ホスト {host} は現在実行できません：{reason}。この会話は作業ディレクトリが固定されているため自動ではホストを変更しません。「別のホストを使う」で切り替えてください。",
-  "conversations.executionFailedOn": "{cli} がホスト {host} で失敗したか接続が切れました。再試行する前に実行済みの結果を確認してください。詳細はそのホストの Runner ログにあります。"
+  "conversations.executionFailedOn": "{cli} がホスト {host} で失敗したか接続が切れました。再試行する前に実行済みの結果を確認してください。詳細はそのホストの Runner ログにあります。",
+  "conversations.boundHostOffline": "割り当て済みのホスト {host} は現在オフラインです（{reason}）。他の候補ホスト：{others}",
+  "conversations.boundHostOfflineNoOthers": "割り当て済みのホスト {host} は現在オフラインで（{reason}）、他の候補ホストはありません。オンラインに戻ってから再試行してください。"
 }
