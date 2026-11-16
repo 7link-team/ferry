@@ -212,6 +212,7 @@ pub(super) async fn automatic_update_cycle(
                     version: target.into(),
                     state: "retrying".into(),
                     message: error.stored(),
+                    reason: None,
                 };
                 persist_update(s, id, &job).await?;
             }

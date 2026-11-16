@@ -112,6 +112,12 @@ pub(crate) async fn recover_updates(s: &AppState) -> Result<()> {
                                 )),
                             )
                         } else if failed.as_deref() == Some(job.version.as_str()) {
+                            job.reason = super::rollback_reason(
+                                peer.failed_reason
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .as_deref(),
+                            );
                             (
                                 "rolled_back",
                                 crate::i18n::store_message(&crate::i18n::Message::new(

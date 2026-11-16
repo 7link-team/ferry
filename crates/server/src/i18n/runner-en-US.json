@@ -92,5 +92,14 @@
   "runner.release.payloadHash": "The update file hash does not match.",
   "runner.release.urlControl": "The download URL contains control characters.",
   "runner.timezoneInvalid": "Unknown time zone. Use an IANA name such as Asia/Shanghai, or leave it empty.",
-  "runner.timezoneUpgrade": "This model requires the time zone {timezone}, but the Runner on this host is too old to apply it. Upgrade the Runner and try again."
+  "runner.timezoneUpgrade": "This model requires the time zone {timezone}, but the Runner on this host is too old to apply it. Upgrade the Runner and try again.",
+  "runner.reason.timeout": "it did not connect to the platform within {seconds} s",
+  "runner.reason.exit": "it exited during startup (exit code {code})",
+  "runner.reason.signal": "it was stopped by signal {signal} during startup",
+  "runner.reason.invalidEvent": "it printed an unrecognised control message",
+  "runner.reason.versionMismatch": "it reported version {version}, which does not match the update",
+  "runner.reason.spawn": "it could not be started ({detail})",
+  "runner.reason.missingBinary": "its file was missing or failed verification",
+  "runner.reason.interrupted": "the service restarted before activation finished",
+  "runner.reason.other": "{detail}"
 }

@@ -975,6 +975,8 @@ mod tests {
                         | "models.hostReason"
                         | "models.hostReasonList"
                         | "workflow.integrationRemoteReason"
+                        // An unrecognised rollback reason is shown as reported.
+                        | "runner.reason.other"
                 ) || (Locale::ALL[index] == Locale::MsMy
                     && matches!(
                         key.as_str(),

@@ -16,6 +16,7 @@ async fn persisted_update_http_status_uses_each_readers_language() {
         version: "9.9.9".into(),
         state: "failed".into(),
         message: stored.clone(),
+        reason: None,
     };
     persist_update(&f.s, f.id, &job).await.unwrap();
     let id = f.id;
@@ -186,6 +187,7 @@ impl Fixture {
             version: "0.0.1".into(),
             ready: std::sync::atomic::AtomicBool::new(true),
             failed_version: Mutex::new(None),
+            failed_reason: Mutex::new(None),
             update_error: Mutex::new(None),
         });
         live().insert(id.to_string(), peer.clone());
@@ -346,6 +348,7 @@ async fn automatic_defaults_and_eligibility_preserve_failed_target_and_backoff()
         state: "retrying".into(),
         message: String::new(),
         owner: None,
+        reason: None,
     };
     persist_update(&f.s, f.id, &job).await.unwrap();
     recover_updates(&f.s).await.unwrap();
@@ -462,6 +465,7 @@ async fn automatic_metadata_failure_cannot_overwrite_manual_admission() {
         state: "draining".into(),
         message: String::new(),
         owner: None,
+        reason: None,
     };
     persist_update(&f.s, f.id, &active).await.unwrap();
     let failed = UpdateJob {
@@ -523,6 +527,7 @@ async fn automatic_drain_holds_new_work_until_healthy_target_reconnects() {
         version: env!("CARGO_PKG_VERSION").into(),
         ready: std::sync::atomic::AtomicBool::new(false),
         failed_version: Mutex::new(None),
+        failed_reason: Mutex::new(None),
         update_error: Mutex::new(None),
     });
     live().insert(f.id.to_string(), healthy.clone());

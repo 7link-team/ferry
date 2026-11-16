@@ -257,6 +257,7 @@ async fn hold(
             &wire::Report::UpdateHealth {
                 version: env!("CARGO_PKG_VERSION").into(),
                 failed_version: cfg.failed_version.clone(),
+                failed_reason: cfg.failed_reason.clone(),
             },
         )
         .await?;
@@ -356,6 +357,7 @@ mod tests {
                 installation_scope: None,
                 confirmation: None,
                 failed_version: None,
+                failed_reason: None,
                 server: format!("http://{address}"),
                 token: Some("fixture-token".into()),
                 state_dir: dir.path().to_owned(),
@@ -474,6 +476,7 @@ mod tests {
                 installation_scope: None,
                 confirmation: None,
                 failed_version: None,
+                failed_reason: None,
                 server: format!("http://{address}"),
                 token: Some("fixture-token".into()),
                 state_dir: dir.path().to_owned(),

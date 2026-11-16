@@ -92,5 +92,14 @@
   "runner.release.payloadHash": "Cincangan fail kemas kini tidak sepadan.",
   "runner.release.urlControl": "URL muat turun mengandungi aksara kawalan.",
   "runner.timezoneInvalid": "Zon waktu tidak dikenali. Gunakan nama IANA seperti Asia/Shanghai, atau biarkan kosong.",
-  "runner.timezoneUpgrade": "Model ini memerlukan zon waktu {timezone}, tetapi Runner pada hos ini terlalu lama untuk menggunakannya. Naik taraf Runner dan cuba lagi."
+  "runner.timezoneUpgrade": "Model ini memerlukan zon waktu {timezone}, tetapi Runner pada hos ini terlalu lama untuk menggunakannya. Naik taraf Runner dan cuba lagi.",
+  "runner.reason.timeout": "versi baharu tidak bersambung ke platform dalam {seconds} s",
+  "runner.reason.exit": "versi baharu keluar semasa dimulakan (kod keluar {code})",
+  "runner.reason.signal": "versi baharu dihentikan oleh isyarat {signal} semasa dimulakan",
+  "runner.reason.invalidEvent": "versi baharu mencetak mesej kawalan yang tidak dikenali",
+  "runner.reason.versionMismatch": "versi baharu melaporkan versi {version} yang tidak sepadan dengan kemas kini",
+  "runner.reason.spawn": "versi baharu tidak dapat dimulakan ({detail})",
+  "runner.reason.missingBinary": "fail versi baharu hilang atau gagal disahkan",
+  "runner.reason.interrupted": "perkhidmatan dimulakan semula sebelum pengaktifan selesai",
+  "runner.reason.other": "{detail}"
 }

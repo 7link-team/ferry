@@ -14,6 +14,9 @@ pub(super) struct Config {
     pub(super) confirmation: Option<tokio::sync::watch::Receiver<bool>>,
     #[arg(skip)]
     pub(super) failed_version: Option<String>,
+    /// Why activating `failed_version` failed, as reported by the supervisor.
+    #[arg(skip)]
+    pub(super) failed_reason: Option<String>,
     /// Server base URL, e.g. https://ops.example.com
     #[arg(long, env = "FERRY_SERVER")]
     pub(super) server: String,

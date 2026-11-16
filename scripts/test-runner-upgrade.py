@@ -57,6 +57,33 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
         run('cargo', 'build', '--offline', '--manifest-path', source/'Cargo.toml', '--target-dir', fixture_target, '-p', 'ferry-runner', env=env)
         shutil.copy2(built, root/filename)
     shutil.copy2(baseline, built)
+    # RUNNER_UPGRADE_FROM=vX.Y.Z: also build that release's runner from its own
+    # source, with the same fixture key and CA, to upgrade across versions.
+    previous_ref = os.environ.get('RUNNER_UPGRADE_FROM', '').strip()
+    previous = None
+    if previous_ref:
+        assert re.fullmatch(r'v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?', previous_ref), previous_ref
+        if subprocess.run(['git', 'rev-parse', '--verify', '--quiet', previous_ref+'^{commit}'], stdout=subprocess.DEVNULL).returncode != 0:
+            run('git', 'fetch', '--depth=1', 'origin', 'tag', previous_ref)
+        import io, tarfile
+        archive = subprocess.run(['git', 'archive', '--format=tar', previous_ref, 'Cargo.toml', 'Cargo.lock', 'crates/runner', 'crates/protocol', 'crates/sandbox', 'desktop/tauri.conf.json'],
+                                 check=True, stdout=subprocess.PIPE).stdout
+        previous_source = root/'previous-source'
+        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+            tar.extractall(previous_source, filter='data')
+        previous_manifest = (previous_source/'Cargo.toml').read_text(encoding='utf-8')
+        previous_manifest = re.sub(r'^members = \[.*\]$', 'members = ["crates/protocol", "crates/runner", "crates/sandbox"]', previous_manifest, count=1, flags=re.M)
+        (previous_source/'Cargo.toml').write_text(previous_manifest, encoding='utf-8')
+        previous_update = previous_source/'crates/runner/src/update.rs'
+        previous_text = previous_update.read_text(encoding='utf-8')
+        assert builder in previous_text, 'previous release must use the same update client'
+        shutil.copy2(root/'ca.crt', previous_update.parent/'fixture-ca.crt')
+        previous_update.write_text(previous_text.replace(builder, builder + certificate), encoding='utf-8')
+        # Its own lock file; dependencies may differ from this source, so allow fetching.
+        run('cargo', 'build', '--manifest-path', previous_source/'Cargo.toml', '--target-dir', root/'previous-target', '-p', 'ferry-runner', env=env)
+        previous = root/('previous'+exe)
+        shutil.copy2(root/'previous-target'/'debug'/('ferry-runner'+exe), previous)
+        print(f'Built previous release {previous_ref} runner for cross-version upgrade', flush=True)
     (root/'broken').write_bytes(b'not an executable\n')
     shutil.copy2(baseline, root/'wrong-version')
     class Handler(http.server.SimpleHTTPRequestHandler):
@@ -94,6 +121,15 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
     run(openssl, 'verify', '-CAfile', root/'ca.crt', root/'tls.crt')
     try:
         args = [str(Path(shutil.which('python') or shutil.which('python3'))), 'scripts/test-runner-service.py']
+        if previous:
+            # The previous release's supervisor and updater perform the upgrade:
+            # the path every existing installation takes.
+            cross = dict(RUNNER_BINARY=str(previous), RUNNER_UPGRADE_FIXTURES=str(root), RUNNER_TEST_CROSS_VERSION='1')
+            if os.name != 'nt':
+                run('sudo', '-n', *(['timeout', '-k', '15s', '300s'] if system=='Linux' else []), 'env', 'RUNNER_TEST_SYSTEM_SERVICE=1', *[f'{k}={v}' for k, v in cross.items()], *args)
+            else:
+                for user_service in ['', '1']:
+                    run(*args, env=dict(os.environ, **cross, RUNNER_TEST_USER_SERVICE=user_service), timeout=600)
         if os.environ.get('RUNNER_TEST_AUTO_ONLY') == '1':
             pass  # The manual suite can be verified separately before automatic acceptance.
         elif os.name != 'nt':

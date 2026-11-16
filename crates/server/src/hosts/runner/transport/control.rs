@@ -150,6 +150,7 @@ async fn control(s: AppState, mut socket: Socket) {
         version: hello.agent_version.clone(),
         ready: std::sync::atomic::AtomicBool::new(!hello.managed_updates),
         failed_version: Mutex::new(None),
+        failed_reason: Mutex::new(None),
         update_error: Mutex::new(None),
     });
     // A replaced connection's own loop ends when its sender is dropped here,
@@ -311,7 +312,7 @@ async fn pump_control(
                 if !matches!(hosts::Entity::find_by_id(i64::from(row_id)).filter(hosts::Column::RunnerKeyHash.eq(&registration.key_hash)).one(&s.db).await,Ok(Some(_))) {break;}
                 let cluster=s.cluster.as_ref().unwrap();
                 let mut owner=registration.owner.as_ref().unwrap().clone();
-                owner.info=Some(crate::cluster::RunnerInfo {managed:registration.managed,installation_scope:registration.installation_scope.clone(),ready:registration.ready.load(std::sync::atomic::Ordering::Acquire), version:registration.version.clone(), failed_version:registration.failed_version.lock().unwrap_or_else(|error|error.into_inner()).clone()});
+                owner.info=Some(crate::cluster::RunnerInfo {managed:registration.managed,installation_scope:registration.installation_scope.clone(),ready:registration.ready.load(std::sync::atomic::Ordering::Acquire), version:registration.version.clone(), failed_version:registration.failed_version.lock().unwrap_or_else(|error|error.into_inner()).clone(), failed_reason:registration.failed_reason.lock().unwrap_or_else(|error|error.into_inner()).clone()});
                 let revision=registration.owner_revision.load(std::sync::atomic::Ordering::Acquire);
                 match cluster.renew_owner(s,host_id,&owner,revision).await {
                     Ok(revision)=>registration.owner_revision.store(revision,std::sync::atomic::Ordering::Release),
@@ -351,8 +352,9 @@ async fn pump_control(
                 match message {
                     Message::Text(text) => match serde_json::from_str::<wire::Report>(&text) {
                         Ok(wire::Report::Pong) => {}
-                        Ok(wire::Report::UpdateHealth { version, failed_version }) => {
+                        Ok(wire::Report::UpdateHealth { version, failed_version, failed_reason }) => {
                             if registration.managed && version == registration.version {
+                                *registration.failed_reason.lock().unwrap_or_else(|e|e.into_inner()) = failed_reason.filter(|_| failed_version.is_some());
                                 *registration.failed_version.lock().unwrap_or_else(|e|e.into_inner()) = failed_version;
                                 registration.ready.store(true, std::sync::atomic::Ordering::Release);
                             }

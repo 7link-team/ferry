@@ -26,6 +26,8 @@ mod test_support;
 #[cfg(test)]
 mod timezone_tests;
 mod transport;
+#[cfg(test)]
+mod update_reason_tests;
 mod updates;
 
 pub(crate) use enrollment::bootstrap_token;
@@ -96,6 +98,8 @@ struct Live {
     version: String,
     ready: std::sync::atomic::AtomicBool,
     failed_version: Mutex<Option<String>>,
+    /// The supervisor's reason for that failure (`code[:detail]`), when reported.
+    failed_reason: Mutex<Option<String>>,
     update_error: Mutex<Option<(String, String)>>,
 }
 

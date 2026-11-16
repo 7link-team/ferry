@@ -666,6 +666,7 @@ mod tests {
                 version: "legacy".into(),
                 ready: std::sync::atomic::AtomicBool::new(true),
                 failed_version: Mutex::new(None),
+                failed_reason: Mutex::new(None),
                 update_error: Mutex::new(None),
             }),
         );
@@ -722,6 +723,7 @@ mod tests {
                 version: "0.1.0-alpha.13".into(),
                 ready: std::sync::atomic::AtomicBool::new(true),
                 failed_version: Mutex::new(None),
+                failed_reason: Mutex::new(None),
                 update_error: Mutex::new(None),
             }),
         );

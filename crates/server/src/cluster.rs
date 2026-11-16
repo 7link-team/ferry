@@ -92,6 +92,8 @@ pub struct RunnerInfo {
     pub ready: bool,
     pub version: String,
     pub failed_version: Option<String>,
+    #[serde(default)]
+    pub failed_reason: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct SessionRoute {
