@@ -1034,6 +1034,12 @@ pub(crate) fn definition_example() -> Value {
         "connections": [link("start","commits"), link("commits","analyze"), link("analyze","report"), link("report","notify")]
     })
 }
+/// Read node contracts. Use offset (default 0), page_size (1..20, default 5),
+/// search (type/name substring), type (exact node type), and section=builtin or
+/// section=integration. Follow next_offset until null; total counts all matches.
+/// MCP calls are paginated automatically. Browser calls without filters retain
+/// the full editor catalog. GET /workflow-definition-format supplies the graph
+/// schema and a valid definition example; node params_schema supplies parameters.
 async fn node_catalog(
     scope: Scope,
     Path(_): Path<String>,
@@ -1042,8 +1048,15 @@ async fn node_catalog(
     // Scope verifies active membership. Only public declarations are returned;
     // tokens, workspace data and saved workflow definitions are never included.
     let _ = scope;
-    // The full response is near the Agent tool's 256 KiB limit; Agents ask for
-    // the built-in section alone.
+    if ["offset", "page_size", "search", "type"]
+        .iter()
+        .any(|key| query.contains_key(*key))
+        || query
+            .get("section")
+            .is_some_and(|section| section == "integration")
+    {
+        return catalog_page(&query).map(Json);
+    }
     if query.get("section").map(String::as_str) == Some("builtin") {
         return Ok(Json(json!({"builtin_nodes":builtin_nodes()})));
     }
@@ -1052,6 +1065,78 @@ async fn node_catalog(
         // nodes are listed separately for clients (e.g. Agents) that need them.
         json!({"nodes":catalog()["nodes"],"builtin_nodes":builtin_nodes(),"packages":super::extensions::catalog().packages}),
     ))
+}
+
+fn catalog_page(query: &std::collections::HashMap<String, String>) -> Result<Value> {
+    let offset = query
+        .get("offset")
+        .map(|value| value.parse::<usize>().map_err(|_| invalid()))
+        .transpose()?
+        .unwrap_or(0);
+    let page_size = query
+        .get("page_size")
+        .map(|value| value.parse::<usize>().map_err(|_| invalid()))
+        .transpose()?
+        .unwrap_or(5);
+    if !(1..=20).contains(&page_size) {
+        return Err(invalid());
+    }
+    let section = query.get("section").map(String::as_str).unwrap_or("");
+    if !["", "builtin", "integration"].contains(&section) {
+        return Err(invalid());
+    }
+    let search = query
+        .get("search")
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+    let kind = query.get("type").map(String::as_str);
+    let builtin = builtin_nodes();
+    let integrations = catalog()["nodes"].as_array().ok_or_else(invalid)?;
+    let matches: Vec<_> = integrations
+        .iter()
+        .map(|node| (false, node))
+        .chain(builtin.iter().map(|node| (true, node)))
+        .filter(|(is_builtin, _)| match section {
+            "builtin" => *is_builtin,
+            "integration" => !*is_builtin,
+            _ => true,
+        })
+        .filter(|(_, node)| kind.is_none_or(|kind| node["type"] == kind))
+        .filter(|(_, node)| {
+            search.is_empty()
+                || ["type", "name"].iter().any(|key| {
+                    node[*key]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&search)
+                })
+        })
+        .collect();
+    let total = matches.len();
+    let mut nodes = Vec::new();
+    let mut builtin_nodes = Vec::new();
+    let mut bytes = 0;
+    let mut count = 0;
+    for (is_builtin, node) in matches.into_iter().skip(offset).take(page_size) {
+        let size = serde_json::to_vec(node).map_err(|_| invalid())?.len();
+        // Leave room for the envelope and MCP metadata below the 256 KiB limit.
+        if count > 0 && bytes + size > 192 * 1024 {
+            break;
+        }
+        bytes += size;
+        count += 1;
+        if is_builtin {
+            builtin_nodes.push(node.clone());
+        } else {
+            nodes.push(node.clone());
+        }
+    }
+    let next = offset.saturating_add(count);
+    Ok(
+        json!({"nodes":nodes,"builtin_nodes":builtin_nodes,"total":total,
+        "offset":offset,"page_size":page_size,"next_offset":(next<total).then_some(next)}),
+    )
 }
 
 /// Bundled non-integration contracts this server can execute (triggers, data,

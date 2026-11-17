@@ -6,6 +6,55 @@ use std::sync::{Arc, Mutex};
 
 type Requests = Arc<Mutex<Vec<(String, String, String)>>>;
 
+#[tokio::test]
+async fn node_catalog_preserves_browser_contract_and_validates_page_filters() {
+    let Json(full) = node_catalog(
+        crate::agents::tests::admin(1),
+        Path("1".into()),
+        Query(Default::default()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(full["nodes"], catalog()["nodes"]);
+    assert_eq!(full["builtin_nodes"], json!(builtin_nodes()));
+    assert!(full["packages"].is_array());
+    assert!(full.get("next_offset").is_none());
+    let query = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    };
+    let empty = catalog_page(&query(&[("search", "not-a-real-node-type")])).unwrap();
+    assert_eq!(empty["total"], 0);
+    assert!(empty["next_offset"].is_null());
+    let beyond = catalog_page(&query(&[("offset", "18446744073709551615")])).unwrap();
+    assert!(beyond["nodes"].as_array().unwrap().is_empty());
+    assert!(beyond["builtin_nodes"].as_array().unwrap().is_empty());
+    assert!(beyond["next_offset"].is_null());
+    let filtered = catalog_page(&query(&[("section", "builtin"), ("search", "trigger")])).unwrap();
+    assert!(filtered["nodes"].as_array().unwrap().is_empty());
+    assert!(
+        filtered["builtin_nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|node| { node["type"].as_str().unwrap().contains("trigger") })
+    );
+    for (key, value) in [
+        ("offset", "-1"),
+        ("offset", "bad"),
+        ("page_size", "0"),
+        ("page_size", "21"),
+        ("page_size", "bad"),
+        ("section", "invalid"),
+    ] {
+        let mut values = query(&[("page_size", "5")]);
+        values.insert(key.to_owned(), value.to_owned());
+        assert!(catalog_page(&values).is_err(), "{key}={value}");
+    }
+}
+
 #[test]
 fn clone_selection_expands_to_distinct_safe_directories_and_rejects_bad_batches() {
     let item = Item {

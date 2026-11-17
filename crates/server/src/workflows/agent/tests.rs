@@ -1136,6 +1136,62 @@ async fn file_output_requires_a_confinable_cli_and_keeps_the_schema_optional_onl
 }
 
 #[tokio::test]
+async fn mcp_node_catalog_is_bounded_searchable_and_complete() {
+    let fixture = Fixture::new().await;
+    let mut offset = 0;
+    let mut types = std::collections::BTreeSet::new();
+    loop {
+        let reply = crate::platform_tools::dispatch(
+            &fixture.s,
+            admin(1),
+            crate::platform_tools::Call {
+                method: "GET".into(),
+                path: format!("/workflow-node-catalog?offset={offset}"),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(reply["status"], 200, "{reply}");
+        assert!(serde_json::to_vec(&reply).unwrap().len() < 256 * 1024);
+        let data = &reply["data"];
+        for key in ["nodes", "builtin_nodes"] {
+            for node in data[key].as_array().unwrap() {
+                assert!(node["params_schema"].is_object());
+                assert!(types.insert(node["type"].as_str().unwrap().to_owned()));
+            }
+        }
+        if let Some(next) = data["next_offset"].as_u64() {
+            assert!(next > offset);
+            offset = next;
+        } else {
+            assert_eq!(types.len() as u64, data["total"].as_u64().unwrap());
+            break;
+        }
+    }
+    assert!(types.contains("core.trigger.manual"));
+    assert!(types.contains("ferry.request"));
+    assert!(types.len() > 50);
+    let reply = crate::platform_tools::dispatch(
+        &fixture.s,
+        admin(1),
+        crate::platform_tools::Call {
+            method: "GET".into(),
+            path: "/workflow-node-catalog?type=core.trigger.manual".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(reply["status"], 200, "{reply}");
+    assert_eq!(reply["data"]["total"], 1);
+    assert_eq!(
+        reply["data"]["builtin_nodes"][0]["type"],
+        "core.trigger.manual"
+    );
+}
+
+#[tokio::test]
 async fn the_published_definition_format_matches_the_validated_schema() {
     let fixture = Fixture::new().await;
     let format = crate::platform_tools::dispatch(

@@ -278,8 +278,30 @@ pub(crate) async fn dispatch_as_agent(
         .await
 }
 
-pub(crate) async fn dispatch(s: &AppState, scope: Scope, call: Call) -> Result<Value> {
+pub(crate) async fn dispatch(s: &AppState, scope: Scope, mut call: Call) -> Result<Value> {
     call.validate()?;
+    // The editor consumes the full catalog, but MCP must stay below its bounded
+    // response size. Preserve explicit pagination while making an unfiltered
+    // discovery call safe as well.
+    if call.method == "GET" && call.path.split('?').next() == Some("/workflow-node-catalog") {
+        let query = call
+            .path
+            .split_once('?')
+            .map(|(_, query)| query)
+            .unwrap_or("");
+        let has_page_size = query.split('&').any(|field| {
+            percent_encoding::percent_decode_str(field.split('=').next().unwrap_or(""))
+                .decode_utf8_lossy()
+                == "page_size"
+        });
+        if !has_page_size {
+            call.path.push_str(if call.path.contains('?') {
+                "&page_size=5"
+            } else {
+                "?page_size=5"
+            });
+        }
+    }
     let uri = format!(
         "/{workspace}{path}",
         workspace = scope.workspace_id,

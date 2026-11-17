@@ -2061,6 +2061,22 @@
       {
         "name": "section",
         "kind": "param"
+      },
+      {
+        "name": "offset",
+        "kind": "param"
+      },
+      {
+        "name": "page_size",
+        "kind": "param"
+      },
+      {
+        "name": "search",
+        "kind": "param"
+      },
+      {
+        "name": "type",
+        "kind": "param"
       }
     ]
   },

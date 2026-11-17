@@ -3821,7 +3821,8 @@
     "source": "crates/server/src/workflows/integration.rs",
     "signature": "async fn node_catalog(\n    scope: Scope,\n    Path(_): Path<String>,\n    Query(query): Query<std::collections::HashMap<String, String>>,\n) -> Result<Json<Value>>",
     "definitions": [],
-    "permission_checks": []
+    "permission_checks": [],
+    "documentation": "Read node contracts. Use offset (default 0), page_size (1..20, default 5),\nsearch (type/name substring), type (exact node type), and section=builtin or\nsection=integration. Follow next_offset until null; total counts all matches.\nMCP calls are paginated automatically. Browser calls without filters retain\nthe full editor catalog. GET /workflow-definition-format supplies the graph\nschema and a valid definition example; node params_schema supplies parameters."
   },
   {
     "path": "/workflows",
