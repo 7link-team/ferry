@@ -36,6 +36,8 @@ interface Summary {
   kind?: string;
   unread?: number;
   mentions?: number;
+  /** Approvals waiting for the viewer, including ones left when a reply ended. */
+  pending?: number;
 }
 export function ConversationsWorkspace({
   workspace,
@@ -248,6 +250,16 @@ export function ConversationsWorkspace({
                 )}
               </span>
             </span>
+            {!!row.pending && (
+              <span
+                data-pending-badge
+                className="shrink-0 rounded-full bg-amber-500 px-1.5 py-0.5 text-xs font-medium text-white"
+                aria-label={`${t("pendingFilter")} ${row.pending}`}
+                title={t("pendingFilter")}
+              >
+                {row.pending > 99 ? "99+" : row.pending}
+              </span>
+            )}
             {!!row.unread && (
               <span
                 className="flex shrink-0 items-center gap-1 text-xs"

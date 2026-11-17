@@ -137,12 +137,14 @@ it("folds settled tool calls into one audit section and keeps pending approvals 
         const audit=host.querySelector('details[data-execution-details]') as HTMLDetailsElement;
         expect(audit).not.toBeNull();expect(audit.open).toBe(false);
         // Closed details build nothing; opening them renders the audit.
-        expect(audit.textContent).not.toContain('ferry_request');
+        expect(audit.textContent).not.toContain(conversationText('decisionAllowed'));
         await act(async()=>{audit.open=true;audit.dispatchEvent(new Event('toggle'));});
-        expect(audit.textContent).toContain('ferry_request');
+        expect(audit.textContent).toContain('/workflows');
+        expect(audit.textContent).toContain(conversationText('decisionAllowed'));
         const approvals=[...host.querySelectorAll('button')].filter(button=>button.textContent===conversationText('allow'));
         expect(approvals).toHaveLength(next==='running'?1:0);
-        expect([...host.querySelectorAll('pre')].filter(pre=>!pre.closest('[data-execution-details]'))).toHaveLength(next==='running'?1:0);
+        expect(host.querySelectorAll('[data-pending-decision]')).toHaveLength(next==='running'?1:0);
+        expect([...host.querySelectorAll('[data-pending-decision]')].every(card=>!card.closest('[data-execution-details]'))).toBe(true);
       }finally{await act(()=>root.unmount());host.remove();}
     }
   }finally{mocked.mockRestore();vi.unstubAllGlobals();}

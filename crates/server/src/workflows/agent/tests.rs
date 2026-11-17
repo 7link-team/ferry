@@ -1134,3 +1134,40 @@ async fn file_output_requires_a_confinable_cli_and_keeps_the_schema_optional_onl
         .unwrap();
     assert!(fixture.requests().is_empty());
 }
+
+#[tokio::test]
+async fn the_published_definition_example_validates_and_saves_with_real_ids() {
+    let fixture = Fixture::new().await;
+    let mut example = super::super::integration::definition_example();
+    // The envelope and every node's params are what the schemas require.
+    super::super::graph::validate(&example.to_string()).unwrap();
+    // Saving also checks expression syntax in the JavaScript sandbox, which
+    // unit tests do not build; save the same graph with literal values.
+    fn literal(value: &mut Value) {
+        match value {
+            Value::String(text) if text.starts_with('=') => *text = text[1..].to_owned(),
+            Value::Array(items) => items.iter_mut().for_each(literal),
+            Value::Object(map) => map.values_mut().for_each(literal),
+            _ => {}
+        }
+    }
+    literal(&mut example);
+    for node in example["nodes"].as_array_mut().unwrap() {
+        if node["type"] == "ai.agent.run" {
+            node["params"]["agent_id"] = json!(fixture.agent.id.to_string());
+        }
+    }
+    create_workflow(&fixture.s, example).await.unwrap();
+    // A guessed envelope is refused with the path and the reason.
+    let error = create_workflow(&fixture.s, json!({"version":1,"nodes":[],"edges":[]}))
+        .await
+        .unwrap_err();
+    let message = error.2.as_ref().unwrap();
+    assert_eq!(message.key, "workflow.graphSchema");
+    let path = message.params["path"].as_str();
+    assert!(path.starts_with("/ ("), "{path}");
+    assert!(
+        path.contains("engine") || path.contains("version") || path.contains("edges"),
+        "{path}"
+    );
+}

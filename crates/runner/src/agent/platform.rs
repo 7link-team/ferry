@@ -210,6 +210,12 @@ pub(crate) fn tools() -> Value {
 }
 
 /// Internal stdio MCP command used by native CLI clients. Logs belong on stderr only.
+///
+/// Requests are served concurrently: a `ferry_request` write can wait a long
+/// time for the user's approval, and meanwhile the client's pings and other
+/// calls must still be answered. A server that stops answering looks dead to
+/// the client, which then fails the waiting call and lets the turn end with
+/// the approval still undecided.
 pub(crate) async fn stdio() -> Result<()> {
     let url = std::env::var("FERRY_PLATFORM_BRIDGE_URL")?;
     let token = std::env::var("FERRY_PLATFORM_BRIDGE_TOKEN")?;
@@ -226,11 +232,43 @@ pub(crate) async fn stdio() -> Result<()> {
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
-    let mut input = BufReader::new(tokio::io::stdin());
-    let mut output = tokio::io::stdout();
+    serve(tokio::io::stdin(), tokio::io::stdout(), client, url, token).await
+}
+
+/// One MCP session over a byte stream; generic so tests can drive it in memory.
+pub(super) async fn serve<R, W>(
+    input: R,
+    mut output: W,
+    client: reqwest::Client,
+    url: String,
+    token: String,
+) -> Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    use tokio::io::AsyncReadExt;
+    let (responses, mut outbox) = mpsc::channel::<Value>(64);
+    let writer = tokio::spawn(async move {
+        while let Some(response) = outbox.recv().await {
+            if output
+                .write_all(response.to_string().as_bytes())
+                .await
+                .is_err()
+                || output.write_all(b"\n").await.is_err()
+                || output.flush().await.is_err()
+            {
+                break;
+            }
+        }
+    });
+    // Outstanding tool calls by JSON-RPC id, so a client cancellation stops
+    // only that call (MCP: no response is sent for a cancelled request).
+    let calls: Arc<Mutex<HashMap<String, tokio::task::AbortHandle>>> = Arc::default();
+    let mut tasks = tokio::task::JoinSet::new();
+    let mut input = BufReader::new(input);
     loop {
         let mut buffer = Vec::new();
-        use tokio::io::AsyncReadExt;
         let size = (&mut input)
             .take(1024 * 1024 + 1)
             .read_until(b'\n', &mut buffer)
@@ -243,10 +281,39 @@ pub(crate) async fn stdio() -> Result<()> {
             "MCP input exceeds limit"
         );
         let request: Value = serde_json::from_slice(&buffer)?;
+        let method = request["method"].as_str().unwrap_or("").to_owned();
+        if method == "notifications/cancelled" {
+            let id = request["params"]["requestId"].to_string();
+            if let Some(call) = calls.lock().unwrap().remove(&id) {
+                call.abort();
+            }
+            continue;
+        }
         if request.get("id").is_none() {
             continue;
         }
-        let result = match request["method"].as_str().unwrap_or("") {
+        let id = request["id"].clone();
+        if method == "tools/call" {
+            let (client, url, token, responses, calls_done) = (
+                client.clone(),
+                url.clone(),
+                token.clone(),
+                responses.clone(),
+                calls.clone(),
+            );
+            let key = id.to_string();
+            let params = request["params"].clone();
+            let task = tasks.spawn(async move {
+                let result = tool_call(&client, &url, &token, &params).await;
+                calls_done.lock().unwrap().remove(&id.to_string());
+                let _ = responses.send(reply(&id, result)).await;
+            });
+            calls.lock().unwrap().insert(key, task);
+            // Finished tasks need no further attention.
+            while tasks.try_join_next().is_some() {}
+            continue;
+        }
+        let result = match method.as_str() {
             "initialize" => {
                 let requested = request["params"]["protocolVersion"].as_str().unwrap_or("");
                 let version = if ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
@@ -262,38 +329,43 @@ pub(crate) async fn stdio() -> Result<()> {
             }
             "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({"tools":tools()})),
-            "tools/call" => match client
-                .post(&url)
-                .bearer_auth(&token)
-                .json(&request["params"])
-                .send()
-                .await
-            {
-                Ok(response) if response.status().is_success() => {
-                    match response.json::<Value>().await {
-                        Ok(value) => Ok(
-                            json!({"content":[{"type":"text","text":value.to_string()}],"isError":value["ok"]==false}),
-                        ),
-                        Err(_) => Err("The platform returned an invalid result."),
-                    }
-                }
-                _ => Err(
-                    "The execution bridge is unavailable; this call was not confirmed as successful. Do not replay a write automatically.",
-                ),
-            },
-            _ => Err("Unsupported MCP method"),
+            _ => Err("Unsupported MCP method".to_owned()),
         };
-        let response = match result {
-            Ok(result) => json!({"jsonrpc":"2.0","id":request["id"],"result":result}),
-            Err(message) => {
-                json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32000,"message":message}})
-            }
-        };
-        output.write_all(response.to_string().as_bytes()).await?;
-        output.write_all(b"\n").await?;
-        output.flush().await?;
+        if responses.send(reply(&id, result)).await.is_err() {
+            break;
+        }
     }
+    // End of input: let outstanding calls answer, then close the writer.
+    while tasks.join_next().await.is_some() {}
+    drop(responses);
+    let _ = writer.await;
     Ok(())
+}
+
+fn reply(id: &Value, result: std::result::Result<Value, String>) -> Value {
+    match result {
+        Ok(result) => json!({"jsonrpc":"2.0","id":id,"result":result}),
+        Err(message) => json!({"jsonrpc":"2.0","id":id,"error":{"code":-32000,"message":message}}),
+    }
+}
+
+async fn tool_call(
+    client: &reqwest::Client,
+    url: &str,
+    token: &str,
+    params: &Value,
+) -> std::result::Result<Value, String> {
+    match client.post(url).bearer_auth(token).json(params).send().await {
+        Ok(response) if response.status().is_success() => match response.json::<Value>().await {
+            Ok(value) => Ok(
+                json!({"content":[{"type":"text","text":value.to_string()}],"isError":value["ok"]==false}),
+            ),
+            Err(_) => Err("The platform returned an invalid result.".into()),
+        },
+        _ => Err(
+            "The execution bridge is unavailable; this call was not confirmed as successful. Do not replay a write automatically.".into(),
+        ),
+    }
 }
 
 // Pi exposes tools through its extension API, rather than a native MCP client.
@@ -317,6 +389,80 @@ export default function(pi) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reads one JSON-RPC line with a deadline.
+    async fn next_line<R: tokio::io::AsyncRead + Unpin>(reader: &mut BufReader<R>) -> Value {
+        let mut line = String::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            reader.read_line(&mut line),
+        )
+        .await
+        .expect("a response in time")
+        .unwrap();
+        serde_json::from_str(&line).unwrap()
+    }
+
+    #[tokio::test]
+    async fn pings_are_answered_while_a_write_waits_for_approval_and_cancelled_calls_stay_silent() {
+        let (events, mut platform) = mpsc::channel(8);
+        let bridge = Bridge::start(events).await.unwrap();
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let (client_end, server_end) = tokio::io::duplex(64 * 1024);
+        let (server_read, server_write) = tokio::io::split(server_end);
+        let session = tokio::spawn(serve(
+            server_read,
+            server_write,
+            client,
+            bridge.url.clone(),
+            bridge.token.clone(),
+        ));
+        let (client_read, mut client_write) = tokio::io::split(client_end);
+        let mut responses = BufReader::new(client_read);
+        let mut send = |value: Value| {
+            let line = format!("{value}\n");
+            async move { line }
+        };
+        // A write that the platform holds for approval: no result yet.
+        let call = send(json!({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"ferry_request","arguments":{"method":"POST","path":"/workflows"}}})).await;
+        client_write.write_all(call.as_bytes()).await.unwrap();
+        let Some(Event::PlatformCall { request_id, .. }) = platform.recv().await else {
+            panic!("platform call expected");
+        };
+        // The client keeps the session alive with pings; they are answered at once.
+        let ping = send(json!({"jsonrpc":"2.0","id":8,"method":"ping"})).await;
+        client_write.write_all(ping.as_bytes()).await.unwrap();
+        assert_eq!(next_line(&mut responses).await["id"], 8);
+        // The decision arrives later; the waiting call then completes.
+        bridge.resolve(
+            &request_id,
+            json!({"status":201,"ok":true,"data":{"id":"42"}}),
+        );
+        let done = next_line(&mut responses).await;
+        assert_eq!(done["id"], 7);
+        assert_eq!(done["result"]["isError"], false);
+        // A call the client cancels is never answered; later requests still are.
+        let second = send(json!({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"ferry_request","arguments":{"method":"POST","path":"/workflows"}}})).await;
+        client_write.write_all(second.as_bytes()).await.unwrap();
+        assert!(matches!(
+            platform.recv().await,
+            Some(Event::PlatformCall { .. })
+        ));
+        let cancel = send(
+            json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9}}),
+        )
+        .await;
+        client_write.write_all(cancel.as_bytes()).await.unwrap();
+        let list = send(json!({"jsonrpc":"2.0","id":10,"method":"tools/list"})).await;
+        client_write.write_all(list.as_bytes()).await.unwrap();
+        assert_eq!(next_line(&mut responses).await["id"], 10);
+        client_write.shutdown().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), session)
+            .await
+            .expect("session ends with its input")
+            .unwrap()
+            .unwrap();
+    }
     #[tokio::test]
     async fn bridge_authentication_result_binding_and_shutdown() {
         let (tx, mut rx) = mpsc::channel(4);

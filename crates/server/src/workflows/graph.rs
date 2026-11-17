@@ -152,6 +152,22 @@ fn contracts() -> &'static Contracts {
     })
 }
 
+/// A schema failure that also says why (missing field, unexpected field,
+/// wrong type), so a person or an Agent can fix exactly that field.
+fn schema_error(path: String, reason: &str) -> ApiError {
+    let reason: String = reason
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(240)
+        .collect();
+    let path = if path.is_empty() {
+        "/".to_owned()
+    } else {
+        path
+    };
+    invalid(format!("{path} ({reason})"), "workflow.graphSchema")
+}
+
 fn invalid(path: impl Into<String>, key: &'static str) -> ApiError {
     ApiError::localized(
         StatusCode::BAD_REQUEST,
@@ -184,6 +200,14 @@ pub(crate) fn validate(input: &str) -> Result<String> {
     }
     validate_layer(&graph, "", 0, &mut 0)?;
     crate::definitions::canonical(input)
+}
+
+/// The bundled graph JSON schema, as validation uses it.
+pub(crate) fn graph_schema() -> Value {
+    serde_json::from_str(include_str!(
+        "../../../../src/shared/workflow-contracts/workflow-graph.schema.json"
+    ))
+    .expect("bundled graph schema must be JSON")
 }
 
 pub(crate) fn pin_data<'a>(graph: &'a Value, node: &Value, mode: &str) -> Option<&'a Value> {
@@ -620,9 +644,9 @@ fn validate_semantics(kind: &str, params: &Value, base: &str) -> Result<()> {
 fn validate_layer(graph: &Value, base: &str, nesting: usize, total: &mut usize) -> Result<()> {
     let registry = contracts();
     if let Err(error) = registry.graph.validate(graph) {
-        return Err(invalid(
+        return Err(schema_error(
             format!("{base}{}", error.instance_path()),
-            "workflow.graphSchema",
+            &error.to_string(),
         ));
     }
     // Shape and numeric bounds are established by the trusted graph schema.
@@ -648,9 +672,9 @@ fn validate_layer(graph: &Value, base: &str, nesting: usize, total: &mut usize) 
             })
             .ok_or_else(|| invalid(&path, "workflow.graphUnknownNode"))?;
         if let Err(error) = contract.params.validate(&node["params"]) {
-            return Err(invalid(
+            return Err(schema_error(
                 format!("{path}/params{}", error.instance_path()),
-                "workflow.graphSchema",
+                &error.to_string(),
             ));
         }
         let settings = &node["settings"];

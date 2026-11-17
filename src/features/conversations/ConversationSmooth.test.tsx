@@ -173,6 +173,9 @@ it("builds execution details only when opened and caps very large results", asyn
   expect(details).not.toBeNull();
   expect(details.querySelector("pre")).toBeNull();
   await act(async () => { details.open = true; details.dispatchEvent(new Event("toggle")); });
+  // The readable view builds the raw result only when it is asked for.
+  expect(details.querySelector("pre")).toBeNull();
+  await act(async () => (details.querySelector("[data-raw-toggle]") as HTMLButtonElement).click());
   const pre = details.querySelector("[data-long-text] pre")!;
   expect(pre.textContent!.length).toBe(LONG_TEXT_LIMIT);
   expect(details.textContent).toContain(conversationText("truncatedNote"));

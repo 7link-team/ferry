@@ -200,6 +200,10 @@ pub enum Event {
     PlatformResult {
         request_id: String,
         result: Value,
+        /// What was asked (tool, method, path; never a body), for a readable
+        /// execution history. Server-created only, so older peers never see it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call: Option<Value>,
     },
     Session {
         native_session_id: String,
