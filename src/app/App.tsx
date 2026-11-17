@@ -232,11 +232,19 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
     },
   });
 
-  const parentItem = item.parent ? findItem(group.key, item.parent)! : item;
+  // Notification templates and send records are shared by the email, SMS and
+  // platform channel menus; the page remembers which one it was opened from
+  // (?scope=…) so the sidebar and tabs stay on that menu.
+  const notificationMenus: Record<string, string> = { "notification-channels": "email", "notification-sms": "sms", "notification-platforms": "platforms" };
+  const notificationScope = new URLSearchParams(location.search).get("scope");
+  const notificationMenu = item.resource === "notification-channels" ? item.key
+    : item.resource.startsWith("notification-") ? Object.keys(notificationMenus).find(key => notificationMenus[key] === notificationScope) ?? "notification-channels"
+    : undefined;
+  const parentItem = notificationMenu && item.resource !== "notification-channels" ? findItem(group.key, notificationMenu)! : item.parent ? findItem(group.key, item.parent)! : item;
   const visibleMenu = group.items.filter(i => menuVisible(group, i));
   const menuSections = [...new Set(visibleMenu.map(i => i.section ?? ""))].map(section => ({ section, items: visibleMenu.filter(i => (i.section ?? "") === section) }));
   const notificationArea = item.resource.startsWith("notification-");
-  const relatedItems = group.items.filter(i => i.resource !== "pipeline-groups" && i.resource !== "host-groups" && i.resource !== "holes" && (notificationArea ? (i.key === (item.resource === "notification-channels" ? item.key : "notification-channels") || ["notification-templates", "notification-deliveries"].includes(i.key)) : (i.key === parentItem.key || i.parent === parentItem.key)) && canVisit(i));
+  const relatedItems = group.items.filter(i => i.resource !== "pipeline-groups" && i.resource !== "host-groups" && i.resource !== "holes" && (notificationArea ? (i.key === notificationMenu || ["notification-templates", "notification-deliveries"].includes(i.key)) : (i.key === parentItem.key || i.parent === parentItem.key)) && canVisit(i));
   const listConfig = (lists[item.key] ?? lists[item.resource]);
   const nodeCatalogPending = needsNodeCatalog && nodeCatalogWorkspace !== workspaceId;
   const nodeCatalogFeedback = nodeCatalogError
@@ -354,7 +362,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
           </h1>
 
           {relatedItems.length > 1 && !["pipelines", "workflows", "credentials"].includes(parentItem.key) && <nav aria-label={commonText("shell.relatedPages", { name: notificationArea ? commonText("notifications:notification-channels") : parentItem.label })} className="mb-3 flex flex-wrap gap-3">
-            {relatedItems.map(i => <a key={i.key} {...to(group.key, i.key, i.params)} aria-current={i.key === item.key ? "page" : undefined} className={cn("border-b-2 px-1 py-2 text-sm", i.key === item.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{i.label}</a>)}
+            {relatedItems.map(i => <a key={i.key} {...to(group.key, i.key, notificationMenu && ["notification-templates", "notification-deliveries"].includes(i.key) ? { ...i.params, scope: notificationMenus[notificationMenu]! } : i.params)} aria-current={i.key === item.key ? "page" : undefined} className={cn("border-b-2 px-1 py-2 text-sm", i.key === item.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{i.label}</a>)}
           </nav>}
           {item.description && <p className="mb-3 max-w-4xl text-sm text-muted-foreground">{item.description}</p>}
           {route.mode === "list" && group.key === "workflow" && ["pipelines","workflows"].includes(parentItem.key) && <nav aria-label={workflowText("libraryTabs")} className="mb-3 flex gap-3">{[findItem("workflow",parentItem.key),findItem("workflow",parentItem.key==="workflows"?"workflow-templates":"pipeline-templates")].filter((entry):entry is NavItem=>!!entry&&canVisit(entry)).map(entry=><a key={entry.key} {...to("workflow",entry.key,entry.params)} aria-current={entry.key===item.key?"page":undefined} className={cn("border-b-2 px-1 py-2 text-sm",entry.key===item.key?"border-primary text-primary":"border-transparent text-muted-foreground hover:text-foreground")}>{entry.key===parentItem.key?workflowText("workflows"):workflowText("templates")}</a>)}</nav>}

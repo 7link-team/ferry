@@ -112,6 +112,33 @@ it("keeps notification templates and deliveries in tabs under one grouped mainte
   expect(location.pathname).toBe("/zh-CN/workspaces/2/notification-deliveries");
   expect(host.querySelector('nav[aria-label="通知页面"] [aria-current="page"]')?.textContent).toBe("发送记录");
 });
+it("keeps templates and send records under the SMS or platform menu they were opened from", async () => {
+  required = false;
+  permissions = ["notifications.read"];
+  history.replaceState({}, "", "/zh-CN/workspaces/2/notification-channels?scope=sms");
+  await act(async () => root.render(<App />));
+  const sidebar = () => host.querySelector('nav[aria-label="维护"]')!;
+  const tabs = () => host.querySelector('nav[aria-label="通知页面"]')!;
+  expect(sidebar().querySelector('[aria-current="page"]')?.textContent).toBe("短信");
+  expect([...tabs().querySelectorAll("a")].map(a => a.textContent)).toEqual(["短信", "通知模板", "发送记录"]);
+  await act(async () => tabs().querySelectorAll<HTMLAnchorElement>("a")[1]!.click());
+  expect(location.pathname).toBe("/zh-CN/workspaces/2/notification-templates");
+  expect(new URLSearchParams(location.search).get("scope")).toBe("sms");
+  expect(sidebar().querySelector('[aria-current="page"]')?.textContent).toBe("短信");
+  expect([...tabs().querySelectorAll("a")].map(a => a.textContent)).toEqual(["短信", "通知模板", "发送记录"]);
+  await act(async () => tabs().querySelectorAll<HTMLAnchorElement>("a")[2]!.click());
+  expect(location.pathname).toBe("/zh-CN/workspaces/2/notification-deliveries");
+  expect(sidebar().querySelector('[aria-current="page"]')?.textContent).toBe("短信");
+  // A reload of a send-records page opened from the platform menu keeps that menu.
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  history.replaceState({}, "", "/zh-CN/workspaces/2/notification-deliveries?scope=platforms");
+  await act(async () => root.render(<App />));
+  expect(sidebar().querySelector('[aria-current="page"]')?.textContent).toBe("第三方平台");
+  expect(tabs().querySelectorAll("a")[0]!.textContent).toBe("第三方平台");
+  await act(async () => tabs().querySelectorAll<HTMLAnchorElement>("a")[0]!.click());
+  expect(new URLSearchParams(location.search).get("scope")).toBe("platforms");
+});
 it("collapses maintenance groups and opens the notification group when entering SMS", async () => {
   required = false; permissions = ["notifications.read", "roles.read"];
   history.replaceState({}, "", "/zh-CN/workspaces/2/roles");
