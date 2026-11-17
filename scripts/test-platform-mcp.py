@@ -39,7 +39,10 @@ try:
     result=subprocess.run([str(binary),os.environ.get('FERRY_MCP_COMMAND','ferry-mcp')],env=env,input=''.join(json.dumps(dict(jsonrpc='2.0',**row))+'\n' for row in requests).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=25,**flags)
     assert result.returncode==0,result.stderr.decode(errors='replace')
     rows=[json.loads(line) for line in result.stdout.splitlines()]
-    assert [row['id'] for row in rows]==list(range(1,8)),rows
+    # Calls are served concurrently (a ping must not wait behind a tool call
+    # that is waiting for approval), so responses are matched by id.
+    assert sorted(row['id'] for row in rows)==list(range(1,8)),rows
+    rows=sorted(rows,key=lambda row:row['id'])
     assert rows[0]['result']['protocolVersion']=='2025-06-18'
     assert rows[0]['result']['serverInfo']['name']=='ferry'
     tools=rows[1]['result']['tools'];assert {tool['name'] for tool in tools}=={'ferry_discover','ferry_request'}

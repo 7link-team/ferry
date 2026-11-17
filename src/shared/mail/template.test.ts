@@ -4,7 +4,7 @@ import { mailPreview, plainMailHtml } from "./template";
 it("shows a styled default and resolves variables in the isolated HTML preview", () => {
   const html = mailPreview("Verify your email", plainMailHtml("Your code: {{code}}\nValid {{expires_minutes}} minutes."));
   expect(html).toContain('max-width:600px');
-  expect(html).toContain('font-size:28px');
+  expect(html).toMatch(/font-size:\s*28px/);
   expect(html).toContain("123456");
   expect(html).toContain("Valid 10 minutes.");
   expect(html).not.toContain("{{content}}");

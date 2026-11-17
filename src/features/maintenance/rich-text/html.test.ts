@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sanitizeRichText } from "../value-content";
+import { plainMailHtml } from "../../../shared/mail/template";
 import { canonicalHtml, htmlToValue, isPlaceholder, PLACEHOLDER, roundTrips, valueToHtml } from "./html";
 
 const round = (html: string) => roundTrips(html, sanitizeRichText);
@@ -75,4 +76,9 @@ describe("stored rich text round-trips through the visual editor", () => {
     expect(html).toBe('<p>a &lt;b&gt; &amp; "q" <a href="https://e.invalid/?a=1&amp;b=&quot;2&quot;">link</a></p>');
     expect(round('<p onclick="x()">Hi</p><script>alert(1)</script>')).toBe(true);
   });
+});
+
+it("opens the built-in verification mail template in the visual editor", () => {
+  // The default body must stay editable visually (not fall back to HTML source).
+  expect(round(plainMailHtml(["您的验证码是 {{code}}", "{{expires_minutes}} 分钟内有效。"].join("\n")))).toBe(true);
 });
