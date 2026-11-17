@@ -1326,8 +1326,10 @@ async fn heartbeat_waiting_for_sqlite_never_starves_the_transaction_owner() {
         tokio::time::sleep(std::time::Duration::from_millis(75)).await;
         Ok(())
     };
+    // A starved owner hangs forever; the bound only detects that, so it is
+    // generous enough for a loaded CI machine running tests in parallel.
     tokio::time::timeout(
-        std::time::Duration::from_secs(2),
+        std::time::Duration::from_secs(10),
         with_heartbeat(&s, &claim, process, std::time::Duration::from_millis(10)),
     )
     .await
