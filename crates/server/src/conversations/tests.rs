@@ -1562,3 +1562,77 @@ fn message_limits_are_each_named() {
     );
     check_message("hello", "c", &[attachment("a.txt", "text")]).unwrap();
 }
+
+#[tokio::test]
+async fn conversations_and_their_files_delete_while_file_storage_is_unavailable() {
+    let (_dir, s, id) = seeded().await;
+    // A stored file attached to the conversation, then storage breaks.
+    let backend = crate::artifact_store::ArtifactStore::for_state(&s)
+        .await
+        .unwrap();
+    let store = crate::content_assets::Store {
+        db: &s.db,
+        backend: &backend,
+        vault: &s.vault,
+        ids: &s.ids,
+        quota: crate::content_assets::DEFAULT_QUOTA,
+    };
+    let asset = store
+        .stage_bytes(1, b"notes", "text/plain", 0, "conversation", 1)
+        .await
+        .unwrap();
+    let file_id = s.next_id().unwrap();
+    let tx = sea_orm::TransactionTrait::begin(&s.db).await.unwrap();
+    store
+        .attach(&tx, 1, asset.id, "conversation_file", i64::from(file_id))
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    crate::entities::ai_chat_files::Entity::insert(crate::entities::ai_chat_files::ActiveModel {
+        id: sea_orm::Set(file_id.into()),
+        workspace_id: sea_orm::Set(1),
+        conversation_id: sea_orm::Set(id.into()),
+        owner_id: sea_orm::Set(1),
+        asset_id: sea_orm::Set(asset.id),
+        size: sea_orm::Set(5),
+        created_at: sea_orm::Set(db::now()),
+        name: sea_orm::Set("notes.txt".into()),
+        mime: sea_orm::Set("text/plain".into()),
+    })
+    .exec(&s.db)
+    .await
+    .unwrap();
+    let broken = s
+        .vault
+        .seal(
+            r#"{"kind":"s3","endpoint":"https://s3.example.invalid"}"#,
+            "platform:file-storage",
+        )
+        .unwrap();
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::FileStorage,
+            sea_orm::sea_query::Expr::value(Some(broken)),
+        )
+        .filter(crate::entities::platform_state::Column::Id.eq(1))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    assert!(
+        crate::artifact_store::ArtifactStore::for_state(&s)
+            .await
+            .is_err()
+    );
+    remove(State(s.clone()), admin(1), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert!(find(&s.db, &admin(1), id).await.is_err());
+    assert_eq!(
+        crate::entities::ai_chat_files::Entity::find()
+            .filter(crate::entities::ai_chat_files::Column::ConversationId.eq(i64::from(id)))
+            .count(&s.db)
+            .await
+            .unwrap(),
+        0
+    );
+}

@@ -202,7 +202,9 @@ async fn content_reference_rollback_grace_and_gc_generation() {
     assert_eq!(refs::Entity::find().count(&f.db).await.unwrap(), 1);
     assert!(!store.collect(11, a.id, i64::MAX).await.unwrap());
     let tx = f.db.begin().await.unwrap();
-    store.detach(&tx, 11, a.id, "node_run", 31).await.unwrap();
+    detach_reference(&tx, 11, a.id, "node_run", 31)
+        .await
+        .unwrap();
     tx.commit().await.unwrap();
     let gc = job(&f.db, 11, a.id).await.unwrap().unwrap();
     assert!(store.collect(11, a.id, gc.eligible_at).await.unwrap());

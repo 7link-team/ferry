@@ -342,30 +342,6 @@ impl Store<'_> {
             .await?;
         Ok(())
     }
-    pub(crate) async fn detach(
-        &self,
-        tx: &DatabaseTransaction,
-        workspace: i64,
-        id: i64,
-        owner_kind: &str,
-        owner_id: i64,
-    ) -> Result<()> {
-        asset_lock(tx, workspace, id).await?;
-        let asset = row(tx, workspace, id).await?;
-        refs::Entity::delete_by_id((id, owner_kind.to_owned(), owner_id))
-            .exec(tx)
-            .await?;
-        if asset.pinned == 0
-            && refs::Entity::find()
-                .filter(refs::Column::AssetId.eq(id))
-                .count(tx)
-                .await?
-                == 0
-        {
-            candidate(tx, &asset, crate::db::now()).await?;
-        }
-        Ok(())
-    }
     pub(crate) async fn pin(
         &self,
         tx: &DatabaseTransaction,
@@ -517,3 +493,31 @@ async fn candidate(tx: &DatabaseTransaction, asset: &assets::Model, now: i64) ->
 
 #[cfg(test)]
 mod tests;
+
+/// Drops one owner's reference to an asset and, when nothing else uses it,
+/// queues the bytes for cleanup. Database-only: removing references never
+/// needs the file storage itself, so deletes work while storage is down.
+pub(crate) async fn detach_reference(
+    tx: &DatabaseTransaction,
+    workspace: i64,
+    id: i64,
+    owner_kind: &str,
+    owner_id: i64,
+) -> Result<()> {
+    asset_lock(tx, workspace, id).await?;
+
+    let asset = row(tx, workspace, id).await?;
+    refs::Entity::delete_by_id((id, owner_kind.to_owned(), owner_id))
+        .exec(tx)
+        .await?;
+    if asset.pinned == 0
+        && refs::Entity::find()
+            .filter(refs::Column::AssetId.eq(id))
+            .count(tx)
+            .await?
+            == 0
+    {
+        candidate(tx, &asset, crate::db::now()).await?;
+    }
+    Ok(())
+}

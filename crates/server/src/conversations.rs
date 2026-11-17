@@ -583,7 +583,6 @@ async fn remove(
     Path((_, id)): Path<(String, Id)>,
 ) -> Result<Json<Value>> {
     scope.require("conversations.update")?;
-    let backend = crate::artifact_store::ArtifactStore::for_state(&s).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let c = find(&tx, &scope, id).await?;
     if c.owner_id != i64::from(scope.user.id) {
@@ -592,7 +591,7 @@ async fn remove(
     if has_active(&tx, id).await? {
         return Err(error(StatusCode::CONFLICT, "conversations.busy"));
     }
-    files::detach_all(&s, &tx, id, &backend).await?;
+    files::detach_all(&tx, id).await?;
     groups::delete(&tx, id).await?;
     interactions::delete(&tx, id).await?;
     events::Entity::delete_many()

@@ -238,7 +238,6 @@ async fn remove(
     Path((_, id, file)): Path<(String, Id, Id)>,
 ) -> Result<Json<Value>> {
     scope.require("conversations.run")?;
-    let backend = ArtifactStore::for_state(&s).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let conversation = find(&tx, &scope, id).await?;
     if serde_json::from_str::<Value>(&conversation.config)
@@ -270,9 +269,14 @@ async fn remove(
     {
         return Err(conflict());
     }
-    store(&s, &backend)
-        .detach(&tx, f.workspace_id, f.asset_id, "conversation_file", f.id)
-        .await?;
+    crate::content_assets::detach_reference(
+        &tx,
+        f.workspace_id,
+        f.asset_id,
+        "conversation_file",
+        f.id,
+    )
+    .await?;
     files::Entity::delete_by_id(file).exec(&tx).await?;
     tx.commit().await?;
     Ok(Json(json!({"ok":true})))
@@ -337,20 +341,22 @@ pub(super) async fn validate_refs(
     }
     Ok(())
 }
-pub(super) async fn detach_all(
-    s: &AppState,
-    tx: &sea_orm::DatabaseTransaction,
-    id: Id,
-    backend: &ArtifactStore,
-) -> Result<()> {
+/// Removes a conversation's file references (database only; the bytes are
+/// cleaned up later), so deleting a conversation never needs file storage.
+pub(super) async fn detach_all(tx: &sea_orm::DatabaseTransaction, id: Id) -> Result<()> {
     for f in files::Entity::find()
         .filter(files::Column::ConversationId.eq(id))
         .all(tx)
         .await?
     {
-        store(s, backend)
-            .detach(tx, f.workspace_id, f.asset_id, "conversation_file", f.id)
-            .await?;
+        crate::content_assets::detach_reference(
+            tx,
+            f.workspace_id,
+            f.asset_id,
+            "conversation_file",
+            f.id,
+        )
+        .await?;
     }
     files::Entity::delete_many()
         .filter(files::Column::ConversationId.eq(id))
