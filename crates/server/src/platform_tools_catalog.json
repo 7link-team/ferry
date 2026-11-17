@@ -1146,14 +1146,14 @@
     "source": "crates/server/src/conversations.rs",
     "signature": "async fn resolve_decision(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, turn)): Path<(String, Id, Id)>,\n    Json(body): Json<Resolution>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct Resolution {\n    request_id: String,\n    /// \"resumed\": the task was continued in a new message; \"dismissed\": not needed.\n    action: String,\n}"
+      "struct Resolution {\n    request_id: String,\n    /// \"resumed\": the task was continued in a new message.\n    action: String,\n}"
     ],
     "permission_checks": [
       "conversations.read",
       "conversations.run",
       "conversations.update"
     ],
-    "documentation": "Clears an approval that ended undecided from the conversation's pending\nitems once its owner continued the task or dismissed it.",
+    "documentation": "Clears an approval that ended undecided from the conversation's pending\nitems once its owner continued the task.",
     "permission": "conversations.run"
   },
   {

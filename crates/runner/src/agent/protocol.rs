@@ -336,6 +336,14 @@ impl Protocol {
                     step.events.push(Event::Tool {
                         item_id: id.into(),
                         name: item["type"].as_str().unwrap().into(),
+                        input: match item["type"].as_str() {
+                            Some("commandExecution") => item.get("command"),
+                            Some("fileChange") => item.get("changes"),
+                            Some("mcpToolCall") => item.get("arguments"),
+                            _ => None,
+                        }
+                        .filter(|value| !value.is_null())
+                        .cloned(),
                         state: if method == "item/started" {
                             "running"
                         } else {
@@ -434,6 +442,7 @@ impl Protocol {
                         step.events.push(Event::Tool {
                             item_id: item["id"].as_str().unwrap_or("").into(),
                             name: item["name"].as_str().unwrap_or("").into(),
+                            input: item.get("input").filter(|value| !value.is_null()).cloned(),
                             state: "running".into(),
                         });
                     }

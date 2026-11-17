@@ -1136,38 +1136,108 @@ async fn file_output_requires_a_confinable_cli_and_keeps_the_schema_optional_onl
 }
 
 #[tokio::test]
-async fn the_published_definition_example_validates_and_saves_with_real_ids() {
+async fn the_published_definition_format_matches_the_validated_schema() {
     let fixture = Fixture::new().await;
-    let mut example = super::super::integration::definition_example();
-    // The envelope and every node's params are what the schemas require.
+    let format = crate::platform_tools::dispatch(
+        &fixture.s,
+        admin(1),
+        crate::platform_tools::Call {
+            method: "GET".into(),
+            path: "/workflow-definition-format".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(format["status"], 200, "{format}");
+    assert_eq!(
+        format["data"]["schema"],
+        super::super::graph::graph_schema()
+    );
+    super::super::graph::validate(&format["data"]["example"].to_string()).unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires a built real ferry-sandbox via absolute FERRY_SANDBOX_PATH"]
+async fn the_published_definition_example_validates_and_saves_with_real_ids() {
+    assert!(std::path::Path::new(&std::env::var_os("FERRY_SANDBOX_PATH").unwrap()).is_file());
+    let fixture = Fixture::new().await;
+    let format = crate::platform_tools::dispatch(
+        &fixture.s,
+        admin(1),
+        crate::platform_tools::Call {
+            method: "GET".into(),
+            path: "/workflow-definition-format".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(format["status"], 200, "{format}");
+    assert_eq!(
+        format["data"]["schema"],
+        super::super::graph::graph_schema()
+    );
+    let mut example = format["data"]["example"].clone();
     super::super::graph::validate(&example.to_string()).unwrap();
-    // Saving also checks expression syntax in the JavaScript sandbox, which
-    // unit tests do not build; save the same graph with literal values.
-    fn literal(value: &mut Value) {
-        match value {
-            Value::String(text) if text.starts_with('=') => *text = text[1..].to_owned(),
-            Value::Array(items) => items.iter_mut().for_each(literal),
-            Value::Object(map) => map.values_mut().for_each(literal),
-            _ => {}
-        }
-    }
-    literal(&mut example);
+    // Keep the published expressions intact: POST must syntax-check the real
+    // example, not a literal-only substitute. This requires ferry-sandbox.
     for node in example["nodes"].as_array_mut().unwrap() {
         if node["type"] == "ai.agent.run" {
             node["params"]["agent_id"] = json!(fixture.agent.id.to_string());
         }
     }
-    create_workflow(&fixture.s, example).await.unwrap();
-    // A guessed envelope is refused with the path and the reason.
-    let error = create_workflow(&fixture.s, json!({"version":1,"nodes":[],"edges":[]}))
+    let saved = crate::platform_tools::dispatch(
+        &fixture.s,
+        admin(1),
+        crate::platform_tools::Call {
+            method: "POST".into(),
+            path: "/workflows".into(),
+            body: json!({"name":"Contributors report","definition":example.to_string()}),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved["status"], 201, "{saved}");
+    let id: Id = serde_json::from_value(saved["data"]["id"].clone()).unwrap();
+    let row = crate::entities::workflows::Entity::find_by_id(i64::from(id))
+        .one(&fixture.s.db)
         .await
-        .unwrap_err();
-    let message = error.2.as_ref().unwrap();
-    assert_eq!(message.key, "workflow.graphSchema");
-    let path = message.params["path"].as_str();
-    assert!(path.starts_with("/ ("), "{path}");
-    assert!(
-        path.contains("engine") || path.contains("version") || path.contains("edges"),
-        "{path}"
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&row.definition).unwrap(),
+        example
     );
+    let count = fixture.workflow_count().await;
+    let mut missing = example.clone();
+    missing.as_object_mut().unwrap().remove("engine");
+    let mut invalid_params = example;
+    invalid_params["nodes"][2]["params"]
+        .as_object_mut()
+        .unwrap()
+        .remove("agent_id");
+    for (definition, path) in [
+        (missing, "/engine"),
+        (invalid_params, "/nodes/2/params/agent_id"),
+    ] {
+        let rejected = crate::platform_tools::dispatch(
+            &fixture.s,
+            admin(1),
+            crate::platform_tools::Call {
+                method: "POST".into(),
+                path: "/workflows".into(),
+                body: json!({"name":"Invalid report","definition":definition.to_string()}),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(rejected["status"], 400, "{rejected}");
+        let detail = rejected["data"]["error"].as_str().unwrap();
+        assert!(detail.contains(&format!("{path} (")), "{detail}");
+        assert!(detail.contains("required"), "{detail}");
+    }
+    assert_eq!(fixture.workflow_count().await, count);
 }

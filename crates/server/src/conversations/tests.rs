@@ -252,6 +252,7 @@ async fn persisted_chat_is_independent_of_execution_logs_and_final_text_replaces
             item_id: "tool".into(),
             name: "LOG_ONLY_SECRET_MARKER".into(),
             state: "finished".into(),
+            input: None,
         },
         Event::Text {
             item_id: "part-a".into(),

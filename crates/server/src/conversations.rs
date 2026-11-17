@@ -299,7 +299,7 @@ pub(super) fn view_turn(t: &turns::Model) -> Value {
 }
 /// How many items need the decision of this turn's owner: approvals still
 /// waiting in an active turn, plus ones whose turn ended before a decision and
-/// that the owner has not yet continued or dismissed.
+/// that the owner has not yet continued.
 pub(super) fn pending_in(turn: &turns::Model) -> usize {
     let Ok(decisions) = serde_json::from_str::<Value>(&turn.decisions) else {
         return 0;
@@ -311,7 +311,7 @@ pub(super) fn pending_in(turn: &turns::Model) -> usize {
         .flat_map(|map| map.values())
         .filter(|item| {
             item["decision"].is_null()
-                && if item["ended_undecided"] == true {
+                && if item["ended_undecided"] == true || !active(&turn.state) {
                     !item["resolved"].is_string()
                 } else {
                     running
@@ -320,10 +320,11 @@ pub(super) fn pending_in(turn: &turns::Model) -> usize {
         .count()
 }
 
-/// Pending items per conversation for the viewer (the owner of each turn).
+/// Pending items in conversations already visible to the viewer, including
+/// group turns whose approval belongs to another member.
 async fn pending_counts(
     db: &impl ConnectionTrait,
-    scope: &Scope,
+    _scope: &Scope,
     rows: &[conversations::Model],
 ) -> Result<HashMap<i64, usize>> {
     let mut counts = HashMap::new();
@@ -332,12 +333,39 @@ async fn pending_counts(
     }
     let turns = turns::Entity::find()
         .filter(turns::Column::ConversationId.is_in(rows.iter().map(|r| r.id)))
-        .filter(turns::Column::OwnerId.eq(i64::from(scope.user.id)))
-        .filter(turns::Column::Decisions.ne("{}"))
         .all(db)
         .await?;
+    let owned: HashMap<_, _> = turns
+        .iter()
+        .map(|turn| (turn.id, turn.conversation_id))
+        .collect();
+    let mut failed = std::collections::HashSet::new();
+    if !owned.is_empty() {
+        for event in events::Entity::find()
+            .filter(events::Column::TurnId.is_in(owned.keys().copied()))
+            .all(db)
+            .await?
+        {
+            let Ok(value) = serde_json::from_str::<Value>(&event.payload) else {
+                continue;
+            };
+            if value["type"] == "platform_result"
+                && (value["result"]["ok"] == false
+                    || value["result"]["status"]
+                        .as_u64()
+                        .is_some_and(|status| status >= 400))
+            {
+                failed.insert(event.turn_id);
+            }
+        }
+    }
     for turn in turns {
         let count = pending_in(&turn);
+        let count = if failed.contains(&turn.id) {
+            count.max(1)
+        } else {
+            count
+        };
         if count > 0 {
             *counts.entry(turn.conversation_id).or_default() += count;
         }
@@ -886,11 +914,11 @@ pub struct Decision {
 #[serde(deny_unknown_fields)]
 pub struct Resolution {
     request_id: String,
-    /// "resumed": the task was continued in a new message; "dismissed": not needed.
+    /// "resumed": the task was continued in a new message.
     action: String,
 }
 /// Clears an approval that ended undecided from the conversation's pending
-/// items once its owner continued the task or dismissed it.
+/// items once its owner continued the task.
 async fn resolve_decision(
     State(s): State<AppState>,
     scope: Scope,
@@ -898,7 +926,7 @@ async fn resolve_decision(
     Json(body): Json<Resolution>,
 ) -> Result<Json<Value>> {
     scope.require("conversations.run")?;
-    if !matches!(body.action.as_str(), "resumed" | "dismissed") {
+    if body.action != "resumed" {
         return Err(invalid());
     }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
@@ -910,7 +938,7 @@ async fn resolve_decision(
     let mut decisions: Value = serde_json::from_str(&row.decisions).map_err(|_| invalid())?;
     let item = decisions
         .get_mut(&body.request_id)
-        .filter(|item| item["ended_undecided"] == true)
+        .filter(|item| !active(&row.state) && item["decision"].is_null())
         .ok_or_else(|| error(StatusCode::CONFLICT, "conversations.staleDecision"))?;
     if item["resolved"].is_string() {
         return Ok(Json(json!({"ok":true})));
@@ -951,6 +979,7 @@ async fn decide(
         return Err(error(StatusCode::CONFLICT, "conversations.staleDecision"));
     }
     item["decision"] = json!(body.allow);
+    item["decided_by"] = json!(scope.user.id);
     row.decisions = decisions.to_string();
     row.version += 1;
     row.into_active_model().reset_all().update(&tx).await?;

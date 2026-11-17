@@ -960,3 +960,11 @@ Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-a
 - Reason: user feedback (all operators "未知"; reuse CC Switch for API setup; CLI custom API limited to existing API models).
 - Alternatives considered: keep "not provided by polling" (no useful identity); inline connection for CLI (duplicates and overwrites shared providers).
 - Scope/status: frontend only; no API, schema or migration change. Released in v0.4.0-alpha; verification tracked in MEMORY.md.
+
+## Conversation approval recovery and readable execution (2026-11-17)
+- Decision: reuse turn decisions/event JSON and normal message sending; mark undecided terminal approvals and allow owner continuation. No migration or replay of writes without a fresh approval.
+- Reason: approvals must remain visible when native runtimes finish early; prior raw-only details hid the operation and required owner action.
+- Alternatives considered: automatic write replay and hiding expired requests; rejected because approval does not authorize future turns and operation outcomes must remain explicit.
+- Tradeoffs: optional Tool.input/PlatformResult.call fields preserve old wire payloads; historical terminal null decisions use state fallback. Requests remain authorized through existing workspace/agent scope.
+- Scope: A-D completion only; six locales, lazy16KB history, exact schema/example and path errors. No push, merge, tag, version, dependencies or historical schema change.
+- Status: implementation reviewed; acceptance gated on full tests. Windows offline account currently cannot create AppContainer (0x80070002), so real-expression POST test remains mandatory and must not be mocked away.

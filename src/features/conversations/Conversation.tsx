@@ -302,7 +302,7 @@ export function Conversation({
     }
     return index;
   }, [events]);
-  // Turns that need someone: decisions waiting for the viewer (live or left
+  // Turns that need someone: accessible decisions (live or left
   // undecided when the reply ended) and failed platform requests.
   const attention = useMemo(() => {
     const turns = new Set<string>();
@@ -310,12 +310,12 @@ export function Conversation({
     for (const turn of data?.turns ?? []) {
       for (const [request, decision] of Object.entries(turn.decisions)) {
         if (!awaitingDecision(turn, decision)) continue;
+        turns.add(turn.id);
         if (turn.owner_id === data?.viewer_id) {
-          turns.add(turn.id);
           mine.push(`${turn.id}:${request}`);
         }
       }
-      if (turn.owner_id === data?.viewer_id && (turnEvents.get(turn.id) ?? []).some((event) => event.type === "platform_result" && platformFailed(event.result)))
+      if ((turnEvents.get(turn.id) ?? []).some((event) => event.type === "platform_result" && platformFailed(event.result)))
         turns.add(turn.id);
     }
     return { turns, mine };
@@ -467,16 +467,14 @@ export function Conversation({
       setBusy(false);
     }
   }
-  /** Ends an approval left when its reply ended: continue the task, or drop it. */
-  async function resolveEnded(turn: Turn, request: string, action: "resumed" | "dismissed", operation = "") {
-    if (action === "resumed") {
-      const sent = await send(undefined, {
-        prompt: commonText("conversations:continuePrompt", { operation }),
-        targets: data?.kind === "group" && turn.agent_id ? [turn.agent_id] : [],
-      });
-      if (!sent) return;
-    }
-    await act(`/turns/${turn.id}/decision-resolutions`, { request_id: request, action });
+  /** Continue an approval left when its reply ended through the normal send path. */
+  async function resolveEnded(turn: Turn, request: string, operation: string) {
+    const sent = await send(undefined, {
+      prompt: commonText("conversations:continuePrompt", { operation }),
+      targets: data?.kind === "group" && turn.agent_id ? [turn.agent_id] : [],
+    });
+    if (!sent) return;
+    await act(`/turns/${turn.id}/decision-resolutions`, { request_id: request, action: "resumed" });
   }
   function showOldestPending() {
     const first = attention.mine[0];
@@ -1080,7 +1078,7 @@ export function Conversation({
                           const owner = turn.owner_id === data.viewer_id;
                           const ownerName = data.members.find((member) => member.id === turn.owner_id)?.name || t("member");
                           const turnActivity = turnEvents.get(turn.id) ?? NO_EVENTS;
-                          const hasDetails = !!items.size || !!turn.usage || Object.values(turn.decisions).some((decision) => decision.decision !== null || turn.state !== "running");
+                          const hasDetails = !!turnActivity.length || !!items.size || !!turn.usage || Object.values(turn.decisions).some((decision) => decision.decision !== null || turn.state !== "running");
                           const counts = timelineSummary(turnActivity, turn.decisions, turn);
                           return (
                             <>
@@ -1102,20 +1100,22 @@ export function Conversation({
                                   decision={decision}
                                   canAct={runnable && owner}
                                   busy={busy || !!current}
-                                  onContinue={(operation) => void resolveEnded(turn, request, "resumed", operation)}
-                                  onDismiss={() => void resolveEnded(turn, request, "dismissed")}
+                                  onContinue={(operation) => void resolveEnded(turn, request, operation)}
                                 />
                               ))}
                               {hasDetails && (
                                 <LazyDetails data-execution-details className="text-xs text-muted-foreground" summaryClassName="min-h-11 cursor-pointer py-3" summary={counts ? `${t("executionDetails")} · ${counts}` : t("executionDetails")}>
                                   {() => (
                                     <ExecutionTimeline
+                                    key={data.viewer_id}
+                                    viewerId={data.viewer_id}
                                       events={turnActivity}
                                       decisions={turn.decisions}
                                       turnState={turn.state}
                                       usage={turn.usage}
                                       stateLabel={t(turn.state)}
                                       deciderName={ownerName}
+                                    deciders={data.members}
                                     />
                                   )}
                                 </LazyDetails>
@@ -1295,7 +1295,7 @@ export function Conversation({
         {!!attention.mine.length && (
           <div role="status" data-pending-banner className="mb-2 flex items-center gap-2 rounded-lg border border-amber-500/60 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow-sm dark:bg-amber-950/40 dark:text-amber-100">
             <span className="min-w-0 flex-1">{commonText("conversations:pendingBanner", { count: attention.mine.length })}</span>
-            <Button type="button" size="sm" variant="outline" onClick={showOldestPending}>
+            <Button type="button" size="sm" className="min-h-11" variant="outline" onClick={showOldestPending}>
               {t("showPending")}
             </Button>
           </div>

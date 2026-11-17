@@ -313,8 +313,14 @@ pub(super) async fn append(
     s: &AppState,
     row: &turns::Model,
     owner: &str,
-    event: Event,
+    mut event: Event,
 ) -> Result<()> {
+    if let Event::Tool {
+        input: Some(input), ..
+    } = &mut event
+    {
+        crate::platform_tools::redact(input);
+    }
     let mut public_event = serde_json::to_value(&event).map_err(|_| invalid())?;
     if let Some(input) = public_event.get_mut("input").and_then(Value::as_object_mut) {
         input.remove("_sealed");
@@ -713,8 +719,21 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             },
             result=&mut running=>{
                 while let Ok(event)=receiver.try_recv(){
-                    // A finished execution cannot start new calls or persist raw arguments.
-                    if matches!(event, Event::PlatformCall { .. }) { continue; }
+                    // Calls already emitted by the CLI still need a receipt. In particular,
+                    // a queued write must persist its approval before finish marks it expired.
+                    if let Event::PlatformCall { request_id, name, arguments } = event {
+                        platform_calls += 1;
+                        received += serde_json::to_vec(&arguments).map_err(|_| invalid())?.len();
+                        if platform_calls > 128 || received > 18 * 1024 * 1024 {
+                            failure = "conversations.outputLimit".into();
+                            stopping = true;
+                            continue;
+                        }
+                        if !stopping && tool_tasks.len() < 16 {
+                            tool_tasks.spawn(platform_call(s.clone(), row.clone(), owner.clone(), request_id, name, arguments, None));
+                        }
+                        continue;
+                    }
                     if let Event::Finished{outcome:value,..}=&event {outcome=Some(*value);}
                     append(&s,&row,&owner,event).await?;
                 }
@@ -764,8 +783,14 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             }
         }
     }
-    tool_tasks.abort_all();
-    while tool_tasks.join_next().await.is_some() {}
+    // Do not cancel a task between receiving a call and storing its approval.
+    // The CLI has ended, so results cannot be delivered to it, but the durable
+    // receipt must survive for the owner to continue in another turn.
+    renewing(&s, &row, &owner, async {
+        while tool_tasks.join_next().await.is_some() {}
+        Ok(())
+    })
+    .await?;
     if files && failure.is_empty() && matches!(outcome, Some(Outcome::Completed)) {
         deliver_files(&s, &row, &owner, channel.as_ref(), &workdir).await?;
     }

@@ -303,12 +303,14 @@ where
             );
             let key = id.to_string();
             let params = request["params"].clone();
+            let mut pending_calls = calls.lock().unwrap();
             let task = tasks.spawn(async move {
                 let result = tool_call(&client, &url, &token, &params).await;
                 calls_done.lock().unwrap().remove(&id.to_string());
                 let _ = responses.send(reply(&id, result)).await;
             });
-            calls.lock().unwrap().insert(key, task);
+            pending_calls.insert(key, task);
+            drop(pending_calls);
             // Finished tasks need no further attention.
             while tasks.try_join_next().is_some() {}
             continue;
@@ -362,7 +364,11 @@ async fn tool_call(
             ),
             Err(_) => Err("The platform returned an invalid result.".into()),
         },
-        _ => Err(
+        Ok(response) => {
+            let status = response.status();
+            Err(format!("Platform execution bridge returned {status}; this call was not confirmed as successful."))
+        }
+        Err(_) => Err(
             "The execution bridge is unavailable; this call was not confirmed as successful. Do not replay a write automatically.".into(),
         ),
     }
@@ -389,6 +395,39 @@ export default function(pi) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn platform_validation_errors_reach_the_cli_verbatim() {
+        let (events, mut platform) = mpsc::channel(8);
+        let bridge = Bridge::start(events).await.unwrap();
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let url = bridge.url.clone();
+        let token = bridge.token.clone();
+        let call = tokio::spawn(async move {
+            tool_call(
+                &client,
+                &url,
+                &token,
+                &json!({"name":"ferry_request","arguments":{"method":"POST","path":"/workflows"}}),
+            )
+            .await
+            .unwrap()
+        });
+        let Some(Event::PlatformCall { request_id, .. }) = platform.recv().await else {
+            panic!("expected call")
+        };
+        let message = "$.nodes[2].parameters: missing required field model_id";
+        bridge.resolve(
+            &request_id,
+            json!({"ok":false,"status":400,"data":{"error":message}}),
+        );
+        let response = call.await.unwrap();
+        assert_eq!(response["isError"], true);
+        let text: Value =
+            serde_json::from_str(response["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(text["data"]["error"], message);
+        assert_eq!(text["status"], 400);
+    }
 
     /// Reads one JSON-RPC line with a deadline.
     async fn next_line<R: tokio::io::AsyncRead + Unpin>(reader: &mut BufReader<R>) -> Value {

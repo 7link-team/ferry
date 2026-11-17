@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { AlertTriangle, ShieldQuestion } from "lucide-react";
 import { commonText } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
-import { LongText } from "./LazyDetails";
+import { LONG_TEXT_LIMIT, LongText } from "./LazyDetails";
 
 const tv = (key: string, values?: Record<string, unknown>) => commonText(`conversations:${key}`, values);
 
@@ -10,6 +10,7 @@ export interface Decision {
   tool: string;
   input: unknown;
   decision: boolean | null;
+  decided_by?: string;
   dispatching: boolean;
   sent: boolean;
   /** The turn ended before anyone decided; the operation never ran. */
@@ -24,6 +25,7 @@ export interface ActivityEvent {
   state?: string;
   request_id?: string;
   result?: unknown;
+  input?: unknown;
   /** What a platform result answered: tool, method and path (never a body). */
   call?: { tool?: string; method?: string | null; path?: string | null };
   outcome?: string;
@@ -37,10 +39,10 @@ interface TurnLike {
 
 /** Waiting for someone now, or ended undecided and not yet continued/dismissed. */
 export const awaitingDecision = (turn: TurnLike, decision: Decision) =>
-  decision.decision === null && (turn.state === "running" || (!!decision.ended_undecided && !decision.resolved));
+  liveDecision(turn, decision) || endedDecision(turn, decision);
 export const liveDecision = (turn: TurnLike, decision: Decision) => decision.decision === null && turn.state === "running";
 export const endedDecision = (turn: TurnLike, decision: Decision) =>
-  decision.decision === null && turn.state !== "running" && !!decision.ended_undecided && !decision.resolved;
+  decision.decision === null && !["queued", "running", "stopping"].includes(turn.state) && !decision.resolved;
 
 /** A failed platform request (HTTP status ≥ 400 or ok: false). */
 export function platformFailed(result: unknown) {
@@ -84,17 +86,17 @@ export function operationTitle(tool: string, method?: string | null, path?: stri
   const resource = RESOURCES[name] ? tv(RESOURCES[name]) : "";
   const verb = VERBS[(method ?? "GET").toUpperCase()];
   if (!verb || !resource) return `${(method ?? "GET").toUpperCase()} ${clean}`;
-  return `${tv(verb, { resource })} ${clean}`;
+  return `${tv(verb, { resource })} · ${(method ?? "GET").toUpperCase()} ${clean}`;
 }
 
 /** A readable summary of a decision's input: title plus the key body fields. */
 export function describeOperation(tool: string, input: unknown) {
-  const value = record(input);
+  const value = record(parsed(input));
   if (!value || typeof value.path !== "string") {
     const command = value?.command;
     return {
       title: typeof command === "string" ? `${tool}: ${command}` : Array.isArray(command) ? `${tool}: ${command.join(" ")}` : tool,
-      fields: [] as [string, string][],
+      fields: Object.entries(value ?? {}).filter(([key]) => key !== "command").slice(0, 8).map(([key, item]): [string, string] => [key, typeof item === "string" ? item.slice(0, 240) : item && typeof item === "object" ? Object.keys(item).slice(0, 8).join(", ") : String(item)]),
     };
   }
   const method = typeof value.method === "string" ? value.method : "GET";
@@ -111,6 +113,11 @@ export function describeOperation(tool: string, input: unknown) {
     }
     const schedule = body.schedule ?? body.cron ?? body.expression;
     if (typeof schedule === "string" && schedule) fields.push([tv("fieldSchedule"), schedule]);
+    const summarized = new Set(["name", "description", "definition", "schedule", "cron", "expression", "version"]);
+    for (const [key, item] of Object.entries(body).filter(([key]) => !summarized.has(key)).slice(0, 8)) {
+      if (typeof item === "string" || typeof item === "number" || typeof item === "boolean" || item === null)
+        fields.push([key, String(item).slice(0, 240)]);
+    }
     if (["PUT", "PATCH"].includes(method.toUpperCase())) {
       const keys = Object.keys(body).filter((key) => key !== "version");
       if (keys.length) fields.push([tv("fieldChanges"), keys.join(", ")]);
@@ -147,7 +154,7 @@ function RawToggle({ value, label }: { value: unknown; label?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
-      <button type="button" data-raw-toggle aria-expanded={open} className="text-xs text-muted-foreground underline-offset-2 hover:underline" onClick={() => setOpen(!open)}>
+      <button type="button" data-raw-toggle aria-expanded={open} className="inline-flex min-h-11 items-center text-xs text-muted-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-ring" onClick={() => setOpen(!open)}>
         {open ? tv("hideRaw") : label ?? tv("rawData")}
       </button>
       {open && <LongText value={value} className="mt-1 max-h-56 rounded bg-muted/60 p-2 text-xs" />}
@@ -180,11 +187,11 @@ export function PendingDecisionCard({
       <Summary tool={decision.tool} input={decision.input} />
       <RawToggle value={decision.input} />
       {canDecide ? (
-        <div className="flex gap-2">
-          <Button size="sm" disabled={busy || decision.dispatching} onClick={() => onDecide(true)}>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" className="min-h-11" disabled={busy || decision.dispatching} onClick={() => onDecide(true)}>
             {tv("allow")}
           </Button>
-          <Button size="sm" variant="outline" disabled={busy || decision.dispatching} onClick={() => onDecide(false)}>
+          <Button size="sm" className="min-h-11" variant="outline" disabled={busy || decision.dispatching} onClick={() => onDecide(false)}>
             {tv("deny")}
           </Button>
         </div>
@@ -202,14 +209,12 @@ export function EndedDecisionCard({
   canAct,
   busy,
   onContinue,
-  onDismiss,
 }: {
   request: string;
   decision: Decision;
   canAct: boolean;
   busy: boolean;
   onContinue: (operation: string) => void;
-  onDismiss: () => void;
 }) {
   const { title } = describeOperation(decision.tool, decision.input);
   return (
@@ -222,11 +227,13 @@ export function EndedDecisionCard({
       <RawToggle value={decision.input} />
       {canAct && (
         <div className="flex gap-2">
-          <Button size="sm" disabled={busy} onClick={() => onContinue(title)}>
+          <Button size="sm" className="min-h-11" disabled={busy} onClick={() => {
+            // Inputs here are the server's redacted viewer representation. Build
+            // the visible follow-up only when requested, with the same raw cap.
+            const input = JSON.stringify(decision.input, null, 2) ?? "";
+            onContinue(`${title}\n${input.slice(0, LONG_TEXT_LIMIT)}${input.length > LONG_TEXT_LIMIT ? `\n${tv("truncatedNote")}` : ""}`);
+          }}>
             {tv("continueTask")}
-          </Button>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={onDismiss}>
-            {tv("dismissPending")}
           </Button>
         </div>
       )}
@@ -234,24 +241,24 @@ export function EndedDecisionCard({
   );
 }
 
-const VIEW_KEY = "ferry.conversation.details-view";
-function storedView(): "readable" | "raw" {
+const viewKey = (viewerId: string) => `conversation.details-view:${viewerId}`;
+function storedView(viewerId: string): "readable" | "raw" {
   try {
-    return window.localStorage.getItem(VIEW_KEY) === "raw" ? "raw" : "readable";
+    return window.localStorage.getItem(viewKey(viewerId)) === "raw" ? "raw" : "readable";
   } catch {
     return "readable";
   }
 }
-function storeView(view: "readable" | "raw") {
+function storeView(viewerId: string, view: "readable" | "raw") {
   try {
-    window.localStorage.setItem(VIEW_KEY, view);
+    window.localStorage.setItem(viewKey(viewerId), view);
   } catch {
     // A private window or blocked storage only loses the preference.
   }
 }
 
 type Entry =
-  | { kind: "tool"; key: string; name: string; state?: string }
+  | { kind: "tool"; key: string; name: string; state?: string; input?: unknown }
   | { kind: "platform"; key: string; event: ActivityEvent }
   | { kind: "decision"; key: string; decision: Decision };
 
@@ -261,7 +268,8 @@ export function timelineEntries(events: readonly ActivityEvent[], decisions: Rec
   for (const event of events) {
     if (event.type === "tool" && event.item_id) {
       const key = `tool:${event.item_id}`;
-      entries.set(key, { kind: "tool", key, name: event.name ?? "", ...(event.state ? { state: event.state } : {}) });
+      const previous = entries.get(key);
+      entries.set(key, { kind: "tool", key, name: event.name ?? (previous?.kind === "tool" ? previous.name : ""), ...(event.state ? { state: event.state } : {}), input: event.input ?? (previous?.kind === "tool" ? previous.input : undefined) });
     } else if (event.type === "approval" && event.request_id && decisions[event.request_id]) {
       const key = `decision:${event.request_id}`;
       if (!entries.has(key)) entries.set(key, { kind: "decision", key, decision: decisions[event.request_id]! });
@@ -318,6 +326,8 @@ export function ExecutionTimeline({
   usage,
   stateLabel,
   deciderName,
+  viewerId,
+  deciders,
 }: {
   events: readonly ActivityEvent[];
   decisions: Record<string, Decision>;
@@ -325,18 +335,20 @@ export function ExecutionTimeline({
   usage: { input_tokens: number; output_tokens: number } | null | undefined;
   stateLabel: string;
   deciderName?: string;
+  viewerId: string;
+  deciders?: readonly { id: string; name: string }[];
 }) {
-  const [view, setView] = useState(storedView);
+  const [view, setView] = useState(() => storedView(viewerId));
   const entries = timelineEntries(events, decisions);
   const choose = (next: "readable" | "raw") => {
     setView(next);
-    storeView(next);
+    storeView(viewerId, next);
   };
   return (
     <div className="mt-2 space-y-2" data-execution-timeline={view}>
       <div role="group" className="flex gap-1">
         {(["readable", "raw"] as const).map((value) => (
-          <Button key={value} type="button" size="sm" variant={view === value ? "secondary" : "ghost"} className="h-7 px-2 text-xs" aria-pressed={view === value} onClick={() => choose(value)}>
+          <Button key={value} type="button" size="sm" variant={view === value ? "secondary" : "ghost"} className="min-h-11 px-2 text-xs" aria-pressed={view === value} onClick={() => choose(value)}>
             {tv(value)}
           </Button>
         ))}
@@ -346,7 +358,7 @@ export function ExecutionTimeline({
           {entries.map((entry) => (
             <li key={entry.key} className="min-w-0 rounded border p-2">
               <p>{entry.kind === "tool" ? entry.name : entry.kind === "platform" ? tv("platformResult") : entry.decision.tool}</p>
-              <LongText value={entry.kind === "tool" ? { name: entry.name, state: entry.state } : entry.kind === "platform" ? entry.event : entry.decision} className="mt-1 max-h-64" />
+              <LongText value={entry.kind === "tool" ? { name: entry.name, state: entry.state, input: entry.input } : entry.kind === "platform" ? entry.event : entry.decision} className="mt-1 max-h-64" />
             </li>
           ))}
         </ul>
@@ -355,12 +367,13 @@ export function ExecutionTimeline({
           {entries.map((entry) => {
             if (entry.kind === "tool")
               return (
-                <Row key={entry.key} raw={{ name: entry.name, state: entry.state }}>
+                <Row key={entry.key} raw={{ name: entry.name, state: entry.state, input: entry.input }}>
                   <p className="break-words">
                     <span className="text-muted-foreground">{tv("toolCall")} · </span>
                     <span className="font-medium text-foreground">{entry.name}</span>
                     {entry.state && <span> · {entry.state === "started" || entry.state === "running" ? tv("toolRunning") : entry.state === "completed" || entry.state === "finished" ? tv("toolFinished") : entry.state}</span>}
                   </p>
+                  {entry.input !== undefined && <Summary tool={entry.name} input={entry.input} />}
                 </Row>
               );
             if (entry.kind === "platform") {
@@ -370,7 +383,8 @@ export function ExecutionTimeline({
               const title = call ? operationTitle(call.tool ?? "ferry_request", call.method, call.path) : tv("platformResult");
               const status = typeof result.status === "number" ? result.status : undefined;
               const message = failed ? errorMessage(result) : "";
-              const created = !failed && call?.method && call.method.toUpperCase() === "POST" ? createdName(result) : "";
+              const method = call?.method?.toUpperCase();
+              const created = !failed && method && ["POST", "PUT", "PATCH"].includes(method) ? createdName(result) : "";
               return (
                 <Row key={entry.key} raw={entry.event.result} tone={failed ? "border-destructive/50" : ""}>
                   <p data-platform-entry={failed ? "failed" : "ok"} className="break-words">
@@ -378,20 +392,23 @@ export function ExecutionTimeline({
                     {" → "}
                     {status !== undefined && <span>{status} · </span>}
                     <span className={failed ? "text-destructive" : "text-emerald-700 dark:text-emerald-400"}>{tv(failed ? "platformFailed" : "platformOk")}</span>
-                    {created && <span> · {tv("platformCreated", { name: created })}</span>}
+                    {created && <span> · {tv(method === "POST" ? "platformCreated" : "platformUpdated", { name: created })}</span>}
                   </p>
                   {message && <p className="mt-1 break-words text-destructive">{message}</p>}
                   {failed && typeof result.guidance === "string" && <p className="mt-1 break-words">{result.guidance}</p>}
                 </Row>
               );
             }
+            const decidedBy = entry.decision.decided_by
+              ? deciders?.find((member) => member.id === entry.decision.decided_by)?.name ?? entry.decision.decided_by
+              : deciderName;
             return (
               <Row key={entry.key} raw={entry.decision.input}>
                 <p className="break-words">
                   <span className="font-medium text-foreground">{describeOperation(entry.decision.tool, entry.decision.input).title}</span>
                   {" · "}
                   <span>{decisionText(turnState, entry.decision)}</span>
-                  {entry.decision.decision !== null && deciderName && <span> · {tv("decisionBy", { name: deciderName })}</span>}
+                  {entry.decision.decision !== null && decidedBy && <span> · {tv("decisionBy", { name: decidedBy })}</span>}
                 </p>
               </Row>
             );
@@ -399,9 +416,10 @@ export function ExecutionTimeline({
         </ul>
       )}
       {usage && (
-        <p className="py-1">
-          {stateLabel} · {tv("usageLine", { input: usage.input_tokens, output: usage.output_tokens })}
-        </p>
+        <div className="py-1">
+          <p>{stateLabel} · {tv("usageLine", { input: usage.input_tokens, output: usage.output_tokens })}</p>
+          {view === "raw" ? <LongText value={usage} className="mt-1 max-h-64" /> : <RawToggle value={usage} />}
+        </div>
       )}
     </div>
   );
