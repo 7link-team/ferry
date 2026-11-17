@@ -1140,6 +1140,23 @@
     "permission": "conversations.run"
   },
   {
+    "path": "/conversations/{id}/turns/{turn}/decision-resolutions",
+    "method": "POST",
+    "handler": "resolve_decision",
+    "source": "crates/server/src/conversations.rs",
+    "signature": "async fn resolve_decision(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, turn)): Path<(String, Id, Id)>,\n    Json(body): Json<Resolution>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Resolution {\n    request_id: String,\n    /// \"resumed\": the task was continued in a new message.\n    action: String,\n}"
+    ],
+    "permission_checks": [
+      "conversations.read",
+      "conversations.run",
+      "conversations.update"
+    ],
+    "documentation": "Clears an approval that ended undecided from the conversation's pending\nitems once its owner continued the task.",
+    "permission": "conversations.run"
+  },
+  {
     "path": "/conversations/{id}/turns/{turn}/decisions",
     "method": "POST",
     "handler": "decide",
@@ -3616,6 +3633,16 @@
       "variables.reveal"
     ],
     "permission": "variables.reveal"
+  },
+  {
+    "path": "/workflow-definition-format",
+    "method": "GET",
+    "handler": "definition_format",
+    "source": "crates/server/src/workflows/integration.rs",
+    "signature": "async fn definition_format(scope: Scope, Path(_): Path<String>) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [],
+    "documentation": "The exact envelope of a workflow definition as POST/PATCH /workflows\nvalidate it, with one complete valid example, so an Agent never guesses\nfield names (e.g. `version` or `edges`)."
   },
   {
     "path": "/workflow-executions/{id}",

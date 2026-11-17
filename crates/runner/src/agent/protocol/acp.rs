@@ -140,6 +140,10 @@ impl Protocol {
                             step.events.push(Event::Tool {
                                 item_id: update["toolCallId"].as_str().unwrap_or("").into(),
                                 name: update["title"].as_str().unwrap_or("tool").into(),
+                                input: update
+                                    .get("rawInput")
+                                    .filter(|value| !value.is_null())
+                                    .cloned(),
                                 state: match update["status"].as_str() {
                                     Some("completed") => "finished",
                                     Some("failed") => "failed",

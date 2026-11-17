@@ -2026,6 +2026,9 @@
     "permission": "variables.read"
   },
   {
+    "path": "/workflow-definition-format"
+  },
+  {
     "path": "/workflow-executions/{id}",
     "permission": "workflows.read"
   },

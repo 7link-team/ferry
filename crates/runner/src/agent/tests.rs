@@ -541,6 +541,63 @@ fn codex() -> protocol::Protocol {
 }
 
 #[test]
+fn codex_tool_arguments_preserve_native_values_and_absence() {
+    let mut p = codex();
+    for (kind, field, input) in [
+        ("commandExecution", "command", json!("git status --short")),
+        (
+            "fileChange",
+            "changes",
+            json!([{"path":"src/main.rs","kind":{"type":"update"}}]),
+        ),
+        ("mcpToolCall", "arguments", json!({"path":"README.md"})),
+    ] {
+        let mut item = json!({"id":"tool-a","type":kind});
+        item[field] = input.clone();
+        let step = p
+            .receive(json!({"method":"item/started","params":{
+            "threadId":"thread-a","turnId":"turn-a","item":item}}))
+            .unwrap();
+        assert!(
+            matches!(&step.events[0], Event::Tool { input: Some(actual), .. } if actual == &input)
+        );
+    }
+    let step = p
+        .receive(json!({"method":"item/completed","params":{
+        "threadId":"thread-a","turnId":"turn-a","item":{"id":"tool-a","type":"mcpToolCall"}}}))
+        .unwrap();
+    assert!(matches!(&step.events[0], Event::Tool { input: None, .. }));
+}
+
+#[test]
+fn claude_tool_arguments_preserve_the_tool_input() {
+    let mut p = protocol::Protocol::new(request(Runtime::Claude), "args".into());
+    p.receive(json!({"type":"control_response","response":{"request_id":"initialize","subtype":"success"}})).unwrap();
+    p.receive(json!({"type":"system","subtype":"init","session_id":"claude-a"}))
+        .unwrap();
+    let input = json!({"file_path":"README.md","offset":0});
+    let step = p.receive(json!({"type":"assistant","session_id":"claude-a","message":{
+        "id":"message-a","content":[{"type":"tool_use","id":"tool-a","name":"Read","input":input}]}})).unwrap();
+    assert!(matches!(&step.events[0], Event::Tool { input: Some(actual), .. } if actual == &input));
+}
+
+#[test]
+fn acp_tool_arguments_use_raw_input_and_keep_missing_updates_empty() {
+    let mut p = acp_ready(Runtime::Gemini, Permission::OnRequest);
+    let input = json!({"command":"git status --short"});
+    let step = p.receive(json!({"method":"session/update","params":{"sessionId":"native-acp",
+        "update":{"sessionUpdate":"tool_call","toolCallId":"tool-a","title":"Shell","rawInput":input}}})).unwrap();
+    assert!(matches!(&step.events[0], Event::Tool { input: Some(actual), .. } if actual == &input));
+    let step = p
+        .receive(
+            json!({"method":"session/update","params":{"sessionId":"native-acp",
+        "update":{"sessionUpdate":"tool_call_update","toolCallId":"tool-a","status":"completed"}}}),
+        )
+        .unwrap();
+    assert!(matches!(&step.events[0], Event::Tool { input: None, .. }));
+}
+
+#[test]
 fn codex_approval_is_single_item_and_cannot_be_reused() {
     for allow in [false, true] {
         let mut p = codex();

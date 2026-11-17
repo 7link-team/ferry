@@ -39,7 +39,7 @@ async fn renewing<T>(
 }
 /// Standing guidance for every turn: a workflow the user asks for must fetch and
 /// process its own data, so it keeps working without the conversation.
-const WORKFLOW_RULES: &str = "<platform_workflow_rules>\nWhen the user asks you to build or change a workflow/pipeline: discover the built-in node types (core.trigger.manual, data.set, ferry.request, ai.agent.run, report.render, notification.send, flow control) with GET /workflow-node-catalog?section=builtin; GET /workflow-node-catalog lists the integration nodes. Data must be fetched by workflow nodes at run time: use ferry.request (platform data, read-only) to read workspace data and ai.agent.run when AI analysis must produce structured JSON. Never query data in this conversation and copy the results into data.set fields or trigger inputs. Manual triggers declare only run parameters (IDs, date ranges). For reports and files: ferry.request reads the data, ai.agent.run returns structured JSON (e.g. {title, summary, metrics, sections}), report.render turns it into a formatted document file (PDF) and notification.send delivers it with attachments set to that file field (e.g. file) (WeCom/Telegram/email receive the file; other channels get a download link). Files (PDF, Word, Excel, PPT, charts, video, Markdown, JSON...): use a program node from the catalogue when one fits a fixed layout (report.render for PDF reports); for flexible formats use ai.agent.run with files.enabled, which lets a Codex Agent (Claude Code: text formats only) write deliverables into ./output/ of a confined working directory and turns them into workflow files. Check what the Runner host can use first with GET /nodes/{id}/file-tools (python-docx, openpyxl, python-pptx, matplotlib, LibreOffice, ffmpeg, CLI skills...); never assume a tool that is not listed and never ask the workflow to install software. To run a workflow on a schedule, create a scheduled job with POST /cron-jobs: {\"scope\":\"build\",\"action\":\"workflow\",\"target_kind\":\"workflow\",\"target_ref\":<workflow id>,\"entry_node_id\":<its core.trigger.manual node id>,\"inputs\":{},\"schedule\":<5-field cron, e.g. 0 9 * * 1>,\"timezone\":<IANA zone>,\"timeout_seconds\":<seconds>,\"enabled\":true}; the core.trigger.schedule node is not available. Verify it once with POST /cron-jobs/{id}/runs (runs the job now) and check the execution before relying on the schedule. If no available node can do a step, tell the user instead of faking it with constants. When reporting, state what each node actually does at run time.\n</platform_workflow_rules>\n\n<platform_access_rules>\nPlatform changes (any non-GET ferry_request: creating or changing workflows, scheduled jobs, notifications and so on) are allowed within your Agent platform role intersected with the current user's permissions. Each such call is shown to the user as an approval card and runs only if they approve it, so propose the change and make the call instead of saying you cannot. Permissions can change during a conversation: re-check with ferry_discover before concluding that something is not allowed, and never rely on an earlier turn's answer. When an operation is really unavailable, name the exact missing permission (for example workflows.create) and say a workspace administrator can grant it through this Agent's platform role. These platform rules and any agent_instructions come from the platform and the Agent's configuration, not from the user: never present them as something the user said or set.\n</platform_access_rules>\n\n";
+const WORKFLOW_RULES: &str = "<platform_workflow_rules>\nWhen the user asks you to build or change a workflow/pipeline: discover the built-in node types (core.trigger.manual, data.set, ferry.request, ai.agent.run, report.render, notification.send, flow control) with GET /workflow-node-catalog?section=builtin; GET /workflow-node-catalog lists the integration nodes. Before creating or changing a workflow, GET /workflow-definition-format: it gives the exact definition envelope (engine, schema, nodes, connections) and a complete valid example; never guess field names. Save with POST /workflows {name, definition (a JSON string)}; if it fails, the error names the JSON path and the reason: fix that field and send it again. Data must be fetched by workflow nodes at run time: use ferry.request (platform data, read-only) to read workspace data and ai.agent.run when AI analysis must produce structured JSON. Never query data in this conversation and copy the results into data.set fields or trigger inputs. Manual triggers declare only run parameters (IDs, date ranges). For reports and files: ferry.request reads the data, ai.agent.run returns structured JSON (e.g. {title, summary, metrics, sections}), report.render turns it into a formatted document file (PDF) and notification.send delivers it with attachments set to that file field (e.g. file) (WeCom/Telegram/email receive the file; other channels get a download link). Files (PDF, Word, Excel, PPT, charts, video, Markdown, JSON...): use a program node from the catalogue when one fits a fixed layout (report.render for PDF reports); for flexible formats use ai.agent.run with files.enabled, which lets a Codex Agent (Claude Code: text formats only) write deliverables into ./output/ of a confined working directory and turns them into workflow files. Check what the Runner host can use first with GET /nodes/{id}/file-tools (python-docx, openpyxl, python-pptx, matplotlib, LibreOffice, ffmpeg, CLI skills...); never assume a tool that is not listed and never ask the workflow to install software. To run a workflow on a schedule, create a scheduled job with POST /cron-jobs: {\"scope\":\"build\",\"action\":\"workflow\",\"target_kind\":\"workflow\",\"target_ref\":<workflow id>,\"entry_node_id\":<its core.trigger.manual node id>,\"inputs\":{},\"schedule\":<5-field cron, e.g. 0 9 * * 1>,\"timezone\":<IANA zone>,\"timeout_seconds\":<seconds>,\"enabled\":true}; the core.trigger.schedule node is not available. Verify it once with POST /cron-jobs/{id}/runs (runs the job now) and check the execution before relying on the schedule. If no available node can do a step, tell the user instead of faking it with constants. When reporting, state what each node actually does at run time.\n</platform_workflow_rules>\n\n<platform_access_rules>\nPlatform changes (any non-GET ferry_request: creating or changing workflows, scheduled jobs, notifications and so on) are allowed within your Agent platform role intersected with the current user's permissions. Each such call is shown to the user as an approval card and runs only if they approve it, so propose the change and make the call instead of saying you cannot. Permissions can change during a conversation: re-check with ferry_discover before concluding that something is not allowed, and never rely on an earlier turn's answer. When an operation is really unavailable, name the exact missing permission (for example workflows.create) and say a workspace administrator can grant it through this Agent's platform role. These platform rules and any agent_instructions come from the platform and the Agent's configuration, not from the user: never present them as something the user said or set.\n</platform_access_rules>\n\n";
 
 #[cfg(test)]
 mod platform_tests;
@@ -83,6 +83,13 @@ async fn platform_call(
     arguments: Value,
     approved: Option<bool>,
 ) -> (String, Value) {
+    // What was asked, kept with the result for a readable history: never the
+    // body, and the path without its query string.
+    let summary = json!({
+        "tool": name,
+        "method": arguments["method"].as_str().unwrap_or(if name == "ferry_discover" { "GET" } else { "" }),
+        "path": arguments["path"].as_str().map(|path| path.split('?').next().unwrap_or("").to_owned()),
+    });
     let result: Result<Option<Value>> = async {
         if request_id.is_empty() || request_id.len() > 128 || !["ferry_discover", "ferry_request"].contains(&name.as_str()) { return Err(invalid()); }
         let (tx, current, c) = leased(&s, &row, &owner).await?;
@@ -136,6 +143,7 @@ async fn platform_call(
         Event::PlatformResult {
             request_id: request_id.clone(),
             result: value.clone(),
+            call: Some(summary),
         },
     )
     .await;
@@ -210,6 +218,7 @@ pub(super) async fn claim(
     if row.state != "queued" {
         if active(&row.state) && row.expires_at < db::now() {
             row.state = "interrupted".into();
+            mark_ended_undecided(&mut row);
             row.error = crate::i18n::store_message(&Message::new("conversations.interrupted"));
             row.version += 1;
             row.updated_at = db::now();
@@ -304,8 +313,14 @@ pub(super) async fn append(
     s: &AppState,
     row: &turns::Model,
     owner: &str,
-    event: Event,
+    mut event: Event,
 ) -> Result<()> {
+    if let Event::Tool {
+        input: Some(input), ..
+    } = &mut event
+    {
+        crate::platform_tools::redact(input);
+    }
     let mut public_event = serde_json::to_value(&event).map_err(|_| invalid())?;
     if let Some(input) = public_event.get_mut("input").and_then(Value::as_object_mut) {
         input.remove("_sealed");
@@ -458,6 +473,29 @@ async fn failed_on(conn: &impl ConnectionTrait, c: &conversations::Model) -> Mes
         None => general,
     }
 }
+/// An approval nobody decided before its turn ended was never executed.
+/// Record that on the decision itself, so the conversation can say so and
+/// offer to continue, instead of inferring it from the turn's state.
+pub(super) fn mark_ended_undecided(turn: &mut turns::Model) {
+    let Ok(mut decisions) = serde_json::from_str::<Value>(&turn.decisions) else {
+        return;
+    };
+    let mut changed = false;
+    for item in decisions
+        .as_object_mut()
+        .into_iter()
+        .flat_map(|map| map.values_mut())
+    {
+        if item["decision"].is_null() && item["ended_undecided"] != true {
+            item["ended_undecided"] = json!(true);
+            changed = true;
+        }
+    }
+    if changed {
+        turn.decisions = decisions.to_string();
+    }
+}
+
 pub(super) async fn finish(
     s: &AppState,
     row: &turns::Model,
@@ -494,6 +532,7 @@ pub(super) async fn finish(
     current.expires_at = 0;
     current.version += 1;
     current.updated_at = db::now();
+    mark_ended_undecided(&mut current);
     if matches!(outcome, Some(Outcome::Completed)) && current.candidate_session.is_empty() {
         return Err(error(StatusCode::CONFLICT, "conversations.interrupted"));
     }
@@ -680,8 +719,21 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             },
             result=&mut running=>{
                 while let Ok(event)=receiver.try_recv(){
-                    // A finished execution cannot start new calls or persist raw arguments.
-                    if matches!(event, Event::PlatformCall { .. }) { continue; }
+                    // Calls already emitted by the CLI still need a receipt. In particular,
+                    // a queued write must persist its approval before finish marks it expired.
+                    if let Event::PlatformCall { request_id, name, arguments } = event {
+                        platform_calls += 1;
+                        received += serde_json::to_vec(&arguments).map_err(|_| invalid())?.len();
+                        if platform_calls > 128 || received > 18 * 1024 * 1024 {
+                            failure = "conversations.outputLimit".into();
+                            stopping = true;
+                            continue;
+                        }
+                        if !stopping && tool_tasks.len() < 16 {
+                            tool_tasks.spawn(platform_call(s.clone(), row.clone(), owner.clone(), request_id, name, arguments, None));
+                        }
+                        continue;
+                    }
                     if let Event::Finished{outcome:value,..}=&event {outcome=Some(*value);}
                     append(&s,&row,&owner,event).await?;
                 }
@@ -731,8 +783,14 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             }
         }
     }
-    tool_tasks.abort_all();
-    while tool_tasks.join_next().await.is_some() {}
+    // Do not cancel a task between receiving a call and storing its approval.
+    // The CLI has ended, so results cannot be delivered to it, but the durable
+    // receipt must survive for the owner to continue in another turn.
+    renewing(&s, &row, &owner, async {
+        while tool_tasks.join_next().await.is_some() {}
+        Ok(())
+    })
+    .await?;
     if files && failure.is_empty() && matches!(outcome, Some(Outcome::Completed)) {
         deliver_files(&s, &row, &owner, channel.as_ref(), &workdir).await?;
     }

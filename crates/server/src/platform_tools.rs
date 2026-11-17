@@ -347,7 +347,36 @@ pub(crate) async fn dispatch(s: &AppState, scope: Scope, call: Call) -> Result<V
         else { json!({"content_type":content_type,"data_base64":STANDARD.encode(&bytes),"size":bytes.len()}) }
     });
     redact(&mut body);
-    Ok(json!({"status":status.as_u16(),"ok":status.is_success(),"data":body}))
+    let mut result = json!({"status":status.as_u16(),"ok":status.is_success(),"data":body});
+    if !status.is_success() {
+        result["guidance"] = json!(guidance(status.as_u16()));
+    }
+    Ok(result)
+}
+
+/// What an Agent should do about a failed call, so it fixes and retries
+/// instead of giving up (or blindly repeating a write).
+fn guidance(status: u16) -> &'static str {
+    match status {
+        400 | 422 => {
+            "The request was invalid; nothing was changed. The error names the field (a JSON path and the reason): fix exactly that and send the request again."
+        }
+        401 | 403 => {
+            "Not permitted for this user and Agent role; nothing was changed. Name the missing permission to the user instead of retrying."
+        }
+        404 => "Not found: check the path and ids (list the resource first), then retry.",
+        409 => {
+            "The resource changed or is busy: read it again (for the current version) and retry once."
+        }
+        413 => "Too large: send less (smaller page_size or fewer fields).",
+        424 => {
+            "A setting it depends on failed its check; the error says which. Tell the user what to fix."
+        }
+        429 | 500..=599 => {
+            "A temporary platform problem: wait briefly and retry once. For a write, first read the resource to check it did not already happen."
+        }
+        _ => "The platform refused the call; the error explains why.",
+    }
 }
 
 fn routes() -> &'static [Value] {
@@ -387,8 +416,13 @@ pub(crate) fn read_path(path: &str) -> bool {
 
 /// The tool result returned to an Agent when the platform refuses a call.
 pub(crate) fn denial(error: &ApiError) -> Value {
-    json!({"status":error.0.as_u16(),"ok":false,"error":error.1,
-        "guidance":"The platform denied or could not complete this call. No Agent role means no platform access. Check this workspace's current user and Agent role grants. Do not substitute local filesystem searches or invent counts."})
+    let status = error.0.as_u16();
+    let guidance = if matches!(status, 401 | 403) {
+        "The platform denied this call. No Agent role means no platform access. Check this workspace's current user and Agent role grants. Do not substitute local filesystem searches or invent counts."
+    } else {
+        guidance(status)
+    };
+    json!({"status":status,"ok":false,"error":error.1,"guidance":guidance})
 }
 
 pub(crate) fn catalogue(scope: &Scope, search: &str, offset: usize) -> Value {

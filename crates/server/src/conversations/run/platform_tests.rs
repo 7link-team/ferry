@@ -6,6 +6,180 @@ use crate::{
 };
 use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel};
 
+#[tokio::test]
+async fn settling_outstanding_platform_work_keeps_its_lease_alive() {
+    let (_dir, s, row, owner) = enabled().await;
+    let original_expiry = row.expires_at;
+    renewing(&s, &row, &owner, async {
+        tokio::time::sleep(Duration::from_millis((LEASE / 3 + 1500) as u64)).await;
+        let current = turns::Entity::find_by_id(row.id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            current.expires_at > original_expiry,
+            "lease renewed during outstanding work"
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+    finish(&s, &row, &owner, Some(Outcome::Cancelled), "", true)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn parallel_approvals_survive_every_terminal_outcome_and_lease_loss() {
+    for outcome in [
+        Some(Outcome::Completed),
+        Some(Outcome::Failed),
+        Some(Outcome::Cancelled),
+        Some(Outcome::TimedOut),
+        None,
+    ] {
+        let (_dir, s, row, owner) = enabled().await;
+        append(
+            &s,
+            &row,
+            &owner,
+            Event::Session {
+                native_session_id: "approval-session".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let mut tasks = JoinSet::new();
+        for id in ["parallel-a", "parallel-b"] {
+            tasks.spawn(platform_call(s.clone(), row.clone(), owner.clone(), id.into(), "ferry_request".into(), json!({"method":"POST","path":"/node-groups","body":{"name":id,"parent_id":"0","position":0}}), None));
+        }
+        while let Some(result) = tasks.join_next().await {
+            assert!(result.unwrap().1.is_null());
+        }
+        finish(&s, &row, &owner, outcome, "", true).await.unwrap();
+        let ended = turns::Entity::find_by_id(row.id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let decisions: Value = serde_json::from_str(&ended.decisions).unwrap();
+        for id in ["parallel-a", "parallel-b"] {
+            assert_eq!(decisions[id]["ended_undecided"], true);
+            assert!(decisions[id]["decision"].is_null());
+        }
+        assert_eq!(super::super::pending_in(&ended), 2);
+        assert_eq!(host_groups::Entity::find().count(&s.db).await.unwrap(), 0);
+        assert!(
+            super::super::decide(
+                State(s.clone()),
+                admin(1),
+                Path(("1".into(), row.conversation_id.into(), row.id.into())),
+                Json(super::super::Decision {
+                    request_id: "parallel-a".into(),
+                    allow: true
+                })
+            )
+            .await
+            .is_err()
+        );
+    }
+    let (_dir, s, row, owner) = enabled().await;
+    platform_call(
+        s.clone(),
+        row.clone(),
+        owner,
+        "lease-call".into(),
+        "ferry_request".into(),
+        json!({"method":"POST","path":"/node-groups","body":{"name":"Never executed"}}),
+        None,
+    )
+    .await;
+    let mut current = turns::Entity::find_by_id(row.id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    current.expires_at = db::now() - 1;
+    current
+        .into_active_model()
+        .reset_all()
+        .update(&s.db)
+        .await
+        .unwrap();
+    assert!(claim(&s, row.id.into()).await.unwrap().is_none());
+    let current = turns::Entity::find_by_id(row.id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.state, "interrupted");
+    assert_eq!(
+        serde_json::from_str::<Value>(&current.decisions).unwrap()["lease-call"]["ended_undecided"],
+        true
+    );
+    assert_eq!(host_groups::Entity::find().count(&s.db).await.unwrap(), 0);
+    // Historical terminal turns predate the explicit marker. They can still
+    // be continued without rewriting old records or requiring a migration.
+    let mut historical = current;
+    let mut decisions: Value = serde_json::from_str(&historical.decisions).unwrap();
+    decisions["lease-call"]
+        .as_object_mut()
+        .unwrap()
+        .remove("ended_undecided");
+    historical.decisions = decisions.to_string();
+    historical
+        .into_active_model()
+        .reset_all()
+        .update(&s.db)
+        .await
+        .unwrap();
+    super::super::resolve_decision(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), row.conversation_id.into(), row.id.into())),
+        Json(super::super::Resolution {
+            request_id: "lease-call".into(),
+            action: "resumed".into(),
+        }),
+    )
+    .await
+    .unwrap();
+    let resolved = turns::Entity::find_by_id(row.id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(super::super::pending_in(&resolved), 0);
+}
+
+#[tokio::test]
+async fn failed_platform_read_returns_specific_error_to_the_agent_and_list_badge() {
+    let (_dir, s, row, owner) = enabled().await;
+    let result = platform_call(
+        s.clone(),
+        row.clone(),
+        owner,
+        "missing-read".into(),
+        "ferry_request".into(),
+        json!({"method":"GET","path":"/node-groups/999999"}),
+        None,
+    )
+    .await
+    .1;
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["status"], 404);
+    assert!(
+        !result["data"]["error"].as_str().unwrap_or("").is_empty()
+            || !result["error"].as_str().unwrap_or("").is_empty()
+    );
+    let listed = super::super::list(State(s), admin(1), Query(HashMap::new()))
+        .await
+        .unwrap()
+        .0;
+    assert_eq!(listed["items"][0]["pending"], 1);
+}
+
 async fn enabled() -> (tempfile::TempDir, AppState, turns::Model, String) {
     let (dir, s, id) = seeded().await;
     let c = conversations::Entity::find_by_id(id)

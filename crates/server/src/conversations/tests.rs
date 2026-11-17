@@ -252,6 +252,7 @@ async fn persisted_chat_is_independent_of_execution_logs_and_final_text_replaces
             item_id: "tool".into(),
             name: "LOG_ONLY_SECRET_MARKER".into(),
             state: "finished".into(),
+            input: None,
         },
         Event::Text {
             item_id: "part-a".into(),
@@ -1635,4 +1636,70 @@ async fn conversations_and_their_files_delete_while_file_storage_is_unavailable(
             .unwrap(),
         0
     );
+}
+
+#[tokio::test]
+async fn an_approval_left_undecided_when_its_turn_ends_stays_pending_until_resolved() {
+    let (_dir, s, id) = seeded().await;
+    let turn = sent(&s, id, "request-approval").await;
+    let (row, _, owner) = run::claim(&s, turn).await.unwrap().unwrap();
+    for event in [
+        Event::Session {
+            native_session_id: "native-b".into(),
+        },
+        Event::Approval {
+            request_id: "platform-1".into(),
+            tool: "ferry_request".into(),
+            input: json!({"method":"POST","path":"/workflows","body":{"name":"Weekly"}}),
+        },
+    ] {
+        run::append(&s, &row, &owner, event).await.unwrap();
+    }
+    async fn pending(s: &AppState) -> u64 {
+        let Json(listed) = list(State(s.clone()), admin(1), Query(HashMap::new()))
+            .await
+            .unwrap();
+        listed["items"][0]["pending"].as_u64().unwrap()
+    }
+    // Waiting in a running turn: the owner sees one pending item.
+    assert_eq!(pending(&s).await, 1);
+    // The turn ends before anyone decides: the approval is marked, not lost.
+    run::finish(&s, &row, &owner, Some(Outcome::Completed), "", true)
+        .await
+        .unwrap();
+    let current = turns::Entity::find_by_id(turn)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let decisions: Value = serde_json::from_str(&current.decisions).unwrap();
+    assert_eq!(decisions["platform-1"]["ended_undecided"], true);
+    assert!(decisions["platform-1"]["decision"].is_null());
+    assert_eq!(pending(&s).await, 1, "still needs the owner's attention");
+    // Only an item that ended undecided can be resolved; continuing clears it.
+    let resolution = |request: &str, action: &str| {
+        Json(Resolution {
+            request_id: request.into(),
+            action: action.into(),
+        })
+    };
+    assert!(
+        resolve_decision(
+            State(s.clone()),
+            admin(1),
+            Path(("1".into(), id, turn)),
+            resolution("missing", "dismissed"),
+        )
+        .await
+        .is_err()
+    );
+    resolve_decision(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id, turn)),
+        resolution("platform-1", "resumed"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(pending(&s).await, 0);
 }

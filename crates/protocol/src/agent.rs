@@ -200,6 +200,10 @@ pub enum Event {
     PlatformResult {
         request_id: String,
         result: Value,
+        /// What was asked (tool, method, path; never a body), for a readable
+        /// execution history. Server-created only, so older peers never see it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call: Option<Value>,
     },
     Session {
         native_session_id: String,
@@ -214,6 +218,9 @@ pub enum Event {
         item_id: String,
         name: String,
         state: String,
+        /// Native tool arguments, when supplied by the runtime.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<Value>,
     },
     Approval {
         request_id: String,
@@ -235,6 +242,18 @@ pub enum Event {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn tool_arguments_are_optional_and_round_trip_when_present() {
+        let old = json!({"type":"tool","item_id":"t","name":"Read","state":"running"});
+        let parsed: Event = serde_json::from_value(old.clone()).unwrap();
+        assert!(matches!(&parsed, Event::Tool { input: None, .. }));
+        assert_eq!(serde_json::to_value(parsed).unwrap(), old);
+        let mut with_input = old;
+        with_input["input"] = json!({"path":"src/main.rs"});
+        let parsed: Event = serde_json::from_value(with_input.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), with_input);
+    }
 
     #[test]
     fn working_directory_writes_and_file_tools_are_backward_compatible() {

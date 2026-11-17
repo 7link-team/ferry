@@ -3,7 +3,7 @@ import { InlineAlert } from "../../shared/ui/inline-alert";
 import { cliToolLabel } from "../../shared/forms/cli-tools";
 import { IdentityAvatar, type AvatarValue } from "../../shared/ui/identity-avatar";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { LazyDetails, LongText } from "./LazyDetails";
+import { LazyDetails } from "./LazyDetails";
 import { ApiError, api, errorText } from "../../shared/api/api";
 import { base } from "../../shared/api/resource";
 import { AlertDialog, Dialog } from "radix-ui";
@@ -34,14 +34,19 @@ import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { conversationText as t } from "./resource-config";
+import {
+  awaitingDecision,
+  EndedDecisionCard,
+  endedDecision,
+  ExecutionTimeline,
+  liveDecision,
+  PendingDecisionCard,
+  platformFailed,
+  timelineSummary,
+  type ActivityEvent,
+  type Decision,
+} from "./TurnActivity";
 export type ConversationDraft = ComposerDraft;
-interface Decision {
-  tool: string;
-  input: unknown;
-  decision: boolean | null;
-  dispatching: boolean;
-  sent: boolean;
-}
 interface Turn {
   id: string;
   owner_id: string;
@@ -109,21 +114,13 @@ interface ConversationData {
 interface Event {
   sequence: number;
   turn_id: string;
-  event: {
-    type: string;
-    item_id?: string;
-    text?: string;
-    replace?: boolean;
-    name?: string;
-    state?: string;
-    request_id?: string;
-    result?: unknown;
-  };
+  event: ActivityEvent & { text?: string; replace?: boolean };
 }
 const active = (value: string) =>
   ["queued", "running", "stopping"].includes(value);
 type ExecutionItem = { name?: string | undefined; state?: string | undefined; result?: unknown };
 const NO_ITEMS: ReadonlyMap<string, ExecutionItem> = new Map();
+const NO_EVENTS: readonly ActivityEvent[] = [];
 // Keep a room's human messages and concurrent Agent replies in actual arrival
 // order. A reply link is metadata, not permission to move a later reply backwards.
 export function conversationTimeline(messages: ChatMessage[], turns: Turn[]) {
@@ -294,6 +291,35 @@ export function Conversation({
     }
     return index;
   }, [events]);
+  // Raw execution events per turn, for the readable timeline.
+  const turnEvents = useMemo(() => {
+    const index = new Map<string, ActivityEvent[]>();
+    for (const { turn_id, event } of events) {
+      if (!["tool", "platform_result", "approval"].includes(event.type)) continue;
+      let list = index.get(turn_id);
+      if (!list) index.set(turn_id, (list = []));
+      list.push(event);
+    }
+    return index;
+  }, [events]);
+  // Turns that need someone: accessible decisions (live or left
+  // undecided when the reply ended) and failed platform requests.
+  const attention = useMemo(() => {
+    const turns = new Set<string>();
+    const mine: string[] = [];
+    for (const turn of data?.turns ?? []) {
+      for (const [request, decision] of Object.entries(turn.decisions)) {
+        if (!awaitingDecision(turn, decision)) continue;
+        turns.add(turn.id);
+        if (turn.owner_id === data?.viewer_id) {
+          mine.push(`${turn.id}:${request}`);
+        }
+      }
+      if ((turnEvents.get(turn.id) ?? []).some((event) => event.type === "platform_result" && platformFailed(event.result)))
+        turns.add(turn.id);
+    }
+    return { turns, mine };
+  }, [data?.turns, data?.viewer_id, turnEvents]);
   const scroll = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   const readCursor = useRef("");
@@ -441,22 +467,47 @@ export function Conversation({
       setBusy(false);
     }
   }
-  async function send(retry?: Turn) {
-    const prompt = retry?.prompt ?? draft;
-    const files = retry?.attachments ?? attachments;
-    const replyTo = retry ? data?.messages.find(message => message.role === "user" && message.turn_id === retry.id)?.reply_to : thread;
-    if ((!prompt.trim() && !files.length) || !runnable || busy) return;
+  /** Continue an approval left when its reply ended through the normal send path. */
+  async function resolveEnded(turn: Turn, request: string, operation: string) {
+    const sent = await send(undefined, {
+      prompt: commonText("conversations:continuePrompt", { operation }),
+      targets: data?.kind === "group" && turn.agent_id ? [turn.agent_id] : [],
+    });
+    if (!sent) return;
+    await act(`/turns/${turn.id}/decision-resolutions`, { request_id: request, action: "resumed" });
+  }
+  function showOldestPending() {
+    const first = attention.mine[0];
+    if (!first) return;
+    setActivity("allMessages");
+    setThread("");
+    setSearch("");
+    const request = first.slice(first.indexOf(":") + 1);
+    requestAnimationFrame(() => {
+      const node = [...(scroll.current?.querySelectorAll("[data-pending-decision],[data-ended-decision]") ?? [])].find(
+        (card) => (card.getAttribute("data-pending-decision") ?? card.getAttribute("data-ended-decision")) === request,
+      );
+      node?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }
+  async function send(retry?: Turn, followUp?: { prompt: string; targets: string[] }): Promise<boolean> {
+    const prompt = followUp?.prompt ?? retry?.prompt ?? draft;
+    const files = followUp ? [] : retry?.attachments ?? attachments;
+    const replyTo = followUp ? undefined : retry ? data?.messages.find(message => message.role === "user" && message.turn_id === retry.id)?.reply_to : thread;
+    const sendTargets = followUp ? followUp.targets : targets;
+    const sendMentions = followUp ? [] : mentions;
+    if ((!prompt.trim() && !files.length) || !runnable || busy) return false;
     if (current && data?.kind !== "group") {
       // Keep the draft; it is sent once this reply finishes.
-      if (!retry) setQueue({ after: current.id, state: "waiting" });
-      return;
+      if (!retry && !followUp) setQueue({ after: current.id, state: "waiting" });
+      return false;
     }
     const signature = JSON.stringify({
       prompt,
       attachments: files,
       retry: retry?.id,
-      targets,
-      mentions,
+      targets: sendTargets,
+      mentions: sendMentions,
       thread: replyTo,
     });
     if (pending.current?.signature !== signature)
@@ -477,10 +528,10 @@ export function Conversation({
           attachments: files,
           client_id: pending.current.client_id,
           ...(replyTo ? { reply_to: replyTo } : {}),
-          ...(data?.kind === "group" ? { targets, mentions } : {}),
+          ...(data?.kind === "group" ? { targets: sendTargets, mentions: sendMentions } : {}),
         }),
       });
-      if (!retry) {
+      if (!retry && !followUp) {
         setDraft("");
         setAttachments([]);
         setTargets([]);
@@ -490,11 +541,13 @@ export function Conversation({
       pending.current = undefined;
       follow.current = true;
       setData(await api<ConversationData>(endpoint));
+      return true;
     } catch (cause) {
       setError(errorText(cause));
       // Recovery may have succeeded before a send/network failure. Keep the
       // server version fresh so the next explicit retry can reuse client_id.
       setData(await api<ConversationData>(endpoint).catch(() => data));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -707,7 +760,7 @@ export function Conversation({
         role="group"
         aria-label={t("messageFilters")}
       >
-        {["allMessages", "unread", "mentions", "saved"].map((value) => (
+        {["allMessages", "unread", "mentions", "saved", "pending"].map((value) => (
           <Button
             key={value}
             variant={activity === value ? "secondary" : "ghost"}
@@ -718,10 +771,11 @@ export function Conversation({
               setThread("");
             }}
           >
-            {t(value)}
+            {t(value === "pending" ? "pendingFilter" : value)}
             {value === "unread" && data.messages.some((m) => m.unread)
               ? ` · ${data.messages.filter((m) => m.unread).length}`
               : ""}
+            {value === "pending" && attention.turns.size ? ` · ${attention.turns.size}` : ""}
           </Button>
         ))}
         {activity === "unread" && data.messages.some((m) => m.unread) && (
@@ -793,13 +847,15 @@ export function Conversation({
       >
         <div className={`mx-auto w-full max-w-4xl ${!data.turns.length && !data.messages.length ? "flex min-h-full flex-col" : ""}`}>
           {activity !== "allMessages" &&
-            !data.messages.some((m) =>
-              activity === "unread"
-                ? m.unread
-                : activity === "saved"
-                  ? m.saved
-                  : m.mentions?.includes(data.viewer_id),
-            ) && (
+            (activity === "pending"
+              ? !attention.turns.size
+              : !data.messages.some((m) =>
+                  activity === "unread"
+                    ? m.unread
+                    : activity === "saved"
+                      ? m.saved
+                      : m.mentions?.includes(data.viewer_id),
+                )) && (
               <p
                 role="status"
                 className="py-12 text-center text-sm text-muted-foreground"
@@ -830,6 +886,8 @@ export function Conversation({
               if (activity === "saved") return !!m?.saved;
               if (activity === "mentions")
                 return !!m?.mentions?.includes(data.viewer_id);
+              if (activity === "pending")
+                return m?.role !== "user" && !!entry.turn && attention.turns.has(entry.turn.id);
               return true;
             })
             .filter(
@@ -1014,87 +1072,59 @@ export function Conversation({
                             ))}
                           </div>
                         )}
-                        {(!!items.size || (turn && m?.role !== "user" && (turn.usage || Object.values(turn.decisions).some(decision => decision.decision !== null || turn.state !== "running")))) && (
-                          <LazyDetails data-execution-details className="text-xs text-muted-foreground" summaryClassName="min-h-11 cursor-pointer py-3" summary={t("executionDetails")}>
-                            {() => (
-                              <div className="mt-2 space-y-1">
-                                {[...items].map(([key, item]) => (
-                                  <div key={key} className="min-w-0 rounded border p-2">
-                                    <p>{item.name}{item.state ? ` · ${item.state}` : ""}</p>
-                                    {item.result !== undefined && <><p className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground/80">{t("toolRawResult")}</p><LongText value={item.result} className="mt-1 max-h-64" /></>}
-                                  </div>
-                                ))}
-                                {turn && m?.role !== "user" && Object.entries(turn.decisions).filter(([, decision]) => decision.decision !== null || turn.state !== "running").map(([request, decision]) => (
-                                  <LazyDetails key={request} className="rounded-md border p-2" summaryClassName="min-h-11 cursor-pointer break-words py-2" summary={<>{decision.tool} · {decision.sent ? t("decisionSent") : decision.decision !== null ? t("decisionQueued") : t("decisionExpired")}</>}>
-                                    {() => <LongText value={decision.input} className="mt-2 max-h-56" />}
-                                  </LazyDetails>
-                                ))}
-                                {turn?.usage && <p className="py-2">{t(turn.state)} · {t("inputTokens")}: {turn.usage.input_tokens} · {t("outputTokens")}: {turn.usage.output_tokens}</p>}
-                              </div>
-                            )}
-                          </LazyDetails>
-                        )}
+                        {turn && m?.role !== "user" && (() => {
+                          const live = Object.entries(turn.decisions).filter(([, decision]) => liveDecision(turn, decision));
+                          const ended = Object.entries(turn.decisions).filter(([, decision]) => endedDecision(turn, decision));
+                          const owner = turn.owner_id === data.viewer_id;
+                          const ownerName = data.members.find((member) => member.id === turn.owner_id)?.name || t("member");
+                          const turnActivity = turnEvents.get(turn.id) ?? NO_EVENTS;
+                          const hasDetails = !!turnActivity.length || !!items.size || !!turn.usage || Object.values(turn.decisions).some((decision) => decision.decision !== null || turn.state !== "running");
+                          const counts = timelineSummary(turnActivity, turn.decisions, turn);
+                          return (
+                            <>
+                              {live.map(([request, decision]) => (
+                                <PendingDecisionCard
+                                  key={request}
+                                  request={request}
+                                  decision={decision}
+                                  canDecide={runnable && owner}
+                                  ownerName={ownerName}
+                                  busy={busy}
+                                  onDecide={(allow) => void act(`/turns/${turn.id}/decisions`, { request_id: request, allow })}
+                                />
+                              ))}
+                              {ended.map(([request, decision]) => (
+                                <EndedDecisionCard
+                                  key={request}
+                                  request={request}
+                                  decision={decision}
+                                  canAct={runnable && owner}
+                                  busy={busy || !!current}
+                                  onContinue={(operation) => void resolveEnded(turn, request, operation)}
+                                />
+                              ))}
+                              {hasDetails && (
+                                <LazyDetails data-execution-details className="text-xs text-muted-foreground" summaryClassName="min-h-11 cursor-pointer py-3" summary={counts ? `${t("executionDetails")} · ${counts}` : t("executionDetails")}>
+                                  {() => (
+                                    <ExecutionTimeline
+                                    key={data.viewer_id}
+                                    viewerId={data.viewer_id}
+                                      events={turnActivity}
+                                      decisions={turn.decisions}
+                                      turnState={turn.state}
+                                      usage={turn.usage}
+                                      stateLabel={t(turn.state)}
+                                      deciderName={ownerName}
+                                    deciders={data.members}
+                                    />
+                                  )}
+                                </LazyDetails>
+                              )}
+                            </>
+                          );
+                        })()}
                         {turn && m?.role !== "user" && (
                           <>
-                            {Object.entries(turn.decisions).filter(([, decision]) => decision.decision === null && turn.state === "running").map(
-                              ([request, decision]) => (
-                                <div
-                                  key={request}
-                                  className="space-y-2 rounded-md border p-3"
-                                >
-                                  <p className="font-medium">{decision.tool}</p>
-                                  <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all text-xs">
-                                    {JSON.stringify(decision.input, null, 2)}
-                                  </pre>
-                                  {decision.decision === null &&
-                                  turn.state === "running" &&
-                                  runnable &&
-                                  turn.owner_id === data.viewer_id ? (
-                                    <div className="flex gap-2">
-                                      <Button
-                                        size="sm"
-                                        disabled={busy}
-                                        onClick={() =>
-                                          void act(
-                                            `/turns/${turn.id}/decisions`,
-                                            {
-                                              request_id: request,
-                                              allow: true,
-                                            },
-                                          )
-                                        }
-                                      >
-                                        {t("allow")}
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        disabled={busy}
-                                        onClick={() =>
-                                          void act(
-                                            `/turns/${turn.id}/decisions`,
-                                            {
-                                              request_id: request,
-                                              allow: false,
-                                            },
-                                          )
-                                        }
-                                      >
-                                        {t("deny")}
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <p className="text-sm text-muted-foreground">
-                                      {decision.sent
-                                        ? t("decisionSent")
-                                        : decision.decision !== null
-                                          ? t("decisionQueued")
-                                          : t("decisionExpired")}
-                                    </p>
-                                  )}
-                                </div>
-                              ),
-                            )}
                             {active(turn.state) && (
                               <p
                                 role="status"
@@ -1262,6 +1292,14 @@ export function Conversation({
         <p role="status" className="px-3 text-sm text-muted-foreground sm:px-6">{t("archived")}</p>
       )}
       <div className="shrink-0 px-3 pb-3 pt-2 sm:px-6 sm:pb-5">
+        {!!attention.mine.length && (
+          <div role="status" data-pending-banner className="mb-2 flex items-center gap-2 rounded-lg border border-amber-500/60 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow-sm dark:bg-amber-950/40 dark:text-amber-100">
+            <span className="min-w-0 flex-1">{commonText("conversations:pendingBanner", { count: attention.mine.length })}</span>
+            <Button type="button" size="sm" className="min-h-11" variant="outline" onClick={showOldestPending}>
+              {t("showPending")}
+            </Button>
+          </div>
+        )}
         {error && (
           <InlineAlert className="mb-2" onDismiss={() => setError("")}>
             {error}
@@ -1290,7 +1328,7 @@ export function Conversation({
             };
           })() : undefined}
           onCancelReply={() => setThread("")}
-          onSend={() => send()}
+          onSend={async () => { await send(); }}
           queue={queue && data.kind !== "group" ? {
             state: queue.state,
             onCancel: () => setQueue(undefined),

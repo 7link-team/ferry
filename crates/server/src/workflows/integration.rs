@@ -980,6 +980,59 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/{workspace}/workflow-integration-options", post(options))
         .route("/{workspace}/workflow-node-catalog", get(node_catalog))
+        .route(
+            "/{workspace}/workflow-definition-format",
+            get(definition_format),
+        )
+}
+/// The exact envelope of a workflow definition as POST/PATCH /workflows
+/// validate it, with one complete valid example, so an Agent never guesses
+/// field names (e.g. `version` or `edges`).
+async fn definition_format(scope: Scope, Path(_): Path<String>) -> Result<Json<Value>> {
+    let _ = scope;
+    Ok(Json(json!({
+        "schema": super::graph::graph_schema(),
+        "example": definition_example(),
+        "rules": [
+            "Send the definition as a JSON string in the `definition` field of POST /workflows (with `name`).",
+            "Top level: exactly engine=\"ferry-graph\", schema=1, nodes, connections; optional settings, layout, pin_data. No other fields.",
+            "Each node: id (lower_snake, unique in its graph), type and type_version from GET /workflow-node-catalog?section=builtin (or the integration catalog), name, params valid for that type, position [x, y]. Names do not have to be unique.",
+            "The schema describes the graph envelope. Node params use that node's catalog params_schema; expression_fields additionally allow strings beginning with = at those paths in saved drafts. Evaluated values must satisfy params_schema.",
+            "Connections link {node, port, index} to {node, port, index}; ports are the `port` names in the node contract (usually main).",
+            "Saving also validates node versions, runtime/cache/credential settings, node-specific semantics, existing endpoint nodes and ports/indexes, duplicate connections, acyclic graphs, loop nesting, pin references, timezone and size limits. JSON Schema validation alone does not guarantee acceptance or permission to execute.",
+            "Replace example ids (agent_id, channel_id, report source ids) with real ones from the platform.",
+            "If saving fails, the error names a JSON path and the reason: fix that field and send the request again."
+        ]
+    })))
+}
+
+/// Manual trigger, platform data, AI analysis, PDF report, then a notification
+/// with the PDF attached. Ids are placeholders that must be replaced.
+pub(crate) fn definition_example() -> Value {
+    let link = |from: &str, to: &str| json!({"from":{"node":from,"port":"main","index":0},"to":{"node":to,"port":"main","index":0}});
+    json!({
+        "engine": "ferry-graph",
+        "schema": 1,
+        "settings": {"timezone": "Asia/Shanghai"},
+        "nodes": [
+            {"id":"start","name":"Start","type":"core.trigger.manual","type_version":1,"position":[0,0],
+             "params":{"input_schema":{"type":"object"}}},
+            {"id":"commits","name":"Read contributors","type":"ferry.request","type_version":1,"position":[260,0],
+             "params":{"operation":"/code-insights/{id}/reports/{kind}","path_params":{"id":"1","kind":"contributors"},
+                       "query":{},"split_items":false,"all_pages":false,"max_pages":50}},
+            {"id":"analyze","name":"Summarize contributors","type":"ai.agent.run","type_version":1,"position":[520,0],
+             "params":{"agent_id":"1","prompt":"=Summarize this contributors report using only the provided data: {{ JSON.stringify($json) }}",
+                       "output_schema":{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"}},
+                       "required":["title","summary"]},"timeout_s":600,"max_tool_calls":64}},
+            {"id":"report","name":"Render PDF","type":"report.render","type_version":1,"position":[780,0],
+             "params":{"format":"pdf","title":"={{ $json.title }}","subtitle":"","period":"","summary":"={{ $json.summary }}",
+                       "metrics":[],"sections":[{"title":"Contributors","markdown":"={{ $json.summary }}","page_break":false}],
+                       "language":"zh","file_name":"weekly-report","output_field":"file","link_ttl_days":7}},
+            {"id":"notify","name":"Send report","type":"notification.send","type_version":1,"position":[1040,0],
+             "params":{"channel_id":"1","subject":"","body":"={{ $json.summary }}","format":"text","to":[],"variables":{},"attachments":["file"]}}
+        ],
+        "connections": [link("start","commits"), link("commits","analyze"), link("analyze","report"), link("report","notify")]
+    })
 }
 async fn node_catalog(
     scope: Scope,

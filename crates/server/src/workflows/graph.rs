@@ -90,12 +90,7 @@ fn contracts() -> &'static Contracts {
                 .build(schema)
                 .expect("bundled Workflow schema must compile")
         };
-        let graph = compile(
-            &serde_json::from_str::<Value>(include_str!(
-                "../../../../src/shared/workflow-contracts/workflow-graph.schema.json"
-            ))
-            .expect("bundled graph schema must be JSON"),
-        );
+        let graph = compile(&graph_schema());
         let mut nodes = BTreeMap::new();
         for catalog in [
             include_str!("../../../../src/shared/workflow-contracts/workflow-core-nodes.json"),
@@ -152,6 +147,69 @@ fn contracts() -> &'static Contracts {
     })
 }
 
+/// A schema failure that also says why (missing field, unexpected field,
+/// wrong type), so a person or an Agent can fix exactly that field.
+fn schema_error(base: &str, error: &jsonschema::ValidationError<'_>) -> ApiError {
+    use jsonschema::error::ValidationErrorKind;
+    let mut path = format!("{base}{}", error.instance_path());
+    // Required/additional-property failures point at the containing object.
+    // Include the offending key so callers can locate the field directly.
+    let field = match error.kind() {
+        ValidationErrorKind::Required { property } => property.as_str(),
+        ValidationErrorKind::AdditionalProperties { unexpected } => {
+            unexpected.first().map(String::as_str)
+        }
+        _ => None,
+    };
+    if let Some(field) = field {
+        path.push('/');
+        path.push_str(&pointer_key(field));
+    }
+    // The reason never quotes the offending value: resolved parameters can
+    // carry secrets substituted from expressions.
+    let reason = schema_reason(error.kind());
+    let path = if path.is_empty() {
+        "/".to_owned()
+    } else {
+        path
+    };
+    invalid(format!("{path} ({reason})"), "workflow.graphSchema")
+}
+
+/// Why a value failed, in words that never include the value itself.
+fn schema_reason(kind: &jsonschema::error::ValidationErrorKind) -> String {
+    use jsonschema::error::ValidationErrorKind as K;
+    match kind {
+        K::Required { .. } => "missing required field".into(),
+        K::AdditionalProperties { .. } => "unexpected field".into(),
+        K::Type { kind } => {
+            let types: String = format!("{kind:?}")
+                .to_lowercase()
+                .replace("single(", "")
+                .replace("multiple(", "")
+                .chars()
+                .filter(|c| !matches!(c, '(' | ')' | '[' | ']'))
+                .collect();
+            format!("expected type {types}")
+        }
+        K::Enum { .. } | K::Constant { .. } => "not one of the allowed values".into(),
+        K::Minimum { .. }
+        | K::Maximum { .. }
+        | K::ExclusiveMinimum { .. }
+        | K::ExclusiveMaximum { .. } => "number out of the allowed range".into(),
+        K::MinLength { .. } | K::MaxLength { .. } => "text length out of the allowed range".into(),
+        K::MinItems { .. } | K::MaxItems { .. } => {
+            "number of items out of the allowed range".into()
+        }
+        K::Pattern { .. } | K::Format { .. } => "does not match the required format".into(),
+        K::UniqueItems => "items must be unique".into(),
+        K::OneOfNotValid { .. } | K::AnyOf { .. } | K::OneOfMultipleValid { .. } => {
+            "does not match any allowed shape".into()
+        }
+        _ => "invalid value".into(),
+    }
+}
+
 fn invalid(path: impl Into<String>, key: &'static str) -> ApiError {
     ApiError::localized(
         StatusCode::BAD_REQUEST,
@@ -184,6 +242,14 @@ pub(crate) fn validate(input: &str) -> Result<String> {
     }
     validate_layer(&graph, "", 0, &mut 0)?;
     crate::definitions::canonical(input)
+}
+
+/// The bundled graph JSON schema, as validation uses it.
+pub(crate) fn graph_schema() -> Value {
+    serde_json::from_str(include_str!(
+        "../../../../src/shared/workflow-contracts/workflow-graph.schema.json"
+    ))
+    .expect("bundled graph schema must be JSON")
 }
 
 pub(crate) fn pin_data<'a>(graph: &'a Value, node: &Value, mode: &str) -> Option<&'a Value> {
@@ -443,10 +509,7 @@ async fn resolve_mode(
         .filter(|contract| contract.spec["type_version"].as_f64() == node["type_version"].as_f64())
         .ok_or_else(|| invalid(base, "workflow.graphUnknownNode"))?;
     if let Err(error) = contract.params.validate(&node["params"]) {
-        return Err(invalid(
-            format!("{path}{}", error.instance_path()),
-            "workflow.graphSchema",
-        ));
+        return Err(schema_error(&path, &error));
     }
     let mut expressions = Vec::new();
     collect_params(
@@ -563,10 +626,7 @@ pub(crate) fn validate_resolved(node: &Value, base: &str, params: &Value) -> Res
         .filter(|contract| contract.spec["type_version"].as_f64() == node["type_version"].as_f64())
         .ok_or_else(|| invalid(base, "workflow.graphUnknownNode"))?;
     if let Err(error) = contract.resolved.validate(params) {
-        return Err(invalid(
-            format!("{base}/params{}", error.instance_path()),
-            "workflow.graphSchema",
-        ));
+        return Err(schema_error(&format!("{base}/params"), &error));
     }
     validate_semantics(kind, params, base)
 }
@@ -620,10 +680,7 @@ fn validate_semantics(kind: &str, params: &Value, base: &str) -> Result<()> {
 fn validate_layer(graph: &Value, base: &str, nesting: usize, total: &mut usize) -> Result<()> {
     let registry = contracts();
     if let Err(error) = registry.graph.validate(graph) {
-        return Err(invalid(
-            format!("{base}{}", error.instance_path()),
-            "workflow.graphSchema",
-        ));
+        return Err(schema_error(base, &error));
     }
     // Shape and numeric bounds are established by the trusted graph schema.
     let nodes = graph["nodes"].as_array().unwrap();
@@ -648,10 +705,7 @@ fn validate_layer(graph: &Value, base: &str, nesting: usize, total: &mut usize) 
             })
             .ok_or_else(|| invalid(&path, "workflow.graphUnknownNode"))?;
         if let Err(error) = contract.params.validate(&node["params"]) {
-            return Err(invalid(
-                format!("{path}/params{}", error.instance_path()),
-                "workflow.graphSchema",
-            ));
+            return Err(schema_error(&format!("{path}/params"), &error));
         }
         let settings = &node["settings"];
         let runtime = settings
@@ -811,6 +865,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn definition_schema_errors_identify_the_field_and_reason() {
+        let example = super::super::integration::definition_example();
+        validate(&example.to_string()).unwrap();
+        let mut missing = example.clone();
+        missing.as_object_mut().unwrap().remove("engine");
+        let mut extra = example.clone();
+        extra["edges"] = json!([]);
+        let mut wrong_type = example.clone();
+        wrong_type["nodes"][0]["position"] = json!("0,0");
+        let mut missing_param = example.clone();
+        missing_param["nodes"][2]["params"]
+            .as_object_mut()
+            .unwrap()
+            .remove("agent_id");
+        let mut escaped_extra = example;
+        escaped_extra["nodes"][0]["params"]["a/b~c"] = json!(true);
+        for (definition, path, reason) in [
+            (missing, "/engine", "required"),
+            (extra, "/edges", "unexpected field"),
+            (wrong_type, "/nodes/0/position", "expected type array"),
+            (missing_param, "/nodes/2/params/agent_id", "required"),
+            (escaped_extra, "/nodes/0/params/a~1b~0c", "unexpected field"),
+        ] {
+            let error = validate(&definition.to_string()).unwrap_err();
+            assert_eq!(error.0, StatusCode::BAD_REQUEST);
+            let message = error.2.as_ref().unwrap();
+            assert_eq!(message.key, "workflow.graphSchema");
+            let detail = message.params["path"].as_str();
+            assert!(detail.starts_with(&format!("{path} (")), "{detail}");
+            assert!(detail.contains(reason), "{detail}");
+        }
+    }
+
+    #[test]
     fn repository_auth_policy_rejects_new_legacy_and_preserves_only_saved_identity() {
         let legacy = node("repo", "integration.github.repository.get");
         let previous = json!({"nodes":[legacy.clone()]}).to_string();
@@ -907,7 +995,11 @@ mod tests {
     fn resolved_error(error: ApiError, key: &str, path: &str) {
         let message = error.2.as_ref().unwrap();
         assert_eq!(message.key, key, "{error:?}");
-        assert_eq!(message.params["path"], path);
+        let detail = message.params["path"].as_str();
+        assert_eq!(
+            detail.split_once(" (").map_or(detail, |(path, _)| path),
+            path
+        );
         for locale in crate::i18n::Locale::ALL {
             let text = crate::i18n::render(locale, message);
             assert!(
