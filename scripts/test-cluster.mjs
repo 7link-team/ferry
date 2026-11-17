@@ -89,6 +89,9 @@ try {
   const {token}=await api(B,`/workspaces/${ws}/runner-tokens`,{host_id:host},'POST',201);
   let controlPort=ports[0];
   const counts={control:0,sessions:0};
+  // Control connections passing through the gateway, newest last; a test can
+  // cut the Runner's side only, leaving the server holding a half-open socket.
+  const controlPairs=[];
   gateway=httpServer((req,res)=>{
     const remote=httpRequest({host:'127.0.0.1',port:ports[1],method:req.method,path:req.url,headers:req.headers},reply=>{res.writeHead(reply.statusCode,reply.headers);reply.pipe(res);});
     remote.on('error',()=>{res.writeHead(502);res.end();});req.pipe(remote);
@@ -98,13 +101,29 @@ try {
     const upstream=createConnection({host:'127.0.0.1',port:control?controlPort:ports[2]});
     sockets.add(socket);sockets.add(upstream);for(const stream of [socket,upstream])stream.on('close',()=>sockets.delete(stream));
     upstream.on('connect',()=>{upstream.write(`${req.method} ${req.url} HTTP/1.1\r\n${Object.entries(req.headers).map(([key,value])=>`${key}: ${value}`).join('\r\n')}\r\n\r\n`);if(head.length)upstream.write(head);socket.pipe(upstream);upstream.pipe(socket);});
-    upstream.on('error',()=>socket.destroy());socket.on('error',()=>upstream.destroy());socket.on('close',()=>upstream.destroy());upstream.on('close',()=>socket.destroy());
+    upstream.on('error',()=>socket.destroy());socket.on('error',()=>{if(!socket.halfOpen)upstream.destroy();});socket.on('close',()=>{if(!socket.halfOpen)upstream.destroy();});upstream.on('close',()=>socket.destroy());
+    if(control)controlPairs.push({socket,upstream});
   });
   await new Promise(done=>gateway.listen(0,'127.0.0.1',done));
   const runner=await launch(runnerBinary,['--server',`http://127.0.0.1:${gateway.address().port}`,'--token',token,'--state-dir',join(work,'runner-state')],process.env,'runner');
   await until(async()=>{if(runner.launchError)throw runner.launchError;assert.equal(runner.exitCode,null,'Runner exited before connecting');return(await api(B,root)).state==='online';},'Runner control on A');
   const result=await api(B,root+'/connection-tests',{});assert(result.ok);
   console.log('PASS command from B, control on A, dedicated session callback forced to C');
+  {
+    // A network path that cuts TLS mid-stream leaves the server unaware its
+    // control connection is dead. The Runner must be accepted again at once,
+    // not only after the old ownership lease expires (30 s).
+    const pair=controlPairs.at(-1);assert(pair,'control connection through the gateway');
+    const before=counts.control;pair.socket.halfOpen=true;pair.socket.destroy();
+    const cutAt=Date.now();
+    await until(async()=>counts.control>before&&(await api(B,root+'/connection-tests',{})).ok,'Runner reconnects after a half-open control connection',15);
+    const seconds=(Date.now()-cutAt)/1000;
+    // Before the takeover this took ~95 s (lease expiry plus backoff), the outage seen in production.
+    assert(seconds<15,`Runner took ${seconds.toFixed(1)}s to be accepted again after a half-open control connection`);
+    assert(!pair.upstream.destroyed,'the cut left the server side open, as a broken network path does');
+    pair.upstream.destroy();
+    console.log(`PASS Runner taken over after a half-open control connection in ${seconds.toFixed(1)}s (ownership lease is 30s)`);
+  }
   if(natsCount===3){
     await until(replicated,'three replicas of all Ferry KV buckets are current',90);
     const owners=(await streams()).find(s=>s.name===`KV_${namespace}_owners`&&s.cluster?.leader);

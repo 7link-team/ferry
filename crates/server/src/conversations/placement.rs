@@ -209,6 +209,20 @@ pub(super) async fn place(
 }
 
 /// Checks the bound host still runs this CLI exactly as bound.
+/// How recently the bound host must have been seen to wait for it to reconnect.
+const RECONNECT_GRACE_WINDOW_MS: i64 = 120_000;
+/// How long to wait for a recently seen bound host before failing over.
+const RECONNECT_GRACE: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_millis(600)
+} else {
+    std::time::Duration::from_secs(20)
+};
+const RECONNECT_POLL: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_millis(100)
+} else {
+    std::time::Duration::from_secs(2)
+};
+
 async fn current(
     s: &AppState,
     scope: &Scope,
@@ -240,18 +254,35 @@ async fn current(
         let reason = Message::new("conversations.bindingChanged");
         return Err(unusable(&host, reason, !host.runner_key_hash.is_empty()));
     }
-    let channel = match crate::hosts::remote::open(s, &scope.workspace_id, &config.host_id).await {
-        Ok(channel) => channel,
-        Err(error) => {
-            return Err(unusable(&host, offline(&error), false));
+    // A Runner that was online moments ago is usually just reconnecting
+    // (a network blip or an update restart takes a few seconds). Moving the
+    // conversation loses the CLI's own context, so give its host a short grace
+    // period before failing over.
+    let recently_seen = crate::db::now() - host.seen_at < RECONNECT_GRACE_WINDOW_MS;
+    let deadline = tokio::time::Instant::now() + RECONNECT_GRACE;
+    // Reaching the Runner (opening a channel and probing over it) is retried;
+    // what the probe reports about the CLI is an answer, not retried.
+    let (channel, probe) = loop {
+        let reached =
+            match crate::hosts::remote::open(s, &scope.workspace_id, &config.host_id).await {
+                Ok(channel) => match channel
+                    .agent_probe(config.runtime, &config.cwd, Some(binding))
+                    .await
+                {
+                    Ok(probe) => Ok((channel, probe)),
+                    Err(error) => Err(error),
+                },
+                Err(error) => Err(error),
+            };
+        match reached {
+            Ok(reached) => break reached,
+            Err(error) => {
+                if !recently_seen || tokio::time::Instant::now() >= deadline {
+                    return Err(unusable(&host, offline(&error), false));
+                }
+                tokio::time::sleep(RECONNECT_POLL).await;
+            }
         }
-    };
-    let probe = match channel
-        .agent_probe(config.runtime, &config.cwd, Some(binding))
-        .await
-    {
-        Ok(probe) => probe,
-        Err(error) => return Err(unusable(&host, offline(&error), false)),
     };
     let files = FileCapability::of(&probe);
     let checked = match agent_hosts::check(probe, &cli, &login_usable) {

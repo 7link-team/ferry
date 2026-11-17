@@ -94,10 +94,38 @@ async fn control(s: AppState, mut socket: Socket) {
         return;
     }
     let (owner, owner_revision) = if let Some(cluster) = &s.cluster {
-        match cluster
+        let mut acquired = cluster
             .acquire_owner(&s, &host_id, row.workspace_id.into(), secret())
-            .await
-        {
+            .await;
+        // The same Runner (its key was just verified) reconnecting to this node
+        // while its previous connection is still registered here means that
+        // connection is dead but not yet noticed (e.g. a network path that cut
+        // TLS mid-stream). End it and take over now, instead of refusing the
+        // reconnect until the old ownership expires, which turned every brief
+        // network blip into a minute-long outage.
+        if acquired.is_err() {
+            let stale = live().get(&host_id).cloned().filter(|old| {
+                old.key_hash == row.runner_key_hash
+                    && old
+                        .owner
+                        .as_ref()
+                        .is_some_and(|owner| owner.node == cluster.node)
+            });
+            if let Some(old) = stale {
+                tracing::info!(%host_id, "runner reconnected; replacing its unresponsive connection");
+                let _ = old.disconnect.send(true);
+                for _ in 0..50 {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    acquired = cluster
+                        .acquire_owner(&s, &host_id, row.workspace_id.into(), secret())
+                        .await;
+                    if acquired.is_ok() {
+                        break;
+                    }
+                }
+            }
+        }
+        match acquired {
             Ok((owner, revision)) => (Some(owner), revision),
             Err(error) => {
                 tracing::warn!(%host_id, reason=%error.1, "Cluster ownership temporarily unavailable");

@@ -118,24 +118,30 @@ pub(super) async fn run_with_shutdown(
     let control_url = ws_url(&cfg.server, "/api/runners/connect")?;
     tracing::info!(server = %cfg.server, protocol = wire::VERSION, "ferry-runner 启动");
 
-    // Reconnect with backoff, forever: a server restart or a flapping link is
-    // normal operation for an agent, not a reason to stop.
-    let mut backoff = Duration::from_secs(1);
+    // Reconnect forever: a server restart or a flapping link is normal
+    // operation for an agent, not a reason to stop. See `reconnect_delay`.
+    let mut attempt = 0usize;
     let mut sessions = tokio::task::JoinSet::new();
     // Preview forwards are open-ended byte pipes with no state to finish, so
     // they are kept apart and cut on stop instead of being waited for.
     let mut forwards = tokio::task::JoinSet::new();
     let mut activation = None;
     loop {
+        let connected_at = tokio::time::Instant::now();
         let result = tokio::select! {
             biased;
             _ = stopped.wait_for(|value| *value) => break,
             result = hold(&cfg, &control_url, &mut sessions, &mut forwards) => result,
         };
+        // A connection that worked for a while and then broke (e.g. TLS cut by
+        // the network) is a fresh incident: start the schedule again.
+        if connected_at.elapsed() >= HEALTHY_CONNECTION {
+            attempt = 0;
+        }
         match result {
             Ok(()) => {
                 tracing::warn!("控制连接已关闭，准备重连");
-                backoff = Duration::from_secs(1);
+                attempt = 0;
             }
             Err(error) if error.is::<update::Prepared>() => {
                 activation = Some(error.downcast::<update::Prepared>()?.0);
@@ -145,13 +151,17 @@ pub(super) async fn run_with_shutdown(
                 tracing::error!(%error, "接入被拒绝，不再重试");
                 return Err(error);
             }
-            Err(error) => tracing::warn!(%error, "控制连接失败，{}s 后重试", backoff.as_secs()),
+            Err(_) => {}
+        }
+        let delay = reconnect_delay(attempt, jitter_seed());
+        attempt = attempt.saturating_add(1);
+        if let Err(error) = &result {
+            tracing::warn!(%error, "控制连接失败，{:.1}s 后重试", delay.as_secs_f64());
         }
         tokio::select! {
             _ = stopped.wait_for(|value| *value) => break,
-            _ = tokio::time::sleep(backoff) => {},
+            _ = tokio::time::sleep(delay) => {},
         }
-        backoff = (backoff * 2).min(Duration::from_secs(30));
     }
     tracing::info!(
         active_sessions = sessions.len(),
@@ -342,9 +352,48 @@ async fn hold(
     }
 }
 
+/// How long a control connection must have lasted to count as healthy, so
+/// that its failure restarts the reconnect schedule from the beginning.
+const HEALTHY_CONNECTION: Duration = Duration::from_secs(60);
+/// Reconnect schedule in seconds: a network blip is usually over within
+/// seconds (1, 3, 5), a server restart or upgrade within 10-30 s (10, 15),
+/// and a long outage is retried every 30 s so it adds no load.
+const RECONNECT_SCHEDULE: [u64; 6] = [1, 3, 5, 10, 15, 30];
+
+/// The wait before reconnect attempt `attempt` (0-based), spread by ±20 % so
+/// that many Runners do not reconnect in the same second after a restart.
+/// `seed` is any value in 0..1000.
+fn reconnect_delay(attempt: usize, seed: u64) -> Duration {
+    let base = RECONNECT_SCHEDULE[attempt.min(RECONNECT_SCHEDULE.len() - 1)] as f64;
+    let spread = (seed % 1000) as f64 / 1000.0 * 0.4 - 0.2;
+    Duration::from_secs_f64(base * (1.0 + spread))
+}
+
+/// Cheap per-attempt variation; no randomness dependency is needed for jitter.
+fn jitter_seed() -> u64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|time| time.subsec_nanos() as u64)
+        .unwrap_or(0);
+    (nanos ^ (u64::from(std::process::id()) * 2_654_435_761)) % 1000
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reconnects_quickly_at_first_then_backs_off_to_30_seconds_with_jitter() {
+        let secs = |attempt, seed| super::reconnect_delay(attempt, seed).as_secs_f64();
+        // Middle of the jitter range (seed 500) is the schedule itself.
+        let schedule: Vec<f64> = (0..8).map(|attempt| secs(attempt, 500)).collect();
+        assert_eq!(schedule, [1.0, 3.0, 5.0, 10.0, 15.0, 30.0, 30.0, 30.0]);
+        // Jitter stays within ±20 %.
+        assert!((secs(0, 0) - 0.8).abs() < 1e-9);
+        assert!((secs(5, 999) - 35.988).abs() < 1e-9);
+        // The first three tries cover a brief network blip within ~10 s.
+        assert!(secs(0, 999) + secs(1, 999) + secs(2, 999) < 11.0);
+    }
     use futures_util::SinkExt;
 
     #[tokio::test]

@@ -260,6 +260,57 @@ async fn an_unusable_host_is_replaced_with_history_and_a_notice() {
 }
 
 #[tokio::test]
+async fn a_bound_host_that_is_only_reconnecting_keeps_its_conversation() {
+    let (_dir, s, _) = seeded().await;
+    let agent = floating_agent(&s).await;
+    let (alpha, alpha_fake) = runner(&s, "alpha").await;
+    let id = conversation(&s, &agent, json!({})).await;
+    alpha_fake
+        .agent_scripts
+        .lock()
+        .unwrap()
+        .push_back(reply("s1", "first answer"));
+    assert_eq!(turn(&s, id, "one").await.state, "completed");
+    // Another host is available, but alpha is only gone for a moment: it was
+    // seen just now (a real Runner's heartbeats keep this current).
+    hosts::Entity::update_many()
+        .col_expr(
+            hosts::Column::SeenAt,
+            sea_orm::sea_query::Expr::value(crate::db::now()),
+        )
+        .filter(hosts::Column::Id.eq(alpha))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let (_, beta_fake) = runner(&s, "beta").await;
+    alpha_fake.unreachable.store(true, Ordering::SeqCst);
+    let back = alpha_fake.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        back.unreachable.store(false, Ordering::SeqCst);
+    });
+    alpha_fake
+        .agent_scripts
+        .lock()
+        .unwrap()
+        .push_back(reply("s1", "same host answer"));
+    assert_eq!(turn(&s, id, "two").await.state, "completed");
+    let (config, _) = stored(&s, id).await;
+    assert_eq!(i64::from(config.host_id), alpha, "stayed on its host");
+    assert!(requests(&beta_fake).is_empty(), "never moved to beta");
+    // Its CLI session continues; no "switched host" notice.
+    assert_eq!(
+        requests(&alpha_fake)
+            .last()
+            .unwrap()
+            .native_session_id
+            .as_deref(),
+        Some("s1")
+    );
+    assert!(notices(&s, id).await.is_empty());
+}
+
+#[tokio::test]
 async fn a_chosen_directory_never_moves_by_itself_and_can_be_released() {
     let (dir, s, _) = seeded().await;
     let agent = floating_agent(&s).await;
