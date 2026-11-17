@@ -20,7 +20,12 @@ export type Mark = (typeof MARKS)[number];
 const MARK_TAG: Record<Mark, string> = { bold: "strong", italic: "em", underline: "u", strikethrough: "s", code: "code" };
 const TAG_MARK: Record<string, Mark> = { strong: "bold", b: "bold", em: "italic", i: "italic", u: "underline", s: "strikethrough", strike: "strikethrough", del: "strikethrough", code: "code" };
 export const ALIGNMENTS = ["left", "center", "right", "justify"] as const;
-const TEXT_BLOCKS = new Set<string>([KEYS.p, KEYS.h1, KEYS.h2, KEYS.h3, KEYS.blockquote]);
+const TEXT_BLOCKS = new Set<string>([KEYS.p, KEYS.h1, KEYS.h2, KEYS.h3, KEYS.h4, KEYS.h5, KEYS.h6, KEYS.blockquote]);
+/** Inline styles kept as text marks (the CSS property and the Plate mark). */
+export const STYLE_MARKS = { color: KEYS.color, "background-color": KEYS.backgroundColor, "font-size": KEYS.fontSize } as const;
+const STYLE_MARK_CSS = Object.fromEntries(Object.entries(STYLE_MARKS).map(([css, mark]) => [mark, css])) as Record<string, string>;
+/** Image size styles kept as image properties. */
+const IMAGE_STYLES = ["width", "height"] as const;
 
 class Unsupported extends Error {}
 const unsupported = (): never => { throw new Unsupported(); };
@@ -77,7 +82,7 @@ function alignment(element: Element, attrs: Map<string, string>): string | undef
 const isBlockTag = (tag: string) => ["p", "h1", "h2", "h3", "blockquote", "pre", "ul", "ol", "table", "div", "h4", "h5", "h6", "hr"].includes(tag);
 const isWhitespace = (node: Node) => node.nodeType === Node.TEXT_NODE && !/\S/.test(node.textContent ?? "");
 
-type Marks = Partial<Record<Mark, true>>;
+type Marks = Partial<Record<Mark, true>> & Record<string, true | string>;
 
 /** Text leaves (and placeholder chips) for one run of text with marks. */
 function textNodes(text: string, marks: Marks): Descendant[] {
@@ -101,7 +106,19 @@ function inline(nodes: Iterable<Node>, marks: Marks = {}): Descendant[] {
     const tag = element.tagName.toLowerCase();
     if (tag === "br") { result.push({ text: "\n", ...marks }); continue; }
     if (TAG_MARK[tag]) { attributes(element, []); result.push(...inline(element.childNodes, { ...marks, [TAG_MARK[tag]!]: true })); continue; }
-    if (tag === "span") { attributes(element, []); result.push(...inline(element.childNodes, marks)); continue; }
+    if (tag === "span") {
+      const attrs = attributes(element, ["style"]);
+      const styled: Record<string, string> = {};
+      if (attrs.has("style")) {
+        for (const [property, value] of styles(element)) {
+          const mark = STYLE_MARKS[property as keyof typeof STYLE_MARKS];
+          if (!mark || !value) unsupported();
+          styled[mark] = value;
+        }
+      }
+      result.push(...inline(element.childNodes, { ...marks, ...styled }));
+      continue;
+    }
     if (tag === "a") {
       const attrs = attributes(element, ["href", "target", "rel"]);
       result.push({ type: KEYS.link, url: attrs.get("href") ?? "", ...(attrs.has("target") ? { target: attrs.get("target") } : {}), ...(attrs.has("rel") ? { rel: attrs.get("rel") } : {}), children: nonEmpty(inline(element.childNodes, marks)) } as TElement);
@@ -122,9 +139,25 @@ function trimEdges(children: Descendant[]): Descendant[] {
 const nonEmpty = (children: Descendant[]) => children.length ? children : [{ text: "" }];
 
 function image(element: Element): TElement {
-  const attrs = attributes(element, ["src", "alt"]);
+  const attrs = attributes(element, ["src", "alt", "width", "height", "style"]);
   if (!attrs.get("src")) unsupported();
-  return { type: KEYS.img, url: attrs.get("src")!, ...(attrs.has("alt") ? { alt: attrs.get("alt") } : {}), children: [{ text: "" }] };
+  const css: Record<string, string> = {};
+  if (attrs.has("style")) {
+    for (const [property, value] of styles(element)) {
+      if (property === "width" && value === "auto") continue;
+      if (!(IMAGE_STYLES as readonly string[]).includes(property) || !value) unsupported();
+      css[property] = value;
+    }
+  }
+  return {
+    type: KEYS.img, url: attrs.get("src")!,
+    ...(attrs.has("alt") ? { alt: attrs.get("alt") } : {}),
+    ...(attrs.has("width") ? { attrWidth: attrs.get("width") } : {}),
+    ...(attrs.has("height") ? { attrHeight: attrs.get("height") } : {}),
+    ...(css.width ? { cssWidth: css.width } : {}),
+    ...(css.height ? { cssHeight: css.height } : {}),
+    children: [{ text: "" }],
+  };
 }
 
 /** Block nodes for a container's children; loose inline content becomes a paragraph. */
@@ -148,7 +181,8 @@ function blocks(nodes: Iterable<Node>): TElement[] {
 
 function block(element: Element, tag: string): TElement {
   if (tag === "img") return image(element);
-  if (["p", "h1", "h2", "h3", "blockquote"].includes(tag)) {
+  if (tag === "hr") { attributes(element, []); return { type: KEYS.hr, children: [{ text: "" }] }; }
+  if (["p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote"].includes(tag)) {
     const attrs = attributes(element, ["style"]);
     const align = alignment(element, attrs);
     const children = [...element.childNodes].filter(node => !isWhitespace(node));
@@ -245,7 +279,10 @@ const escapeText = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "
 const escapeAttribute = (text: string) => escapeText(text).replace(/"/g, "&quot;");
 
 function wrapMarks(html: string, node: Record<string, unknown>): string {
-  return [...MARKS].reverse().reduce((inner, mark) => node[mark] ? `<${MARK_TAG[mark]}>${inner}</${MARK_TAG[mark]}>` : inner, html);
+  const marked = [...MARKS].reverse().reduce((inner, mark) => node[mark] ? `<${MARK_TAG[mark]}>${inner}</${MARK_TAG[mark]}>` : inner, html);
+  const style = Object.values(STYLE_MARKS).filter(mark => typeof node[mark] === "string" && node[mark])
+    .map(mark => `${STYLE_MARK_CSS[mark]}: ${node[mark]};`).join(" ");
+  return style ? `<span style="${escapeAttribute(style)}">${marked}</span>` : marked;
 }
 
 function serializeInline(children: Descendant[]): string {
@@ -271,7 +308,16 @@ function serializeBlock(element: TElement): string {
     const inner = serializeInline(element.children);
     return `<${type}${alignAttribute(element)}>${inner || "<br>"}</${type}>`;
   }
-  if (type === KEYS.img) return `<img src="${escapeAttribute(String(element.url ?? ""))}"${element.alt !== undefined ? ` alt="${escapeAttribute(String(element.alt))}"` : ""}>`;
+  if (type === KEYS.hr) return "<hr>";
+  if (type === KEYS.img) {
+    const attrs = [`src="${escapeAttribute(String(element.url ?? ""))}"`];
+    if (element.alt !== undefined) attrs.push(`alt="${escapeAttribute(String(element.alt))}"`);
+    if (element.attrWidth) attrs.push(`width="${escapeAttribute(String(element.attrWidth))}"`);
+    if (element.attrHeight) attrs.push(`height="${escapeAttribute(String(element.attrHeight))}"`);
+    const css = [element.cssWidth ? `width: ${element.cssWidth};` : "", element.cssHeight ? `height: ${element.cssHeight};` : ""].filter(Boolean).join(" ");
+    if (css) attrs.push(`style="${escapeAttribute(css)}"`);
+    return `<img ${attrs.join(" ")}>`;
+  }
   if (type === KEYS.codeBlock) {
     const lines = element.children.map(line => (line as TElement).children.map(leaf => "text" in leaf ? leaf.text : "").join(""));
     return `<pre><code${element.lang ? ` class="language-${escapeAttribute(String(element.lang))}"` : ""}>${escapeText(lines.join("\n"))}</code></pre>`;
@@ -351,6 +397,15 @@ export function canonicalHtml(html: string): string {
         if (tag === "br") { if (key !== marks) { push(); marks = key; } text += "\n"; continue; }
         if (TAG_MARK[tag] && !attrsOf(element)) { walk(element.childNodes, new Set([...active, TAG_MARK[tag]!])); continue; }
         if (tag === "span" && !attrsOf(element)) { walk(element.childNodes, active); continue; }
+        if (tag === "span" && [...element.attributes].every(({ name, value }) => name === "style" || ignorable(element, name, value))) {
+          const declared = [...styles(element)];
+          if (declared.length && declared.every(([property, value]) => property in STYLE_MARKS && value)) {
+            // An inner span overrides the same property of an outer one.
+            const kept = [...active].filter(mark => !declared.some(([property]) => mark.startsWith(`${property}=`)));
+            walk(element.childNodes, new Set([...kept, ...declared.map(([property, value]) => `${property}=${value}`)]));
+            continue;
+          }
+        }
         push();
         tokens.push(`${tag}[${attrsOf(element)}](${inlineOf(element.childNodes, false)})`);
       }

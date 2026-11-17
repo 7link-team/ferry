@@ -4,21 +4,14 @@
  * content the visual editor cannot keep exactly opens as HTML source instead
  * of being changed silently.
  */
-import { BlockquotePlugin, BoldPlugin, CodePlugin, H1Plugin, H2Plugin, H3Plugin, ItalicPlugin, StrikethroughPlugin, UnderlinePlugin } from "@platejs/basic-nodes/react";
 import { setAlign } from "@platejs/basic-styles";
-import { TextAlignPlugin } from "@platejs/basic-styles/react";
 import { toggleCodeBlock } from "@platejs/code-block";
-import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { unwrapLink, upsertLink } from "@platejs/link";
-import { LinkPlugin } from "@platejs/link/react";
 import { toggleList } from "@platejs/list-classic";
-import { ListPlugin } from "@platejs/list-classic/react";
-import { ImagePlugin } from "@platejs/media/react";
 import { insertTable } from "@platejs/table";
-import { TablePlugin } from "@platejs/table/react";
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, ChevronDown, Code, CodeXml, Image as ImageIcon, Italic, Link2, List, ListOrdered, Redo2, Strikethrough, Table, Underline, Undo2 } from "lucide-react";
+import { ALargeSmall, AlignCenter, AlignJustify, AlignLeft, AlignRight, Baseline, Bold, ChevronDown, Code, CodeXml, Highlighter, Image as ImageIcon, Italic, Link2, List, ListOrdered, Minus, Redo2, Strikethrough, TableProperties, Underline, Undo2, Grid2x2Plus } from "lucide-react";
 import { KEYS, type SlateEditor, type TElement, type Value } from "platejs";
-import { createPlatePlugin, Plate, PlateContent, useEditorSelector, usePlateEditor, type PlateEditor } from "platejs/react";
+import { Plate, PlateContent, useEditorSelector, usePlateEditor, type PlateEditor } from "platejs/react";
 import { Popover } from "radix-ui";
 import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import { useTranslation } from "react-i18next";
@@ -26,20 +19,14 @@ import { CodeEditor } from "../../shared/editor/CodeEditor";
 import { AutoForm } from "../../shared/forms/auto-form";
 import { typedText } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../shared/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../../shared/ui/dropdown-menu";
 import { InlineAlert } from "../../shared/ui/inline-alert";
 import { Input } from "../../shared/ui/input";
 import { components } from "./rich-text/elements";
 import { ALIGNMENTS, htmlToValue, isPlaceholder, MARKS, PLACEHOLDER, PLACEHOLDER_PATTERN, roundTrips, valueToHtml, type Mark } from "./rich-text/html";
+import { COLORS, FONT_SIZES, plugins, TABLE_ACTIONS, withIds } from "./rich-text/plugins";
 import { sanitizeRichText } from "./value-content";
 
-const PlaceholderPlugin = createPlatePlugin({ key: PLACEHOLDER, node: { isElement: true, isInline: true, isVoid: true } });
-const plugins = [
-  H1Plugin, H2Plugin, H3Plugin, BlockquotePlugin,
-  BoldPlugin, ItalicPlugin, UnderlinePlugin, StrikethroughPlugin, CodePlugin,
-  TextAlignPlugin.configure({ inject: { targetPlugins: [KEYS.p, KEYS.h1, KEYS.h2, KEYS.h3, KEYS.blockquote] } }),
-  ListPlugin, LinkPlugin, TablePlugin, ImagePlugin, CodeBlockPlugin, PlaceholderPlugin,
-];
 const EMPTY: Value = [{ type: KEYS.p, children: [{ text: "" }] }];
 
 /** Plate nodes for text that may contain template variables. */
@@ -55,7 +42,11 @@ function textWithChips(text: string) {
   return nodes;
 }
 
-export default function RichTextValueEditor({ value, readOnly, onChange, insertRef }: { value: string; readOnly: boolean; onChange: (value: string) => void; insertRef?: Ref<{ insertText(value: string): void }> }) {
+/**
+ * `sourceToggle={false}` hides the visual/HTML switch for hosts that offer
+ * their own; content the visual editor cannot keep still opens as source.
+ */
+export default function RichTextValueEditor({ value, readOnly, onChange, insertRef, sourceToggle = true }: { value: string; readOnly: boolean; onChange: (value: string) => void; insertRef?: Ref<{ insertText(value: string): void }>; sourceToggle?: boolean }) {
   useTranslation("typed-domain");
   const changeRef = useRef(onChange);
   changeRef.current = onChange;
@@ -70,7 +61,7 @@ export default function RichTextValueEditor({ value, readOnly, onChange, insertR
   const [unsupported, setUnsupported] = useState(!initial.current.visual);
   const [source, setSource] = useState(value);
   const sourceRef = useRef<{ insertText(value: string): void }>(null);
-  const editor = usePlateEditor({ plugins, value: initial.current.nodes, override: { components } });
+  const editor = usePlateEditor({ plugins, value: withIds(initial.current.nodes), override: { components } });
 
   const emit = (html: string) => {
     if (html === lastHtml.current) return;
@@ -94,7 +85,7 @@ export default function RichTextValueEditor({ value, readOnly, onChange, insertR
     const nodes = roundTrips(value, sanitizeRichText) ? htmlToValue(sanitizeRichText(value)) : null;
     if (nodes) {
       visualHtml.current = valueToHtml(nodes);
-      editor.tf.setValue(nodes);
+      editor.tf.setValue(withIds(nodes));
       setUnsupported(false);
     } else {
       setUnsupported(true);
@@ -117,14 +108,14 @@ export default function RichTextValueEditor({ value, readOnly, onChange, insertR
     const nodes = roundTrips(source, sanitizeRichText) ? htmlToValue(sanitizeRichText(source)) : null;
     if (!nodes) { setUnsupported(true); return; }
     visualHtml.current = valueToHtml(nodes);
-    editor.tf.setValue(nodes);
+    editor.tf.setValue(withIds(nodes));
     setUnsupported(false);
     setMode("visual");
   };
 
   return <div className="overflow-hidden rounded-md border border-border bg-background text-foreground">
     <Plate editor={editor} readOnly={readOnly} onValueChange={onValueChange}>
-      <Toolbar editor={editor} mode={mode} readOnly={readOnly} onMode={switchTo} />
+      <Toolbar editor={editor} mode={mode} readOnly={readOnly} onMode={sourceToggle || mode === "source" ? switchTo : undefined} />
       {mode === "source" && unsupported && <InlineAlert className="m-2">{typedText("richtext.sourceOnly")}</InlineAlert>}
       {mode === "visual"
         ? <PlateContent aria-label={typedText("richValue")} aria-multiline="true" role="textbox"
@@ -150,13 +141,17 @@ const BLOCKS: [string, Parameters<typeof typedText>[0]][] = [
   [KEYS.p, "richtext.paragraph"], [KEYS.h1, "richtext.heading1"], [KEYS.h2, "richtext.heading2"], [KEYS.h3, "richtext.heading3"],
   [KEYS.blockquote, "richtext.quote"], [KEYS.codeBlock, "richtext.codeBlock"],
 ];
+const MORE_HEADINGS: [string, Parameters<typeof typedText>[0]][] = [[KEYS.h4, "richtext.heading4"], [KEYS.h5, "richtext.heading5"], [KEYS.h6, "richtext.heading6"]];
+const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+const asHex = (value: string) => { const text = value.trim(); return text.startsWith("#") ? text : `#${text}`; };
 const ALIGN_ICONS: Record<(typeof ALIGNMENTS)[number], [ReactNode, Parameters<typeof typedText>[0]]> = {
   left: [<AlignLeft key="l" />, "richtext.alignLeft"], center: [<AlignCenter key="c" />, "richtext.alignCenter"],
   right: [<AlignRight key="r" />, "richtext.alignRight"], justify: [<AlignJustify key="j" />, "richtext.alignJustify"],
 };
 
-function Toolbar({ editor, mode, readOnly, onMode }: { editor: PlateEditor; mode: "visual" | "source"; readOnly: boolean; onMode: (mode: "visual" | "source") => void }) {
+function Toolbar({ editor, mode, readOnly, onMode }: { editor: PlateEditor; mode: "visual" | "source"; readOnly: boolean; onMode: ((mode: "visual" | "source") => void) | undefined }) {
   const marks = useEditorSelector(current => current.api.marks() ?? {}, []);
+  const inTable = useEditorSelector(current => !!current.api.above({ match: { type: KEYS.table } }), []);
   const block = useEditorSelector(current => current.api.block({ highest: true })?.[0] as TElement | undefined, []);
   const off = readOnly || mode !== "visual";
   const blockType = block?.type === KEYS.ulClassic || block?.type === KEYS.olClassic ? block.type : block?.type ?? KEYS.p;
@@ -185,15 +180,34 @@ function Toolbar({ editor, mode, readOnly, onMode }: { editor: PlateEditor; mode
     <DropdownMenu>
       <DropdownMenuTrigger asChild disabled={off}>
         <Button type="button" variant="ghost" size="sm" className="h-8 min-w-24 justify-between" aria-label={typedText("richtext.blockType")} onMouseDown={event => { event.preventDefault(); sync(); }}>
-          {typedText(BLOCKS.find(([type]) => type === blockType)?.[1] ?? "richtext.paragraph")}<ChevronDown />
+          {typedText([...BLOCKS, ...MORE_HEADINGS].find(([type]) => type === blockType)?.[1] ?? "richtext.paragraph")}<ChevronDown />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent onCloseAutoFocus={event => event.preventDefault()}>
         {BLOCKS.map(([type, label]) => <DropdownMenuItem key={type} onSelect={() => setBlock(type)}>{typedText(label)}</DropdownMenuItem>)}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>{typedText("richtext.moreHeadings")}</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            {MORE_HEADINGS.map(([type, label]) => <DropdownMenuItem key={type} onSelect={() => setBlock(type)}>{typedText(label)}</DropdownMenuItem>)}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
       </DropdownMenuContent>
     </DropdownMenu>
     {MARKS.map(mark => <ToolbarButton key={mark} label={typedText(MARK_ICONS[mark][1])} active={!!(marks as Record<string, unknown>)[mark]} disabled={off}
       onClick={act(() => { editor.tf.toggleMark(mark); editor.tf.focus(); })}>{MARK_ICONS[mark][0]}</ToolbarButton>)}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild disabled={off}>
+        <Button type="button" variant="ghost" size="sm" className="h-8 w-16 justify-between px-2 font-mono text-xs" aria-label={typedText("richtext.fontSize")} title={typedText("richtext.fontSize")}
+          onMouseDown={event => { event.preventDefault(); sync(); }}>{String((marks as Record<string, unknown>)[KEYS.fontSize] ?? "").replace(/px$/, "") || <ALargeSmall />}<ChevronDown /></Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent onCloseAutoFocus={event => event.preventDefault()}>
+        <DropdownMenuItem onSelect={() => { editor.tf.removeMarks(KEYS.fontSize); editor.tf.focus(); }}>{typedText("richtext.defaultSize")}</DropdownMenuItem>
+        {FONT_SIZES.map(size => <DropdownMenuItem key={size} onSelect={() => { editor.tf.addMarks({ [KEYS.fontSize]: size }); editor.tf.focus(); }}>
+          <span style={{ fontSize: size }} className="leading-none">{size}</span></DropdownMenuItem>)}
+      </DropdownMenuContent>
+    </DropdownMenu>
+    <ColorButton editor={editor} mark={KEYS.color} label={typedText("richtext.color")} icon={<Baseline />} current={(marks as Record<string, unknown>)[KEYS.color]} disabled={off} remember={remember} restore={restore} />
+    <ColorButton editor={editor} mark={KEYS.backgroundColor} label={typedText("richtext.backgroundColor")} icon={<Highlighter />} current={(marks as Record<string, unknown>)[KEYS.backgroundColor]} disabled={off} remember={remember} restore={restore} />
     <ToolbarButton label={typedText("richtext.bulletedList")} active={blockType === KEYS.ulClassic} disabled={off} onClick={act(() => { toggleList(editor as SlateEditor, { type: KEYS.ulClassic }); editor.tf.focus(); })}><List /></ToolbarButton>
     <ToolbarButton label={typedText("richtext.numberedList")} active={blockType === KEYS.olClassic} disabled={off} onClick={act(() => { toggleList(editor as SlateEditor, { type: KEYS.olClassic }); editor.tf.focus(); })}><ListOrdered /></ToolbarButton>
     <DropdownMenu>
@@ -206,13 +220,29 @@ function Toolbar({ editor, mode, readOnly, onMode }: { editor: PlateEditor; mode
     </DropdownMenu>
     <LinkButton editor={editor} disabled={off} remember={remember} restore={restore} />
     <ImageButton editor={editor} disabled={off} remember={remember} restore={restore} />
-    <ToolbarButton label={typedText("richtext.table")} disabled={off} onClick={act(() => { insertTable(editor as SlateEditor, { rowCount: 3, colCount: 3 }, { select: true }); editor.tf.focus(); })}><Table /></ToolbarButton>
-    <div className="ml-auto">
+    <ToolbarButton label={typedText("richtext.table")} disabled={off} onClick={act(() => { insertTable(editor as SlateEditor, { rowCount: 3, colCount: 3 }, { select: true }); editor.tf.focus(); })}><Grid2x2Plus /></ToolbarButton>
+    {inTable && !off && <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="ghost" size="icon" className="size-8" aria-label={typedText("richtext.tableActions")} title={typedText("richtext.tableActions")}
+          onMouseDown={event => { event.preventDefault(); sync(); }}><TableProperties /></Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent onCloseAutoFocus={event => event.preventDefault()}>
+        {TABLE_ACTIONS.map((group, index) => [
+          index > 0 && <DropdownMenuSeparator key={`separator-${index}`} />,
+          ...group.map(([label, run]) => <DropdownMenuItem key={label} onSelect={() => { run(editor as SlateEditor); editor.tf.focus(); }}>{typedText(label)}</DropdownMenuItem>),
+        ])}
+      </DropdownMenuContent>
+    </DropdownMenu>}
+    <ToolbarButton label={typedText("richtext.hr")} disabled={off} onClick={act(() => {
+      editor.tf.insertNodes([{ type: KEYS.hr, children: [{ text: "" }] }, { type: KEYS.p, children: [{ text: "" }] }] as TElement[], { select: true });
+      editor.tf.focus();
+    })}><Minus /></ToolbarButton>
+    {onMode && <div className="ml-auto">
       <Button type="button" variant={mode === "source" ? "secondary" : "ghost"} size="sm" className="h-8" aria-pressed={mode === "source"}
         onClick={() => onMode(mode === "source" ? "visual" : "source")}>
         <CodeXml />{typedText(mode === "source" ? "richtext.visual" : "richtext.source")}
       </Button>
-    </div>
+    </div>}
   </div>;
 }
 
@@ -267,5 +297,35 @@ function ImageButton({ editor, disabled, remember, restore }: { editor: PlateEdi
       <Input aria-label={typedText("richtext.imageAlt")} value={alt} onChange={event => setAlt(event.target.value)} />
       <div className="flex justify-end"><Button type="submit" size="sm">{typedText("richtext.apply")}</Button></div>
     </AutoForm>}
+  </FieldPopover>;
+}
+
+/** Text or highlight colour: a fixed palette plus any hex colour. */
+function ColorButton({ editor, mark, label, icon, current, disabled, remember, restore }: { editor: PlateEditor; mark: string; label: string; icon: ReactNode; current: unknown; disabled: boolean; remember: () => void; restore: () => void }) {
+  const [custom, setCustom] = useState("");
+  const apply = (color: string | null, close: () => void) => {
+    restore();
+    if (color) editor.tf.addMarks({ [mark]: color });
+    else editor.tf.removeMarks(mark);
+    close();
+  };
+  const active = typeof current === "string" ? current : "";
+  return <FieldPopover label={label} disabled={disabled} remember={remember}
+    icon={<span className="relative inline-flex">{icon}<span aria-hidden className="absolute -bottom-1 left-0 h-1 w-full rounded-sm border border-border" style={{ background: active || "transparent" }} /></span>}>
+    {close => <>
+      <div className="grid grid-cols-6 gap-1.5" role="group" aria-label={label}>
+        {COLORS.map(color => <button key={color} type="button" title={color} aria-label={color} aria-pressed={active.toLowerCase() === color}
+          className="size-7 rounded-md border border-border outline-none ring-offset-2 ring-offset-popover focus-visible:ring-2 focus-visible:ring-ring aria-pressed:ring-2 aria-pressed:ring-primary"
+          style={{ background: color }} onClick={() => apply(color, close)} />)}
+      </div>
+      <AutoForm className="flex items-center gap-2" onSubmit={event => {
+        event.preventDefault();
+        if (HEX.test(asHex(custom))) { apply(asHex(custom).toLowerCase(), close); setCustom(""); }
+      }}>
+        <Input aria-label={typedText("richtext.customColor")} placeholder="#1f6feb" value={custom} onChange={event => setCustom(event.target.value)} className="h-8 font-mono" />
+        <Button type="submit" size="sm" disabled={!HEX.test(asHex(custom))}>{typedText("richtext.apply")}</Button>
+      </AutoForm>
+      <Button type="button" variant="outline" size="sm" className="w-full" onClick={() => apply(null, close)}>{typedText("richtext.clearColor")}</Button>
+    </>}
   </FieldPopover>;
 }

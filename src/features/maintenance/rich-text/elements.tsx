@@ -39,11 +39,24 @@ function CodeBlockElement(props: PlateElementProps) {
   </PlateElement>;
 }
 
-function ImageElement(props: PlateElementProps<TElement & { url?: string; alt?: string }>) {
+// A bare number in a width/height attribute means pixels.
+const size = (value: unknown) => value === undefined || value === "" ? undefined : /^\d+(\.\d+)?$/.test(String(value)) ? `${value}px` : String(value);
+
+function ImageElement(props: PlateElementProps<TElement & { url?: string; alt?: string; attrWidth?: string; attrHeight?: string; cssWidth?: string; cssHeight?: string }>) {
+  const { url, alt, attrWidth, attrHeight, cssWidth, cssHeight } = props.element;
+  const width = size(cssWidth ?? attrWidth), height = size(cssHeight ?? attrHeight);
   return <PlateElement {...props} className="my-2">
     <div contentEditable={false} className="inline-block max-w-full">
-      <img src={props.element.url} alt={props.element.alt ?? ""} className="max-h-64 max-w-full rounded-md border border-border" />
+      <img src={url} alt={alt ?? ""} className="max-w-full rounded-md border border-border"
+        style={{ ...(width ? { width } : {}), ...(height ? { height } : { maxHeight: "16rem" }) }} />
     </div>
+    {props.children}
+  </PlateElement>;
+}
+
+function HorizontalRuleElement(props: PlateElementProps) {
+  return <PlateElement {...props} className="my-3">
+    <div contentEditable={false}><hr className="border-t border-border" /></div>
     {props.children}
   </PlateElement>;
 }
@@ -64,6 +77,10 @@ export const components = {
   [KEYS.h1]: element("h1", "mb-2 mt-3 text-2xl font-semibold"),
   [KEYS.h2]: element("h2", "mb-2 mt-3 text-xl font-semibold"),
   [KEYS.h3]: element("h3", "mb-1 mt-2 text-lg font-semibold"),
+  [KEYS.h4]: element("h4", "mb-1 mt-2 text-base font-semibold"),
+  [KEYS.h5]: element("h5", "mb-1 mt-2 text-sm font-semibold"),
+  [KEYS.h6]: element("h6", "mb-1 mt-2 text-xs font-semibold uppercase tracking-wide"),
+  [KEYS.hr]: HorizontalRuleElement,
   [KEYS.blockquote]: element("blockquote", "my-2 border-l-4 border-border pl-3 text-muted-foreground"),
   [KEYS.codeBlock]: CodeBlockElement,
   [KEYS.codeLine]: element("div", ""),
