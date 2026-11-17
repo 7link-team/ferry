@@ -115,14 +115,15 @@ try {
       await page.getByRole('textbox', { name: '富文本值', exact: true }).click();
       await page.getByRole('textbox', { name: '富文本值', exact: true }).pressSequentially('Rich content');
       await page.locator('[data-slate-editor]').press('ControlOrMeta+A');
-      await page.waitForFunction(() => !document.querySelector('.w-e-toolbar [data-menu-key="bold"]')?.classList.contains('disabled'));
-      await page.locator('.w-e-toolbar [data-menu-key="bold"]').click();
+      const boldButton = page.getByRole('toolbar', { name: '格式' }).getByRole('button', { name: '加粗', exact: true });
+      await boldButton.click();
       await page.waitForFunction(() => [...document.querySelectorAll('[data-slate-string]')].some(element => Number(getComputedStyle(element).fontWeight) >= 600));
+      await page.waitForFunction(() => document.querySelector('[role="toolbar"] button[aria-label="加粗"]')?.getAttribute('aria-pressed') === 'true');
       await page.locator('[data-slate-editor]').evaluate(element => { window.__richEditorNode = element; });
       const count = requests.length;
-      for (const [locale, bold] of [['en-US', 'Bold'], ['zh-TW', '粗體'], ['ja-JP', '太字'], ['ko-KR', '굵게'], ['ms-MY', 'Tebal'], ['zh-CN', '粗体']]) {
+      for (const [locale, bold] of [['en-US', 'Bold'], ['zh-TW', '粗體'], ['ja-JP', '太字'], ['ko-KR', '굵게'], ['ms-MY', 'Tebal'], ['zh-CN', '加粗']]) {
         await switchLanguage(page, locale);
-        await page.waitForFunction(expected => document.querySelector('.w-e-toolbar [data-menu-key="bold"]')?.getAttribute('data-tooltip')?.split('\n')[0] === expected, bold);
+        await page.locator(`[role="toolbar"] button[aria-label="${bold}"]`).waitFor();
         assert.equal(await page.locator('[data-slate-editor]').innerText(), 'Rich content');
         assert(await page.locator('[data-slate-editor]').evaluate(element => element === window.__richEditorNode));
         assert.equal(requests.length, count);
@@ -147,8 +148,8 @@ try {
   const rich = rows.dictionaries.find(row => row.value_type === 'richtext');
   rich.value_json = JSON.stringify('<p><a href="https://example.invalid">Preserved link</a></p><table><tbody><tr><td>Preserved cell</td></tr></tbody></table>');
   await page.goto(`${origin}/workspaces/2/dictionaries/${rich.id}`, { waitUntil: 'domcontentloaded' });
-  await page.locator('.w-e-text-container a').filter({ hasText: 'Preserved link' }).waitFor();
-  await page.locator('.w-e-text-container td').filter({ hasText: 'Preserved cell' }).waitFor();
+  await page.locator('[data-slate-editor] a[href="https://example.invalid"]').filter({ hasText: 'Preserved link' }).waitFor();
+  await page.locator('[data-slate-editor] td').filter({ hasText: 'Preserved cell' }).waitFor();
   await page.goto(`${origin}/workspaces/2/settings/new`, { waitUntil: 'domcontentloaded' });
   await page.getByRole('textbox', { name: /^标识/ }).fill('custom-setting');
   await page.getByRole('textbox', { name: /^名称/ }).fill('Custom setting');
