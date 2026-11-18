@@ -497,7 +497,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
       const tabSections = sections.filter(({ section }) => section.tab);
       const tabs = tabSections.filter(({ section }, index) => tabSections.findIndex(item => item.section.tab === section.tab) === index);
       return <div className="flex flex-col gap-4 md:flex-row">
-        <nav aria-label={commonText("form.categories")} className="sticky top-[var(--resource-heading-height,0px)] z-10 flex shrink-0 flex-wrap gap-1 bg-background md:max-h-[65dvh] md:w-40 md:flex-col md:self-start md:overflow-y-auto">
+        <nav aria-label={commonText("form.categories")} className="top-[var(--resource-heading-height,0px)] z-10 flex shrink-0 flex-wrap gap-1 bg-background md:sticky md:max-h-[65dvh] md:w-40 md:flex-col md:flex-nowrap md:self-start md:overflow-y-auto">
           {groups.map(name => <button key={name} type="button" aria-current={!groupContent && name === active ? "page" : undefined} onClick={() => { setGroup(name); onGroupChange?.(); }}
             className={cn("min-h-11 rounded px-3 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", !groupContent && name === active ? "bg-accent font-medium text-accent-foreground" : "text-foreground hover:bg-accent")}>{configText(name, config.sections.find(section => section.group === name)?.groupKey)}</button>)}
           {groupLinks}
