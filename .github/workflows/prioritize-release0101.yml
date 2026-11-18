@@ -1,36 +1,32 @@
-name: Prioritize v0.10.1 release
+name: Pause candidate for complete acceptance audit
 on:
   push:
     branches: [ci/prioritize-release-0101-20261118]
 permissions:
   actions: write
 jobs:
-  prioritize:
+  pause:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Cancel only duplicate main checks for the exact release commit
+      - name: Stop only the incomplete candidate release after user audit request
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PYCODE'
           import json, os, urllib.request
-          base = 'https://api.github.com/repos/7link-team/ferry/actions/runs/'
+          url = 'https://api.github.com/repos/7link-team/ferry/actions/runs/44245803789'
           headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
-                     'Accept': 'application/vnd.github+json', 'User-Agent': 'release-priority'}
-          def read(ident):
-              with urllib.request.urlopen(urllib.request.Request(base + ident, headers=headers), timeout=30) as response:
-                  return json.load(response)
-          duplicate = read('44245803085')
-          release = read('44245803789')
-          assert duplicate['head_sha'] == release['head_sha'] == '0745eeedd0a0c8e211b3999fd4e81e4700bb99ab'
-          assert duplicate['path'] == release['path'] == '.github/workflows/build.yml'
-          assert duplicate['head_branch'] == 'main' and release['head_branch'] == 'v0.10.1-alpha'
-          if duplicate['status'] != 'completed' and release['status'] != 'completed':
-              request = urllib.request.Request(base + '44245803085/cancel', headers=headers, data=b'', method='POST')
+                     'Accept': 'application/vnd.github+json', 'User-Agent': 'release-acceptance'}
+          with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30) as response:
+              run = json.load(response)
+          assert run['head_sha'] == '0745eeedd0a0c8e211b3999fd4e81e4700bb99ab'
+          assert run['head_branch'] == 'v0.10.1-alpha' and run['path'] == '.github/workflows/build.yml'
+          if run['status'] != 'completed':
+              request = urllib.request.Request(url + '/cancel', headers=headers, data=b'', method='POST')
               with urllib.request.urlopen(request, timeout=30) as response:
                   assert response.status == 202
-              print('Cancelled duplicate main run; full release checks remain unchanged.')
+              print('Stopped incomplete candidate release for requested acceptance audit; tags and published images preserved.')
           else:
-              print('No duplicate cancellation necessary.')
+              print('Candidate already completed:', run['conclusion'], '; no release or tag deleted.')
           PYCODE
