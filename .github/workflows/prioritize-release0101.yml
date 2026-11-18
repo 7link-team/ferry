@@ -1,0 +1,36 @@
+name: Prioritize v0.10.1 release
+on:
+  push:
+    branches: [ci/prioritize-release-0101-20261118]
+permissions:
+  actions: write
+jobs:
+  prioritize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Cancel only duplicate main checks for the exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os, urllib.request
+          base = 'https://api.github.com/repos/7link-team/ferry/actions/runs/'
+          headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                     'Accept': 'application/vnd.github+json', 'User-Agent': 'release-priority'}
+          def read(ident):
+              with urllib.request.urlopen(urllib.request.Request(base + ident, headers=headers), timeout=30) as response:
+                  return json.load(response)
+          duplicate = read('44245803085')
+          release = read('44245803789')
+          assert duplicate['head_sha'] == release['head_sha'] == '0745eeedd0a0c8e211b3999fd4e81e4700bb99ab'
+          assert duplicate['path'] == release['path'] == '.github/workflows/build.yml'
+          assert duplicate['head_branch'] == 'main' and release['head_branch'] == 'v0.10.1-alpha'
+          if duplicate['status'] != 'completed' and release['status'] != 'completed':
+              request = urllib.request.Request(base + '44245803085/cancel', headers=headers, data=b'', method='POST')
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  assert response.status == 202
+              print('Cancelled duplicate main run; full release checks remain unchanged.')
+          else:
+              print('No duplicate cancellation necessary.')
+          PYCODE
