@@ -1,8 +1,11 @@
 import { useState, type ReactNode } from "react";
-import { AlertTriangle, ShieldQuestion } from "lucide-react";
+import { AlertTriangle, ShieldQuestion, X } from "lucide-react";
+import { Dialog } from "radix-ui";
 import { commonText } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { LONG_TEXT_LIMIT, LongText } from "./LazyDetails";
+import { AutoField, AutoForm, FieldControl } from "../../shared/forms/auto-form";
+import { api, errorText } from "../../shared/api/api";
 
 const tv = (key: string, values?: Record<string, unknown>) => commonText(`conversations:${key}`, values);
 
@@ -16,7 +19,10 @@ export interface Decision {
   /** The turn ended before anyone decided; the operation never ran. */
   ended_undecided?: boolean;
   /** The owner continued or dismissed an ended, undecided request. */
-  resolved?: "resumed" | "dismissed";
+  resolved?: "resumed" | "dismissed" | "answered" | "paused" | "abandoned";
+  response?: { answer: string; action: string; option_id?: string | null };
+  automatic?: boolean;
+  approval_mode?: string;
 }
 export interface ActivityEvent {
   type: string;
@@ -43,6 +49,56 @@ export const awaitingDecision = (turn: TurnLike, decision: Decision) =>
 export const liveDecision = (turn: TurnLike, decision: Decision) => decision.decision === null && turn.state === "running";
 export const endedDecision = (turn: TurnLike, decision: Decision) =>
   decision.decision === null && !["queued", "running", "stopping"].includes(turn.state) && !decision.resolved;
+
+/** Suggested choices never replace free text or the ability to stop a task. */
+export function QuestionCard({ request, decision, canAnswer, busy, executing, onAnswer }: {
+  request: string; decision: Decision; canAnswer: boolean; busy: boolean; executing: boolean;
+  onAnswer: (response: { action: "continue" | "pause" | "abandon"; answer: string; option_id?: string }) => Promise<void>;
+}) {
+  const question = record(decision.input) ?? {};
+  const options = Array.isArray(question.options) ? question.options.flatMap(item => {
+    const value = record(item);
+    return value && typeof value.id === "string" && typeof value.label === "string" ? [value] : [];
+  }) : [];
+  const [text, setText] = useState(decision.response?.answer ?? "");
+  const [selected, setSelected] = useState(decision.response?.option_id ?? "");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const resolved = decision.resolved;
+  const settled = resolved === "answered" || resolved === "abandoned";
+  const disabled = busy || sending;
+  const submit = async (action: "continue" | "pause" | "abandon") => {
+    setSending(true); setError("");
+    try { await onAnswer({ action, answer: text, ...(selected ? { option_id: selected } : {}) }); }
+    catch (cause) { setError(errorText(cause)); }
+    finally { setSending(false); }
+  };
+  return <section data-user-question={request} className="min-w-0 space-y-3 rounded-xl border border-primary/40 bg-card p-3 text-sm sm:p-4">
+    <div className="flex items-start gap-2"><ShieldQuestion aria-hidden className="mt-0.5 size-4 shrink-0 text-primary" /><div className="min-w-0 flex-1"><p className="text-xs font-medium text-primary">{tv(resolved === "answered" ? "questionAnswered" : resolved === "abandoned" ? "questionAbandoned" : resolved === "paused" ? "questionPaused" : "questionWaiting")}</p><h3 className="mt-1 break-words font-semibold">{String(question.title ?? "")}</h3></div></div>
+    <p className="whitespace-pre-wrap break-words">{String(question.question ?? "")}</p>
+    {typeof question.reason === "string" && question.reason && <p className="whitespace-pre-wrap break-words text-muted-foreground">{String(question.reason)}</p>}
+    {settled ? <p className="whitespace-pre-wrap break-words">{decision.response?.answer || options.find(option => option.id === decision.response?.option_id)?.label as string || tv(resolved === "abandoned" ? "questionAbandoned" : "questionAnswered")}</p> : canAnswer ? <AutoForm className="space-y-3" onSubmit={event => { event.preventDefault(); void submit("continue"); }}>
+      {options.length > 0 && <div className="grid gap-2" role="group" aria-label={tv("questionSuggestions")}>{options.map(option => <button key={String(option.id)} type="button" disabled={disabled} aria-pressed={selected === option.id} className={`min-h-11 rounded-lg border p-3 text-left focus-visible:outline-2 focus-visible:outline-ring ${selected === option.id ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`} onClick={() => setSelected(selected === option.id ? "" : String(option.id))}><span className="flex flex-wrap items-center gap-2 font-medium"><span>{String(option.label)}</span>{question.recommended_option_id === option.id && <span className="text-xs text-primary">{tv("questionRecommended")}</span>}</span>{typeof option.description === "string" && option.description && <span className="mt-1 block whitespace-pre-wrap break-words text-xs text-muted-foreground">{String(option.description)}</span>}</button>)}</div>}
+      <AutoField name={`question-${request}`} label={tv("questionResponse")} help={tv("questionResponseHelp")}><FieldControl name={`question-${request}`} field={{name:tv("questionResponse"),type:"textarea",config:{maxLength:4096}}} value={text} onChange={value=>setText(String(value))} disabled={disabled} /></AutoField>
+      {executing && <p role="status" className="text-xs text-muted-foreground">{tv("questionFinishing")}</p>}
+      {error && <p role="alert" className="break-words text-destructive">{error}</p>}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3"><Button type="submit" className="min-h-11" disabled={disabled || executing || !text.trim() && !selected}>{tv("questionContinue")}</Button><Button type="button" variant="outline" className="min-h-11" disabled={disabled} onClick={()=>void submit("pause")}>{tv("questionPause")}</Button><Button type="button" variant="outline" className="min-h-11" disabled={disabled} onClick={()=>void submit("abandon")}>{tv("questionAbandon")}</Button></div>
+    </AutoForm> : <p className="text-xs text-muted-foreground">{tv("questionOwnerOnly")}</p>}
+  </section>;
+}
+
+export function ConversationApproval({ endpoint, mode, version, canManage, executing, onSaved }: {
+  endpoint: string; mode: string; version: number; canManage: boolean; executing: boolean;
+  onSaved: (mode: string, version: number) => void;
+}) {
+  const [open,setOpen]=useState(false);const [draft,setDraft]=useState(mode);const [revision,setRevision]=useState(version);
+  const [busy,setBusy]=useState(false);const [error,setError]=useState("");
+  const labels = {request:"approvalRequest",assisted:"approvalAssisted",yolo:"approvalYolo"} as const;
+  const label=(value:string)=>tv(labels[value as keyof typeof labels]??"approvalRequest");
+  const save=async()=>{setBusy(true);setError("");try { const saved=await api<{version:number}>(endpoint+"/approval-mode",{method:"PUT",body:JSON.stringify({mode:draft,version:revision})});onSaved(draft,saved.version);setOpen(false); } catch(cause){setError(errorText(cause));}finally{setBusy(false);}};
+  if(!canManage) return <span className="inline-flex min-h-11 items-center px-2 text-xs" title={tv("approvalMode")}>{label(mode)}</span>;
+  return <Dialog.Root open={open} onOpenChange={value=>{if(busy)return;setOpen(value);if(value){setDraft(mode);setRevision(version);setError("");}}}><Dialog.Trigger asChild><Button type="button" variant="ghost" className="min-h-11 min-w-11 px-2 text-xs" disabled={executing} aria-label={`${tv("approvalMode")} · ${label(mode)}`}><ShieldQuestion className="size-4"/><span className="hidden sm:inline">{label(mode)}</span></Button></Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/35"/><Dialog.Content aria-describedby={undefined} className="fixed left-1/2 top-1/2 z-50 flex max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-background text-foreground shadow-xl"><header className="flex shrink-0 items-center gap-2 border-b p-4"><Dialog.Title className="min-w-0 flex-1 font-semibold">{tv("approvalMode")}</Dialog.Title><Dialog.Close asChild><Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label={commonText("common.close")}><X/></Button></Dialog.Close></header><div className="min-h-0 space-y-3 overflow-y-auto p-4"><AutoField name="approval-mode" label={tv("approvalMode")} required><FieldControl name="approval-mode" field={{name:tv("approvalMode"),type:"select",config:{options:Object.keys(labels).map(value=>({value,label:label(value)}))}}} value={draft} required onChange={value=>setDraft(String(value))} /></AutoField><p className="text-sm text-muted-foreground">{tv("approvalScopeHelp")}</p><p className={`rounded-lg border p-3 text-sm ${draft==="yolo"?"border-destructive/50 bg-destructive/10 text-destructive":"border-border bg-muted/30"}`}>{tv(draft==="yolo"?"approvalYoloHelp":draft==="assisted"?"approvalAssistedHelp":"approvalRequestHelp")}</p>{error&&<p role="alert" className="text-sm text-destructive">{error}</p>}</div><footer className="grid shrink-0 grid-cols-2 gap-2 border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"><Dialog.Close asChild><Button variant="outline" className="min-h-11" disabled={busy}>{commonText("common.cancel")}</Button></Dialog.Close><Button className="min-h-11" disabled={busy} onClick={()=>void save()}>{commonText("common.save")}</Button></footer></Dialog.Content></Dialog.Portal></Dialog.Root>;
+}
 
 /** A failed platform request (HTTP status ≥ 400 or ok: false). */
 export function platformFailed(result: unknown) {
@@ -78,6 +134,7 @@ const record = (value: unknown) =>
 /** One line saying what a request does, in words: "创建工作流 /workflows". */
 export function operationTitle(tool: string, method?: string | null, path?: string | null) {
   if (tool === "ferry_discover") return tv("operationDiscover");
+  if (tool === "ferry_ask_user") return tv("questionWaiting");
   if (!path) return tool;
   const clean = path.split("?")[0] ?? path;
   const segments = clean.split("/").filter(Boolean);
@@ -150,13 +207,16 @@ function FieldRow({ label, text }: { label: string; text: string }) {
   );
 }
 
-function RawToggle({ value, label }: { value: unknown; label?: string }) {
+function RawToggle({ value, label, children }: { value: unknown; label?: string; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
-      <button type="button" data-raw-toggle aria-expanded={open} className="inline-flex min-h-11 items-center text-xs text-muted-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-ring" onClick={() => setOpen(!open)}>
+      <div className="flex min-w-0 items-start gap-3">
+      {children && <div className="min-w-0 flex-1 pt-2.5">{children}</div>}
+      <button type="button" data-raw-toggle aria-expanded={open} className="ml-auto inline-flex min-h-11 shrink-0 items-center text-xs text-muted-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-ring" onClick={() => setOpen(!open)}>
         {open ? tv("hideRaw") : label ?? tv("rawData")}
       </button>
+      </div>
       {open && <LongText value={value} className="mt-1 max-h-56 rounded bg-muted/60 p-2 text-xs" />}
     </div>
   );
@@ -184,8 +244,7 @@ export function PendingDecisionCard({
         <ShieldQuestion className="size-3.5" aria-hidden />
         {tv("approvalNeeded")}
       </p>
-      <Summary tool={decision.tool} input={decision.input} />
-      <RawToggle value={decision.input} />
+      <RawToggle value={decision.input}><Summary tool={decision.tool} input={decision.input} /></RawToggle>
       {canDecide ? (
         <div className="flex flex-wrap gap-2">
           <Button size="sm" className="min-h-11" disabled={busy || decision.dispatching} onClick={() => onDecide(true)}>
@@ -223,8 +282,7 @@ export function EndedDecisionCard({
         <AlertTriangle className="size-3.5" aria-hidden />
         {tv("endedUndecided")}
       </p>
-      <Summary tool={decision.tool} input={decision.input} />
-      <RawToggle value={decision.input} />
+      <RawToggle value={decision.input}><Summary tool={decision.tool} input={decision.input} /></RawToggle>
       {canAct && (
         <div className="flex gap-2">
           <Button size="sm" className="min-h-11" disabled={busy} onClick={() => {
@@ -301,6 +359,8 @@ function createdName(result: Record<string, unknown>) {
 }
 
 function decisionText(turnState: string, decision: Decision) {
+  if(decision.tool==="ferry_ask_user") return tv(decision.resolved==="answered"?"questionAnswered":decision.resolved==="paused"?"questionPaused":decision.resolved==="abandoned"?"questionAbandoned":"questionWaiting");
+  if(decision.automatic) return tv("automaticApproval");
   if (decision.decision === true) return tv("decisionAllowed");
   if (decision.decision === false) return tv("decisionDenied");
   if (turnState === "running") return tv("decisionWaiting");
@@ -310,11 +370,34 @@ function decisionText(turnState: string, decision: Decision) {
 function Row({ children, raw, tone = "" }: { children: ReactNode; raw: unknown; tone?: string }) {
   return (
     <li className={`min-w-0 rounded border p-2 ${tone}`}>
-      {children}
-      <div className="mt-1">
-        <RawToggle value={raw} />
-      </div>
+      <RawToggle value={raw}>{children}</RawToggle>
     </li>
+  );
+}
+
+/** The transcript stays in place while execution history scrolls independently. */
+export function ExecutionDetailsPanel({ summary, children }: { summary: string; children: () => ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Dialog.Root open={open} onOpenChange={setOpen}>
+      <Dialog.Trigger asChild>
+        <Button type="button" data-execution-details variant="ghost" className="min-h-11 max-w-full justify-start whitespace-normal px-0 text-left text-xs text-muted-foreground">
+          {summary}
+        </Button>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/35" />
+        <Dialog.Content data-execution-panel aria-describedby={undefined} className="fixed inset-y-0 right-0 z-50 flex h-dvh w-full min-w-0 flex-col border-l bg-background text-foreground shadow-xl outline-none md:max-w-2xl lg:max-w-3xl">
+          <header className="flex shrink-0 items-start gap-3 border-b px-4 py-3 pt-[max(.75rem,env(safe-area-inset-top))]">
+            <Dialog.Title className="min-w-0 flex-1 break-words pt-2.5 text-sm font-semibold">{summary}</Dialog.Title>
+            <Dialog.Close asChild><Button type="button" variant="ghost" size="icon" className="min-h-11 min-w-11 shrink-0" aria-label={commonText("common.close")}><X className="size-4" /></Button></Dialog.Close>
+          </header>
+          <div data-execution-panel-scroll className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-xs">
+            {open && children()}
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -346,7 +429,7 @@ export function ExecutionTimeline({
   };
   return (
     <div className="mt-2 space-y-2" data-execution-timeline={view}>
-      <div role="group" className="flex gap-1">
+      <div role="group" className="sticky top-0 z-10 flex gap-1 border-b bg-background py-1">
         {(["readable", "raw"] as const).map((value) => (
           <Button key={value} type="button" size="sm" variant={view === value ? "secondary" : "ghost"} className="min-h-11 px-2 text-xs" aria-pressed={view === value} onClick={() => choose(value)}>
             {tv(value)}
@@ -417,8 +500,7 @@ export function ExecutionTimeline({
       )}
       {usage && (
         <div className="py-1">
-          <p>{stateLabel} · {tv("usageLine", { input: usage.input_tokens, output: usage.output_tokens })}</p>
-          {view === "raw" ? <LongText value={usage} className="mt-1 max-h-64" /> : <RawToggle value={usage} />}
+          {view === "raw" ? <><p>{stateLabel} · {tv("usageLine", { input: usage.input_tokens, output: usage.output_tokens })}</p><LongText value={usage} className="mt-1 max-h-64" /></> : <RawToggle value={usage}><p>{stateLabel} · {tv("usageLine", { input: usage.input_tokens, output: usage.output_tokens })}</p></RawToggle>}
         </div>
       )}
     </div>
@@ -429,7 +511,7 @@ export function ExecutionTimeline({
 export function timelineSummary(events: readonly ActivityEvent[], decisions: Record<string, Decision>, turn: TurnLike) {
   const tools = new Set(events.filter((event) => event.type === "tool" && event.item_id).map((event) => event.item_id)).size;
   const platform = new Set(events.filter((event) => event.type === "platform_result" && event.request_id).map((event) => event.request_id)).size;
-  const pending = Object.values(decisions).filter((decision) => awaitingDecision(turn, decision)).length;
+  const pending = Object.values(decisions).filter((decision) => decision.tool!=="ferry_ask_user"&&awaitingDecision(turn, decision)).length;
   if (!tools && !platform && !pending) return "";
   return tv("detailsSummary", { tools, platform, pending });
 }

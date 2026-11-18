@@ -1269,3 +1269,157 @@ SSH 和 Host Agent 分别验证：约束实际进入 Swarm 服务规格、两个
 每次执行保留 `swarm-ha-<run_id>-<attempt>` artifact，包含断言结果 `acceptance.json`、两条链路四个故障阶段的任务/节点快照、验收输出及 daemon/失败诊断日志，保留14天。只上传明确列出的诊断文件，不上传临时数据库、主密钥或整个测试目录。本地具备 Docker/Linux 测试环境时也可设置上述两个变量运行 `bash scripts/test-deployments.sh`；可选 `FERRY_TEST_OUTPUT_DIR` 必须指向已创建的证据父目录。
 
 三个节点共享 Actions runner 的宿主内核：覆盖独立 daemon 退出与调度恢复，不等同于跨物理主机网络隔离、三 manager 仲裁、持久卷跨机迁移，或 PXC/Redis/NATS/TiDB 的协议级高可用验收。后者仍需对应拓扑和独立场景。工作流配置与语法检查通过不代表上述运行测试已通过；实际结论以对应提交的 Actions 执行结果和证据为准。
+
+### 会话执行策略、用户问答与大结果（2026-11-18，候选实现，待验收）
+
+事实来源为 `accounts/conversation_policy.rs`、`accounts/platform.rs`、`conversations/{approval,questions}.rs`、`conversations/run.rs`、`platform_tools.rs` 及共享表单；外部聊天产品仅提供交互参考，不定义权限和业务状态。
+
+| 评审维度 | 本期约定 |
+|---|---|
+| 本期范围 / 不做范围 | 管理员维护全局注入规则、MCP响应限额和默认审批模式；会话人工切换审批、持久化提问及自由回答、暂停/放弃；执行详情侧栏。无新权限体系，无原生CLI提权，无自动重放写入。 |
+| 灰度策略 | 无；NULL配置使用保守默认request。新默认模式仅用于新会话，已有会话模式保留。 |
+| 流程闭环 | 问题待答→回答并续接、暂停或放弃；暂停允许后续继续；继续通过原发送端点幂等创建新回合。执行未结束时禁止继续，暂停/放弃停止原执行。失败重试必须保留原回答且不重复创建回合。 |
+| 异常覆盖 | 无建议项仍可自由输入；空回答仅允许暂停/放弃；超长、多字节、无权限、跨空间、重复/并发、版本冲突、服务中断均须测试。 |
+| 操作记录 | 平台配置复用平台审计；模式变更记录前后值；问答记录turn/request/action/answer/option；原工具事件和结果保留追溯。 |
+| 删除保留 | 无新删除策略，继续沿用会话删除及事件保留规则；迁移down拒绝删除非NULL配置。 |
+| 权限规则 | 平台设置仅管理员；会话审批模式限人类owner且需conversations.update；回答限原turn人类owner且需conversations.run；每次续接及工具操作重查当前权限，A空间授权不适用于B空间。YOLO不绕过RBAC、数据权限和校验。 |
+| 计算逻辑 | 无金额计算；响应限额单位KiB=1024字节。文本后端限制按UTF-8字节，标题/问题及选项部分长度按字符；前端不得声称字符限长保证字节校验通过。 |
+| 模式差异 | request逐次批准写入；assisted仅允许列表内普通草稿/组织编辑自动批准，删除/凭据/权限/执行/发布/cron及未知操作仍确认；yolo自动批准已有权限内的MCP操作，明确危险提示。与CLI本地工具权限独立。 |
+| 字段联动 | 恢复默认只修改当前草稿，保存后生效；清空规则表示不注入自定义规则；默认审批用于新会话。修改模式需最新version且没有活跃回合。 |
+| 状态操作 | 建议项可不选、可取消选择、可与自由文字结合；暂停/放弃无须回答；失败保留输入；仅待答/暂停问题提供继续，已回答/放弃显示结果；原始数据按需展开。 |
+| 校验规则 | instructions≤16384 UTF-8字节；tool_response_limit_kib为256..8192整数；审批枚举request/assisted/yolo。回答≤4096字节且不含NUL；问题≤6选项，推荐ID必须存在。完整字段限制以Question.validate为准。 |
+| 数据模型 | platform_state新增conversation_config可空TEXT，默认NULL；JSON含instructions:string、tool_response_limit_kib:usize、default_approval_mode:string。无新增问答表，复用turn.decisions JSON；无索引及外键新增。 |
+| 时间审计 | 无新增xx_at字段；平台配置及会话继续沿用现有更新时间、版本和操作记录，不增加独立时间列。 |
+| 索引设计 | 无新增索引；复用平台主键、会话/回合主键和既有client_id幂等约束。 |
+| SQL示例 | 仅执行下述由新增字段派生的ALTER；不改历史行，不新增未声明字段。 |
+| 文案完整 | zh-CN/en-US/ms-MY及项目其余三语言走i18n；候选已补译，长文案实际布局和翻译验收待做。 |
+| 配置来源 | 规则默认文件为可恢复初始内容；管理员可编辑/清空/恢复并保存至私有平台列；每回合重新读取，工具限额每次请求读取。公开footer不含规则。 |
+| 状态覆盖 | 空/默认配置、未知枚举拒绝、加载/保存/失败/版本冲突、长文本、只读、执行中及已结束均列入验收。 |
+| 影响核心流程 | 影响会话注入、MCP审批和问答续接；沿用已有执行与发送流程。 |
+| 影响历史数据 | 只新增可空列，NULL回退默认；不重写已有会话/权限/消息。真实旧库保全和三数据库迁移待验证，不以SQLite内存测试替代。 |
+| 是否依赖三方 | 复用现有CLI、MCP、Radix Dialog和Playwright；无新依赖。 |
+| 版本兼容 | 既有会话无approval_mode时使用request；Runner需升级以注册ask_user及修正ACP/Codex接线。旧Runner不宣称支持新问答工具。 |
+| 逻辑冲突 | 模型指令不代替强制授权；询问不是批准；响应限额、原生单行、累计输出、事件与cluster限制必须分别验证，不以单个1GiB常量宣称端到端支持。 |
+| 可测试性 | 默认/编辑/清空恢复、隐私/管理员撤权/CAS、三模式权限交集、Agent不能自改模式/自答、并发回答、失败窗口恢复、放弃后新任务、CLI提问续接、详情焦点/滚动/多尺寸均有可执行测试要求。 |
+| 验收追踪 | 测试位于conversation_policy、conversations/tests、run/platform_tests、platform_tools/tests、runner agent/tests及ConversationApprovals；真实链路扩展test-agent-platform-tools.mjs。Figma暂缺；未运行项不得计PASS。 |
+| 响应式交付 | 见下表，截图与交互尚待最终候选构建后执行。 |
+| 模糊描述 | 本节无模糊验收词；仍未验证项显式标待验收。 |
+
+| 设备形态 | 布局重排 | 导航/操作 | 数据呈现 | 滚动 | 安全区/键盘 |
+|---|---|---|---|---|---|
+| Desktop≥1200 | 详情右侧面板，保留原聊天 | 固定标题/关闭，Esc返回焦点 | 摘要与原始数据按钮同排 | 面板内容独立滚动，关闭保留聊天位置 | 关闭目标≥44px，焦点可见 |
+| Pad 768..1199 | 右侧面板约束宽度 | 同桌面，触控可达 | 长文案换行 | 同桌面，无整页横向滚动 | 边界不裁切，方向切换保留数据 |
+| Phone 320..767 | 窄屏全宽面板，单列问题操作 | 关闭始终可达，允许任意文本 | 长结果默认16KiB预览，可展开/复制全部 | 内容区内滚动 | 顶底safe-area；真实软键盘验收暂缺 |
+
+新增字段及DDL（完整旧表结构保持原样）：
+
+| 表 | 字段 | 类型 | 必填 | 默认 | 约束 |
+|---|---|---|---|---|---|
+| platform_state | conversation_config | TEXT | 否 | NULL（隐式） | 私有JSON配置，经Configuration.validate校验 |
+
+SQLite / PostgreSQL / MySQL新增语句均为：
+
+```sql
+ALTER TABLE platform_state ADD COLUMN conversation_config TEXT NULL;
+```
+
+重复up先检查列存在；down先执行`SELECT id FROM platform_state WHERE conversation_config IS NOT NULL LIMIT 1`，存在任何配置即拒绝。只有全为NULL时才允许：
+
+```sql
+ALTER TABLE platform_state DROP COLUMN conversation_config;
+```
+
+SQLite删除列依赖项目支持的SQLite版本。PostgreSQL/MySQL真实up/down及旧版本回滚仍待验证。回退应用二进制时保留新增列和配置；需要回退数据库时先备份完整数据库及私有配置，在运维明确决定舍弃设置前不得清空列或强制down。上述文档不授权对现有用户数据库执行迁移。
+
+传输限制补充：共享协议当前定义原生CLI单行32MiB（给MCP文本的JSON转义留空间）、标准化事件12MiB（低于既有cluster 16MiB消息上限）、每回合累计输出1GiB、Runner MCP请求封装2MiB（API请求body仍沿用1MiB校验）。工具响应默认1MiB、管理员可配置256..8192KiB；目录接口采用分页。1GiB为累计预算，不是单事件/单响应大小，也不改变模型上下文窗口。已有单事件/输入/操作数与资源校验继续生效；不得宣称全平台无大小限制。单事件超过12MiB的任意工具结构体通用分段取回未实现，不能计为已交付。
+
+### 登录会话有效期与自动续期（2026-11-18，设计与实现计划）
+
+事实来源：用户已确认默认访问有效期30分钟、刷新有效期14天、仅活跃时自动续期、刷新令牌轮换且不延长最初14天截止时间、退出同时撤销，保留Cookie认证。现有依据为accounts/auth.rs的sessions散列令牌、Account提取器、初始设置/注册/密码/OTP的start_session入口、平台设置事务及版本检查、共享api.ts与App.tsx。仓库OAuth不属于账号登录入口。旧SESSION_MS固定14天且请求滑动延期不符合该需求。
+
+活跃续期窗口采用原始访问时长快照的五分之一，上限60秒；一分钟有效期不会刚签发就进入续期。访问截止时间已达到固定刷新截止时间时，不再执行无法延长有效时间的旋转。相同权限内容的身份刷新保留工作区表单配置引用，新增和编辑草稿均不得因续期重置。
+
+| 维度 | 约定 |
+|---|---|
+| 本期范围 / 不做范围 | 平台维护访问分钟、刷新天数、自动续期；两枚不透明HttpOnly Cookie；轮换、撤销、活跃触发。无JWT、角色/空间授权变更、终端进程重放、外部登录协议替换。 |
+| 灰度策略 | 无开关灰度；既有sessions且没有refresh行视为兼容会话，保留当前截止时间，不再滑动延长；新登录使用新机制。 |
+| 流程闭环 | 登录/OTP完成→短访问Cookie及固定期限刷新Cookie；访问过期拒绝业务请求但保留尚可刷新的会话；人类活跃→轮换两令牌→继续；刷新期限到、账号禁用、撤销→拒绝；退出可在访问过期时撤销整对令牌。 |
+| 异常覆盖 | 空Cookie、错误Cookie、过期、同时刷新、多标签、禁用账号、配置关闭、网络错误、取消、后台轮询、旧会话、超长/非整数/溢出配置均验证。 |
+| 操作记录 | 设置复用平台审计；刷新由rotated_at/by追溯；不记录原始令牌；登录和退出沿用既有账号记录规则，无新增高频业务操作日志。 |
+| 删除保留 | refresh行随sessions删除级联；退出撤销两者；失效哈希不用于恢复登录。无新业务数据删除。迁移down有配置或refresh行时拒绝，不静默丢失。 |
+| 权限规则 | 平台设置仅管理员、版本检查及事务重查管理员资格；刷新绑定数据库session/user，不接受客户端user或workspace；每次Account及Scope继续校验用户、空间权限，刷新不授予新权限。 |
+| 计算逻辑 | access_ms=access_minutes×60000，refresh_ms=refresh_days×86400000；正整数、检查乘加溢出、access_ms≤refresh_ms，截止值须可由JavaScript Date准确表示；新会话保存access_ms快照，固定refresh_deadline=login_now+refresh_ms；每次access_deadline=min(now+access_ms,refresh_deadline)。 |
+| 模式差异 | 默认30分钟/14天/开启；调整时长只用于新登录；关闭自动续期在刷新端点立即生效，不提前撤销仍有效的访问Cookie；旧会话保留当前剩余期限并在下次登录切换机制。 |
+| 字段联动 | 访问分钟、刷新天数必填；访问时长不超过刷新时长；自动续期是独立布尔值；只保存实际变更的私有配置；普通平台设置保存不强制写默认JSON。 |
+| 状态操作 | 用户按键、点击、触摸、滚轮及回到前台触发检查；后台轮询不触发续期。临近短期截止才刷新；同标签单飞、多标签Web Locks串行；失败不自动重放业务写入。退出幂等清除两Cookie。 |
+| 校验规则 | 配置正整数，拒绝0/负数/浮点/乘加溢出/不可表示时间；自动续期仅布尔；令牌沿用256bit随机数和SHA-256散列；请求通过现有同源/CSRF约束。 |
+| 数据模型 | 见下方字段表。sessions现有结构不改，expires_at用于短访问期限；兼容会话没有refresh行。新增配置列可空，不回填旧记录。 |
+| 时间审计 | 新refresh表每个created_at/rotated_at/expires_at都有对应created_by/rotated_by/expires_by，BIGINT NOT NULL DEFAULT0，0=system，登录/刷新时写真实用户。 |
+| 索引设计 | session_id主键及外键级联；token_hash唯一索引用于刷新令牌查找；不增加无查询依据的索引。 |
+| SQL示例 | 下方SQL严格派生字段表；MySQL/PostgreSQL/SQLite共用这些类型和约束，差异由SeaQuery生成。 |
+| 文案完整 | 平台三个字段及帮助、服务端校验/关闭提示覆盖zh-CN/en-US/ms-MY及其余现有语言；客户端复用既有错误呈现，不插入硬编码通知。 |
+| 配置来源 | 私有platform_state.session_config；NULL读取默认30/14/true；新登录快照时长；刷新实时读取auto_renew。无环境变量/部署脚本中的第二套时长。 |
+| 状态覆盖 | 默认、编辑、只读、保存、错误、失效、兼容旧会话、同时刷新、自动续期关闭均覆盖。 |
+| 影响核心流程 | 所有登录入口、Account、退出、共享API和界面身份恢复；OTP仍完成第二步后才发会话。 |
+| 影响历史数据 | 新增可空配置列及空refresh表，不改既有会话记录；取消请求滑动延期，保留旧截止时间；up/down、旧库保全与回滚见下文。 |
+| 是否依赖三方 | 无新依赖；复用SeaORM/SeaQuery、现有随机数/散列、Cookie、浏览器Web Locks；不支持Web Locks时同标签单飞且服务端CAS拒绝旧令牌。 |
+| 版本兼容 | 新旧Cookie均沿用访问Cookie名；刷新Cookie新建且HttpOnly、同源、安全属性沿用部署配置；旧服务端不理解新机制，回滚须先撤销新式会话。 |
+| 逻辑冲突 | API轮询不等于人类活跃；权限与会话时长独立；刷新成功不代表业务操作成功；不把MCP批准当作浏览器会话续期。 |
+| 可测试性 | 默认字段、读取不延期先RED；配置/快照/边界、两Cookie、到期、轮换/旧令牌拒绝、并发、禁用账号、即时关闭、过期访问退出、OTP/OAuth、菜单/跨空间、客户端空闲与多标签、页面草稿保留逐项测试。 |
+| 验收追踪 | 新auth测试、现有OTP/OAuth/平台测试及独立HTTP/浏览器脚本；完整门禁和真实旧库保全；Figma设计稿暂缺，不宣称覆盖。 |
+| 响应式交付 | Desktop≥1200与Pad768..1199使用共享平台表单1–2列；Phone320..767单列，字段/帮助换行，布尔行沿用统一组件；所有尺寸保存按钮可达，无全页横向滚动；真实软键盘验收暂缺。 |
+| 模糊描述 | 规则与边界明确；尚未执行的验证记NOT_RUN，不将设计或源码视为通过。 |
+
+新增字段表：
+
+| 表 | 字段 | 类型 | 必填 | 默认 | 约束 |
+|---|---|---|---|---|---|
+| platform_state | session_config | TEXT | 否 | NULL | 私有JSON；access_minutes正整数默认30，refresh_days正整数默认14，auto_renew布尔默认true；按上述计算校验 |
+| session_refresh_tokens | session_id | BIGINT | 是 | 无 | 主键；引用sessions.id，ON DELETE CASCADE |
+| session_refresh_tokens | token_hash | VARCHAR(64) | 是 | 无 | 唯一、SHA-256十六进制散列，不保存原令牌 |
+| session_refresh_tokens | previous_hash | VARCHAR(64) | 否 | NULL | 上一次刷新令牌散列；普通索引；仅用于撤销轮换中的会话，不能用于刷新 |
+| session_refresh_tokens | access_ttl_ms | BIGINT | 是 | 1800000 | 新登录时长快照，>0 |
+| session_refresh_tokens | created_at | BIGINT | 是 | 0 | 毫秒时间 |
+| session_refresh_tokens | created_by | BIGINT | 是 | 0 | 0=system，其余为用户ID |
+| session_refresh_tokens | rotated_at | BIGINT | 是 | 0 | 毫秒时间 |
+| session_refresh_tokens | rotated_by | BIGINT | 是 | 0 | 0=system，其余为用户ID |
+| session_refresh_tokens | expires_at | BIGINT | 是 | 0 | 原始固定刷新截止时间，轮换不变 |
+| session_refresh_tokens | expires_by | BIGINT | 是 | 0 | 0=system，其余为用户ID |
+
+DDL（类型与约束保持三数据库一致，由迁移构造器输出方言引号）：
+
+```sql
+ALTER TABLE platform_state ADD COLUMN session_config TEXT NULL;
+CREATE TABLE session_refresh_tokens (
+  session_id BIGINT NOT NULL PRIMARY KEY,
+  token_hash VARCHAR(64) NOT NULL,
+  previous_hash VARCHAR(64) NULL,
+  access_ttl_ms BIGINT NOT NULL DEFAULT 1800000 CHECK (access_ttl_ms > 0),
+  created_at BIGINT NOT NULL DEFAULT 0,
+  created_by BIGINT NOT NULL DEFAULT 0,
+  rotated_at BIGINT NOT NULL DEFAULT 0,
+  rotated_by BIGINT NOT NULL DEFAULT 0,
+  expires_at BIGINT NOT NULL DEFAULT 0,
+  expires_by BIGINT NOT NULL DEFAULT 0,
+  CONSTRAINT session_refresh_token_hash UNIQUE (token_hash),
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+CREATE INDEX session_refresh_previous_hash ON session_refresh_tokens(previous_hash);
+```
+
+up先检查列/表存在，重复执行不重写历史行。down在任意非NULL session_config或任意refresh行存在时拒绝；只在两者无数据且已备份时执行：
+
+```sql
+DROP TABLE session_refresh_tokens;
+ALTER TABLE platform_state DROP COLUMN session_config;
+```
+
+旧二进制会滑动延长sessions.expires_at，不能直接拿它运行新式会话。运维回退前须备份，并撤销新式会话、让这些用户重新登录；不得只删refresh表、不得移除保护后强制down。当前设计文档不授权直接操作生产数据库。
+
+实现顺序（直接执行，认证路径耦合，不委派）：
+
+1. 现有auth测试入口增加默认字段与不滑动延期两个失败测试，实际运行记录RED。
+2. 配置、迁移、实体及平台管理接口，补配置范围/管理员/CAS/私密性/保全测试。
+3. 原始随机数与散列下沉共享底层工具并兼容原调用；完成成对Cookie、四个实际登录入口（初始设置、注册、密码登录、OTP）、刷新CAS、撤销及me元数据，验证过期/并发/禁用/OTP。仓库OAuth不是账号登录入口，不参与本次会话签发。
+4. 共享API接入活跃触发、单飞与跨标签协调；只重试明确的读取，不自动重放写入；统一表单与六语言字段。
+5. 完整Rust/前端门禁、真实Server浏览器模拟到期、多标签、后台不续期、跨空间及旧库迁移；两轮复核后增量整合，保留当前4291版本供验收。

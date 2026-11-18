@@ -41,5 +41,9 @@
   "conversations.agentRequired": "Choose an agent for the conversation.",
   "conversations.titleRequired": "Enter a conversation title.",
   "conversations.titleInvalid": "The conversation title must be at most 256 bytes and cannot contain null characters.",
-  "conversations.stateInvalid": "The conversation status must be active, archived or interrupted."
+  "conversations.stateInvalid": "The conversation status must be active, archived or interrupted.",
+  "conversations.questionInvalid": "Invalid question or response. Provide a clear question, unique suggestions, or a response of at most 4096 UTF-8 bytes.",
+  "conversations.questionPending": "A saved question is waiting for the user, or this turn is still finishing. Do not continue operations; wait for the user or retry the response after the turn ends.",
+  "conversations.questionAnswered": "This question already has a different response. Refresh to see it; do not submit a conflicting answer.",
+  "conversations.approvalModeInvalid": "Choose request, assisted or yolo approval mode."
 }

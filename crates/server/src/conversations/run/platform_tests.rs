@@ -7,6 +7,337 @@ use crate::{
 use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel};
 
 #[tokio::test]
+async fn questions_survive_turn_completion_and_custom_replies_continue_exactly_once() {
+    let (_dir, s, row, owner) = enabled().await;
+    append(
+        &s,
+        &row,
+        &owner,
+        Event::Session {
+            native_session_id: "question-session".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let result=platform_call(s.clone(),row.clone(),owner.clone(),"question-1".into(),"ferry_ask_user".into(),
+        json!({"title":"Missing connection","question":"How should I continue?","reason":"The configured repository is unavailable.",
+            "options":[{"id":"repair","label":"Repair connection","description":"Use corrected connection details."}],"recommended_option_id":"repair"}),None).await.1;
+    assert_eq!(result["data"]["state"], "awaiting_user", "{result}");
+    let blocked = platform_call(
+        s.clone(),
+        row.clone(),
+        owner.clone(),
+        "after-question".into(),
+        "ferry_request".into(),
+        json!({"method":"GET","path":"/workflows"}),
+        None,
+    )
+    .await
+    .1;
+    assert_eq!(blocked["status"], 409);
+    finish(&s, &row, &owner, Some(Outcome::Completed), "", true)
+        .await
+        .unwrap();
+    let waiting = turns::Entity::find_by_id(row.id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(super::super::pending_in(&waiting), 1);
+    let answer = || crate::platform_tools::Call {
+        method: "POST".into(),
+        path: format!(
+            "/conversations/{}/turns/{}/question-answers",
+            row.conversation_id, row.id
+        ),
+        body: json!({"request_id":"question-1","action":"continue","answer":"Use a different repository; none of those choices fit."}),
+        ..Default::default()
+    };
+    let conversation = conversations::Entity::find_by_id(row.conversation_id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let self_answer = crate::platform_tools::dispatch_as_agent(
+        &s,
+        admin(1),
+        answer(),
+        conversation.agent_id.into(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(self_answer["status"], 403);
+    let mut revoked = admin(1);
+    revoked.permissions.remove("conversations.run");
+    let denied = crate::platform_tools::dispatch(&s, revoked, answer())
+        .await
+        .unwrap();
+    assert_eq!(denied["status"], 403);
+    let (first, again) = tokio::join!(
+        crate::platform_tools::dispatch(&s, admin(1), answer()),
+        crate::platform_tools::dispatch(&s, admin(1), answer()),
+    );
+    let first = first.unwrap();
+    let again = again.unwrap();
+    assert!(first["ok"].as_bool().unwrap(), "{first}");
+    assert!(again["ok"].as_bool().unwrap(), "{again}");
+    assert_eq!(first["data"]["id"], again["data"]["id"]);
+    let rows = turns::Entity::find()
+        .filter(turns::Column::ConversationId.eq(row.conversation_id))
+        .all(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(
+        rows.iter()
+            .any(|turn| turn.prompt.contains("none of those choices fit"))
+    );
+    let answered = turns::Entity::find_by_id(row.id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(super::super::pending_in(&answered), 0);
+    let denied = crate::platform_tools::dispatch(&s, admin(2), answer())
+        .await
+        .unwrap();
+    assert_eq!(denied["status"], 404);
+}
+
+#[tokio::test]
+async fn assisted_and_yolo_approval_never_bypass_roles_or_auto_approve_sensitive_assisted_work() {
+    use sea_orm::{ColumnTrait, QueryFilter, sea_query::Expr};
+    for mode in ["assisted", "yolo"] {
+        let (_dir, s, row, owner) = enabled().await;
+        let c = conversations::Entity::find_by_id(row.conversation_id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut config: Value = serde_json::from_str(&c.config).unwrap();
+        config["approval_mode"] = json!(mode);
+        conversations::Entity::update_many()
+            .col_expr(
+                conversations::Column::Config,
+                Expr::value(config.to_string()),
+            )
+            .filter(conversations::Column::Id.eq(c.id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let created=platform_call(s.clone(),row.clone(),owner.clone(),"auto-group".into(),"ferry_request".into(),
+            json!({"method":"POST","path":"/node-groups","body":{"name":"Automatic draft organization","parent_id":"0","position":0}}),None).await.1;
+        assert!(created["ok"].as_bool().unwrap(), "{created}");
+        let saved = turns::Entity::find_by_id(row.id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let decisions: Value = serde_json::from_str(&saved.decisions).unwrap();
+        assert_eq!(decisions["auto-group"]["automatic"], true);
+        assert_eq!(decisions["auto-group"]["sent"], true);
+        if mode == "assisted" {
+            let sensitive=platform_call(s.clone(),row.clone(),owner.clone(),"sensitive".into(),"ferry_request".into(),
+                json!({"method":"POST","path":"/nodes/1/commands","body":{"command":"echo should-wait","timeout_seconds":10}}),None).await.1;
+            assert!(sensitive.is_null(), "{sensitive}");
+        }
+        let mut role = workspace_roles::Entity::find_by_id(1)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut grants: Vec<String> = serde_json::from_str(&role.permissions).unwrap();
+        grants.retain(|grant| grant != "host-groups.create");
+        role.permissions = json!(grants).to_string();
+        role.into_active_model()
+            .reset_all()
+            .update(&s.db)
+            .await
+            .unwrap();
+        let denied=platform_call(s.clone(),row.clone(),owner.clone(),"denied".into(),"ferry_request".into(),
+            json!({"method":"POST","path":"/node-groups","body":{"name":"Must not exist","parent_id":"0","position":0}}),None).await.1;
+        assert_eq!(denied["status"], 403, "{denied}");
+        assert_eq!(host_groups::Entity::find().count(&s.db).await.unwrap(), 1);
+    }
+}
+
+#[tokio::test]
+async fn paused_questions_create_no_turn_and_can_resume_with_a_custom_answer() {
+    let (_dir, s, row, owner) = enabled().await;
+    append(
+        &s,
+        &row,
+        &owner,
+        Event::Session {
+            native_session_id: "pause-session".into(),
+        },
+    )
+    .await
+    .unwrap();
+    platform_call(
+        s.clone(),
+        row.clone(),
+        owner.clone(),
+        "q".into(),
+        "ferry_ask_user".into(),
+        json!({"title":"Choose next step","question":"How should I proceed?"}),
+        None,
+    )
+    .await;
+    finish(&s, &row, &owner, Some(Outcome::Completed), "", true)
+        .await
+        .unwrap();
+    let call = |action: &str, answer: &str| crate::platform_tools::Call {
+        method: "POST".into(),
+        path: format!(
+            "/conversations/{}/turns/{}/question-answers",
+            row.conversation_id, row.id
+        ),
+        body: json!({"request_id":"q","action":action,"answer":answer}),
+        ..Default::default()
+    };
+    let paused = crate::platform_tools::dispatch(&s, admin(1), call("pause", ""))
+        .await
+        .unwrap();
+    assert_eq!(paused["data"]["state"], "paused", "{paused}");
+    assert_eq!(turns::Entity::find().count(&s.db).await.unwrap(), 1);
+    let resumed = crate::platform_tools::dispatch(
+        &s,
+        admin(1),
+        call("continue", "Now use my alternative approach"),
+    )
+    .await
+    .unwrap();
+    assert!(resumed["ok"].as_bool().unwrap(), "{resumed}");
+    assert_eq!(turns::Entity::find().count(&s.db).await.unwrap(), 2);
+}
+
+#[tokio::test]
+async fn failed_question_continuation_keeps_one_answer_and_retries_without_duplicate_turns() {
+    use sea_orm::{ColumnTrait, QueryFilter, sea_query::Expr};
+    let (_dir, s, row, owner) = enabled().await;
+    append(
+        &s,
+        &row,
+        &owner,
+        Event::Session {
+            native_session_id: "retry-question-session".into(),
+        },
+    )
+    .await
+    .unwrap();
+    platform_call(
+        s.clone(),
+        row.clone(),
+        owner.clone(),
+        "q".into(),
+        "ferry_ask_user".into(),
+        json!({"title":"Choose next step","question":"How should I proceed?"}),
+        None,
+    )
+    .await;
+    finish(&s, &row, &owner, Some(Outcome::Completed), "", true)
+        .await
+        .unwrap();
+    let call = |action: &str, answer: &str| crate::platform_tools::Call {
+        method: "POST".into(),
+        path: format!(
+            "/conversations/{}/turns/{}/question-answers",
+            row.conversation_id, row.id
+        ),
+        body: json!({"request_id":"q","action":action,"answer":answer}),
+        ..Default::default()
+    };
+    let paused = crate::platform_tools::dispatch(&s, admin(1), call("pause", ""))
+        .await
+        .unwrap();
+    assert_eq!(paused["status"], 200);
+    // Fail normal turn admission after the answer transaction commits, without
+    // test hooks in production: an archived room cannot admit a new turn.
+    conversations::Entity::update_many()
+        .col_expr(conversations::Column::State, Expr::value("archived"))
+        .filter(conversations::Column::Id.eq(row.conversation_id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let failed = crate::platform_tools::dispatch(&s, admin(1), call("continue", "First answer"))
+        .await
+        .unwrap();
+    assert_eq!(failed["status"], 409, "{failed}");
+    conversations::Entity::update_many()
+        .col_expr(conversations::Column::State, Expr::value("active"))
+        .filter(conversations::Column::Id.eq(row.conversation_id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let replaced =
+        crate::platform_tools::dispatch(&s, admin(1), call("continue", "Conflicting answer"))
+            .await
+            .unwrap();
+    assert_eq!(
+        replaced["status"], 409,
+        "a committed continuation must not be replaced: {replaced}"
+    );
+    let (first, again) = tokio::join!(
+        crate::platform_tools::dispatch(&s, admin(1), call("continue", "First answer")),
+        crate::platform_tools::dispatch(&s, admin(1), call("continue", "First answer")),
+    );
+    let (first, again) = (first.unwrap(), again.unwrap());
+    assert_eq!(first["status"], 200, "{first}");
+    assert_eq!(first["data"]["id"], again["data"]["id"], "{again}");
+    assert_eq!(turns::Entity::find().count(&s.db).await.unwrap(), 2);
+}
+
+#[tokio::test]
+async fn abandoning_a_question_stops_the_turn_without_locking_the_conversation() {
+    let (_dir, s, row, owner) = enabled().await;
+    append(
+        &s,
+        &row,
+        &owner,
+        Event::Session {
+            native_session_id: "abandon-question-session".into(),
+        },
+    )
+    .await
+    .unwrap();
+    platform_call(
+        s.clone(),
+        row.clone(),
+        owner.clone(),
+        "q".into(),
+        "ferry_ask_user".into(),
+        json!({"title":"Choose next step","question":"How should I proceed?"}),
+        None,
+    )
+    .await;
+    let call = crate::platform_tools::Call {
+        method: "POST".into(),
+        path: format!(
+            "/conversations/{}/turns/{}/question-answers",
+            row.conversation_id, row.id
+        ),
+        body: json!({"request_id":"q","action":"abandon"}),
+        ..Default::default()
+    };
+    let response = crate::platform_tools::dispatch(&s, admin(1), call)
+        .await
+        .unwrap();
+    assert_eq!(response["data"]["state"], "abandoned", "{response}");
+    let stopped = turns::Entity::find_by_id(row.id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stopped.state, "stopping");
+    finish(&s, &row, &owner, Some(Outcome::Cancelled), "", true)
+        .await
+        .unwrap();
+    sent(&s, row.conversation_id.into(), "new-task-after-abandon").await;
+    assert_eq!(turns::Entity::find().count(&s.db).await.unwrap(), 2);
+}
+
+#[tokio::test]
 async fn settling_outstanding_platform_work_keeps_its_lease_alive() {
     let (_dir, s, row, owner) = enabled().await;
     let original_expiry = row.expires_at;

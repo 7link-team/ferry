@@ -174,5 +174,8 @@
   "mail.templateCodeMissing": "Isi mel kod pengesahan mesti mengandungi {{code}}.",
   "notification.testSubject": "Ujian saluran Ferry",
   "notification.testBody": "Ini mesej ujian daripada Ferry untuk mengesahkan saluran \"{channel}\" boleh menghantar pemberitahuan.",
-  "notification.smsTestUnsupported": "Saluran SMS hanya menghantar templat yang diluluskan dengan parameter; uji saluran ini dengan Hantar dan isi parameter templat."
+  "notification.smsTestUnsupported": "Saluran SMS hanya menghantar templat yang diluluskan dengan parameter; uji saluran ini dengan Hantar dan isi parameter templat.",
+  "platform.conversationInvalid": "Dasar perbualan tidak sah: arahan maksimum 16 KiB, had respons 256–8192 KiB, mod request, assisted atau yolo.",
+  "auth.sessionPolicyInvalid": "Gunakan minit/hari dalam nombor bulat positif; tempoh akses tidak melebihi tempoh pembaharuan dan tarikh tamat mestilah dalam julat yang disokong.",
+  "auth.sessionAutoRenewDisabled": "Pembaharuan sesi automatik dimatikan. Log masuk semula selepas akses tamat."
 }

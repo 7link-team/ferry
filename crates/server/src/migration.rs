@@ -28,10 +28,12 @@ mod marketplace_platform;
 mod model_hosts;
 mod monitoring;
 mod notification_center;
+mod platform_conversation;
 mod platform_monitor;
 mod platform_storage;
 mod preview_ingress;
 mod runner_timezones;
+mod session_policy;
 mod workflow_node_logs;
 
 // Keep names alongside builders for existence checks; no SQL parsing is needed.
@@ -193,6 +195,8 @@ impl MigratorTrait for Migrator {
             Box::new(deployment_failover::Migration),
             Box::new(hole_targets::Migration),
             Box::new(hole_tls::Migration),
+            Box::new(platform_conversation::Migration),
+            Box::new(session_policy::Migration),
         ]
     }
 }

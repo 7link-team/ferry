@@ -496,6 +496,23 @@ async fn oversized_gateway_responses_fail_with_a_narrow_the_query_error() {
         "type_version":1,"params":{"fields":[{"path":"blob","value":"x".repeat(300 * 1024)}],
         "keep_other_fields":true},"position":[600,0]}));
     let id = workflow(&fixture.s, 1, "Large", &large).await;
+    // The gateway now has an administrator-configured limit, defaulting to
+    // 1 MiB. This former 256 KiB regression fixture must be accepted at the
+    // default, and must still fail with the same precise error at a lower cap.
+    let accepted = fixture
+        .read(params("/workflows/{id}", json!({"id":id.to_string()})))
+        .await
+        .unwrap();
+    assert!(accepted[0].json["definition"].as_str().unwrap().len() > 300 * 1024);
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ConversationConfig,
+            Expr::value(json!({"tool_response_limit_kib":256}).to_string()),
+        )
+        .filter(crate::entities::platform_state::Column::Id.eq(1))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
     let error = fixture
         .read(params("/workflows/{id}", json!({"id":id.to_string()})))
         .await

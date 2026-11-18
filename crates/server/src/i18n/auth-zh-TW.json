@@ -174,5 +174,8 @@
   "mail.templateCodeMissing": "驗證碼郵件的內文必須包含 {{code}}。",
   "notification.testSubject": "Ferry 通道測試",
   "notification.testBody": "這是一則來自 Ferry 的測試訊息，用於確認通道「{channel}」可以正常傳遞通知。",
-  "notification.smsTestUnsupported": "簡訊通道只能傳送帶參數的已審核範本；請使用「傳送」並填寫範本參數來測試。"
+  "notification.smsTestUnsupported": "簡訊通道只能傳送帶參數的已審核範本；請使用「傳送」並填寫範本參數來測試。",
+  "platform.conversationInvalid": "對話策略無效：注入內容最多 16 KiB，MCP 回應上限為 256–8192 KiB，審批模式須為 request、assisted 或 yolo。",
+  "auth.sessionPolicyInvalid": "存取與更新有效期必須為正整數，存取有效期不得超過更新有效期，且到期時間須在支援範圍內。",
+  "auth.sessionAutoRenewDisabled": "自動續期已關閉，存取憑證到期後請重新登入。"
 }

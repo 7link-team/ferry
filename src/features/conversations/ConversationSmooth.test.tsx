@@ -165,20 +165,23 @@ it("does not re-render the conversation when polling returns the same data", asy
 });
 
 it("builds execution details only when opened and caps very large results", async () => {
-  const large = "x".repeat(LONG_TEXT_LIMIT * 4);
+  const large = "x".repeat(3 * 1024 * 1024);
   row = conversation("private", [turn("10", "completed")], [reply("11", "10", "done")]);
   events = [{ sequence: 1, turn_id: "10", event: { type: "platform_result", request_id: "r1", result: large } }];
   await act(async () => root.render(<Conversation workspace="1" id="2" permissions={permissions} />));
-  const details = host.querySelector("details[data-execution-details]") as HTMLDetailsElement;
+  const trigger = host.querySelector("button[data-execution-details]") as HTMLButtonElement;
+  expect(trigger).not.toBeNull();
+  expect(document.querySelector("[data-execution-panel]")).toBeNull();
+  await act(async () => trigger.click());
+  const details = document.querySelector("[data-execution-panel]")!;
   expect(details).not.toBeNull();
   expect(details.querySelector("pre")).toBeNull();
-  await act(async () => { details.open = true; details.dispatchEvent(new Event("toggle")); });
   // The readable view builds the raw result only when it is asked for.
   expect(details.querySelector("pre")).toBeNull();
   await act(async () => (details.querySelector("[data-raw-toggle]") as HTMLButtonElement).click());
   const pre = details.querySelector("[data-long-text] pre")!;
   expect(pre.textContent!.length).toBe(LONG_TEXT_LIMIT);
   expect(details.textContent).toContain(conversationText("truncatedNote"));
-  await act(async () => button(conversationText("showAll"))!.click());
+  await act(async () => ([...details.querySelectorAll("button")].find(item => item.textContent === conversationText("showAll")) as HTMLButtonElement).click());
   expect(details.querySelector("[data-long-text] pre")!.textContent!.length).toBe(large.length);
 });

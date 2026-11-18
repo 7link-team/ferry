@@ -41,5 +41,9 @@
   "conversations.agentRequired": "請為會話選擇智慧體。",
   "conversations.titleRequired": "請填寫會話標題。",
   "conversations.titleInvalid": "會話標題最多 256 位元組，且不能包含空字元。",
-  "conversations.stateInvalid": "會話狀態只能是進行中、已封存或已中斷。"
+  "conversations.stateInvalid": "會話狀態只能是進行中、已封存或已中斷。",
+  "conversations.questionInvalid": "問題或回覆無效。請提供明確的問題、唯一的建議項，或不超過 4096 UTF-8 位元組的回覆。",
+  "conversations.questionPending": "已有問題等待使用者回覆，或本輪尚在收尾。請停止推進，等待使用者；收尾完成後可提交回覆。",
+  "conversations.questionAnswered": "此問題已有不同的回覆，請重新整理查看，不要重複提交衝突的答案。",
+  "conversations.approvalModeInvalid": "請選擇 request、assisted 或 yolo 審批模式。"
 }

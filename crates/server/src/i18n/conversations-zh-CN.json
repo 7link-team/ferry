@@ -41,5 +41,9 @@
   "conversations.agentRequired": "请为会话选择智能体。",
   "conversations.titleRequired": "请填写会话标题。",
   "conversations.titleInvalid": "会话标题最多 256 字节，且不能包含空字符。",
-  "conversations.stateInvalid": "会话状态只能是进行中、已归档或已中断。"
+  "conversations.stateInvalid": "会话状态只能是进行中、已归档或已中断。",
+  "conversations.questionInvalid": "问题或回复无效。请提供明确的问题、唯一的建议项，或不超过 4096 UTF-8 字节的回复。",
+  "conversations.questionPending": "已有问题等待用户回复，或本轮尚在收尾。请停止推进，等待用户；收尾完成后可提交回复。",
+  "conversations.questionAnswered": "此问题已有不同的回复，请刷新查看，不要重复提交冲突的答案。",
+  "conversations.approvalModeInvalid": "请选择 request、assisted 或 yolo 审批模式。"
 }

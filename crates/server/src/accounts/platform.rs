@@ -202,10 +202,7 @@ pub async fn initialize(
     audit(&s, &tx, &actor, "initialize", "platform", id, json!({})).await?;
     tx.commit().await?;
     let _ = std::fs::remove_file(s.data_dir.join("setup-token"));
-    Ok((
-        auth::set_cookie(&s, &session, auth::SESSION_MS / 1000),
-        Json(json!({"id": id, "email": email})),
-    ))
+    Ok((session.headers(&s), Json(json!({"id": id, "email": email}))))
 }
 
 pub(crate) async fn audit(
@@ -699,8 +696,22 @@ pub async fn get_settings(State(s): State<AppState>, _: Admin) -> Result<Json<Va
         .unwrap()
         .extend(addresses.view().as_object().unwrap().clone());
     view["id"] = json!("1");
+    view.as_object_mut().unwrap().extend(
+        super::session_policy::Configuration::read(row.session_config.as_deref())?
+            .view()
+            .as_object()
+            .unwrap()
+            .clone(),
+    );
     view["registration_enabled"] = json!(row.registration_enabled != 0);
     view["runner_auto_update"] = json!(row.runner_auto_update != 0);
+    view.as_object_mut().unwrap().extend(
+        super::conversation_policy::Configuration::read(row.conversation_config.as_deref())?
+            .view()
+            .as_object()
+            .unwrap()
+            .clone(),
+    );
     view["footer_html"] = json!(row.footer_html.as_deref().unwrap_or_default());
     view.as_object_mut().unwrap().extend(
         json!(super::site::Configuration::read(
@@ -843,8 +854,27 @@ pub async fn update_settings(
     let page_scripts =
         super::platform_scripts::Configuration::update(row.page_scripts.as_deref(), &body.oauth)?;
     let site_config = super::site::Configuration::update(row.site_config.as_deref(), &body.oauth)?;
+    let conversation_before =
+        super::conversation_policy::Configuration::read(row.conversation_config.as_deref())?;
+    let conversation_patched = super::conversation_policy::Configuration::update(
+        row.conversation_config.as_deref(),
+        &body.oauth,
+    )?;
+    let conversation_after =
+        super::conversation_policy::Configuration::read(Some(&conversation_patched))?;
+    let conversation_changed = conversation_before != conversation_after;
+    let conversation_config = if conversation_changed {
+        Some(conversation_patched)
+    } else {
+        row.conversation_config.clone()
+    };
     let mail_config =
         super::mail::Configuration::update(&s, row.mail_config.as_deref(), &body.oauth)?;
+    let session_before = super::session_policy::Configuration::read(row.session_config.as_deref())?;
+    let session_config =
+        super::session_policy::Configuration::update(row.session_config.as_deref(), &body.oauth)?;
+    let session_after = super::session_policy::Configuration::read(session_config.as_deref())?;
+    let session_changed = session_before != session_after;
     let login_security =
         super::login_guard::Configuration::update(&s, row.login_security.as_deref(), &body.oauth)?;
     let monitor_limits = crate::platform_monitor::retention::Limits::update(
@@ -892,6 +922,14 @@ pub async fn update_settings(
         .col_expr(platform_state::Column::FooterHtml, Expr::value(footer_html))
         .col_expr(platform_state::Column::SiteConfig, Expr::value(site_config))
         .col_expr(
+            platform_state::Column::ConversationConfig,
+            Expr::value(conversation_config),
+        )
+        .col_expr(
+            platform_state::Column::SessionConfig,
+            Expr::value(session_config),
+        )
+        .col_expr(
             platform_state::Column::LoginSecurity,
             Expr::value(login_security),
         )
@@ -934,7 +972,7 @@ pub async fn update_settings(
         "update",
         "platform-settings",
         Id::from(1),
-        json!({"registration_enabled": body.registration_enabled, "runner_auto_update":runner_auto_update != 0, "repository_oauth_updated": oauth_changed, "footer_updated":body.footer_html.is_some(), "scripts_updated":body.oauth.keys().any(|key|key.starts_with("analytics_")), "site_updated":body.oauth.keys().any(|key|key.starts_with("site_")), "otp_settings_updated":body.oauth.contains_key("otp_enabled")}),
+        json!({"registration_enabled": body.registration_enabled, "runner_auto_update":runner_auto_update != 0, "repository_oauth_updated": oauth_changed, "footer_updated":body.footer_html.is_some(), "scripts_updated":body.oauth.keys().any(|key|key.starts_with("analytics_")), "site_updated":body.oauth.keys().any(|key|key.starts_with("site_")), "otp_settings_updated":body.oauth.contains_key("otp_enabled"), "conversation_policy_updated":conversation_changed, "conversation_policy":if conversation_changed {json!({"before":conversation_before,"after":conversation_after})} else {Value::Null}, "session_policy_updated":session_changed, "session_policy":if session_changed {json!({"before":session_before,"after":session_after})} else {Value::Null}}),
     )
     .await?;
     tx.commit().await?;

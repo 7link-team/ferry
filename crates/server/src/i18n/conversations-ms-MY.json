@@ -41,5 +41,9 @@
   "conversations.agentRequired": "Pilih ejen untuk perbualan.",
   "conversations.titleRequired": "Masukkan tajuk perbualan.",
   "conversations.titleInvalid": "Tajuk perbualan maksimum 256 bait dan tidak boleh mengandungi aksara null.",
-  "conversations.stateInvalid": "Status perbualan mesti aktif, diarkibkan atau terganggu."
+  "conversations.stateInvalid": "Status perbualan mesti aktif, diarkibkan atau terganggu.",
+  "conversations.questionInvalid": "Soalan atau jawapan tidak sah. Berikan soalan yang jelas, cadangan unik, atau jawapan maksimum 4096 bait UTF-8.",
+  "conversations.questionPending": "Soalan sedang menunggu jawapan atau giliran masih ditamatkan. Jangan teruskan operasi; tunggu pengguna atau cuba jawapan selepas giliran tamat.",
+  "conversations.questionAnswered": "Soalan ini sudah mempunyai jawapan berbeza. Muat semula untuk melihatnya; jangan hantar jawapan bercanggah.",
+  "conversations.approvalModeInvalid": "Pilih mod kelulusan request, assisted atau yolo."
 }

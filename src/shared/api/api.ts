@@ -1,6 +1,7 @@
 import { i18n } from "../i18n/i18n";
 import { localeHeaders } from "../i18n/locale";
 import { beginActivity } from "./progress";
+import { clearSession, deferUnauthorized, observeSession, restoreInitialSession, waitForSessionRenewal } from "./session";
 
 export interface AvatarValue {
   style: "portrait" | "adventurer" | "notionists" | "lorelei" | "pixel-art" | "pixel" | "initials" | "emoji" | "image";
@@ -23,6 +24,7 @@ export class ApiError extends Error {
 export async function localizedFetch(input: string, options: RequestInit = {}): Promise<Response> {
   const finish = beginActivity("request", input);
   try {
+    if (input.startsWith("/api/")) await waitForSessionRenewal(input.slice(4));
     // Raw streams finish their initial request at headers, without consuming the body.
     return await fetch(input, { ...options, headers: localeHeaders(options.headers) });
   } finally { finish(); }
@@ -37,6 +39,8 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 async function requestApi<T>(path: string, options: RequestInit): Promise<T> {
   let response: Response;
   try {
+    await waitForSessionRenewal(path);
+    options.signal?.throwIfAborted();
     const headers = new Headers(options.headers);
     if (!(options.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
     if (!headers.has("X-Ferry-Request")) headers.set("X-Ferry-Request", "1");
@@ -49,10 +53,14 @@ async function requestApi<T>(path: string, options: RequestInit): Promise<T> {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new ApiError(i18n.t("errors.network"), 0);
   }
-  if (response.status === 401 && path !== "/sessions")
+  if (response.status === 401 && (!options.method || options.method === "GET") && await restoreInitialSession(path))
+    return requestApi<T>(path, options);
+  if (response.status === 401 && path !== "/sessions" && !deferUnauthorized())
     window.dispatchEvent(new Event("ferry:unauthorized"));
   const plainText = response.headers?.get("content-type")?.startsWith("text/plain") ?? false;
   const data = plainText ? {} : await response.json().catch(() => ({}));
+  if (response.ok && path === "/me") observeSession(data.session);
+  if (response.ok && path === "/sessions" && options.method === "DELETE") clearSession();
   if (!response.ok) throw new ApiError(data.error ?? (plainText ? await plainError(response) : undefined) ?? failure(response.status), response.status);
   return data as T;
 }

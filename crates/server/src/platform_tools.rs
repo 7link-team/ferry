@@ -280,6 +280,7 @@ pub(crate) async fn dispatch_as_agent(
 
 pub(crate) async fn dispatch(s: &AppState, scope: Scope, mut call: Call) -> Result<Value> {
     call.validate()?;
+    let policy = crate::accounts::conversation_policy::Configuration::load(&s.db).await?;
     // The editor consumes the full catalog, but MCP must stay below its bounded
     // response size. Preserve explicit pagination while making an unfiltered
     // discovery call safe as well.
@@ -356,11 +357,20 @@ pub(crate) async fn dispatch(s: &AppState, scope: Scope, mut call: Call) -> Resu
         .and_then(|v| v.to_str().ok())
         .unwrap_or("application/octet-stream")
         .to_owned();
-    let bytes = match to_bytes(response.into_body(), 256 * 1024).await {
+    let bytes = match to_bytes(response.into_body(), policy.tool_response_limit_kib * 1024).await {
         Ok(bytes) => bytes,
         Err(_) => {
+            let reason = if call.read_only() {
+                "This was a read-only request; no write was performed. Request a smaller page, a specific node type, or a smaller file."
+            } else {
+                "A write may already have completed; read its state before retrying. Request a smaller response."
+            };
+            let error = format!(
+                "The response exceeds the configured tool limit of {} KiB. {reason}",
+                policy.tool_response_limit_kib
+            );
             return Ok(
-                json!({"status":413,"ok":false,"error":"The response exceeds the tool's 256 KiB limit. Reduce page_size or select a smaller file. A write may already have completed; inspect its state before retrying."}),
+                json!({"status":413,"ok":false,"error":error,"guidance":call_guidance(&call,413)}),
             );
         }
     };
@@ -371,9 +381,25 @@ pub(crate) async fn dispatch(s: &AppState, scope: Scope, mut call: Call) -> Resu
     redact(&mut body);
     let mut result = json!({"status":status.as_u16(),"ok":status.is_success(),"data":body});
     if !status.is_success() {
-        result["guidance"] = json!(guidance(status.as_u16()));
+        result["guidance"] = json!(call_guidance(&call, status.as_u16()));
     }
     Ok(result)
+}
+
+fn call_guidance(call: &Call, status: u16) -> &'static str {
+    let path = call.path.split('?').next().unwrap_or("");
+    let definition_write = (call.method == "POST" && path == "/workflows")
+        || (call.method == "PATCH"
+            && path
+                .strip_prefix("/workflows/")
+                .is_some_and(|id| !id.is_empty() && !id.contains('/')));
+    if matches!(status, 400 | 422) && definition_write {
+        return "The workflow was rejected; this request created no workflow or revision. GET /workflow-definition-format for the exact Schema and executable requests.create_minimal example. definition must be a JSON string whose object has engine=\"ferry-graph\", schema=1, nodes and connections (not edges). Inspect the failing field, correct it using the Schema/node contracts, and request a new approval for the corrected write. Never describe this HTTP rejection as approval pending.";
+    }
+    if status == 413 && path == "/workflow-node-catalog" {
+        return "Read a bounded catalog page with GET /workflow-node-catalog?page_size=5&offset=0, or use ?type=exact.node.type / ?search=keyword. Follow next_offset until null; both nodes and builtin_nodes contain contracts. Do not repeat the same oversized query. The limit is response bytes, not the model context window.";
+    }
+    guidance(status)
 }
 
 /// What an Agent should do about a failed call, so it fixes and retries
@@ -493,17 +519,33 @@ fn listing(scope: &Scope, search: &str, offset: usize, read_only: bool) -> Value
                     .unwrap_or("")
                     .to_ascii_lowercase()
                     .contains(&search)
+                || row["documentation"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_ascii_lowercase()
+                    .contains(&search)
         })
         .collect::<Vec<_>>();
     let total = rows.len();
     json!({"workspace_id":scope.workspace_id,"permissions":permissions,"total":total,"next_offset":(offset+20<total).then_some(offset+20),
         "operations":rows.into_iter().skip(offset).take(20).collect::<Vec<_>>(),
+        "usage":{
+            "invoke":{"tool":"ferry_request","arguments":{"method":"GET","path":"<discovered workspace-relative path>","body":"<JSON object for a write; omit for reads>"}},
+            "path":"Use a discovered operation. Replace {id} placeholders with real IDs returned by this workspace's APIs; URL-encode each substituted path/query value. Do not include /api, /workspaces/{workspace}, a hostname, or an arbitrary workspace_id.",
+            "query":"GET operation.query lists supported keys and sort options. Append them to path, e.g. ?page=1&page_size=20. Only send keys declared for that operation. Page lists use page/page_size; discovery and node catalogs use offset/next_offset. An absent query description is not permission to invent filters.",
+            "body":"For Json<T>, body is a JSON object matching definitions and documentation, not a serialized copy of a Rust struct. IDs are decimal strings; integer/bool values are JSON numbers/booleans. Option<T> fields can be omitted; serde defaults are server-owned. Respect declared enum/rename rules. Opaque fields such as workflow definition require their dedicated Schema, not guessed structure.",
+            "response":{"status":"Actual HTTP status; 2xx means the request was accepted, not that a queued execution finished.","ok":"Request success boolean; false is an error, never an empty list.","data":"The real API result. Lists include items/total; inspect all required pages.","error":"Failure reason; may also be inside data.error.","guidance":"Concrete recovery instructions. Read these before retrying."},
+            "writes":if read_only {"This unattended tool is read-only; no write or approval is available."} else {"Each non-GET request is reauthorized and follows the human-configured MCP approval mode. Required approvals permit an attempt; the platform_result proves the outcome. A failed request is not pending approval. Never replay an uncertain write without checking whether it already happened."},
+            "recovery":"Correct validation errors from the actual Schema/contracts. For permission or configuration blockers, explain the exact cause and available remedies. Ask the user when a product choice or access change is needed; allow custom instructions, pause or abandon. Do not repeatedly send an unchanged failing request or claim completion when work remains.",
+            "workflow_start":{"tool":"ferry_request","arguments":{"method":"GET","path":"/workflow-definition-format"}},
+            "large_results":"The MCP gateway bounds response bytes independently of model context size. Read smaller pages or exact node contracts; use file download/preview links for files instead of loading their entire contents."
+        },
         "ui_routes":{
             "workflow":format!("/workspaces/{}/workflows/{{id}}",scope.workspace_id),
             "workflow_execution":format!("/workspaces/{}/workflows/{{workflow_id}}?execution={{id}}",scope.workspace_id),
             "instructions":"Use these UI routes for user-facing links, prefixed with the user's current UI locale, e.g. /zh-CN. API /api URLs return JSON and must not be labeled as detail pages. Get workflow_id from the execution detail response. Keep authenticated file preview/download URLs unchanged."
         },
-        "instructions":"Paths are relative to this conversation's workspace. Call ferry_request using the documented method/path/body. The normal API enforces each operation's permissions, ownership and validation. GET list responses contain total; never count only the first page. Writes require a user confirmation and fresh authorization. A 403 is a permission denial, not an empty list. Never infer platform records by scanning the Runner filesystem."})
+        "instructions":"Paths are relative to this conversation's workspace. Call ferry_request using the documented method/path/body. The normal API enforces each operation's permissions, ownership and validation. GET list responses contain total; never count only the first page. Writes follow the human-configured MCP approval mode and fresh authorization. A 403 is a permission denial, not an empty list. Never infer platform records by scanning the Runner filesystem."})
 }
 
 #[cfg(test)]

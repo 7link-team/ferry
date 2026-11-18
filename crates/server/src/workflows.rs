@@ -318,6 +318,10 @@ pub async fn get(
     Ok(Json(json(row)))
 }
 
+/// Create workflows using a JSON body with `name` and `definition` (a JSON string,
+/// not an object). First GET /workflow-definition-format for the graph Schema,
+/// a valid create request and publish/schedule/run instructions. Never guess the
+/// envelope or use `edges`: graph connections are in `connections`.
 pub async fn create(
     State(s): State<AppState>,
     scope: Scope,
@@ -393,6 +397,9 @@ pub async fn create(
     Ok((StatusCode::CREATED, Json(json(row))))
 }
 
+/// Update workflows with the latest `version` from GET /workflows/{id}; send
+/// only changed fields. `definition` is a JSON string matching the Schema from
+/// GET /workflow-definition-format. Saving edits creates a draft, not a release.
 pub async fn update(
     State(s): State<AppState>,
     scope: Scope,

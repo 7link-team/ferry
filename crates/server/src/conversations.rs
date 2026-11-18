@@ -1,10 +1,12 @@
 //! Private conversations; HTTP owns authorization, the scheduler owns execution.
 mod appearance;
+mod approval;
 mod files;
 mod groups;
 mod interactions;
 pub(crate) mod messages;
 mod placement;
+mod questions;
 pub(crate) mod run;
 #[cfg(test)]
 mod tests;
@@ -25,6 +27,7 @@ use axum::{
     http::StatusCode,
     routing::{get, post},
 };
+use futures::TryStreamExt;
 pub use run::scheduler;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
@@ -53,7 +56,15 @@ pub fn routes() -> Router<AppState> {
             post(placement::rebind),
         )
         .route("/{workspace}/conversations/{id}/events", get(history))
+        .route(
+            "/{workspace}/conversations/{id}/approval-mode",
+            axum::routing::put(approval::update),
+        )
         .route("/{workspace}/conversations/{id}/turns", post(send))
+        .route(
+            "/{workspace}/conversations/{id}/turns/{turn}/question-answers",
+            post(questions::answer),
+        )
         .route(
             "/{workspace}/conversations/{id}/turns/{turn}/cancellations",
             post(cancel),
@@ -186,6 +197,8 @@ pub(super) async fn usable(
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Configuration {
+    #[serde(default = "approval::default_mode")]
+    pub approval_mode: String,
     pub runtime: ferry_protocol::agent::Runtime,
     pub cwd: String,
     pub host_id: Id,
@@ -254,6 +267,7 @@ impl Configuration {
     }
     pub(crate) fn from_agent(a: &ai_agents::Model) -> Result<Self> {
         Ok(Self {
+            approval_mode: approval::default_mode(),
             runtime: ferry_protocol::agent::Runtime::parse(&a.runtime).ok_or_else(invalid)?,
             cwd: a.cwd.clone(),
             host_id: a.host_id.into(),
@@ -489,7 +503,10 @@ async fn create(
     }
     let id = s.next_id()?;
     // Creating only creates: the host is chosen at each Agent's first message.
-    let config = prepare_execution(&s, &scope, &agent, &body).await?;
+    let mut config = prepare_execution(&s, &scope, &agent, &body).await?;
+    config.approval_mode = crate::accounts::conversation_policy::Configuration::load(&s.db)
+        .await?
+        .default_approval_mode;
     let extra = groups::prepare(&s, &scope, &body, &agent, &config).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     if available(&tx, &scope, agent_id).await?.revision_id != agent.revision_id {
@@ -845,16 +862,30 @@ async fn history(
     if cursor.after < 0 {
         return Err(invalid());
     }
-    let rows = events::Entity::find()
+    let mut stream = events::Entity::find()
         .filter(events::Column::ConversationId.eq(id))
         .filter(events::Column::Sequence.gt(cursor.after))
         .order_by_asc(events::Column::Sequence)
         .limit(200)
-        .all(&s.db)
+        .stream(&s.db)
         .await?;
+    let mut rows = Vec::new();
+    let mut bytes = 0;
+    let mut has_more = false;
+    while let Some(row) = stream.try_next().await? {
+        // Keep each event intact. A single large event is delivered alone;
+        // subsequent events are fetched using the existing sequence cursor.
+        if !rows.is_empty() && bytes + row.payload.len() > 4 * 1024 * 1024 {
+            has_more = true;
+            break;
+        }
+        bytes += row.payload.len();
+        rows.push(row);
+        has_more = rows.len() == 200;
+    }
     Ok(Json(
         json!({"items":rows.iter().map(|r|json!({"sequence":r.sequence,"turn_id":Id::from(r.turn_id),"event":serde_json::from_str::<Value>(&r.payload).unwrap_or(Value::Null),"created_at":r.created_at})).collect::<Vec<_>>(),
-        "next":rows.last().map_or(cursor.after,|r|r.sequence),"has_more":rows.len()==200}),
+        "next":rows.last().map_or(cursor.after,|r|r.sequence),"has_more":has_more}),
     ))
 }
 async fn find_turn(

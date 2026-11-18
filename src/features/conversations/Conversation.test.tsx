@@ -134,11 +134,12 @@ it("folds settled tool calls into one audit section and keeps pending approvals 
       state=next;const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
       try {
         await act(()=>root.render(<Conversation workspace="1" id="2" permissions={new Set(['conversations.read','conversations.run'])} />));
-        const audit=host.querySelector('details[data-execution-details]') as HTMLDetailsElement;
-        expect(audit).not.toBeNull();expect(audit.open).toBe(false);
+        const trigger=host.querySelector('button[data-execution-details]') as HTMLButtonElement;
+        expect(trigger).not.toBeNull();expect(document.querySelector('[data-execution-panel]')).toBeNull();
         // Closed details build nothing; opening them renders the audit.
-        expect(audit.textContent).not.toContain(conversationText('decisionAllowed'));
-        await act(async()=>{audit.open=true;audit.dispatchEvent(new Event('toggle'));});
+        expect(trigger.textContent).not.toContain(conversationText('decisionAllowed'));
+        await act(async()=>trigger.click());
+        const audit=document.querySelector('[data-execution-panel]')!;
         expect(audit.textContent).toContain('/workflows');
         expect(audit.textContent).toContain(conversationText('decisionAllowed'));
         const approvals=[...host.querySelectorAll('button')].filter(button=>button.textContent===conversationText('allow'));

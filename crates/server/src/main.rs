@@ -37,6 +37,7 @@ mod resources;
 mod snowflake;
 mod state;
 mod templates;
+mod tokens;
 mod upstream;
 mod variables;
 mod vault;
@@ -391,6 +392,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/registration-code", post(accounts::mail::request_code))
         .route("/api/platform/mail-test", post(accounts::mail::test))
         .route("/api/sessions", post(accounts::auth::login).delete(accounts::auth::logout))
+        .route("/api/sessions/refresh", post(accounts::auth::refresh))
         .route("/api/sessions/challenge", post(accounts::login_guard::challenge))
         .route("/api/sessions/challenge/verify", post(accounts::login_guard::verify))
         .route("/api/sessions/otp", post(accounts::otp::login))

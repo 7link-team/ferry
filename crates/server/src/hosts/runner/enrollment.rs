@@ -12,16 +12,7 @@ const TOKEN_MINUTES_RANGE: std::ops::RangeInclusive<i64> = 5..=1440;
 /// chose; stretching a random 256-bit secret buys nothing and would be paid on
 /// every reconnect. There is no timing concern in comparing the hashes either:
 /// matching one means finding a preimage, not guessing it byte by byte.
-pub fn fingerprint(secret: &str) -> String {
-    hex::encode(Sha256::digest(secret.as_bytes()))
-}
-
-pub fn secret() -> String {
-    use rand::Rng;
-    let mut bytes = [0u8; 32];
-    rand::thread_rng().fill(&mut bytes[..]);
-    hex::encode(bytes)
-}
+pub use crate::tokens::{fingerprint, secret};
 
 // ------------------------------------------------------------ 注册令牌
 

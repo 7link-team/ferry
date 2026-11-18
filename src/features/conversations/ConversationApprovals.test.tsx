@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Conversation } from "./Conversation";
-import { describeOperation, EndedDecisionCard, ExecutionTimeline } from "./TurnActivity";
+import { describeOperation, EndedDecisionCard, ExecutionTimeline, PendingDecisionCard, QuestionCard } from "./TurnActivity";
 import { LONG_TEXT_LIMIT } from "./LazyDetails";
 import * as apiModule from "../../shared/api/api";
 import { commonText } from "../../shared/i18n/i18n";
@@ -47,6 +47,67 @@ afterEach(async () => {
 });
 const permissions = new Set(["conversations.read", "conversations.run"]);
 const buttons = (text: string) => [...host.querySelectorAll("button")].filter((button) => button.textContent?.trim() === text);
+
+it("keeps approval summaries and raw controls in the same header row", async () => {
+  for (const ended of [false, true]) {
+    await act(async () => root.render(ended
+      ? <EndedDecisionCard request="r" decision={createWorkflow} canAct busy={false} onContinue={() => {}} />
+      : <PendingDecisionCard request="r" decision={createWorkflow} canDecide ownerName="Ann" busy={false} onDecide={() => {}} />));
+    const raw = host.querySelector("[data-raw-toggle]")!;
+    expect(raw.parentElement!.querySelector("[data-operation-title]")).not.toBeNull();
+  }
+});
+
+it("labels a user question as a response and jumps directly to its card", async () => {
+  const question = { tool: "ferry_ask_user", input: { title: "Need input", question: "What next?" }, decision: null, dispatching: false, sent: false };
+  const row = conversation([turn("10", { state: "succeeded", decisions: { "question-1": question } })], [chat("9", "user", "10")]);
+  vi.spyOn(apiModule, "api").mockImplementation(async (path) => String(path).includes("/events?")
+    ? { items: [], next: 0, has_more: false } as never : structuredClone(row) as never);
+  await act(async () => root.render(<Conversation workspace="1" id="2" permissions={permissions} />));
+  const card = host.querySelector('[data-user-question="question-1"]')!;
+  expect(card).not.toBeNull();
+  const banner = host.querySelector("[data-pending-banner]")!;
+  expect(banner.textContent).toContain(commonText("conversations:pendingResponseBanner", { count: 1 }));
+  const scrolled = vi.fn();
+  card.scrollIntoView = scrolled;
+  await act(async () => { banner.querySelector<HTMLButtonElement>("button")!.click(); await new Promise(resolve => requestAnimationFrame(resolve)); });
+  expect(scrolled).toHaveBeenCalled();
+});
+
+it("accepts a custom question response without any fixed choice and preserves it on failure", async () => {
+  const answer = vi.fn().mockRejectedValueOnce(new Error("Offline")).mockResolvedValue(undefined);
+  const decision = { tool: "ferry_ask_user", input: { title: "Repository unavailable", question: "How should I proceed?", options: [{ id: "repair", label: "Repair connection" }], recommended_option_id: "repair" }, decision: null, dispatching: false, sent: false };
+  await act(async () => root.render(<QuestionCard request="q" decision={decision} canAnswer busy={false} executing={false} onAnswer={answer} />));
+  const suggested = host.querySelector<HTMLButtonElement>('[aria-pressed="false"]')!;
+  await act(async () => suggested.click());
+  expect(suggested.getAttribute("aria-pressed")).toBe("true");
+  await act(async () => suggested.click());
+  expect(suggested.getAttribute("aria-pressed")).toBe("false");
+  const input = host.querySelector("textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "Use my own alternative, not a fixed suggestion.");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const submit = () => act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+  await submit();
+  expect(host.textContent).toContain("Offline");
+  expect(input.value).toBe("Use my own alternative, not a fixed suggestion.");
+  await submit();
+  expect(answer).toHaveBeenLastCalledWith({ action: "continue", answer: input.value });
+});
+
+it("lets users pause or abandon without selecting anything or typing an answer", async () => {
+  const answer = vi.fn().mockResolvedValue(undefined);
+  const decision = { tool: "ferry_ask_user", input: { title: "Need input", question: "What next?" }, decision: null, dispatching: false, sent: false };
+  await act(async () => root.render(<QuestionCard request="q" decision={decision} canAnswer busy={false} executing={false} onAnswer={answer} />));
+  await act(async () => buttons(conversationText("questionPause"))[0]!.click());
+  expect(answer).toHaveBeenLastCalledWith({ action: "pause", answer: "" });
+  await act(async () => buttons(conversationText("questionAbandon"))[0]!.click());
+  expect(answer).toHaveBeenLastCalledWith({ action: "abandon", answer: "" });
+  await act(async () => root.render(<QuestionCard request="q" decision={decision} canAnswer={false} busy={false} executing={false} onAnswer={answer} />));
+  expect(host.querySelector("textarea")).toBeNull();
+  expect(host.textContent).toContain(conversationText("questionOwnerOnly"));
+});
 
 it("shows a waiting approval inline with a readable summary even before any reply text", async () => {
   const row = conversation([turn("10", { decisions: { "req-1": createWorkflow } })], [chat("9", "user", "10")]);
@@ -206,9 +267,10 @@ it.each(["private", "group"])("includes pending, historical undecided and failed
   expect(host.querySelectorAll("[data-ended-decision]")).toHaveLength(1);
   await act(async () => buttons(`${conversationText("pendingFilter")} · 3`)[0]!.click());
   expect([...host.querySelectorAll("article[data-turn-id]")].map((item) => item.getAttribute("data-turn-id"))).toEqual(["10", "20", "30"]);
-  const details = host.querySelector('article[data-turn-id="30"] details[data-execution-details]') as HTMLDetailsElement;
-  expect(details).not.toBeNull();
-  await act(async () => { details.open = true; details.dispatchEvent(new Event("toggle")); });
+  const trigger = host.querySelector('article[data-turn-id="30"] button[data-execution-details]') as HTMLButtonElement;
+  expect(trigger).not.toBeNull();
+  await act(async () => trigger.click());
+  const details = document.querySelector("[data-execution-panel]")!;
   expect(details.textContent).toContain("PATCH /workflows/7");
   expect(details.textContent).toContain("409");
   expect(details.textContent).toContain("Version conflict");

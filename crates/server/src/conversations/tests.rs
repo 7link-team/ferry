@@ -4,6 +4,50 @@ use ferry_protocol::agent::{Event, Outcome};
 use sea_orm::TransactionTrait;
 
 #[tokio::test]
+async fn approval_mode_updates_require_the_human_owner_current_version_and_an_idle_conversation() {
+    let (_dir, s, id) = seeded().await;
+    let c = find(&s.db, &admin(1), id).await.unwrap();
+    let update = |version: i64| crate::platform_tools::Call {
+        method: "PUT".into(),
+        path: format!("/conversations/{id}/approval-mode"),
+        body: json!({"mode":"assisted","version":version}),
+        ..Default::default()
+    };
+    let foreign = crate::platform_tools::dispatch(&s, admin(2), update(c.version))
+        .await
+        .unwrap();
+    assert_eq!(foreign["status"], 404);
+    let agent = crate::platform_tools::dispatch_as_agent(
+        &s,
+        admin(1),
+        update(c.version),
+        c.agent_id.into(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(agent["status"], 403);
+    let saved = crate::platform_tools::dispatch(&s, admin(1), update(c.version))
+        .await
+        .unwrap();
+    assert_eq!(saved["status"], 200, "{saved}");
+    let current = find(&s.db, &admin(1), id).await.unwrap();
+    assert_eq!(approval::mode(&current.config).unwrap(), "assisted");
+    assert_eq!(
+        serde_json::from_str::<Value>(&current.config).unwrap()["permission"],
+        serde_json::from_str::<Value>(&c.config).unwrap()["permission"]
+    );
+    let stale = crate::platform_tools::dispatch(&s, admin(1), update(c.version))
+        .await
+        .unwrap();
+    assert_eq!(stale["status"], 409);
+    sent(&s, id, "approval-running").await;
+    let busy = crate::platform_tools::dispatch(&s, admin(1), update(current.version))
+        .await
+        .unwrap();
+    assert_eq!(busy["status"], 409);
+}
+
+#[tokio::test]
 async fn audit_conversation_update_records_committed_before_after_and_rejects_stale_write() {
     let (_dir, s, id) = seeded().await;
     let old = find(&s.db, &admin(1), id).await.unwrap();
@@ -1492,6 +1536,7 @@ fn a_turn_labels_agent_instructions_apart_from_the_users_own_words() {
     ]))
     .unwrap();
     let prompt = run::turn_prompt(
+        crate::accounts::conversation_policy::DEFAULT_INSTRUCTIONS,
         "Do not modify configuration or send messages.",
         "Create the weekly report workflow.",
         &attachments,
@@ -1516,7 +1561,8 @@ fn a_turn_labels_agent_instructions_apart_from_the_users_own_words() {
     assert!(message.contains("<attachment name=\"report.pdf\""));
     // How platform writes work, and that rules are never the user's words.
     for rule in [
-        "shown to the user as an approval card",
+        "human-configured MCP approval mode",
+        "Required approvals appear as cards",
         "re-check with ferry_discover",
         "workflows.create",
         "never present them as something the user said or set",
@@ -1524,7 +1570,12 @@ fn a_turn_labels_agent_instructions_apart_from_the_users_own_words() {
         assert!(prompt.contains(rule), "{rule}");
     }
     // No configured instructions: no empty block; an attachment-only message is still delimited.
-    let bare = run::turn_prompt("  ", "", &[]);
+    let bare = run::turn_prompt(
+        crate::accounts::conversation_policy::DEFAULT_INSTRUCTIONS,
+        "  ",
+        "",
+        &[],
+    );
     assert!(!bare.contains("<agent_instructions"));
     assert!(
         bare.ends_with("<user_message>\nA message with attachments was sent.\n</user_message>")

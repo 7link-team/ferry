@@ -174,5 +174,8 @@
   "mail.templateCodeMissing": "The verification code mail must include {{code}} in its body.",
   "notification.testSubject": "Ferry channel test",
   "notification.testBody": "This is a test message from Ferry confirming that the channel \"{channel}\" can deliver notifications.",
-  "notification.smsTestUnsupported": "SMS channels send approved templates with parameters; test this channel with Send, filling in a template's parameters."
+  "notification.smsTestUnsupported": "SMS channels send approved templates with parameters; test this channel with Send, filling in a template's parameters.",
+  "platform.conversationInvalid": "Invalid conversation policy: instructions up to 16 KiB, MCP response limit 256–8192 KiB, approval mode request, assisted or yolo.",
+  "auth.sessionPolicyInvalid": "Use positive whole minutes/days, with access no longer than refresh validity and an expiry date within the supported range.",
+  "auth.sessionAutoRenewDisabled": "Automatic session renewal is disabled. Sign in again after access expires."
 }

@@ -40,6 +40,27 @@ beforeEach(() => {
   } })));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+it.each(["new", "42/edit"])("preserves a workspace form draft after renewal: %s", async mode => {
+  required = false;
+  permissions = ["variables.read", "variables.create", "variables.update"];
+  const previous = fetch;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
+    if (url === "/api/workspaces/2/variables/42") return { ok: true, status: 200, json: async () => ({id:"42",name:"existing",kind:"secret",scope:"global",scope_ref:"0",value:"",description:"saved",version:1}) };
+    const response = await previous(url, options);
+    if (url === "/api/me") return { ok: true, status: 200, json: async () => structuredClone(await response.json()) };
+    return response;
+  }));
+  history.replaceState({}, "", `/zh-CN/workspaces/2/variables/${mode}`);
+  await act(async () => root.render(<App />));
+  const field = host.querySelector<HTMLTextAreaElement>('textarea[name="description"]')!;
+  expect(field).toBeTruthy();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "unsaved draft");
+    field.dispatchEvent(new Event("input", {bubbles:true}));
+  });
+  await act(async () => window.dispatchEvent(new Event("session:renewed")));
+  expect(host.querySelector<HTMLTextAreaElement>('textarea[name="description"]')!.value).toBe("unsaved draft");
+});
 it("keeps shared branding and space selection before account actions in platform chrome", async () => {
   required = false;
   const previous = fetch;

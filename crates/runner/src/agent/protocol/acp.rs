@@ -77,14 +77,16 @@ impl Protocol {
                         [
                             "ferry_discover",
                             "ferry_request",
+                            "ferry_ask_user",
                             "mcp__ferry__ferry_discover",
                             "mcp__ferry__ferry_request",
+                            "mcp__ferry__ferry_ask_user",
                         ]
                         .contains(&tool.as_str())
                     };
                     if platform {
                         // Approve only this transport call. The server independently authorizes
-                        // its operation and obtains the user's confirmation before any write.
+                        // its operation and applies the human-configured approval policy.
                         let once = params["options"]
                             .as_array()
                             .and_then(|options| options.iter().find(|o| o["kind"] == "allow_once"))

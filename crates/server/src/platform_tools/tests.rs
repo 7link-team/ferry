@@ -7,6 +7,196 @@ use crate::{
 use axum::extract::State;
 use sea_orm::{ActiveModelTrait, IntoActiveModel};
 
+#[tokio::test]
+async fn configured_tool_limit_accepts_large_results_and_distinguishes_read_failures() {
+    use crate::entities::{platform_state, workflows};
+    use sea_orm::{ColumnTrait, QueryFilter, sea_query::Expr};
+    let (_dir, s) = setup().await;
+    let created=dispatch(&s,admin(1),Call {method:"POST".into(),path:"/workflows".into(),
+        body:json!({"name":"Transport fixture","definition":"{\"engine\":\"ferry-graph\",\"schema\":1,\"nodes\":[],\"connections\":[]}"}),..Default::default()}).await.unwrap();
+    assert_eq!(created["status"], 201, "{created}");
+    let id: Id = serde_json::from_value(created["data"]["id"].clone()).unwrap();
+    let fetch = || Call {
+        method: "GET".into(),
+        path: format!("/workflows/{id}"),
+        ..Default::default()
+    };
+    let text = "x".repeat(600 * 1024);
+    workflows::Entity::update_many()
+        .col_expr(workflows::Column::Definition, Expr::value(text.clone()))
+        .filter(workflows::Column::Id.eq(id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let accepted = dispatch(&s, admin(1), fetch()).await.unwrap();
+    assert_eq!(accepted["status"], 200, "{accepted}");
+    assert_eq!(
+        accepted["data"]["definition"].as_str().unwrap().len(),
+        text.len()
+    );
+    let text = "x".repeat(2 * 1024 * 1024);
+    workflows::Entity::update_many()
+        .col_expr(workflows::Column::Definition, Expr::value(text.clone()))
+        .filter(workflows::Column::Id.eq(id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let rejected = dispatch(&s, admin(1), fetch()).await.unwrap();
+    assert_eq!(rejected["status"], 413, "{rejected}");
+    assert!(rejected["error"].as_str().unwrap().contains("read-only"));
+    assert!(!rejected["error"].as_str().unwrap().contains("write may"));
+    platform_state::Entity::update_many()
+        .col_expr(
+            platform_state::Column::ConversationConfig,
+            Expr::value(json!({"tool_response_limit_kib":4096}).to_string()),
+        )
+        .filter(platform_state::Column::Id.eq(1))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let accepted = dispatch(&s, admin(1), fetch()).await.unwrap();
+    assert_eq!(accepted["status"], 200);
+    assert_eq!(accepted["data"]["definition"].as_str().unwrap(), text);
+    // Exercise the configured maximum with escaping overhead, rather than only
+    // counting characters in a plain ASCII result.
+    platform_state::Entity::update_many()
+        .col_expr(
+            platform_state::Column::ConversationConfig,
+            Expr::value(json!({"tool_response_limit_kib":8192}).to_string()),
+        )
+        .filter(platform_state::Column::Id.eq(1))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let text = "\\".repeat(3 * 1024 * 1024);
+    workflows::Entity::update_many()
+        .col_expr(workflows::Column::Definition, Expr::value(text.clone()))
+        .filter(workflows::Column::Id.eq(id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let accepted = dispatch(&s, admin(1), fetch()).await.unwrap();
+    assert_eq!(accepted["status"], 200, "{}", accepted["error"]);
+    assert_eq!(accepted["data"]["definition"].as_str().unwrap(), text);
+    let text = "x".repeat(8 * 1024 * 1024);
+    workflows::Entity::update_many()
+        .col_expr(workflows::Column::Definition, Expr::value(text))
+        .filter(workflows::Column::Id.eq(id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let rejected = dispatch(&s, admin(1), fetch()).await.unwrap();
+    assert_eq!(rejected["status"], 413);
+    assert!(rejected["error"].as_str().unwrap().contains("read-only"));
+}
+
+#[test]
+fn workflow_discovery_explains_parameters_and_finds_authoring_contracts() {
+    let mut operations = Vec::new();
+    let mut offset = 0;
+    loop {
+        let page = catalogue(&admin(1), "workflows", offset);
+        assert!(page["usage"]["response"].is_object());
+        assert!(serde_json::to_vec(&page).unwrap().len() < 256 * 1024);
+        operations.extend(page["operations"].as_array().unwrap().clone());
+        let Some(next) = page["next_offset"].as_u64() else {
+            break;
+        };
+        offset = next as usize;
+    }
+    for path in ["/workflow-definition-format", "/workflow-node-catalog"] {
+        assert!(
+            operations.iter().any(|operation| operation["path"] == path),
+            "missing {path}"
+        );
+    }
+    let create = operations
+        .iter()
+        .find(|op| op["path"] == "/workflows" && op["method"] == "POST")
+        .unwrap();
+    assert!(
+        create["documentation"]
+            .as_str()
+            .unwrap()
+            .contains("/workflow-definition-format")
+    );
+    let list = operations
+        .iter()
+        .find(|op| op["path"] == "/workflows" && op["method"] == "GET")
+        .unwrap();
+    assert!(
+        list["query"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field["name"] == "page_size")
+    );
+}
+
+#[tokio::test]
+async fn reported_invalid_workflow_returns_recovery_instructions_without_creating_it() {
+    let (_dir, s) = setup().await;
+    let rejected = dispatch(
+        &s,
+        admin(1),
+        Call {
+            method: "POST".into(),
+            path: "/workflows".into(),
+            body: json!({"name":"Weekly insights","definition":"{\"nodes\":[],\"edges\":[]}"}),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(rejected["status"], 400, "{rejected}");
+    let guidance = rejected["guidance"].as_str().unwrap();
+    assert!(
+        guidance.contains("/workflow-definition-format"),
+        "{guidance}"
+    );
+    assert!(guidance.contains("connections"), "{guidance}");
+    let list = dispatch(
+        &s,
+        admin(1),
+        Call {
+            method: "GET".into(),
+            path: "/workflows".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(list["data"]["total"], 0);
+    let format = dispatch(
+        &s,
+        admin(1),
+        Call {
+            method: "GET".into(),
+            path: "/workflow-definition-format".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let schedule: crate::cron_jobs::Body =
+        serde_json::from_value(format["data"]["requests"]["schedule"]["body"].clone()).unwrap();
+    assert!(!schedule.name.is_empty());
+    assert_eq!(schedule.action, "workflow");
+    let rules = format["data"]["rules"].to_string();
+    assert!(
+        rules.contains("downstream_id") && rules.contains("downstream_kind"),
+        "{rules}"
+    );
+    assert!(
+        rules.contains("assisted") && rules.contains("yolo"),
+        "{rules}"
+    );
+    let call: Call =
+        serde_json::from_value(format["data"]["requests"]["create_minimal"].clone()).unwrap();
+    let created = dispatch(&s, admin(1), call).await.unwrap();
+    assert_eq!(created["status"], 201, "{created}");
+}
+
 pub(crate) async fn setup() -> (tempfile::TempDir, AppState) {
     let (dir, s) = base_setup().await;
     for id in [1, 2] {

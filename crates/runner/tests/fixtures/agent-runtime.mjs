@@ -3,6 +3,11 @@ import readline from 'node:readline';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 const mode = process.argv[2];
+if (process.env.FERRY_PLATFORM_BRIDGE_URL) {
+  for (const name of ['ferry_discover','ferry_request','ferry_ask_user']) {
+    assert(process.argv.includes(`mcp_servers.ferry.tools.${name}.approval_mode="approve"`), `${name} transport must not need a second native approval`);
+  }
+}
 const send = value => process.stdout.write(JSON.stringify(value) + '\n');
 const pending = setInterval(() => {}, 1000);
 if (mode === 'eof') process.exit(0);

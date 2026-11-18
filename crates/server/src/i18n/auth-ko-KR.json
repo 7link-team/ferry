@@ -174,5 +174,8 @@
   "mail.templateCodeMissing": "인증 코드 메일 본문에는 {{code}}가 포함되어야 합니다.",
   "notification.testSubject": "Ferry 채널 테스트",
   "notification.testBody": "Ferry에서 보낸 테스트 메시지입니다. 채널 \"{channel}\"이(가) 알림을 전달할 수 있는지 확인합니다.",
-  "notification.smsTestUnsupported": "SMS 채널은 매개변수가 있는 승인된 템플릿만 보낼 수 있습니다. '보내기'에서 템플릿 매개변수를 입력해 테스트하세요."
+  "notification.smsTestUnsupported": "SMS 채널은 매개변수가 있는 승인된 템플릿만 보낼 수 있습니다. '보내기'에서 템플릿 매개변수를 입력해 테스트하세요.",
+  "platform.conversationInvalid": "대화 정책이 유효하지 않습니다. 지침은 최대 16 KiB, 응답 한도는 256–8192 KiB, 모드는 request, assisted 또는 yolo입니다.",
+  "auth.sessionPolicyInvalid": "분과 일은 양의 정수여야 하고 접근 기간은 갱신 기간 이하여야 하며 지원되는 만료 날짜를 사용해야 합니다.",
+  "auth.sessionAutoRenewDisabled": "세션 자동 갱신이 꺼져 있습니다. 접근 만료 후 다시 로그인하세요."
 }

@@ -174,5 +174,8 @@
   "mail.templateCodeMissing": "验证码邮件的正文必须包含 {{code}}。",
   "notification.testSubject": "Ferry 渠道测试",
   "notification.testBody": "这是一条来自 Ferry 的测试消息，用于确认渠道“{channel}”可以正常投递通知。",
-  "notification.smsTestUnsupported": "短信渠道只能发送带参数的已审核模板；请使用“发送”并填写模板参数来测试。"
+  "notification.smsTestUnsupported": "短信渠道只能发送带参数的已审核模板；请使用“发送”并填写模板参数来测试。",
+  "platform.conversationInvalid": "会话策略无效：注入内容最多 16 KiB，MCP 响应上限为 256–8192 KiB，审批模式须为 request、assisted 或 yolo。",
+  "auth.sessionPolicyInvalid": "访问有效期与刷新有效期必须为正整数，访问有效期不能超过刷新有效期，且到期时间须在支持范围内。",
+  "auth.sessionAutoRenewDisabled": "自动续期已关闭，访问凭证到期后请重新登录。"
 }

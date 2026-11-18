@@ -1521,7 +1521,7 @@ mod tests {
             let request = |method, path: &str| {
                 let mut request = client.request(method, format!("{url}{path}")).header(
                     header::COOKIE,
-                    format!("{}={token}", crate::accounts::auth::COOKIE),
+                    format!("{}={}", crate::accounts::auth::COOKIE, token.token),
                 );
                 if let Some(locale) = locale {
                     request = request.header(header::ACCEPT_LANGUAGE, locale);

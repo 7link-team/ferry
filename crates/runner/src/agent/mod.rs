@@ -20,8 +20,10 @@ use tokio::{
     sync::{mpsc, watch},
 };
 
-const LINE_LIMIT: usize = 1024 * 1024;
-const OUTPUT_LIMIT: usize = 16 * 1024 * 1024;
+// CLIs can place a complete multi-MiB tool result on one JSON line.
+// Transport buffers stay bounded independently of the model context window.
+const LINE_LIMIT: usize = ferry_protocol::agent::MAX_NATIVE_LINE_BYTES;
+const OUTPUT_LIMIT: usize = ferry_protocol::agent::MAX_TURN_OUTPUT_BYTES;
 
 /// A stable, isolated directory under this Runner instance's private state.
 /// Keys are server-issued conversation/Agent IDs, never filesystem paths.
@@ -114,12 +116,13 @@ fn validate(request: &Request) -> Result<()> {
 
 /// Claude's `--tools` and `--allowedTools` values for a request.
 fn claude_tools(request: &Request) -> (&'static str, &'static str) {
-    const PLATFORM: &str = "mcp__ferry__ferry_discover,mcp__ferry__ferry_request";
+    const PLATFORM: &str =
+        "mcp__ferry__ferry_discover,mcp__ferry__ferry_request,mcp__ferry__ferry_ask_user";
     if request.write_workdir {
         return if request.platform_tools {
             (
-                "Read,Glob,Grep,Edit,Write,mcp__ferry__ferry_discover,mcp__ferry__ferry_request",
-                "Read(./**),Edit(./**),Write(./**),mcp__ferry__ferry_discover,mcp__ferry__ferry_request",
+                "Read,Glob,Grep,Edit,Write,mcp__ferry__ferry_discover,mcp__ferry__ferry_request,mcp__ferry__ferry_ask_user",
+                "Read(./**),Edit(./**),Write(./**),mcp__ferry__ferry_discover,mcp__ferry__ferry_request,mcp__ferry__ferry_ask_user",
             )
         } else {
             (
@@ -133,7 +136,7 @@ fn claude_tools(request: &Request) -> (&'static str, &'static str) {
     } else if request.permission == Permission::ReadOnly {
         PLATFORM
     } else {
-        "Read,Glob,Grep,Edit,Write,Bash,mcp__ferry__ferry_discover,mcp__ferry__ferry_request"
+        "Read,Glob,Grep,Edit,Write,Bash,mcp__ferry__ferry_discover,mcp__ferry__ferry_request,mcp__ferry__ferry_ask_user"
     };
     (tools, if request.platform_tools { PLATFORM } else { "" })
 }
@@ -611,13 +614,17 @@ async fn run_command(
                     ),
                     ("required", serde_json::json!(true)),
                     // Only the Ferry transport is pre-approved. The server performs
-                    // live RBAC and its own one-time confirmation for every write.
+                    // live RBAC and the human-configured approval policy for writes.
                     (
                         "tools.ferry_discover.approval_mode",
                         serde_json::json!("approve"),
                     ),
                     (
                         "tools.ferry_request.approval_mode",
+                        serde_json::json!("approve"),
+                    ),
+                    (
+                        "tools.ferry_ask_user.approval_mode",
                         serde_json::json!("approve"),
                     ),
                     ("tool_timeout_sec", serde_json::json!(3600)),

@@ -3,6 +3,16 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Native lines can echo JSON tool results as escaped MCP text. Keep room for
+/// that envelope without allocating a whole turn's output in one message.
+pub const MAX_NATIVE_LINE_BYTES: usize = 32 * 1024 * 1024;
+/// Both peers account cumulative output with the same budget.
+pub const MAX_TURN_OUTPUT_BYTES: usize = 1024 * 1024 * 1024;
+/// Normalized events leave framing headroom under the cluster's 16 MiB cap.
+pub const MAX_EVENT_BYTES: usize = 12 * 1024 * 1024;
+/// Includes JSON-RPC/HTTP envelopes around the API's bounded request body.
+pub const MAX_PLATFORM_CALL_BYTES: usize = 2 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Runtime {

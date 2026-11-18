@@ -985,7 +985,8 @@ pub fn routes() -> Router<AppState> {
             get(definition_format),
         )
 }
-/// The exact envelope of a workflow definition as POST/PATCH /workflows
+/// How to create, edit, publish, schedule and run workflows. The exact envelope
+/// of a workflow definition as POST/PATCH /workflows
 /// validate it, with one complete valid example, so an Agent never guesses
 /// field names (e.g. `version` or `edges`).
 async fn definition_format(scope: Scope, Path(_): Path<String>) -> Result<Json<Value>> {
@@ -993,7 +994,35 @@ async fn definition_format(scope: Scope, Path(_): Path<String>) -> Result<Json<V
     Ok(Json(json!({
         "schema": super::graph::graph_schema(),
         "example": definition_example(),
+        "requests": {
+            "create_minimal": {
+                "method":"POST", "path":"/workflows",
+                "body":{"name":"Manual workflow","definition":json!({
+                    "engine":"ferry-graph","schema":1,"settings":{"timezone":"UTC"},
+                    "nodes":[{"id":"start","type":"core.trigger.manual","type_version":1,
+                        "name":"Start","position":[0,0],"params":{"input_schema":{"type":"object"}}}],
+                    "connections":[]
+                }).to_string()}
+            },
+            "inspect":{"method":"GET","path":"/workflows/{workflow_id}"},
+            "run_draft":{"method":"POST","path":"/workflows/{workflow_id}/executions",
+                "body":{"mode":"manual","revision":"draft","version":"<current workflow version: integer>","entry_node_id":"start","inputs":{}}},
+            "publish":{"method":"POST","path":"/workflows/{workflow_id}/publications",
+                "body":{"version":"<current workflow version: integer>","revision_id":"<draft_revision_id>","name":"v1"}},
+            "schedule":{"method":"POST","path":"/cron-jobs","body":{
+                "name":"Weekly workflow","scope":"build","action":"workflow","target_kind":"workflow",
+                "target_ref":"<workflow_id>","entry_node_id":"start","inputs":{},
+                "schedule":"0 9 * * 1","timezone":"UTC","enabled":true,"timeout_seconds":600}},
+            "run_schedule":{"method":"POST","path":"/cron-jobs/{job_id}/runs"},
+            "inspect_execution":{"method":"GET","path":"/workflow-executions/{execution_id}"},
+            "inspect_nodes":{"method":"GET","path":"/workflow-executions/{execution_id}/node-runs"}
+        },
         "rules": [
+            "All requests use ferry_request. Replace every {path_placeholder} and <value_placeholder> using actual prior API results; version must be a JSON integer, IDs are strings. create_minimal is executable as-is but is only a manual trigger: extend it with real nodes for the user's task.",
+            "Inspect node contracts with GET /workflow-node-catalog?type=exact.node.type, or search=keyword. Follow next_offset using offset until null. Nodes are in nodes and builtin_nodes; total counts all matches. Never repeatedly request the unfiltered full directory after a 413.",
+            "The server applies the human-configured approval mode: request requires approval for writes; assisted automatically approves declared ordinary draft/organization edits; yolo automatically approves permitted writes. No mode bypasses live permissions or validation. When required, approval grants permission to attempt the operation; only a successful API result proves it ran. A 400 is a rejected request, not a pending approval.",
+            "Read the workflow again after changes, publication or a 409 before using version. Save and test the draft before publishing. A scheduled workflow must have a published revision; saving alone does not enable scheduling. Choose timezone and schedule from the user's requirements, not this UTC example.",
+            "Poll run_schedule's run via GET /cron-runs/{id}. When downstream_kind is workflow-executions and downstream_id is nonzero, GET /workflow-executions/{downstream_id} identifies the actual execution; workflow_id identifies its workflow. There is no execution_id field on a cron-run. Read execution state and node output before reporting success; queued/running is not completion. Never claim a report was delivered without its actual result.",
             "Send the definition as a JSON string in the `definition` field of POST /workflows (with `name`).",
             "Top level: exactly engine=\"ferry-graph\", schema=1, nodes, connections; optional settings, layout, pin_data. No other fields.",
             "Each node: id (lower_snake, unique in its graph), type and type_version from GET /workflow-node-catalog?section=builtin (or the integration catalog), name, params valid for that type, position [x, y]. Names do not have to be unique.",
@@ -1034,7 +1063,7 @@ pub(crate) fn definition_example() -> Value {
         "connections": [link("start","commits"), link("commits","analyze"), link("analyze","report"), link("report","notify")]
     })
 }
-/// Read node contracts. Use offset (default 0), page_size (1..20, default 5),
+/// Node contracts for workflows. Use offset (default 0), page_size (1..20, default 5),
 /// search (type/name substring), type (exact node type), and section=builtin or
 /// section=integration. Follow next_offset until null; total counts all matches.
 /// MCP calls are paginated automatically. Browser calls without filters retain

@@ -1,12 +1,17 @@
 //! Accounts and sessions. Global, not workspace-scoped: a user exists before
 //! any workspace does, and may belong to several.
 
+#[cfg(test)]
+mod tests;
+
 use crate::snowflake::Id;
 
 use crate::error::Json;
 use crate::{
     db,
-    entities::{sessions, users, workspace_members, workspace_roles, workspaces},
+    entities::{
+        session_refresh_tokens, sessions, users, workspace_members, workspace_roles, workspaces,
+    },
     error::{ApiError, Result},
     state::AppState,
 };
@@ -16,11 +21,12 @@ use argon2::{
 };
 use axum::{
     extract::{FromRequestParts, State},
-    http::{HeaderMap, header, request::Parts},
+    http::{HeaderMap, HeaderValue, header, request::Parts},
 };
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QueryOrder, QuerySelect, Set,
+    ColumnTrait, Condition, EntityTrait, FromQueryResult, JoinType, QueryFilter, QueryOrder,
+    QuerySelect, Set, TransactionTrait,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -104,8 +110,10 @@ mod login_ip_tests {
         assert_eq!(login_ip(peer, &headers, &TrustedProxies::default()), peer);
     }
 }
-/// Idle timeout. Every authenticated request pushes it out.
+/// Legacy test fixtures retain their original session duration.
+#[cfg(test)]
 pub(crate) const SESSION_MS: i64 = 14 * 24 * 60 * 60 * 1000;
+const REFRESH_COOKIE: &str = "session_refresh";
 
 #[derive(Clone)]
 pub struct User {
@@ -132,7 +140,7 @@ impl FromRequestParts<AppState> for Account {
         // thousand candidates. Only its hash is stored, so a database leak
         // does not hand over live sessions either.
         let token = cookie(&parts.headers, COOKIE).ok_or_else(ApiError::unauthorized)?;
-        let hash = crate::hosts::runner::fingerprint(&token);
+        let hash = crate::tokens::fingerprint(&token);
         #[derive(FromQueryResult)]
         struct SessionUser {
             session_id: i64,
@@ -166,11 +174,19 @@ impl FromRequestParts<AppState> for Account {
             .one(&s.db)
             .await?
             .ok_or_else(ApiError::unauthorized)?;
-        if row.expires_at < db::now() || row.active == 0 {
-            sessions::Entity::delete_many()
-                .filter(sessions::Column::TokenHash.eq(hash))
-                .exec(&s.db)
-                .await?;
+        if row.expires_at <= db::now() || row.active == 0 {
+            let refresh_alive = row.active != 0
+                && session_refresh_tokens::Entity::find_by_id(row.session_id)
+                    .filter(session_refresh_tokens::Column::ExpiresAt.gt(db::now()))
+                    .one(&s.db)
+                    .await?
+                    .is_some();
+            if !refresh_alive {
+                sessions::Entity::delete_many()
+                    .filter(sessions::Column::TokenHash.eq(hash))
+                    .exec(&s.db)
+                    .await?;
+            }
             return Err(ApiError::unauthorized());
         }
         let session_id = Id::from(row.session_id);
@@ -182,10 +198,6 @@ impl FromRequestParts<AppState> for Account {
         }
         sessions::Entity::update_many()
             .col_expr(sessions::Column::SeenAt, Expr::value(db::now()))
-            .col_expr(
-                sessions::Column::ExpiresAt,
-                Expr::value(db::now() + SESSION_MS),
-            )
             .filter(sessions::Column::Id.eq(i64::from(session_id)))
             .exec(&s.db)
             .await?;
@@ -222,6 +234,41 @@ pub(crate) fn set_cookie(
         header::SET_COOKIE,
         format!("{COOKIE}={value}; Path=/; HttpOnly; SameSite=Lax{secure}; Max-Age={max_age}"),
     )]
+}
+
+pub(crate) struct SessionCookies {
+    pub(crate) token: String,
+    refresh_token: String,
+    access_max_age: i64,
+    refresh_max_age: i64,
+}
+impl SessionCookies {
+    pub(crate) fn headers(&self, s: &AppState) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        let [(_, access)] = set_cookie(s, &self.token, self.access_max_age);
+        let secure = if s.secure_cookie { "; Secure" } else { "" };
+        let refresh = format!(
+            "{REFRESH_COOKIE}={}; Path=/api/sessions; HttpOnly; SameSite=Lax{secure}; Max-Age={}",
+            self.refresh_token, self.refresh_max_age
+        );
+        // Values contain only server-generated hex secrets and integer ages.
+        // Append, rather than insert: both Set-Cookie headers must survive.
+        headers.append(
+            header::SET_COOKIE,
+            HeaderValue::from_str(&access).expect("opaque access cookie"),
+        );
+        headers.append(
+            header::SET_COOKIE,
+            HeaderValue::from_str(&refresh).expect("opaque refresh cookie"),
+        );
+        headers
+    }
+}
+
+fn session_metadata(access: i64, refresh: i64, auto_renew: bool, access_ttl_ms: i64) -> Value {
+    let now = db::now();
+    json!({"access_expires_at_ms":access,"refresh_expires_at_ms":refresh,"server_time_ms":now,
+        "refreshable":refresh>now,"auto_renew":auto_renew&&refresh>now,"access_ttl_ms":access_ttl_ms})
 }
 
 #[derive(Deserialize)]
@@ -357,10 +404,7 @@ pub async fn register(
     .await?;
     let session = start_session(&s, &id, &tx).await?;
     tx.commit().await?;
-    Ok((
-        set_cookie(&s, &session, SESSION_MS / 1000),
-        Json(json!({"id": id, "email": email})),
-    ))
+    Ok((session.headers(&s), Json(json!({"id": id, "email": email}))))
 }
 
 pub async fn login(
@@ -432,44 +476,210 @@ pub async fn login(
         .exec(&tx)
         .await?;
     tx.commit().await?;
-    Ok((
-        set_cookie(&s, &session, SESSION_MS / 1000),
-        Json(json!({"id": id, "email": email})),
-    )
-        .into_response())
+    Ok((session.headers(&s), Json(json!({"id": id, "email": email}))).into_response())
 }
 
-/// Returns the cookie value. The row keeps only a hash of it, so the secret
-/// exists in exactly one place: the browser that was handed it.
+/// Both credentials are hashed at rest; callers include both cookies only after
+/// their login/OTP transaction commits. No existing session row is rewritten.
 pub(crate) async fn start_session(
     s: &AppState,
     user_id: &Id,
     conn: &impl sea_orm::ConnectionTrait,
-) -> Result<String> {
+) -> Result<SessionCookies> {
     let (id, now) = (s.next_id()?, db::now());
-    let token = crate::hosts::runner::secret();
+    let policy = super::session_policy::Configuration::load(conn).await?;
+    let (access_ms, refresh_ms) = policy.lifetimes(now)?;
+    let token = crate::tokens::secret();
+    let refresh_token = crate::tokens::secret();
     sessions::Entity::insert(sessions::ActiveModel {
         id: Set(i64::from(id)),
-        token_hash: Set(crate::hosts::runner::fingerprint(&token)),
+        token_hash: Set(crate::tokens::fingerprint(&token)),
         user_id: Set(i64::from(*user_id)),
         workspace_id: Set(0),
         created_at: Set(now),
         seen_at: Set(now),
-        expires_at: Set(now + SESSION_MS),
+        expires_at: Set(now + access_ms),
     })
     .exec(conn)
     .await?;
-    Ok(token)
+    session_refresh_tokens::Entity::insert(session_refresh_tokens::ActiveModel {
+        session_id: Set(id.into()),
+        token_hash: Set(crate::tokens::fingerprint(&refresh_token)),
+        previous_hash: Set(None),
+        access_ttl_ms: Set(access_ms),
+        created_at: Set(now),
+        created_by: Set((*user_id).into()),
+        rotated_at: Set(now),
+        rotated_by: Set((*user_id).into()),
+        expires_at: Set(now + refresh_ms),
+        expires_by: Set((*user_id).into()),
+    })
+    .exec(conn)
+    .await?;
+    Ok(SessionCookies {
+        token,
+        refresh_token,
+        access_max_age: access_ms / 1000,
+        refresh_max_age: refresh_ms / 1000,
+    })
 }
 
 pub async fn logout(
     State(s): State<AppState>,
-    account: Account,
+    headers: HeaderMap,
 ) -> Result<impl axum::response::IntoResponse> {
-    sessions::Entity::delete_by_id(i64::from(account.session_id))
-        .exec(&s.db)
+    let mut ids = std::collections::BTreeSet::new();
+    if let Some(token) = cookie(&headers, COOKIE) {
+        if let Some(session) = sessions::Entity::find()
+            .filter(sessions::Column::TokenHash.eq(crate::tokens::fingerprint(&token)))
+            .one(&s.db)
+            .await?
+        {
+            ids.insert(session.id);
+        }
+    }
+    if let Some(token) = cookie(&headers, REFRESH_COOKIE) {
+        let hash = crate::tokens::fingerprint(&token);
+        if let Some(grant) = session_refresh_tokens::Entity::find()
+            .filter(
+                Condition::any()
+                    .add(session_refresh_tokens::Column::TokenHash.eq(hash.clone()))
+                    .add(session_refresh_tokens::Column::PreviousHash.eq(hash)),
+            )
+            .one(&s.db)
+            .await?
+        {
+            ids.insert(grant.session_id);
+        }
+    }
+    if !ids.is_empty() {
+        let tx = s.db.begin().await?;
+        super::platform::lock(&tx).await?;
+        // Authorize the stable session id before taking the rotation fence.
+        // One previous refresh hash is logout-only: it cannot mint credentials.
+        sessions::Entity::delete_many()
+            .filter(sessions::Column::Id.is_in(ids))
+            .exec(&tx)
+            .await?;
+        tx.commit().await?;
+    }
+    let cleared = SessionCookies {
+        token: String::new(),
+        refresh_token: String::new(),
+        access_max_age: 0,
+        refresh_max_age: 0,
+    };
+    Ok((cleared.headers(&s), Json(json!({"ok": true}))))
+}
+
+/// A refresh credential can only rotate its original session. Neither a user
+/// id nor a workspace is accepted from the caller, and a failed CAS emits no
+/// Set-Cookie header that could erase another tab's successful rotation.
+pub async fn refresh(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+) -> Result<(HeaderMap, Json<Value>)> {
+    let token = cookie(&headers, REFRESH_COOKIE).ok_or_else(ApiError::unauthorized)?;
+    let hash = crate::tokens::fingerprint(&token);
+    // Invalid guesses never acquire the platform mutation fence. Recheck the
+    // current hash inside the transaction after acquiring it.
+    session_refresh_tokens::Entity::find()
+        .filter(session_refresh_tokens::Column::TokenHash.eq(hash.clone()))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::unauthorized)?;
+    let tx = s.db.begin().await?;
+    let platform = super::platform::lock(&tx).await?;
+    let policy = super::session_policy::Configuration::read(platform.session_config.as_deref())?;
+    if !policy.auto_renew {
+        return Err(ApiError::localized(
+            axum::http::StatusCode::FORBIDDEN,
+            crate::i18n::Message::new("auth.sessionAutoRenewDisabled"),
+        ));
+    }
+    let grant = session_refresh_tokens::Entity::find()
+        .filter(session_refresh_tokens::Column::TokenHash.eq(hash.clone()))
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::unauthorized)?;
+    let access = sessions::Entity::find_by_id(grant.session_id)
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::unauthorized)?;
+    users::Entity::update_many()
+        .col_expr(users::Column::Active, Expr::col(users::Column::Active))
+        .filter(users::Column::Id.eq(access.user_id))
+        .exec(&tx)
         .await?;
-    Ok((set_cookie(&s, "", 0), Json(json!({"ok": true}))))
+    let user = users::Entity::find_by_id(access.user_id)
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::unauthorized)?;
+    let now = db::now();
+    if user.active == 0 || grant.expires_at <= now || grant.access_ttl_ms <= 0 {
+        sessions::Entity::delete_by_id(grant.session_id)
+            .exec(&tx)
+            .await?;
+        tx.commit().await?;
+        return Err(ApiError::unauthorized());
+    }
+    let token = crate::tokens::secret();
+    let refresh_token = crate::tokens::secret();
+    let expires_at = now
+        .saturating_add(grant.access_ttl_ms)
+        .min(grant.expires_at);
+    let changed = session_refresh_tokens::Entity::update_many()
+        .col_expr(
+            session_refresh_tokens::Column::PreviousHash,
+            Expr::value(hash.clone()),
+        )
+        .col_expr(
+            session_refresh_tokens::Column::TokenHash,
+            Expr::value(crate::tokens::fingerprint(&refresh_token)),
+        )
+        .col_expr(session_refresh_tokens::Column::RotatedAt, Expr::value(now))
+        .col_expr(
+            session_refresh_tokens::Column::RotatedBy,
+            Expr::value(user.id),
+        )
+        .filter(session_refresh_tokens::Column::SessionId.eq(grant.session_id))
+        .filter(session_refresh_tokens::Column::TokenHash.eq(hash))
+        .filter(session_refresh_tokens::Column::ExpiresAt.gt(now))
+        .exec(&tx)
+        .await?;
+    if changed.rows_affected != 1 {
+        return Err(ApiError::unauthorized());
+    }
+    let updated = sessions::Entity::update_many()
+        .col_expr(
+            sessions::Column::TokenHash,
+            Expr::value(crate::tokens::fingerprint(&token)),
+        )
+        .col_expr(sessions::Column::SeenAt, Expr::value(now))
+        .col_expr(sessions::Column::ExpiresAt, Expr::value(expires_at))
+        .filter(sessions::Column::Id.eq(grant.session_id))
+        .filter(sessions::Column::UserId.eq(user.id))
+        .exec(&tx)
+        .await?;
+    if updated.rows_affected != 1 || db::now() >= grant.expires_at {
+        return Err(ApiError::unauthorized());
+    }
+    tx.commit().await?;
+    let cookies = SessionCookies {
+        token,
+        refresh_token,
+        access_max_age: (expires_at - now) / 1000,
+        refresh_max_age: (grant.expires_at - now) / 1000,
+    };
+    Ok((
+        cookies.headers(&s),
+        Json(session_metadata(
+            expires_at,
+            grant.expires_at,
+            true,
+            grant.access_ttl_ms,
+        )),
+    ))
 }
 
 /// Who am I, and which workspaces can I open. The shell calls this on load.
@@ -546,9 +756,33 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
                 "relation": if row.owner_id == i64::from(account.user.id) { "owner" } else if roles.contains_key(&row.id) { "member" } else { "none" },
                 "permissions": crate::accounts::workspace::PERMISSIONS.iter().map(|p| p.0).collect::<Vec<_>>() })).collect();
     }
+    let session = if let Some(access) = sessions::Entity::find_by_id(account.session_id)
+        .one(&s.db)
+        .await?
+    {
+        let grant = session_refresh_tokens::Entity::find_by_id(access.id)
+            .one(&s.db)
+            .await?;
+        let renewable = if grant.is_some() {
+            super::session_policy::Configuration::load(&s.db)
+                .await?
+                .auto_renew
+        } else {
+            false
+        };
+        session_metadata(
+            access.expires_at,
+            grant.as_ref().map_or(0, |grant| grant.expires_at),
+            renewable,
+            grant.map_or(0, |grant| grant.access_ttl_ms),
+        )
+    } else {
+        Value::Null
+    };
     Ok(Json(json!({
         "user": {"avatar": super::preferences::avatars(&s.db, vec![i64::from(account.user.id)]).await?.remove(&i64::from(account.user.id)), "id": account.user.id, "email": account.user.email, "name": account.user.name, "is_superadmin": account.user.is_superadmin},
         "workspaces": workspaces,
+        "session": session,
     })))
 }
 

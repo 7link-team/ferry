@@ -274,6 +274,7 @@ pub(super) async fn execution(
     row: &turns::Model,
     mut c: conversations::Model,
 ) -> Result<conversations::Model> {
+    let approval_mode = super::approval::mode(&c.config)?;
     if let Some(link) = links::Entity::find_by_id(row.id).one(conn).await? {
         let a = agents::Entity::find_by_id(link.chat_agent_id)
             .filter(agents::Column::ConversationId.eq(c.id))
@@ -289,6 +290,9 @@ pub(super) async fn execution(
         c.binding = a.binding;
         c.native_session_id = a.native_session_id;
     }
+    let mut config: Value = serde_json::from_str(&c.config).map_err(|_| invalid())?;
+    config["approval_mode"] = json!(approval_mode);
+    c.config = config.to_string();
     Ok(c)
 }
 pub(super) async fn finish(

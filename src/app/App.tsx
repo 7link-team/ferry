@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { Dashboard } from "../features/dashboard/Dashboard";
 import { Invitation } from "../features/workspaces/Invitation";
 import { api,errorText,type Identity } from "../shared/api/api";
+import { watchSessionActivity } from "../shared/api/session";
 import { commonText,workflowText,useCommonTranslation } from "../shared/i18n/i18n";
 import { LanguageSwitcher } from "../shared/i18n/LanguageSwitcher";
 import { stripLocalePrefix } from "../shared/i18n/locale";
@@ -98,6 +99,12 @@ export function App() {
       .finally(() => setLoading(false));
   };
   useEffect(reload, []);
+  useEffect(watchSessionActivity, []);
+  useEffect(() => {
+    const renewed = () => { void api<Identity>("/me").then(value => { setIdentity(value); setError(""); }).catch(() => {}); };
+    window.addEventListener("session:renewed", renewed);
+    return () => window.removeEventListener("session:renewed", renewed);
+  }, []);
   useEffect(() => {
     if (!loading && !identity && !error && !isPublicEntryPath()) navigateToLogin();
   }, [loading, identity, error, route]);
@@ -190,7 +197,10 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
     if (workspaceId) void api<{default_page_size:number;dictionaries:Record<string,{value:string;label:string;color?:string}[]>}>(`/workspaces/${workspaceId}/preferences`, { signal: controller.signal }).then(value=>{if(live)setPreferences({workspace:workspaceId,value});}).catch(()=>{if(live)setPreferencesError(commonText("shell.preferencesFailed"));});
     return ()=>{live=false;controller.abort();};
   },[workspaceId,preferencesPage]);
-  const permissions = useMemo(() => new Set(current?.permissions ?? []), [current?.permissions]);
+  // Identity reloads produce new arrays even when authorization is unchanged.
+  // Keep form configs stable so renewal cannot reset unsaved workspace drafts.
+  const permissionKey = JSON.stringify(current?.permissions ?? []);
+  const permissions = useMemo(() => new Set<string>(JSON.parse(permissionKey)), [permissionKey]);
   const lists = useMemo(() => listConfigs(workspaceId, permissions, reload, undefined, preferences?.dictionaries), [workspaceId, permissions, reload, preferences]);
   const forms = useMemo(() => formConfigs(workspaceId, permissions), [workspaceId, permissions, nodeCatalogWorkspace]);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});

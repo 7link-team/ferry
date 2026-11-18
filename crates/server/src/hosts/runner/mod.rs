@@ -69,7 +69,6 @@ use futures::StreamExt;
 use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     sync::{Arc, LazyLock, Mutex, MutexGuard},

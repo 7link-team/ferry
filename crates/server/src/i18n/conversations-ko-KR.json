@@ -41,5 +41,9 @@
   "conversations.agentRequired": "대화에 사용할 에이전트를 선택하세요.",
   "conversations.titleRequired": "대화 제목을 입력하세요.",
   "conversations.titleInvalid": "대화 제목은 최대 256바이트이며 NULL 문자를 포함할 수 없습니다.",
-  "conversations.stateInvalid": "대화 상태는 진행 중, 보관됨, 중단됨 중 하나여야 합니다."
+  "conversations.stateInvalid": "대화 상태는 진행 중, 보관됨, 중단됨 중 하나여야 합니다.",
+  "conversations.questionInvalid": "질문 또는 답변이 유효하지 않습니다. 명확한 질문, 고유한 선택지 또는 최대 4096 UTF-8 바이트의 답변을 입력하세요.",
+  "conversations.questionPending": "답변 대기 중인 질문이 있거나 턴이 마무리 중입니다. 작업을 계속하지 말고 사용자 답변 또는 턴 종료를 기다리세요.",
+  "conversations.questionAnswered": "이 질문에는 이미 다른 답변이 있습니다. 새로 고침하여 확인하세요.",
+  "conversations.approvalModeInvalid": "승인 모드는 request, assisted 또는 yolo를 선택하세요."
 }

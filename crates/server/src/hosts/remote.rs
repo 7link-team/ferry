@@ -296,8 +296,20 @@ where
     // Bound output memory without letting a slow browser flush stop receiving
     // Ctrl-C, resize or Pong. Only one pending PTY chunk sits outside this queue.
     let (outgoing, mut queued) = tokio::sync::mpsc::channel(32);
+    // One coalesced heartbeat signal has priority over queued logs. A full data
+    // queue must not discard every Ping and time out a responsive busy terminal.
+    let heartbeat_due = tokio::sync::Notify::new();
+    let heartbeat_signal = &heartbeat_due;
     let writer = async {
-        while let Some(message) = queued.recv().await {
+        loop {
+            let message = tokio::select! {
+                biased;
+                _ = heartbeat_signal.notified() => Message::Ping(bytes::Bytes::new()),
+                message = queued.recv() => match message {
+                    Some(message) => message,
+                    None => break,
+                },
+            };
             if sink.send(message).await.is_err() {
                 break;
             }
@@ -314,9 +326,7 @@ where
                         let _ = outgoing.send(Message::Text(json!({"type":"error","error":crate::i18n::message("terminal.heartbeatTimeout")}).to_string().into())).await;
                         return true;
                     }
-                    // If logs fill the queue, retry on the next heartbeat rather
-                    // than waiting here and preventing incoming Pong processing.
-                    let _ = outgoing.try_send(Message::Ping(bytes::Bytes::new()));
+                    heartbeat_signal.notify_one();
                 },
                 permit = outgoing.reserve(), if pending.is_some() => {
                     let Ok(permit) = permit else { return false; };
@@ -760,6 +770,81 @@ mod terminal_transport_tests {
         }
     }
     struct TestPty(tokio::sync::mpsc::UnboundedSender<Vec<u8>>);
+    struct ThrottledSink {
+        ready: Pin<Box<tokio::time::Sleep>>,
+        pings: Arc<std::sync::atomic::AtomicUsize>,
+        output: Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl futures::Sink<Message> for ThrottledSink {
+        type Error = ();
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), ()>> {
+            use std::future::Future;
+            self.get_mut().ready.as_mut().poll(cx).map(|_| Ok(()))
+        }
+        fn start_send(self: Pin<&mut Self>, message: Message) -> std::result::Result<(), ()> {
+            use std::sync::atomic::Ordering;
+            let this = self.get_mut();
+            match message {
+                Message::Ping(_) => {
+                    this.pings.fetch_add(1, Ordering::Relaxed);
+                }
+                Message::Binary(_) => {
+                    this.output.fetch_add(1, Ordering::Relaxed);
+                }
+                _ => {}
+            }
+            this.ready
+                .as_mut()
+                .reset(tokio::time::Instant::now() + Duration::from_millis(50));
+            Ok(())
+        }
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), ()>> {
+            Poll::Ready(Ok(()))
+        }
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), ()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn terminal_heartbeats_are_not_starved_by_continuous_backpressure() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let pings = Arc::new(AtomicUsize::new(0));
+        let output = Arc::new(AtomicUsize::new(0));
+        let (written, _writes) = tokio::sync::mpsc::unbounded_channel();
+        let task = tokio::spawn(pump_io(
+            ThrottledSink {
+                ready: Box::pin(tokio::time::sleep(Duration::ZERO)),
+                pings: pings.clone(),
+                output: output.clone(),
+            },
+            futures::stream::pending(),
+            Box::new(TestPty(written)),
+        ));
+        // Exercise the real twenty-second heartbeat interval with output that
+        // continuously fills the bounded queue; no clock or policy changes.
+        tokio::time::sleep(Duration::from_secs(25)).await;
+        task.abort();
+        let _ = task.await;
+        assert!(
+            output.load(Ordering::Relaxed) > 100,
+            "the throttled writer must keep making progress"
+        );
+        assert!(
+            pings.load(Ordering::Relaxed) >= 2,
+            "busy output must not discard heartbeat frames"
+        );
+    }
+
     #[async_trait::async_trait]
     impl channel::Pty for TestPty {
         async fn write(&mut self, data: &[u8]) -> Result<()> {

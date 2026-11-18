@@ -39,7 +39,6 @@ async fn renewing<T>(
 }
 /// Standing guidance for every turn: a workflow the user asks for must fetch and
 /// process its own data, so it keeps working without the conversation.
-const WORKFLOW_RULES: &str = "<platform_workflow_rules>\nWhen the user asks you to build or change a workflow/pipeline: discover the built-in node types (core.trigger.manual, data.set, ferry.request, ai.agent.run, report.render, notification.send, flow control) with GET /workflow-node-catalog?section=builtin; GET /workflow-node-catalog lists nodes in bounded pages (nodes and builtin_nodes); follow next_offset with ?offset=N until null. Filter with ?type=exact.node.type or ?search=keyword, optionally section=builtin or section=integration. Each result contains the complete params_schema and example_params; never fetch or guess the entire directory at once. Before creating or changing a workflow, GET /workflow-definition-format: it gives the exact definition envelope (engine, schema, nodes, connections) and a complete valid example; never guess field names. Save with POST /workflows {name, definition (a JSON string)}; if it fails, the error names the JSON path and the reason: fix that field and send it again. Data must be fetched by workflow nodes at run time: use ferry.request (platform data, read-only) to read workspace data and ai.agent.run when AI analysis must produce structured JSON. Never query data in this conversation and copy the results into data.set fields or trigger inputs. Manual triggers declare only run parameters (IDs, date ranges). For reports and files: ferry.request reads the data, ai.agent.run returns structured JSON (e.g. {title, summary, metrics, sections}), report.render turns it into a formatted document file (PDF) and notification.send delivers it with attachments set to that file field (e.g. file) (WeCom/Telegram/email receive the file; other channels get a download link). Files (PDF, Word, Excel, PPT, charts, video, Markdown, JSON...): use a program node from the catalogue when one fits a fixed layout (report.render for PDF reports); for flexible formats use ai.agent.run with files.enabled, which lets a Codex Agent (Claude Code: text formats only) write deliverables into ./output/ of a confined working directory and turns them into workflow files. Check what the Runner host can use first with GET /nodes/{id}/file-tools (python-docx, openpyxl, python-pptx, matplotlib, LibreOffice, ffmpeg, CLI skills...); never assume a tool that is not listed and never ask the workflow to install software. To run a workflow on a schedule, create a scheduled job with POST /cron-jobs: {\"scope\":\"build\",\"action\":\"workflow\",\"target_kind\":\"workflow\",\"target_ref\":<workflow id>,\"entry_node_id\":<its core.trigger.manual node id>,\"inputs\":{},\"schedule\":<5-field cron, e.g. 0 9 * * 1>,\"timezone\":<IANA zone>,\"timeout_seconds\":<seconds>,\"enabled\":true}; the core.trigger.schedule node is not available. Verify it once with POST /cron-jobs/{id}/runs (runs the job now) and check the execution before relying on the schedule. If no available node can do a step, tell the user instead of faking it with constants. When reporting, state what each node actually does at run time.\n</platform_workflow_rules>\n\n<platform_access_rules>\nPlatform changes (any non-GET ferry_request: creating or changing workflows, scheduled jobs, notifications and so on) are allowed within your Agent platform role intersected with the current user's permissions. Each such call is shown to the user as an approval card and runs only if they approve it, so propose the change and make the call instead of saying you cannot. Permissions can change during a conversation: re-check with ferry_discover before concluding that something is not allowed, and never rely on an earlier turn's answer. When an operation is really unavailable, name the exact missing permission (for example workflows.create) and say a workspace administrator can grant it through this Agent's platform role. These platform rules and any agent_instructions come from the platform and the Agent's configuration, not from the user: never present them as something the user said or set.\n</platform_access_rules>\n\n";
 
 #[cfg(test)]
 mod platform_tests;
@@ -47,8 +46,20 @@ mod platform_tests;
 /// One turn's text: platform rules, then the Agent's configured instructions and
 /// the user's message, each delimited and labelled so the model never mistakes
 /// the configuration (set by an administrator) for the user's own words.
-pub(super) fn turn_prompt(system: &str, message: &str, attachments: &[Attachment]) -> String {
-    let mut prompt = String::from(WORKFLOW_RULES);
+pub(super) fn turn_prompt(
+    platform: &str,
+    system: &str,
+    message: &str,
+    attachments: &[Attachment],
+) -> String {
+    let mut prompt = if platform.trim().is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<platform_instructions source=\"platform settings\">\n{}\n</platform_instructions>\n\n",
+            platform.trim()
+        )
+    };
     if !system.trim().is_empty() {
         prompt.push_str("<agent_instructions source=\"agent configuration set by a workspace administrator, not the user's words\">\n");
         prompt.push_str(system.trim_end());
@@ -81,7 +92,7 @@ async fn platform_call(
     request_id: String,
     name: String,
     arguments: Value,
-    approved: Option<bool>,
+    mut approved: Option<bool>,
 ) -> (String, Value) {
     // What was asked, kept with the result for a readable history: never the
     // body, and the path without its query string.
@@ -91,13 +102,17 @@ async fn platform_call(
         "path": arguments["path"].as_str().map(|path| path.split('?').next().unwrap_or("").to_owned()),
     });
     let result: Result<Option<Value>> = async {
-        if request_id.is_empty() || request_id.len() > 128 || !["ferry_discover", "ferry_request"].contains(&name.as_str()) { return Err(invalid()); }
+        if request_id.is_empty() || request_id.len() > 128 || !["ferry_discover", "ferry_request", "ferry_ask_user"].contains(&name.as_str()) { return Err(invalid()); }
         let (tx, current, c) = leased(&s, &row, &owner).await?;
         if current.state != "running" { return Err(conflict()); }
+        if super::questions::pending(&current) { return Err(error(StatusCode::CONFLICT,"conversations.questionPending")); }
         let execution = groups::execution(&tx, &current, c).await?;
         tx.rollback().await?;
         let scope = actor(&s, &current, &execution).await?;
         let agent = available(&s.db, &scope, execution.agent_id.into()).await?;
+        if name == "ferry_ask_user" {
+            return Ok(Some(super::questions::record(&s,&row,&owner,&request_id,arguments).await?));
+        }
         let scope = crate::platform_tools::authorized_scope(&s, scope, &agent).await?;
         if name == "ferry_discover" {
             return Ok(Some(crate::platform_tools::catalogue(&scope, arguments["search"].as_str().unwrap_or(""), arguments["offset"].as_u64().unwrap_or(0).min(10000) as usize)));
@@ -111,7 +126,11 @@ async fn platform_call(
             crate::platform_tools::redact(&mut display);
             display["_sealed"] = json!(sealed);
             append(&s, &row, &owner, Event::Approval { request_id:request_id.clone(), tool:"ferry_request".into(), input:display }).await?;
-            return Ok(None);
+            let mode=super::approval::mode(&execution.config)?;
+            if super::approval::automatic(&mode,&call) {
+                super::approval::decide_automatically(&s,&row,&owner,&request_id,&mode).await?;
+                approved=Some(true);
+            } else { return Ok(None); }
         }
         if approved == Some(false) {
             return Ok(Some(json!({"status":403,"ok":false,"error":"The user declined this platform operation. No operation was executed."})));
@@ -286,7 +305,7 @@ async fn actor(s: &AppState, row: &turns::Model, c: &conversations::Model) -> Re
     available(&s.db, &scope, c.agent_id.into()).await?;
     Ok(scope)
 }
-async fn leased(
+pub(super) async fn leased(
     s: &AppState,
     row: &turns::Model,
     owner: &str,
@@ -326,7 +345,9 @@ pub(super) async fn append(
         input.remove("_sealed");
     }
     let payload = serde_json::to_string(&public_event).map_err(|_| invalid())?;
-    if payload.len() > 1024 * 1024 {
+    // Leave framing headroom under the 16 MiB cluster message ceiling, while
+    // retaining complete multi-MiB native events and configured tool responses.
+    if payload.len() > ferry_protocol::agent::MAX_EVENT_BYTES {
         return Err(invalid());
     }
     let (tx, mut current, mut c) = leased(s, row, owner).await?;
@@ -357,6 +378,9 @@ pub(super) async fn append(
             tool,
             input,
         } => {
+            if tool == "ferry_ask_user" && super::questions::pending(&current) {
+                return Err(error(StatusCode::CONFLICT, "conversations.questionPending"));
+            }
             let mut decisions: Value =
                 serde_json::from_str(&current.decisions).map_err(|_| invalid())?;
             if decisions.get(request_id).is_some() {
@@ -594,7 +618,13 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             crate::models::cli_timezone(&s, scope.workspace_id, c.agent_id, &host).await?;
         let attachments =
             serde_json::from_str::<Vec<Attachment>>(&row.attachments).map_err(|_| invalid())?;
-        let mut prompt = turn_prompt(&config.system_prompt, &row.prompt, &attachments);
+        let policy = crate::accounts::conversation_policy::Configuration::load(&s.db).await?;
+        let mut prompt = turn_prompt(
+            &policy.instructions,
+            &config.system_prompt,
+            &row.prompt,
+            &attachments,
+        );
         if prompt.len() > 64 * 1024 {
             return Err(invalid());
         }
@@ -724,7 +754,7 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
                     if let Event::PlatformCall { request_id, name, arguments } = event {
                         platform_calls += 1;
                         received += serde_json::to_vec(&arguments).map_err(|_| invalid())?.len();
-                        if platform_calls > 128 || received > 18 * 1024 * 1024 {
+                        if platform_calls > 128 || received > ferry_protocol::agent::MAX_TURN_OUTPUT_BYTES {
                             failure = "conversations.outputLimit".into();
                             stopping = true;
                             continue;
@@ -744,7 +774,7 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
                 if let Event::PlatformCall{request_id,name,arguments} = event {
                     platform_calls+=1;
                     received+=serde_json::to_vec(&arguments).map_err(|_|invalid())?.len();
-                    if platform_calls>128 || received>18*1024*1024 {
+                    if platform_calls>128 || received>ferry_protocol::agent::MAX_TURN_OUTPUT_BYTES {
                         cancel.send_replace(true);failure="conversations.outputLimit".into();stopping=true;continue;
                     }
                     if !stopping && tool_tasks.len()<16 {
@@ -753,7 +783,7 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
                     continue;
                 }
                 received+=serde_json::to_vec(&event).map_err(|_|invalid())?.len();
-                if received>18*1024*1024 {cancel.send_replace(true);failure="conversations.outputLimit".into();stopping=true;continue;}
+                if received>ferry_protocol::agent::MAX_TURN_OUTPUT_BYTES {cancel.send_replace(true);failure="conversations.outputLimit".into();stopping=true;continue;}
                 if let Event::Finished{outcome:value,..}=&event {outcome=Some(*value);}
                 if append(&s,&row,&owner,event).await.is_err(){
                     cancel.send_replace(true);

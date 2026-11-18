@@ -41,5 +41,9 @@
   "conversations.agentRequired": "会話のエージェントを選択してください。",
   "conversations.titleRequired": "会話のタイトルを入力してください。",
   "conversations.titleInvalid": "会話のタイトルは 256 バイト以内で、NULL 文字を含めることはできません。",
-  "conversations.stateInvalid": "会話の状態は進行中・アーカイブ・中断のいずれかです。"
+  "conversations.stateInvalid": "会話の状態は進行中・アーカイブ・中断のいずれかです。",
+  "conversations.questionInvalid": "質問または回答が無効です。明確な質問、一意の選択肢、4096 バイト以下の回答を指定してください。",
+  "conversations.questionPending": "回答待ちの質問があるか、ターンを終了中です。操作を続けず、回答またはターン終了を待ってください。",
+  "conversations.questionAnswered": "この質問には別の回答があります。更新して確認してください。",
+  "conversations.approvalModeInvalid": "承認モードは request、assisted、yolo から選択してください。"
 }

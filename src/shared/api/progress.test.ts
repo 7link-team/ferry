@@ -45,9 +45,11 @@ it("does not let a stale route commit finish a newer route or its network reques
 it("tracks API body parsing, and cleans up success, HTTP failure, abort and transport failure", async () => {
   vi.useFakeTimers();
   let resolveBody!: (value: unknown) => void;
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, headers: new Headers(), json: () => new Promise(resolve => { resolveBody = resolve; }) })));
+  let bodyStarted!: () => void;
+  const parsing = new Promise<void>(resolve => { bodyStarted = resolve; });
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, headers: new Headers(), json: () => new Promise(resolve => { resolveBody = resolve; bodyStarted(); }) })));
   const pending = api("/projects");
-  await Promise.resolve();
+  await parsing;
   expect(activitySnapshot().filter(activity => !activity.done)).toHaveLength(1);
   resolveBody({ ok: true });
   await pending;

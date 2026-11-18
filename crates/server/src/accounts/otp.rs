@@ -557,7 +557,7 @@ pub async fn login(
         .await?;
     tx.commit().await?;
     Ok((
-        auth::set_cookie(&s, &session, auth::SESSION_MS / 1000),
+        session.headers(&s),
         Json(json!({"id":id,"email":user.email})),
     ))
 }

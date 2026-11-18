@@ -18,7 +18,7 @@ import { PlatformMonitor, monitorSections } from "./PlatformMonitor";
 import {FOOTER_UPDATED, PlatformFooterEditor} from "./PlatformFooter";
 import {PlatformMailTest} from "./PlatformMailTest";
 import {PlatformMailTemplates} from "./PlatformMailTemplates";
-import {AutoField} from "../shared/forms/auto-form";
+import {AutoField, FieldControl} from "../shared/forms/auto-form";
 import {InlineAlert} from "../shared/ui/inline-alert";
 import { href,navigate,useRoute } from "./router";
 import { platformMarketplaceForm, platformMarketplaceList } from "../features/marketplace/platform-sources";
@@ -105,6 +105,18 @@ const forms: Record<string, FormConfig<Row>> = {
     {key:"login_turnstile_site_key",label:"Site Key",type:"text",required:true,when:d=>d.login_guard_mode==="turnstile"},
     {key:"login_turnstile_secret_key",label:"Secret Key",type:"secret",required:d=>!d.login_turnstile_has_secret,stored:"login_turnstile_has_secret",replaceOnEdit:true,when:d=>d.login_guard_mode==="turnstile"},
   ] },
+{title:"Login sessions",titleKey:"resource-domain:platform.sessionPolicy",group:"Login sessions",groupKey:"resource-domain:platform.sessionPolicy",fields:[
+    {key:"session_access_minutes",label:"Access validity (minutes)",labelKey:"resource-domain:platform.sessionAccessMinutes",type:"number",required:true,min:1,helpKey:"resource-domain:platform.sessionLifetimesHelp"},
+    {key:"session_refresh_days",label:"Refresh validity (days)",labelKey:"resource-domain:platform.sessionRefreshDays",type:"number",required:true,min:1,helpKey:"resource-domain:platform.sessionLifetimesHelp"},
+    {key:"session_auto_renew",label:"Renew while active",labelKey:"resource-domain:platform.sessionAutoRenew",type:"switch",helpKey:"resource-domain:platform.sessionAutoRenewHelp"},
+  ]},
+{title:"Agent conversations",titleKey:"resource-domain:platform.conversationPolicy",group:"Agent conversations",groupKey:"resource-domain:platform.conversationPolicy",fields:[
+    {key:"conversation_approval_mode",label:"Default approval mode",labelKey:"resource-domain:platform.conversationApproval",type:"select",required:true,
+      options:[{value:"request",label:"Request approval",labelKey:"conversations:approvalRequest"},{value:"assisted",label:"Assist approval",labelKey:"conversations:approvalAssisted"},{value:"yolo",label:"YOLO (unsafe)",labelKey:"conversations:approvalYolo"}],helpKey:"resource-domain:platform.conversationApprovalHelp"},
+    {key:"conversation_tool_response_limit_kib",label:"MCP response limit (KiB)",labelKey:"resource-domain:platform.conversationToolLimit",type:"number",required:true,min:256,max:8192,helpKey:"resource-domain:platform.conversationToolLimitHelp"},
+    {key:"conversation_instructions",label:"Global conversation instructions",labelKey:"resource-domain:platform.conversationInstructions",type:"custom",span:2,helpKey:"resource-domain:platform.conversationInstructionsHelp",
+      render:({draft,onPatch,readOnly})=><div className="min-w-0 space-y-2"><FieldControl name="conversation_instructions" field={{name:commonText("resource-domain:platform.conversationInstructions"),type:"code",config:{maxLength:16384}}} value={String(draft.conversation_instructions??"")} readonly={readOnly} onChange={value=>onPatch({conversation_instructions:value})}/>{!readOnly&&<div className="flex justify-end"><Button type="button" variant="outline" className="min-h-11" onClick={()=>onPatch({conversation_instructions:draft.conversation_instructions_default??""})}>{commonText("resource-domain:platform.restoreConversationInstructions")}</Button></div>}</div>},
+  ]},
 {title:"监控采集",titleKey:"resource-domain:platform.monitorCollection",group:"监控采集",groupKey:"resource-domain:platform.monitorCollection",fields:[
     {key:"monitor_retention_days",label:"明细保留天数",labelKey:"resource-domain:platform.monitorRetentionDays",type:"number",min:1,max:365,helpKey:"resource-domain:platform.monitorRetentionHelp"},
     {key:"monitor_max_rows",label:"每节点明细条数上限",labelKey:"resource-domain:platform.monitorMaxRows",type:"number",min:1000,max:1000000,helpKey:"resource-domain:platform.monitorRowsHelp"},

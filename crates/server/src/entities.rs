@@ -385,6 +385,8 @@ pub mod platform_state {
         pub footer_html: Option<String>,
         pub page_scripts: Option<String>,
         pub site_config: Option<String>,
+        pub conversation_config: Option<String>,
+        pub session_config: Option<String>,
         pub mail_config: Option<String>,
         pub monitor_config: Option<String>,
         pub login_security: Option<String>,
@@ -483,6 +485,28 @@ pub mod sessions {
         pub created_at: i64,
         pub seen_at: i64,
         pub expires_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod session_refresh_tokens {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "session_refresh_tokens")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub session_id: i64,
+        pub token_hash: String,
+        pub previous_hash: Option<String>,
+        pub access_ttl_ms: i64,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub rotated_at: i64,
+        pub rotated_by: i64,
+        pub expires_at: i64,
+        pub expires_by: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

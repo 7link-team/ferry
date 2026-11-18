@@ -3,7 +3,6 @@ import { InlineAlert } from "../../shared/ui/inline-alert";
 import { cliToolLabel } from "../../shared/forms/cli-tools";
 import { IdentityAvatar, type AvatarValue } from "../../shared/ui/identity-avatar";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { LazyDetails } from "./LazyDetails";
 import { ApiError, api, errorText } from "../../shared/api/api";
 import { base } from "../../shared/api/resource";
 import { AlertDialog, Dialog } from "radix-ui";
@@ -39,6 +38,9 @@ import {
   EndedDecisionCard,
   endedDecision,
   ExecutionTimeline,
+  ExecutionDetailsPanel,
+  QuestionCard,
+  ConversationApproval,
   liveDecision,
   PendingDecisionCard,
   platformFailed,
@@ -102,7 +104,7 @@ interface ConversationData {
   title: string;
   state: string;
   revision_id: string;
-  config: { name: string; runtime: string; model: string; cwd: string; appearance?: ChatAppearance };
+  config: { name: string; runtime: string; model: string; cwd: string; appearance?: ChatAppearance; approval_mode?: string };
   /** Null until the first message chooses a host. */
   binding: { execution_user: string; canonical_directory: string } | null;
   host?: BoundHost | null;
@@ -307,18 +309,20 @@ export function Conversation({
   const attention = useMemo(() => {
     const turns = new Set<string>();
     const mine: string[] = [];
+    let questions = 0;
     for (const turn of data?.turns ?? []) {
       for (const [request, decision] of Object.entries(turn.decisions)) {
         if (!awaitingDecision(turn, decision)) continue;
         turns.add(turn.id);
         if (turn.owner_id === data?.viewer_id) {
           mine.push(`${turn.id}:${request}`);
+          if (decision.tool === "ferry_ask_user") questions++;
         }
       }
       if ((turnEvents.get(turn.id) ?? []).some((event) => event.type === "platform_result" && platformFailed(event.result)))
         turns.add(turn.id);
     }
-    return { turns, mine };
+    return { turns, mine, questions };
   }, [data?.turns, data?.viewer_id, turnEvents]);
   const scroll = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
@@ -484,8 +488,8 @@ export function Conversation({
     setSearch("");
     const request = first.slice(first.indexOf(":") + 1);
     requestAnimationFrame(() => {
-      const node = [...(scroll.current?.querySelectorAll("[data-pending-decision],[data-ended-decision]") ?? [])].find(
-        (card) => (card.getAttribute("data-pending-decision") ?? card.getAttribute("data-ended-decision")) === request,
+      const node = [...(scroll.current?.querySelectorAll("[data-pending-decision],[data-ended-decision],[data-user-question]") ?? [])].find(
+        (card) => (card.getAttribute("data-pending-decision") ?? card.getAttribute("data-ended-decision") ?? card.getAttribute("data-user-question")) === request,
       );
       node?.scrollIntoView({ block: "center", behavior: "smooth" });
     });
@@ -693,6 +697,7 @@ export function Conversation({
             </div>
           </button>
           <div className="flex shrink-0 items-center gap-1">
+            <ConversationApproval endpoint={endpoint} mode={data.config.approval_mode??"request"} version={data.version} canManage={!!data.can_manage&&permissions.has("conversations.update")} executing={executing} onSaved={(mode,version)=>setData(old=>old?{...old,version,config:{...old.config,approval_mode:mode}}:old)}/>
             {data.can_manage && permissions.has("conversations.update") && <ConversationAppearance endpoint={endpoint} value={data.config.appearance} canUpload={permissions.has("conversations.run") && data.state === "active"} onSaved={appearance => setData(old => old ? { ...old, config: { ...old.config, appearance } } : old)} />}
             <Button
               variant="ghost"
@@ -1073,8 +1078,9 @@ export function Conversation({
                           </div>
                         )}
                         {turn && m?.role !== "user" && (() => {
-                          const live = Object.entries(turn.decisions).filter(([, decision]) => liveDecision(turn, decision));
-                          const ended = Object.entries(turn.decisions).filter(([, decision]) => endedDecision(turn, decision));
+                          const live = Object.entries(turn.decisions).filter(([, decision]) => decision.tool!=="ferry_ask_user"&&liveDecision(turn, decision));
+                          const ended = Object.entries(turn.decisions).filter(([, decision]) => decision.tool!=="ferry_ask_user"&&endedDecision(turn, decision));
+                          const questions = Object.entries(turn.decisions).filter(([, decision]) => decision.tool==="ferry_ask_user");
                           const owner = turn.owner_id === data.viewer_id;
                           const ownerName = data.members.find((member) => member.id === turn.owner_id)?.name || t("member");
                           const turnActivity = turnEvents.get(turn.id) ?? NO_EVENTS;
@@ -1082,6 +1088,9 @@ export function Conversation({
                           const counts = timelineSummary(turnActivity, turn.decisions, turn);
                           return (
                             <>
+                              {questions.map(([request,decision])=><QuestionCard key={request} request={request} decision={decision} canAnswer={owner&&permissions.has("conversations.run")} busy={busy} executing={active(turn.state)} onAnswer={async response=>{
+                                setBusy(true);try {await api(endpoint+`/turns/${turn.id}/question-answers`,{method:"POST",body:JSON.stringify({request_id:request,...response})});setData(await api<ConversationData>(endpoint));}finally{setBusy(false);}
+                              }}/>) }
                               {live.map(([request, decision]) => (
                                 <PendingDecisionCard
                                   key={request}
@@ -1104,7 +1113,7 @@ export function Conversation({
                                 />
                               ))}
                               {hasDetails && (
-                                <LazyDetails data-execution-details className="text-xs text-muted-foreground" summaryClassName="min-h-11 cursor-pointer py-3" summary={counts ? `${t("executionDetails")} · ${counts}` : t("executionDetails")}>
+                                <ExecutionDetailsPanel summary={counts ? `${t("executionDetails")} · ${counts}` : t("executionDetails")}>
                                   {() => (
                                     <ExecutionTimeline
                                     key={data.viewer_id}
@@ -1118,7 +1127,7 @@ export function Conversation({
                                     deciders={data.members}
                                     />
                                   )}
-                                </LazyDetails>
+                                </ExecutionDetailsPanel>
                               )}
                             </>
                           );
@@ -1294,7 +1303,7 @@ export function Conversation({
       <div className="shrink-0 px-3 pb-3 pt-2 sm:px-6 sm:pb-5">
         {!!attention.mine.length && (
           <div role="status" data-pending-banner className="mb-2 flex items-center gap-2 rounded-lg border border-amber-500/60 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow-sm dark:bg-amber-950/40 dark:text-amber-100">
-            <span className="min-w-0 flex-1">{commonText("conversations:pendingBanner", { count: attention.mine.length })}</span>
+            <span className="min-w-0 flex-1">{commonText(attention.questions ? "conversations:pendingResponseBanner" : "conversations:pendingBanner", { count: attention.mine.length })}</span>
             <Button type="button" size="sm" className="min-h-11" variant="outline" onClick={showOldestPending}>
               {t("showPending")}
             </Button>

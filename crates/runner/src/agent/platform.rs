@@ -59,7 +59,9 @@ impl Bridge {
         };
         let app = Router::new()
             .route("/call", post(call))
-            .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
+            .layer(axum::extract::DefaultBodyLimit::max(
+                ferry_protocol::agent::MAX_PLATFORM_CALL_BYTES,
+            ))
             .with_state(context);
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
@@ -98,7 +100,7 @@ async fn call(
     }
     let name = value["name"]
         .as_str()
-        .filter(|v| ["ferry_discover", "ferry_request"].contains(v))
+        .filter(|v| ["ferry_discover", "ferry_request", "ferry_ask_user"].contains(v))
         .ok_or(StatusCode::BAD_REQUEST)?;
     let id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = oneshot::channel();
@@ -139,7 +141,7 @@ pub(crate) fn tools() -> Value {
     json!([
       {
         "name": "ferry_discover",
-        "description": "Discover this workspace's actual platform API operations and the current user/Agent permissions. Use before platform questions about hosts, repositories, deployments, workflows or other business data. Never substitute local files for platform records.",
+        "description": "Discover current workspace operations and user/Agent permissions. Read usage, operation documentation, query keys, parameter definitions and recovery instructions before calling ferry_request. Follow next_offset for additional operations. For workflows, GET /workflow-definition-format supplies the exact Schema and executable examples. Never infer platform records from local files.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -158,7 +160,7 @@ pub(crate) fn tools() -> Value {
       },
       {
         "name": "ferry_request",
-        "description": "Invoke an existing platform API in this conversation's workspace. Every call is reauthorized using the user's and Agent role's current permissions. GET lists return total counts; writes wait for a user confirmation. Use ferry_discover for method/path. Do not invent data when an API fails.",
+        "description": "Invoke a discovered workspace API using its documentation and usage contract. The server rechecks current user/Agent permissions and the human-configured approval mode. Approval permits an attempt, not proof of success. Check status/ok/data/guidance; correct recoverable errors instead of repeating an unchanged failing call. Use ferry_ask_user when a user decision is needed. Never invent results.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -181,7 +183,7 @@ pub(crate) fn tools() -> Value {
             },
             "transfer": {
               "type": "object",
-              "description": "Binary upload instead of body. Up to 1 MiB base64. Raw file upload: data_base64. Multipart upload: also set filename and optional field (default file). Downloads return data_base64 or text. Responses are limited to 256 KiB.",
+              "description": "Binary upload instead of body. Up to 1 MiB base64. Raw upload: data_base64. Multipart: add filename and optional field (default file). The response ceiling is maintained in platform settings; use paging or file download/preview paths for large data.",
               "properties": {
                 "data_base64": {
                   "type": "string"
@@ -204,6 +206,23 @@ pub(crate) fn tools() -> Value {
             "path"
           ],
           "additionalProperties": false
+        }
+      },
+      {
+        "name":"ferry_ask_user",
+        "description":"Save a durable question in this conversation when a decision or missing information blocks progress. Explain the cause, feasible choices and recommendation. Suggested options are optional: users can always type any answer, pause, or abandon. After this tool returns awaiting_user, end the turn and wait; do not continue operations. The user's answer resumes the same conversation and never grants approval for a write. This is not available in unattended workflow steps.",
+        "inputSchema":{
+          "type":"object","additionalProperties":false,
+          "properties":{
+            "title":{"type":"string","minLength":1,"maxLength":120},
+            "question":{"type":"string","minLength":1,"maxLength":2048},
+            "reason":{"type":"string","maxLength":4096},
+            "options":{"type":"array","maxItems":6,"items":{
+              "type":"object","additionalProperties":false,
+              "properties":{"id":{"type":"string","minLength":1,"maxLength":64},"label":{"type":"string","minLength":1,"maxLength":160},"description":{"type":"string","maxLength":2048}},
+              "required":["id","label"]}},
+            "recommended_option_id":{"type":"string","description":"ID of one provided option; omit when there are no suggestions."}
+          },"required":["title","question"]
         }
       }
     ])
@@ -270,14 +289,15 @@ where
     loop {
         let mut buffer = Vec::new();
         let size = (&mut input)
-            .take(1024 * 1024 + 1)
+            .take((ferry_protocol::agent::MAX_PLATFORM_CALL_BYTES + 1) as u64)
             .read_until(b'\n', &mut buffer)
             .await?;
         if size == 0 {
             break;
         }
         ensure!(
-            buffer.len() <= 1024 * 1024 && buffer.last() == Some(&b'\n'),
+            buffer.len() <= ferry_protocol::agent::MAX_PLATFORM_CALL_BYTES
+                && buffer.last() == Some(&b'\n'),
             "MCP input exceeds limit"
         );
         let request: Value = serde_json::from_slice(&buffer)?;
@@ -379,9 +399,9 @@ async fn tool_call(
 pub(super) const PI_EXTENSION: &str = r#"
 import { Type } from '@sinclair/typebox';
 export default function(pi) {
-  for (const name of ['ferry_discover','ferry_request']) {
+  for (const name of ['ferry_discover','ferry_request','ferry_ask_user']) {
     pi.registerTool({name,label:name,description:'Query or operate on the current platform workspace using its live role permissions. Never infer platform data from local files.',
-      parameters:name==='ferry_discover'?Type.Object({search:Type.Optional(Type.String()),offset:Type.Optional(Type.Integer({minimum:0}))}):Type.Object({method:Type.Union(['GET','POST','PUT','PATCH','DELETE'].map(value=>Type.Literal(value))),path:Type.String(),body:Type.Optional(Type.Any()),transfer:Type.Optional(Type.Object({data_base64:Type.String(),filename:Type.Optional(Type.String()),field:Type.Optional(Type.String())}))}),
+      parameters:name==='ferry_discover'?Type.Object({search:Type.Optional(Type.String()),offset:Type.Optional(Type.Integer({minimum:0}))}):name==='ferry_ask_user'?Type.Object({title:Type.String(),question:Type.String(),reason:Type.Optional(Type.String()),options:Type.Optional(Type.Array(Type.Object({id:Type.String(),label:Type.String(),description:Type.Optional(Type.String())}))),recommended_option_id:Type.Optional(Type.String())}):Type.Object({method:Type.Union(['GET','POST','PUT','PATCH','DELETE'].map(value=>Type.Literal(value))),path:Type.String(),body:Type.Optional(Type.Any()),transfer:Type.Optional(Type.Object({data_base64:Type.String(),filename:Type.Optional(Type.String()),field:Type.Optional(Type.String())}))}),
       async execute(_id,args,signal) {
         const response=await fetch(process.env.FERRY_PLATFORM_BRIDGE_URL,{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+process.env.FERRY_PLATFORM_BRIDGE_TOKEN},body:JSON.stringify({name,arguments:args}),signal});
         if (!response.ok) throw new Error('Platform execution bridge failed: '+response.status);

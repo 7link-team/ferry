@@ -169,9 +169,18 @@ fn acp_platform_transport_is_per_call_and_does_not_unlock_local_tools() {
     for runtime in [Runtime::Gemini, Runtime::Qwen, Runtime::Opencode] {
         let mut p = acp_ready_platform(runtime, Permission::ReadOnly, true);
         let event = |title: &str| json!({"id":90,"method":"session/request_permission","params":{"sessionId":"native-acp","toolCall":{"title":title},"options":[{"kind":"allow_always","optionId":"forever"},{"kind":"allow_once","optionId":"once"}]}});
-        let step = p.receive(event("ferry_request")).unwrap();
-        assert_eq!(step.writes[0]["result"]["outcome"]["optionId"], "once");
-        assert!(step.events.is_empty());
+        for tool in [
+            "ferry_request",
+            "ferry_ask_user",
+            "mcp__ferry__ferry_ask_user",
+        ] {
+            let step = p.receive(event(tool)).unwrap();
+            assert_eq!(
+                step.writes[0]["result"]["outcome"]["optionId"], "once",
+                "{runtime:?}: {tool}"
+            );
+            assert!(step.events.is_empty());
+        }
         assert_eq!(
             p.receive(event("Bash")).unwrap().writes[0]["result"]["outcome"]["outcome"],
             "cancelled"
@@ -754,6 +763,34 @@ async fn bounded_json_reader_rejects_oversize_and_truncated_output() {
 }
 
 #[tokio::test]
+async fn native_multi_megabyte_events_are_not_truncated() {
+    for size in [1024 * 1024, 2 * 1024 * 1024, 6 * 1024 * 1024] {
+        let text = "x".repeat(size);
+        let mut wire = serde_json::to_vec(&json!({"text":text})).unwrap();
+        wire.push(b'\n');
+        let mut reader = BufReader::new(wire.as_slice());
+        let mut buffer = Vec::new();
+        let result = read(&mut reader, &mut buffer).await.unwrap().unwrap();
+        assert_eq!(result["text"].as_str().unwrap(), text);
+    }
+    // A tool's bounded JSON result is itself text inside MCP content. Native
+    // runtimes may echo that content in an event, adding another escaping layer.
+    let result = json!({"data":"\\".repeat(3 * 1024 * 1024)}).to_string();
+    assert!(result.len() < 8 * 1024 * 1024);
+    let event = json!({"method":"item/completed","params":{"item":{"type":"mcpToolCall",
+        "result":{"content":[{"type":"text","text":result}]}}}});
+    let mut wire = serde_json::to_vec(&event).unwrap();
+    wire.push(b'\n');
+    assert!(wire.len() > 8 * 1024 * 1024);
+    let mut reader = BufReader::new(wire.as_slice());
+    let mut buffer = Vec::new();
+    assert_eq!(
+        read(&mut reader, &mut buffer).await.unwrap().unwrap(),
+        event
+    );
+}
+
+#[tokio::test]
 async fn partial_json_is_preserved_across_input_selection() {
     let (mut writer, reader) = tokio::io::duplex(100);
     let mut reader = BufReader::new(reader);
@@ -901,8 +938,10 @@ async fn fixture_process_checks_full_handshake_tool_decision_and_end_event() {
     let (events, mut received) = mpsc::channel(8);
     let (input, inputs) = mpsc::channel(2);
     let (_stop, cancel) = watch::channel(false);
+    let mut req = request(Runtime::Codex);
+    req.platform_tools = true;
     let task = tokio::spawn(run_command(
-        request(Runtime::Codex),
+        req,
         fixture("complete"),
         events,
         inputs,

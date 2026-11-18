@@ -163,8 +163,8 @@ for file in source.rglob('*.rs'):
         for method,handler in re.findall(r'\b(get|post|put|patch|delete|any)\(\s*([\w:]+)\s*\)',text[start:end]):
             operations[(route,method)]={'path':route,'method':method.upper(),'handler':handler,'source':str(file.relative_to(root)).replace('\\','/'),**contract(handler,file)}
 rows=sorted(operations.values(),key=lambda v:(v['path'],v['method']))
-# Query parameters are for the workflow editor; the Agent catalogue keeps its shape.
-output=json.dumps([{k:v for k,v in row.items() if k!='_query'} for row in rows],ensure_ascii=False,indent=2)+'\n'
+# Both MCP clients and the workflow editor need the actual supported query keys.
+output=json.dumps([{**{k:v for k,v in row.items() if k!='_query'},**({'query':row['_query']} if row.get('_query') else {})} for row in rows],ensure_ascii=False,indent=2)+'\n'
 # The workflow editor only needs the read-only templates a platform data node may call.
 reads=json.dumps([{'path':v['path'],**({'permission':v['permission']} if 'permission' in v else {}),**({'query':v['_query']} if v.get('_query') else {})} for v in rows if v['method']=='GET'],ensure_ascii=False,indent=2)+'\n'
 for target,text in [(source/'platform_tools_catalog.json',output),(root/'src/shared/workflow-contracts/platform-read-operations.json',reads)]:
