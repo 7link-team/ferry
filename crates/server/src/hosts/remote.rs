@@ -283,64 +283,86 @@ async fn state_workspace(s: &AppState, host_id: &Id) -> Option<Id> {
 
 /// Copies bytes both ways until either side stops. The channel is held for the
 /// lifetime of the session: dropping it would close the remote connection.
-async fn pump(socket: WebSocket, mut pty: Box<dyn channel::Pty>, _channel: Box<dyn HostChannel>) {
-    let (mut sink, mut stream) = socket.split();
-    // Protocol-level heartbeats never reach the PTY or the user's shell.
-    let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
-    let mut last_pong = tokio::time::Instant::now();
-    loop {
-        tokio::select! {
-            _ = heartbeat.tick() => {
-                if last_pong.elapsed() > Duration::from_secs(70) {
-                    let _ = sink.send(Message::Text(json!({"type":"error","error":crate::i18n::message("terminal.heartbeatTimeout")}).to_string().into())).await;
-                    break;
-                }
-                if sink.send(Message::Ping(bytes::Bytes::new())).await.is_err() {
-                    break;
-                }
-            },
-            // Terminal output.
-            output = pty.read() => match output {
-                Ok(Some(bytes)) => {
-                    if sink.send(Message::Binary(bytes)).await.is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => {
-                    let _ = sink.send(Message::Text(json!({"type":"closed"}).to_string().into())).await;
-                    break;
-                }
-                Err(error) => {
-                    let _ = sink
-                        .send(Message::Text(json!({"type":"error","error":error.render(crate::i18n::current_locale())}).to_string().into()))
-                        .await;
-                    break;
-                }
-            },
-            // Keystrokes and control frames.
-            incoming = stream.next() => match incoming {
-                Some(Ok(Message::Binary(data))) => {
-                    if pty.write(&data).await.is_err() {
-                        break;
-                    }
-                }
-                Some(Ok(Message::Text(text))) => {
-                    #[derive(Deserialize)]
-                    struct Control { r#type: String, cols: Option<u16>, rows: Option<u16> }
-                    if let Ok(control) = serde_json::from_str::<Control>(&text)
-                        && control.r#type == "resize"
-                        && let (Some(cols), Some(rows)) = (control.cols, control.rows)
-                        && pty.resize(PtySize { cols, rows }.sane()).await.is_err()
-                    {
-                        break;
-                    }
-                }
-                Some(Ok(Message::Close(_))) | None => break,
-                Some(Ok(Message::Pong(_))) => { last_pong = tokio::time::Instant::now(); },
-                Some(Ok(_)) => {}
-                Some(Err(_)) => break,
-            },
+async fn pump(socket: WebSocket, pty: Box<dyn channel::Pty>, _channel: Box<dyn HostChannel>) {
+    let (sink, stream) = socket.split();
+    pump_io(sink, stream, pty).await;
+}
+
+async fn pump_io<S, R>(mut sink: S, mut stream: R, mut pty: Box<dyn channel::Pty>)
+where
+    S: futures::Sink<Message> + Unpin,
+    R: futures::Stream<Item = std::result::Result<Message, axum::Error>> + Unpin,
+{
+    // Bound output memory without letting a slow browser flush stop receiving
+    // Ctrl-C, resize or Pong. Only one pending PTY chunk sits outside this queue.
+    let (outgoing, mut queued) = tokio::sync::mpsc::channel(32);
+    let writer = async {
+        while let Some(message) = queued.recv().await {
+            if sink.send(message).await.is_err() {
+                break;
+            }
         }
+    };
+    let relay = async move {
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
+        let mut last_pong = tokio::time::Instant::now();
+        let mut pending = None;
+        loop {
+            tokio::select! {
+                _ = heartbeat.tick() => {
+                    if last_pong.elapsed() > Duration::from_secs(70) {
+                        let _ = outgoing.send(Message::Text(json!({"type":"error","error":crate::i18n::message("terminal.heartbeatTimeout")}).to_string().into())).await;
+                        return true;
+                    }
+                    // If logs fill the queue, retry on the next heartbeat rather
+                    // than waiting here and preventing incoming Pong processing.
+                    let _ = outgoing.try_send(Message::Ping(bytes::Bytes::new()));
+                },
+                permit = outgoing.reserve(), if pending.is_some() => {
+                    let Ok(permit) = permit else { return false; };
+                    permit.send(pending.take().unwrap());
+                },
+                output = pty.read(), if pending.is_none() => match output {
+                    Ok(Some(bytes)) => { pending = Some(Message::Binary(bytes)); }
+                    Ok(None) => {
+                        let _ = outgoing.send(Message::Text(json!({"type":"closed"}).to_string().into())).await;
+                        return true;
+                    }
+                    Err(error) => {
+                        let _ = outgoing.send(Message::Text(json!({"type":"error","error":error.render(crate::i18n::current_locale())}).to_string().into())).await;
+                        return true;
+                    }
+                },
+                incoming = stream.next() => match incoming {
+                    Some(Ok(Message::Binary(data))) => {
+                        if pty.write(&data).await.is_err() { return false; }
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        #[derive(Deserialize)]
+                        struct Control { r#type: String, cols: Option<u16>, rows: Option<u16> }
+                        if let Ok(control) = serde_json::from_str::<Control>(&text)
+                            && control.r#type == "resize"
+                            && let (Some(cols), Some(rows)) = (control.cols, control.rows)
+                            && pty.resize(PtySize { cols, rows }.sane()).await.is_err()
+                        {
+                            return false;
+                        }
+                    }
+                    Some(Ok(Message::Pong(_))) => { last_pong = tokio::time::Instant::now(); },
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return false,
+                    Some(Ok(_)) => {}
+                },
+            }
+        }
+    };
+    tokio::pin!(writer, relay);
+    tokio::select! {
+        _ = &mut writer => {},
+        drain = &mut relay => {
+            // Deliver final output/status on shell exit; a browser disconnect
+            // instead cancels the writer immediately and drops the remote PTY.
+            if drain { writer.await; }
+        },
     }
 }
 
@@ -700,4 +722,116 @@ pub async fn test_connection(
     Ok(Json(
         json!({ "ok": ok, "code": output.code, "stderr": output.stderr }),
     ))
+}
+
+#[cfg(test)]
+mod terminal_transport_tests {
+    use super::*;
+    use std::{
+        pin::Pin,
+        sync::Arc,
+        task::{Context, Poll},
+    };
+
+    struct StalledSink(Arc<tokio::sync::Notify>);
+    impl futures::Sink<Message> for StalledSink {
+        type Error = ();
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), ()>> {
+            self.0.notify_one();
+            Poll::Pending
+        }
+        fn start_send(self: Pin<&mut Self>, _: Message) -> std::result::Result<(), ()> {
+            unreachable!()
+        }
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), ()>> {
+            Poll::Pending
+        }
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), ()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+    struct TestPty(tokio::sync::mpsc::UnboundedSender<Vec<u8>>);
+    #[async_trait::async_trait]
+    impl channel::Pty for TestPty {
+        async fn write(&mut self, data: &[u8]) -> Result<()> {
+            self.0.send(data.to_vec()).unwrap();
+            Ok(())
+        }
+        async fn read(&mut self) -> Result<Option<bytes::Bytes>> {
+            Ok(Some(bytes::Bytes::from_static(b"log")))
+        }
+        async fn resize(&mut self, _: PtySize) -> Result<()> {
+            Ok(())
+        }
+    }
+    #[tokio::test]
+    async fn terminal_stalled_browser_output_does_not_block_interrupt_input() {
+        let blocked = Arc::new(tokio::sync::Notify::new());
+        let ready = blocked.clone();
+        let incoming = futures::stream::once(async move {
+            ready.notified().await;
+            Ok(Message::Binary(bytes::Bytes::from_static(b"\x03")))
+        })
+        .chain(futures::stream::pending())
+        .boxed();
+        let (written, mut writes) = tokio::sync::mpsc::unbounded_channel();
+        let task = tokio::spawn(pump_io(
+            StalledSink(blocked),
+            incoming,
+            Box::new(TestPty(written)),
+        ));
+        let result = tokio::time::timeout(Duration::from_millis(500), writes.recv()).await;
+        task.abort();
+        let _ = task.await;
+        assert_eq!(
+            result.expect("a slow browser writer must not stall Ctrl-C"),
+            Some(vec![3])
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_delivers_final_output_before_closed_status() {
+        struct FinitePty(bool);
+        #[async_trait::async_trait]
+        impl channel::Pty for FinitePty {
+            async fn write(&mut self, _: &[u8]) -> Result<()> {
+                Ok(())
+            }
+            async fn read(&mut self) -> Result<Option<bytes::Bytes>> {
+                if std::mem::replace(&mut self.0, false) {
+                    Ok(Some(bytes::Bytes::from_static(b"last line")))
+                } else {
+                    Ok(None)
+                }
+            }
+            async fn resize(&mut self, _: PtySize) -> Result<()> {
+                Ok(())
+            }
+        }
+        let (sink, mut messages) = futures::channel::mpsc::unbounded::<Message>();
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            pump_io(sink, futures::stream::pending(), Box::new(FinitePty(true))),
+        )
+        .await
+        .expect("shell exit must drain and close the writer");
+        let mut observed = Vec::new();
+        while let Some(message) = messages.next().await {
+            match message {
+                Message::Binary(data) => observed.push(String::from_utf8(data.to_vec()).unwrap()),
+                Message::Text(text) => observed.push(text.to_string()),
+                _ => {}
+            }
+        }
+        assert_eq!(observed, ["last line", "{\"type\":\"closed\"}"]);
+    }
 }

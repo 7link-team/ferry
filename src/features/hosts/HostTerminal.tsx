@@ -17,6 +17,7 @@ import { api,ApiError } from "../../shared/api/api";
 import { currentLocale } from "../../shared/i18n/locale";
 import { createThemeColorReader, useTheme } from "../../shared/theme/theme";
 import { TerminalMetrics } from "./HostTelemetry";
+import { Button } from "../../shared/ui/button";
 
 export function terminalStartCommand(os: string, directory?: string, agentVersion?: string) {
   if (directory && /[\x00-\x1f\x7f]/.test(directory)) throw new Error(hostRepositoryText("host.061"));
@@ -57,12 +58,15 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
   const terminal = useRef<Terminal>(null);
   const [status, setStatus] = useState<Status>("connecting");
   const [error, setError] = useState("");
+  const [connection, setConnection] = useState(0);
   const { resolved, palette: appPalette, customLight, customDark } = useTheme();
   const { palette } = useTerminalPalette();
 
   useEffect(() => {
     const element = mount.current;
     if (!element) return;
+    setStatus("connecting");
+    setError("");
 
     const term = new Terminal({
       fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
@@ -146,13 +150,17 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
 
     return () => {
       controller.abort();
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onclose = null;
+      socket.onerror = null;
       observer.disconnect();
       input.dispose();
       socket.close();
       term.dispose();
       terminal.current = null;
     };
-  }, [workspace, hostId, directory]);
+  }, [workspace, hostId, directory, connection]);
 
   // Re-theme in place. Recreating the terminal would kill a live session just
   // because someone toggled dark mode.
@@ -180,11 +188,17 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
           {status === "error" && (error || hostRepositoryText("host.067"))}
         </span>
         {status === "open" && <TerminalMetrics />}
+        {(status === "closed" || status === "error") && <Button
+          type="button" variant="outline" size="sm"
+          className="min-h-11 xl:min-h-8"
+          title={hostRepositoryText("host.reconnectHint")}
+          aria-description={hostRepositoryText("host.reconnectHint")}
+          onClick={() => setConnection(value => value + 1)}
+        >{hostRepositoryText("host.reconnect")}</Button>}
       </div>
-      <div
-        ref={mount}
-        className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-card p-2"
-      />
+      <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-card p-2">
+        <div ref={mount} className="h-full min-h-0 min-w-0 overflow-hidden" />
+      </div>
     </div>
   );
 }

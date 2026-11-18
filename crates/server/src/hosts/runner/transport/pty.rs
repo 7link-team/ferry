@@ -45,12 +45,19 @@ pub(super) async fn pump_pty(
     output: mpsc::Sender<Result<Bytes>>,
     mut input: mpsc::Receiver<Keystrokes>,
 ) {
+    let mut pending = None;
     loop {
         tokio::select! {
-            incoming = socket.recv() => {
+            permit = output.reserve(), if pending.is_some() => {
+                let Ok(permit) = permit else { break };
+                permit.send(pending.take().unwrap());
+            },
+            // Do not wait on a full browser-output queue inside this branch:
+            // the input branch must remain able to forward Ctrl-C and resize.
+            incoming = socket.recv(), if pending.is_none() => {
                 let Some(Ok(message)) = incoming else { break };
                 match message {
-                    Message::Binary(bytes) => if output.send(Ok(bytes)).await.is_err() { break },
+                    Message::Binary(bytes) => { pending = Some(Ok(bytes)); },
                     Message::Text(text) => match serde_json::from_str::<wire::Session>(&text) {
                         Ok(wire::Session::Eof) | Ok(wire::Session::Done) => break,
                         Ok(wire::Session::Failed { error }) => {

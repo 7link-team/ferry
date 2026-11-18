@@ -122,6 +122,18 @@ try {
       assert.equal(overlap, false, 'panes overlap');
     }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'workspace overflows horizontally');
+    for (const terminal of await page.locator('.xterm-screen').all()) {
+      if (!await terminal.isVisible()) continue;
+      const fits = await terminal.evaluate(element => {
+        const screen = element.getBoundingClientRect(), mount = element.closest('.xterm').parentElement.getBoundingClientRect();
+        return screen.bottom <= mount.bottom + 1 && screen.right <= mount.right + 1;
+      });
+      assert(fits, 'terminal cells including the last row must fit the visible mount');
+    }
+    if (process.env.TERMINAL_EVIDENCE_DIR) {
+      await mkdir(process.env.TERMINAL_EVIDENCE_DIR, { recursive: true });
+      await page.screenshot({ path: join(process.env.TERMINAL_EVIDENCE_DIR, `terminal-${viewport.width}.png`) });
+    }
   };
   await checkLayout();
   if (process.env.HOST_WORKSPACE_SCREENSHOT) await page.screenshot({ path: process.env.HOST_WORKSPACE_SCREENSHOT });
@@ -138,6 +150,31 @@ try {
   const folderSession = sessions.at(-1);
   await until(() => folderSession.output.includes(fixtureDir), 'file shortcut PTY enters exact quoted directory');
   console.log('PASS file shortcut opens a native Windows PTY in the exact selected directory');
+
+  // Exercise continuous log output across a heartbeat interval, then interrupt
+  // through the same browser socket. No host service or user data is changed.
+  const keyboard = page.locator('.xterm-helper-textarea').last();
+  await keyboard.focus();
+  await page.keyboard.insertText(`node -e "let n=0;const t=setInterval(()=>{console.log('PTY_FLOW_'+(++n)+' '+'.'.repeat(256));if(n===5000)clearInterval(t)},5)"`);
+  await page.keyboard.press('Enter');
+  await until(() => folderSession.output.includes('PTY_FLOW_10 '), 'actual streaming terminal output');
+  await new Promise(done => setTimeout(done, 22_000));
+  assert.equal(folderSession.closed, false, 'continuous output must survive the heartbeat interval');
+  await page.keyboard.press('Control+c');
+  await page.keyboard.insertText(`node -e "console.log('AFTER'+'INTERRUPT')"`);
+  await page.keyboard.press('Enter');
+  await until(() => folderSession.output.includes('AFTERINTERRUPT'), 'Ctrl-C reaches the shell during output');
+  const beforeReconnect = sessions.length;
+  await page.keyboard.insertText('exit'); await page.keyboard.press('Enter');
+  const reconnect = page.getByRole('button', { name: '重新连接', exact: true });
+  await reconnect.waitFor();
+  assert.match(await reconnect.getAttribute('title'), /新的终端会话/);
+  await reconnect.click();
+  await page.getByText('已连接', { exact: true }).waitFor();
+  assert.equal(sessions.length, beforeReconnect + 1, 'manual reconnect opens exactly one new shell');
+  await until(() => sessions.at(-1).output.includes(fixtureDir), 'new shell uses the selected directory');
+  assert(!sessions.at(-1).output.includes('PTY_FLOW_'), 'reconnect must never replay the previous script');
+  console.log('PASS continuous output, Ctrl-C, shell exit, explicit fresh reconnect without replay');
 
   // Read actual control frames: browser devtools omit protocol-level Ping/Pong.
   let pings = 0, opened = false, ended = false, output = '', buffered = Buffer.alloc(0);

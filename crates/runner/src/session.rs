@@ -665,12 +665,13 @@ async fn terminal(socket: &mut Socket, cols: u16, rows: u16) -> anyhow::Result<(
     command.env("TERM", "xterm-256color");
     #[cfg(windows)]
     command.cwd(terminal_directory());
-    let child = pty.slave.spawn_command(command).context("无法启动 shell")?;
+    let mut child = pty.slave.spawn_command(command).context("无法启动 shell")?;
     // Dropping the slave is what lets the reader see EOF when the shell exits.
     drop(pty.slave);
 
     let mut reader = pty.master.try_clone_reader()?;
     let mut writer = pty.master.take_writer()?;
+    let mut master = Some(pty.master);
     // portable-pty is blocking, and these two threads live as long as the
     // session, so they are dedicated threads rather than `spawn_blocking`
     // slots the runtime needs back.
@@ -697,34 +698,55 @@ async fn terminal(socket: &mut Socket, cols: u16, rows: u16) -> anyhow::Result<(
         }
     });
 
-    let mut shell_exited = false;
-    loop {
-        tokio::select! {
-            chunk = from_shell.recv() => match chunk {
-                Some(bytes) => if socket.send(Message::binary(bytes)).await.is_err() { break },
-                // The shell exited and its output is drained.
-                None => { shell_exited = true; break }
-            },
-            incoming = socket.next() => match incoming {
-                Some(Ok(Message::Binary(bytes))) => {
-                    if to_shell.send(bytes.to_vec()).is_err() { break }
-                }
-                Some(Ok(Message::Text(text))) => {
-                    if let Ok(wire::Session::TerminalResize { cols, rows }) =
-                        serde_json::from_str::<wire::Session>(&text)
-                        && pty.master.resize(pty_size(cols, rows)).is_err()
-                    {
-                        break;
+    let shell_exited = {
+        let (mut sink, mut incoming) = socket.split();
+        // A slow output flush must not prevent receiving Ctrl-C or resize.
+        // The existing bounded PTY queue still applies backpressure to logs.
+        let outgoing = async {
+            while let Some(bytes) = from_shell.recv().await {
+                sink.send(Message::binary(bytes)).await?;
+            }
+            Ok::<(), tokio_tungstenite::tungstenite::Error>(())
+        };
+        tokio::pin!(outgoing);
+        let mut child_poll = tokio::time::interval(std::time::Duration::from_millis(250));
+        loop {
+            tokio::select! {
+                result = &mut outgoing => break result.is_ok(),
+                _ = child_poll.tick(), if cfg!(windows) && master.is_some() => {
+                    match child.try_wait() {
+                        Ok(Some(_)) => {
+                            // ConPTY keeps its output pipe open after cmd exits
+                            // while the master still owns the pseudo console.
+                            // Closing it allows the reader to drain and see EOF.
+                            let closing = master.take();
+                            tokio::task::spawn_blocking(move || drop(closing));
+                        }
+                        Ok(None) => {}
+                        Err(_) => break false,
                     }
-                }
-                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
-                Some(Ok(_)) => {}
-            },
+                },
+                message = incoming.next() => match message {
+                    Some(Ok(Message::Binary(bytes))) => {
+                        if to_shell.send(bytes.to_vec()).is_err() { break false; }
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        if let Ok(wire::Session::TerminalResize { cols, rows }) =
+                            serde_json::from_str::<wire::Session>(&text)
+                            && let Some(master) = &master
+                            && master.resize(pty_size(cols, rows)).is_err()
+                        {
+                            break false;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break false,
+                    Some(Ok(_)) => {}
+                },
+            }
         }
-    }
+    };
 
     // Closing the browser tab must not leave a shell running on the host.
-    let mut child = child;
     tokio::task::spawn_blocking(move || {
         let _ = child.kill();
         let _ = child.wait();
