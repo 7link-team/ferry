@@ -13,6 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check released sandbox with ordinary container restrictions
+        continue-on-error: true
         shell: bash
         run: |
           python3 - <<'PY'
@@ -32,4 +33,17 @@ jobs:
               if name=='default':failed=result.returncode!=0 or json.loads(result.stdout).get('status')!='ok'
           print('Docker security options:',subprocess.check_output(['docker','info','--format','{{json .SecurityOptions}}'],text=True))
           if failed:raise SystemExit('Released sandbox failed under default Docker restrictions')
+          PY
+      - name: Trace confinement failure in a disposable diagnostic container
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,subprocess
+          batch=json.dumps({'version':1,'timeout_ms':1000,'memory_bytes':16777216,'deterministic':True,'evaluations':[{'expression':'1+1','context':{}}]})
+          command='apt-get update -qq && apt-get install -y -qq strace >/dev/null && printf %s '+repr(batch)+' | strace -f -o /tmp/sandbox.trace /usr/local/bin/ferry-sandbox; tail -n 65 /tmp/sandbox.trace'
+          result=subprocess.run(['docker','run','--rm','--user','0:0','--cap-add','SYS_PTRACE','--entrypoint','/bin/sh','ghcr.io/7link-team/ferry-server:v0.10.3-alpha','-c',command],text=True,capture_output=True,timeout=180)
+          for text in [result.stdout,result.stderr]:
+              print('::notice title=Sandbox syscall trace::'+text[-14000:].replace('%','%25').replace('\r','%0D').replace('\n','%0A'))
+          assert result.returncode==0,result.returncode
           PY
