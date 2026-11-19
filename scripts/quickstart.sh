@@ -216,6 +216,13 @@ healthy_ferry_image() { # IMAGE: configuration alone does not prove deployment.
 umask 077
 env_file=.env.production
 files="compose.production.yaml compose.postgres.yaml compose.mysql.yaml scripts/postgres-init.sh"
+sandbox_files() {
+    # Older release files do not reference this policy; never fetch new files
+    # from an old tag that could not have shipped them.
+    if [ -f "$1/compose.production.yaml" ] && grep -q 'seccomp=./sandbox-seccomp.json' "$1/compose.production.yaml"; then
+        printf '%s\n' sandbox-seccomp.json sandbox-seccomp.LICENSE
+    fi
+}
 
 env_get() { sed -n "s/^$1=//p" "$env_file" | head -n 1; }
 env_set() { # KEY VALUE: replace or append one line, keeping everything else
@@ -591,7 +598,7 @@ if [ -n "$upgrade" ]; then
         fail "database backup failed, nothing was changed; the $database service must be running ($compose up -d)"
     fi
     saved=
-    for file in "$env_file" $release compose.storage.yaml; do
+    for file in "$env_file" $release compose.storage.yaml $(sandbox_files .); do
         if [ -f "$file" ]; then cp -p "$file" "$backup/$file"; saved="$saved $file"; fi
     done
     restore() { for file in $saved; do cp -p "$backup/$file" "$file"; done; upgrade_restore_pending=; }
@@ -607,6 +614,9 @@ if [ -n "$upgrade" ]; then
     rm -rf .upgrade
     mkdir -p .upgrade/scripts
     download .upgrade $release
+    policy_files=$(sandbox_files .upgrade)
+    download .upgrade $policy_files
+    release="$release $policy_files"
     sed "s#^FERRY_IMAGE=.*#FERRY_IMAGE=$image:$version#" "$env_file" > ".upgrade/$env_file"
     upgrade_restore_pending=1
     for file in $release "$env_file"; do mv ".upgrade/$file" "$file"; done
@@ -627,6 +637,9 @@ if [ -n "$upgrade" ]; then
         printf 'Quickstart failed: %s did not become healthy; inspect it with: %s logs ferry\n' "$version" "$compose" >&2
         printf 'To return to %s, run in %s:\n' "$current" "$(pwd)" >&2
         printf '  cp -p %s/%s %s/compose.*.yaml . && cp -p %s/scripts/postgres-init.sh scripts/\n' "$backup" "$env_file" "$backup" "$backup" >&2
+        if [ -f "$backup/sandbox-seccomp.json" ]; then
+            printf '  cp -p %s/sandbox-seccomp.json %s/sandbox-seccomp.LICENSE .\n' "$backup" "$backup" >&2
+        fi
         printf '  %s stop ferry\n  %s %s < %s/database.sql\n  %s up -d --wait\n' "$compose" "$compose" "$load" "$backup" "$compose" >&2
         exit 1
     fi
@@ -668,13 +681,14 @@ if [ ! -f "$env_file" ] && command -v docker >/dev/null 2>&1; then
 fi
 
 missing=
-for file in $files; do [ -f "$file" ] || missing=1; done
+for file in $files $(sandbox_files .); do [ -f "$file" ] || missing=1; done
 if [ -n "$missing" ] || [ ! -f "$env_file" ]; then
     if [ -z "$version" ] && [ -f "$env_file" ]; then
         version=$(sed -n 's/^FERRY_IMAGE=.*:\(v[^:@]*\)$/\1/p' "$env_file" | head -n 1)
     fi
     [ -n "$version" ] || resolve_latest
     for file in $files; do [ -f "$file" ] || download . "$file"; done
+    for file in $(sandbox_files .); do [ -f "$file" ] || download . "$file"; done
     chmod 755 scripts/postgres-init.sh
 fi
 

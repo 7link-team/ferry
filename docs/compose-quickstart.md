@@ -182,3 +182,5 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
 ```
 
 新机器复用解压出的版本、配置、密钥和数据。更换域名时再用 `--proxy-domain` 或 `--domain` 更新访问配置。确认新机器运行正常后再处理旧部署，避免两份相同实例身份同时运行。目录归档包含密钥与数据库，应按敏感备份保存。
+
+See [Container sandbox configuration and 503 recovery](compose-sandbox.md).

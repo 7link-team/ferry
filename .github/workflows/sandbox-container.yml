@@ -1,0 +1,60 @@
+name: Container sandbox acceptance
+on:
+  push:
+    branches: [main, fix/compose-sandbox-503]
+    paths:
+      - sandbox-seccomp.json
+      - sandbox-seccomp.LICENSE
+      - compose.yaml
+      - compose.production.yaml
+      - scripts/quickstart.sh
+      - scripts/test-quickstart.sh
+      - scripts/test-workflow-sandbox.py
+      - .github/scripts/test-sandbox-container.py
+      - .github/scripts/smoke-server-image.mjs
+      - .github/workflows/sandbox-container.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sandbox:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}-server:latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install and upgrade script regression
+        run: sh scripts/test-quickstart.sh
+      - name: Test shipped non-root image with the deployment policy
+        shell: bash
+        run: |
+          docker pull "$IMAGE"
+          mkdir -p harness-logs
+          set +e
+          python3 .github/scripts/test-sandbox-container.py "$IMAGE" 2>&1 | tee harness-logs/sandbox.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then python3 .github/scripts/annotate-failures.py harness-logs/sandbox.log || true; fi
+          exit "$status"
+      - name: Verify expression workflow creation and execution through the API
+        shell: bash
+        run: |
+          set +e
+          node .github/scripts/smoke-server-image.mjs "$IMAGE" 2>&1 | tee harness-logs/workflow.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then python3 .github/scripts/annotate-failures.py harness-logs/workflow.log || true; fi
+          exit "$status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sandbox-container-${{ matrix.runner }}
+          path: harness-logs/

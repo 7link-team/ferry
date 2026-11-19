@@ -20,7 +20,13 @@ case "\$url" in
         case "\$url" in */\${UNPUBLISHED_VERSION:-no-version}/*) exit 22 ;; esac
         case "\$url" in */\${UNSIGNED_VERSION:-no-version}/*.sig) exit 22 ;; esac
         printf 'fixture release availability marker\n' > "\$out" ;;
-    https://raw.githubusercontent.com/*) [ -z "\${EMPTY_DOWNLOAD:-}" ] || exit 0; cp "$repo/\$(printf '%s' "\$url" | sed 's#^https://raw.githubusercontent.com/[^/]*/[^/]*/[^/]*/##')" "\$out" ;;
+    https://raw.githubusercontent.com/*)
+        [ -z "\${EMPTY_DOWNLOAD:-}" ] || exit 0
+        cp "$repo/\$(printf '%s' "\$url" | sed 's#^https://raw.githubusercontent.com/[^/]*/[^/]*/[^/]*/##')" "\$out"
+        case "\$url" in */\${LEGACY_SECURITY_RELEASE:-no-version}/compose.production.yaml)
+            sed '/^    security_opt:\$/ { N; N; d; }' "\$out" > "\$out.legacy"
+            mv "\$out.legacy" "\$out" ;;
+        esac ;;
     *) exit 22 ;;
 esac
 EOF
@@ -59,6 +65,9 @@ refused --dir absent --migrate-storage
 output=$(run --port 4399)
 check '[ -f "$work/ferry/compose.production.yaml" ] && [ -f "$work/ferry/compose.postgres.yaml" ] && [ -f "$work/ferry/compose.mysql.yaml" ] && [ -f "$work/ferry/scripts/postgres-init.sh" ]' 'downloads every Compose file of the release into the deployment directory'
 check 'cmp -s "$work/ferry/compose.production.yaml" "$repo/compose.production.yaml" && [ ! -e "$work/ferry/compose.https.yaml" ] && [ ! -e "$work/ferry/caddy/Caddyfile" ]' 'downloaded files are the release files byte for byte; no HTTPS proxy without a domain'
+check 'cmp -s "$work/ferry/sandbox-seccomp.json" "$repo/sandbox-seccomp.json" && cmp -s "$work/ferry/sandbox-seccomp.LICENSE" "$repo/sandbox-seccomp.LICENSE"' 'downloads the version-matched sandbox policy and license'
+(export LEGACY_SECURITY_RELEASE=v8.0.0; run --dir legacy-security --version v8.0.0 --init-only >/dev/null)
+check '[ ! -e "$work/legacy-security/sandbox-seccomp.json" ] && ! grep -q "/v8.0.0/sandbox-seccomp" "$work/curl.log"' 'old releases without a sandbox policy remain installable without fetching nonexistent files'
 check 'has "$env" "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.9"' 'deploys the image of the latest published release, never a stale pin'
 check 'grep -q "/releases.atom$" "$work/curl.log" && ! grep -q "api.github.com" "$work/curl.log"' 'resolves the newest release from the releases feed without the rate-limited API'
 check 'has "$env" "FERRY_BIND_ADDRESS=0.0.0.0" && ! grep -q "^FERRY_ALLOWED_HOSTS=" "$env" && has "$env" "FERRY_SECURE_COOKIE=false" && has "$env" "FERRY_PORT=4399" && has "$env" "FERRY_DOMAINS=" && has "$env" "FERRY_REDIS=true" && ! grep -q PUBLIC_URL "$env"' 'publishes on all interfaces without a host allowlist, with the port and Redis; no public URL environment setting'
@@ -185,12 +194,16 @@ rm -rf "$work/ferry/backups"
 output=$(run --upgrade --version v9.10.0)
 check 'image_line "$env" | grep -qx "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.10.0" && [ "$(printf "%s\n" "$before" | grep -v ^FERRY_IMAGE=)" = "$(without_image "$env")" ]' 'upgrade moves FERRY_IMAGE to the new release and keeps every secret and address'
 backup=$(ls -d "$work"/ferry/backups/*-v9.9.9-to-v9.10.0)
+check 'cmp -s "$backup/sandbox-seccomp.json" "$repo/sandbox-seccomp.json" && cmp -s "$backup/sandbox-seccomp.LICENSE" "$repo/sandbox-seccomp.LICENSE"' 'backs up the old sandbox policy with the release files'
 check '[ "$(cat "$backup/database.sql")" = "-- dump" ] && [ "$before" = "$(cat "$backup/.env.production")" ] && [ -f "$backup/compose.production.yaml" ] && [ -f "$backup/scripts/postgres-init.sh" ]' 'backs up the database dump, the env file and the Compose files of the old release'
 check 'grep -q "exec -T postgres pg_dump -U postgres -d ferry" "$work/docker.log" && [ "$(grep -n -E "pg_dump| pull$|up -d --wait" "$work/docker.log" | cut -d: -f1 | tr "\n" " ")" = "$(grep -n -E "pg_dump| pull$|up -d --wait" "$work/docker.log" | cut -d: -f1 | sort -n | tr "\n" " ")" ] && grep -q "raw.githubusercontent.com/7link-team/ferry/v9.10.0/compose.production.yaml" "$work/curl.log"' 'dumps the database, then downloads the new release files, pulls and waits for health'
 check 'grep -q -- "--profile redis -f compose.storage.yaml pull" "$work/docker.log" && [ ! -e "$work/ferry/.upgrade" ] && printf "%s" "$output" | grep -q "Upgraded from v9.9.9 to v9.10.0" && printf "%s" "$output" | grep -q setup-token-123' 'keeps recorded Redis, leaves no staging files and prints the setup token'
 upgraded=$(cat "$env")
+printf '\n' >> "$work/ferry/sandbox-seccomp.json"
+cp "$work/ferry/sandbox-seccomp.json" "$work/policy-before-failed-upgrade"
 if (export DOCKER_FAIL=pull; run --upgrade --version v9.11.0 >/dev/null 2>&1); then echo 'FAIL failed pull reported success'; exit 1; fi
 check '[ "$upgraded" = "$(cat "$env")" ]' 'a failed image pull restores the previous files'
+check 'cmp -s "$work/ferry/sandbox-seccomp.json" "$work/policy-before-failed-upgrade"' 'a failed image pull restores the exact previous sandbox policy'
 for signal in INT TERM; do
     if (export INTERRUPT_PULL=$signal; run --upgrade --version v9.11.0 >/dev/null 2>&1); then echo 'FAIL interrupted pull reported success'; exit 1; fi
     check '[ "$upgraded" = "$(cat "$env")" ]' "$signal during pull restores the previous configuration before any startup"

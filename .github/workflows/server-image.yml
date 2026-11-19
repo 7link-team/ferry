@@ -79,6 +79,8 @@ jobs:
           cache-to: type=gha,scope=server-${{ matrix.arch }},mode=max
       - name: Verify initialization, the embedded web UI and a persistent restart
         run: node .github/scripts/smoke-server-image.mjs ferry-server:check
+      - name: Verify non-root expression sandbox confinement
+        run: python3 .github/scripts/test-sandbox-container.py ferry-server:check
       # Push the verified image (same layers, from the build
       # cache) by digest, without any tag, so no scratch tags are left behind.
       - name: Push the verified architecture by digest

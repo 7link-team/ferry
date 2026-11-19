@@ -5,6 +5,10 @@ services:
     # Only used by `docker compose build`; `up` pulls the image above.
     build: { context: ., target: runtime }
     restart: unless-stopped
+    # Keep the container baseline; allow only the sandbox's NEWUSER namespace.
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./sandbox-seccomp.json
     ports:
       - "4290:4290"
     environment:

@@ -12,6 +12,9 @@ x-service: &service
 services:
   ferry:
     <<: *service
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./sandbox-seccomp.json
     image: ${FERRY_IMAGE:?Run scripts/quickstart.sh first}
     ports: ["${FERRY_BIND_ADDRESS:-0.0.0.0}:${FERRY_PORT:-4290}:4290"]
     environment:
