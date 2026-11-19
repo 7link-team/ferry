@@ -28,7 +28,7 @@ jobs:
           path=pathlib.Path(tempfile.gettempdir())/'sandbox-userns-seccomp.json';path.write_text(json.dumps(profile))
           failed=False
           for name,args in [('default',[]),('root diagnostic',['--user','0:0']),('userns-only',['--security-opt','seccomp='+str(path)]),('userns-only with NNP',['--security-opt','seccomp='+str(path),'--security-opt','no-new-privileges:true'])]:
-              result=subprocess.run(['docker','run','--rm','-i',*args,'--entrypoint','/usr/local/bin/ferry-sandbox',image],input=batch,text=True,capture_output=True,timeout=30)
+              result=subprocess.run(['docker','run','--rm','--init','-i',*args,'--entrypoint','/usr/local/bin/ferry-sandbox',image],input=batch,text=True,capture_output=True,timeout=30)
               print('::notice title=Sandbox '+name+'::'+json.dumps({'returncode':result.returncode,'stdout':result.stdout,'stderr':result.stderr}),flush=True)
               if name=='default':failed=result.returncode!=0 or json.loads(result.stdout).get('status')!='ok'
           print('Docker security options:',subprocess.check_output(['docker','info','--format','{{json .SecurityOptions}}'],text=True))
