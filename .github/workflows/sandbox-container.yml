@@ -1,7 +1,7 @@
 name: Container sandbox acceptance
 on:
   push:
-    branches: [main, fix/compose-sandbox-503]
+    branches: [main]
     paths:
       - sandbox-seccomp.json
       - sandbox-seccomp.LICENSE
