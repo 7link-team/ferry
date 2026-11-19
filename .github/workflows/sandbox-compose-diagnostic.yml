@@ -1,0 +1,35 @@
+name: Sandbox Compose diagnostic
+on:
+  push:
+    branches: [fix/compose-sandbox-503]
+    paths: [.github/workflows/sandbox-compose-diagnostic.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check released sandbox with ordinary container restrictions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,subprocess,tempfile,pathlib,urllib.request
+          image='ghcr.io/7link-team/ferry-server:v0.10.3-alpha'
+          subprocess.run(['docker','pull',image],check=True)
+          batch=json.dumps({'version':1,'timeout_ms':1000,'memory_bytes':16777216,'deterministic':True,'evaluations':[{'expression':'1+1','context':{}}]})
+          profile=urllib.request.urlopen('https://raw.githubusercontent.com/moby/profiles/main/seccomp/default.json',timeout=30).read()
+          assert hashlib.sha256(profile).hexdigest()=='3320527d4568265ac97a077609b1bfd4cfd0d789eeb9239b7e094b1526675406'
+          profile=json.loads(profile)
+          profile['syscalls'].append({'names':['unshare'],'action':'SCMP_ACT_ALLOW','args':[{'index':0,'value':268435456,'op':'SCMP_CMP_EQ'}]})
+          path=pathlib.Path(tempfile.gettempdir())/'sandbox-userns-seccomp.json';path.write_text(json.dumps(profile))
+          failed=False
+          for name,args in [('default',[]),('root diagnostic',['--user','0:0']),('userns-only',['--security-opt','seccomp='+str(path)]),('userns-only with NNP',['--security-opt','seccomp='+str(path),'--security-opt','no-new-privileges:true'])]:
+              result=subprocess.run(['docker','run','--rm','-i',*args,'--entrypoint','/usr/local/bin/ferry-sandbox',image],input=batch,text=True,capture_output=True,timeout=30)
+              print('::notice title=Sandbox '+name+'::'+json.dumps({'returncode':result.returncode,'stdout':result.stdout,'stderr':result.stderr}),flush=True)
+              if name=='default':failed=result.returncode!=0 or json.loads(result.stdout).get('status')!='ok'
+          print('Docker security options:',subprocess.check_output(['docker','info','--format','{{json .SecurityOptions}}'],text=True))
+          if failed:raise SystemExit('Released sandbox failed under default Docker restrictions')
+          PY
