@@ -28,7 +28,13 @@
       ],
       "credential_slots": {},
       "type": "ai.llm.chat",
-      "search_aliases": ["openai", "anthropic", "claude", "chatgpt", "vision"],
+      "search_aliases": [
+        "openai",
+        "anthropic",
+        "claude",
+        "chatgpt",
+        "vision"
+      ],
       "expression_fields": [
         "/prompt"
       ],
@@ -51,8 +57,8 @@
           },
           "max_cost_micros": {
             "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000000000
+            "description": "Deprecated compatibility field. Ignored; monetary limits are not enforced.",
+            "deprecated": true
           },
           "prompt": {
             "type": "string",
@@ -73,7 +79,6 @@
           "provider_id",
           "model",
           "output_field",
-          "max_cost_micros",
           "prompt",
           "image_field",
           "max_tokens"
@@ -84,7 +89,6 @@
         "provider_id": "0",
         "model": "configure-model",
         "output_field": "result",
-        "max_cost_micros": 1000000,
         "prompt": "={{ .prompt }}",
         "image_field": "",
         "max_tokens": 1024
@@ -118,7 +122,11 @@
       ],
       "credential_slots": {},
       "type": "ai.image.generate",
-      "search_aliases": ["openai", "image", "images"],
+      "search_aliases": [
+        "openai",
+        "image",
+        "images"
+      ],
       "expression_fields": [
         "/prompt"
       ],
@@ -141,8 +149,8 @@
           },
           "max_cost_micros": {
             "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000000000
+            "description": "Deprecated compatibility field. Ignored; monetary limits are not enforced.",
+            "deprecated": true
           },
           "prompt": {
             "type": "string",
@@ -163,7 +171,6 @@
           "provider_id",
           "model",
           "output_field",
-          "max_cost_micros",
           "prompt",
           "size"
         ],
@@ -173,7 +180,6 @@
         "provider_id": "0",
         "model": "configure-model",
         "output_field": "result",
-        "max_cost_micros": 1000000,
         "prompt": "={{ .prompt }}",
         "size": "1024x1024"
       }
@@ -206,7 +212,11 @@
       ],
       "credential_slots": {},
       "type": "ai.audio.speech",
-      "search_aliases": ["openai", "speech", "tts"],
+      "search_aliases": [
+        "openai",
+        "speech",
+        "tts"
+      ],
       "expression_fields": [
         "/prompt"
       ],
@@ -229,8 +239,8 @@
           },
           "max_cost_micros": {
             "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000000000
+            "description": "Deprecated compatibility field. Ignored; monetary limits are not enforced.",
+            "deprecated": true
           },
           "prompt": {
             "type": "string",
@@ -247,7 +257,6 @@
           "provider_id",
           "model",
           "output_field",
-          "max_cost_micros",
           "prompt",
           "voice"
         ],
@@ -257,7 +266,6 @@
         "provider_id": "0",
         "model": "configure-model",
         "output_field": "result",
-        "max_cost_micros": 1000000,
         "prompt": "={{ .text }}",
         "voice": "alloy"
       }
@@ -290,7 +298,12 @@
       ],
       "credential_slots": {},
       "type": "ai.audio.transcribe",
-      "search_aliases": ["openai", "transcription", "whisper", "stt"],
+      "search_aliases": [
+        "openai",
+        "transcription",
+        "whisper",
+        "stt"
+      ],
       "expression_fields": [],
       "params_schema": {
         "type": "object",
@@ -311,8 +324,8 @@
           },
           "max_cost_micros": {
             "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000000000
+            "description": "Deprecated compatibility field. Ignored; monetary limits are not enforced.",
+            "deprecated": true
           },
           "file_field": {
             "type": "string",
@@ -324,7 +337,6 @@
           "provider_id",
           "model",
           "output_field",
-          "max_cost_micros",
           "file_field"
         ],
         "additionalProperties": false
@@ -333,7 +345,6 @@
         "provider_id": "0",
         "model": "configure-model",
         "output_field": "result",
-        "max_cost_micros": 1000000,
         "file_field": "file"
       }
     }

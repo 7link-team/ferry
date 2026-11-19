@@ -994,6 +994,19 @@ async fn definition_format(scope: Scope, Path(_): Path<String>) -> Result<Json<V
     Ok(Json(json!({
         "schema": super::graph::graph_schema(),
         "example": definition_example(),
+        "execution_support": {
+            "settings": {
+                "timeout_seconds":"Omit or use 0. A workflow-wide timeout is not implemented; node timeout_s remains available.",
+                "save_data":"Omit. Custom retention policies are not implemented; existing execution records remain in use.",
+                "concurrency":"Omit or use scope=none. Workflow-wide concurrency policies are not implemented.",
+                "error_workflow_id":"Omit or use an empty string. Error workflows are not implemented."
+            },
+            "node_settings":"Use on_error=stop and retry.max_tries=1 (or omit them). Other policies are not implemented. core.wait supports duration/until; core.merge supports append. Flat pins, bypass and always_output have restrictions on conditional/preview nodes; inspect exact run rejection paths before changing those semantics.",
+            "placement":"Execution is per node, not per workflow. CLI nodes use an explicit node target, otherwise a compatible workflow default, otherwise their model's candidate Runner hosts. Different nodes may use different hosts. Pass data and file artifacts through node outputs; local filesystem paths are not shared across hosts.",
+            "api_agents":"ai.agent.run also accepts enabled API-model Agents. The server calls that model's configured provider, without a Runner, ignoring CLI host targets. The same GET-only platform tools, live user/Agent permission checks and output_schema apply. files.enabled requires a supported CLI: use structured API output followed by report.render for PDF files. max_tokens optionally sets the per-request API output length (default 1024).",
+            "metering":"No per-call or monthly monetary limit is enforced. Legacy max_cost_micros and monthly_limit_micros fields are accepted for compatibility but ignored for admission. Configured prices calculate recorded costs; absent prices do not block calls. Provider request rate and concurrency still apply. Uncertain calls are recorded and never automatically resent.",
+            "recovery":"A schema-valid draft can contain settings this runtime cannot execute. On a run/publication rejection, inspect the exact path and reason. Do not attribute /settings failures to Runner availability. Remove unsupported optional settings only when their semantics are not required; otherwise explain the missing capability and ask the user. Inspect the current version before PATCH, then retry the draft before publishing or scheduling."
+        },
         "requests": {
             "create_minimal": {
                 "method":"POST", "path":"/workflows",

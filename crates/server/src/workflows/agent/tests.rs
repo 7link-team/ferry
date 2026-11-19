@@ -49,6 +49,479 @@ fn finished() -> AgentStep {
         }),
     })
 }
+
+async fn api_model(fixture: &Fixture, protocol: &str, url: &str) -> i64 {
+    let result = crate::platform_tools::dispatch(
+        &fixture.s,
+        admin(1),
+        Call {
+            method: "POST".into(),
+            path: "/ai-models".into(),
+            body: json!({"name":"API analyst","kind":"api","skip_check":true,"state":"enabled",
+            "default_model":"m","connection":{"name":"Test API","api_key":"api-test-secret",
+            "protocol":protocol,"base_url":url,"qps":1000,"concurrency":10,
+            "monthly_limit_micros":0,"prices":[{"model":"m","operation":"ai.llm.chat",
+                "input_micros":2,"output_micros":3,"unit_size":1}]}}),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["status"], 201, "{result}");
+    let profile = result["data"]["id"]
+        .as_str()
+        .unwrap()
+        .parse::<i64>()
+        .unwrap();
+    ai_agents::Entity::update_many()
+        .col_expr(ai_agents::Column::ModelProfileId, Expr::value(profile))
+        .col_expr(ai_agents::Column::HostId, Expr::value(0_i64))
+        .filter(ai_agents::Column::Id.eq(fixture.agent.id))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    profile
+}
+
+async fn api_upstream(
+    protocol: &str,
+    responses: Vec<Value>,
+) -> (
+    String,
+    tokio::task::JoinHandle<()>,
+    Arc<std::sync::Mutex<Vec<Value>>>,
+) {
+    use axum::{Router, routing::post};
+    let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = requests.clone();
+    let responses = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::from(
+        responses,
+    )));
+    let path = if protocol == "anthropic" {
+        "/messages"
+    } else {
+        "/chat/completions"
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                path,
+                post(move |axum::Json(body): axum::Json<Value>| {
+                    observed.lock().unwrap().push(body);
+                    let response = responses
+                        .lock()
+                        .unwrap()
+                        .pop_front()
+                        .expect("unexpected duplicate request");
+                    async move { axum::Json(response) }
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    (format!("http://{address}"), task, requests)
+}
+
+fn api_answer(text: &str) -> Value {
+    json!({"choices":[{"message":{"role":"assistant","content":text}}],
+        "usage":{"prompt_tokens":7,"completion_tokens":5}})
+}
+
+#[tokio::test]
+async fn api_agent_timeout_stops_waiting_and_does_not_resend_the_request() {
+    use axum::{Router, routing::post};
+    let fixture = Fixture::new().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = requests.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/chat/completions",
+                post(move || {
+                    let first = count.fetch_add(1, Ordering::SeqCst) == 0;
+                    async move {
+                        if first {
+                            tokio::time::sleep(Duration::from_secs(60)).await;
+                        }
+                        axum::Json(api_answer("{\"summary\":\"recovered\"}"))
+                    }
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    let profile = api_model(&fixture, "openai", &format!("http://{address}")).await;
+    let profile = crate::agents::model_profile(&fixture.s.db, 1.into(), profile.into())
+        .await
+        .unwrap();
+    crate::entities::ai_providers::Entity::update_many()
+        .col_expr(
+            crate::entities::ai_providers::Column::Concurrency,
+            Expr::value(1_i64),
+        )
+        .filter(crate::entities::ai_providers::Column::Id.eq(profile.provider_id))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    let error = fixture
+        .execute_params(params(fixture.agent.id), Duration::from_secs(2))
+        .await
+        .unwrap_err();
+    assert_eq!(key(&error), "workflow.agentTimeout");
+    assert!(fixture.execute().await.is_err());
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    let call = crate::entities::ai_calls::Entity::find()
+        .one(&fixture.s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        call.state, "unknown",
+        "interrupted sent calls must be reconcilable from the ledger"
+    );
+    let reconciled = crate::platform_tools::dispatch(
+        &fixture.s,
+        admin(1),
+        Call {
+            method: "POST".into(),
+            path: format!("/ai-calls/{}/reconcile", call.id),
+            body: json!({"actual_micros":0,"reason":"Test upstream confirmed no charge"}),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(reconciled["status"], 200, "{reconciled}");
+    let (_, Json(created)) = super::super::run::create(
+        State(fixture.s.clone()),
+        admin(1),
+        Path(("1".into(), fixture.run.workflow_id.into())),
+        Json(
+            serde_json::from_value(
+                json!({"mode":"manual","revision":"draft","version":1,"entry_node_id":"start"}),
+            )
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    let run_id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    workflow_executions::Entity::update_many()
+        .col_expr(workflow_executions::Column::State, Expr::value("running"))
+        .filter(workflow_executions::Column::Id.eq(i64::from(run_id)))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    let run = workflow_executions::Entity::find_by_id(run_id)
+        .one(&fixture.s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let output = execute_with(
+        &fixture.s,
+        &run,
+        0,
+        &json!({"id":"agent","type":"ai.agent.run"}),
+        &[Item {
+            json: Map::new(),
+            binary: BTreeMap::new(),
+            paired: vec![],
+        }],
+        &[params(fixture.agent.id)],
+        Limits {
+            timeout: Duration::from_secs(5),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(output[0].json["summary"], "recovered");
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    server.abort();
+}
+
+#[tokio::test]
+async fn api_agent_revocation_interrupts_an_inflight_request_without_a_host_permission() {
+    use axum::{Router, routing::post};
+    let fixture = Fixture::new().await;
+    let started = Arc::new(tokio::sync::Notify::new());
+    let notify = started.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/chat/completions",
+                post(move || {
+                    notify.notify_one();
+                    async {
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                        axum::Json(api_answer("{}"))
+                    }
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    api_model(&fixture, "openai", &format!("http://{address}")).await;
+    // API execution does not require hosts.terminal. The user retains only
+    // the workflow, credential and Agent grants needed by this node.
+    fixture
+        .grant_user(vec![
+            "workflows.run",
+            "workflows.read",
+            "credentials.use",
+            "ai-agents.read",
+            "ai-agents.use",
+        ])
+        .await;
+    let (result, ()) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(
+            fixture.execute_params(params(fixture.agent.id), Duration::from_secs(5)),
+            async {
+                started.notified().await;
+                ai_agents::Entity::update_many()
+                    .col_expr(ai_agents::Column::State, Expr::value("disabled"))
+                    .filter(ai_agents::Column::Id.eq(fixture.agent.id))
+                    .exec(&fixture.s.db)
+                    .await
+                    .unwrap();
+            }
+        )
+    })
+    .await
+    .expect("API revocation must complete without a host");
+    assert!(result.is_err());
+    assert_ne!(key(&result.unwrap_err()), "workflow.agentTimeout");
+    assert!(fixture.requests().is_empty());
+    server.abort();
+}
+
+#[tokio::test]
+async fn api_agent_tools_use_live_read_permissions_and_never_execute_writes() {
+    let fixture = Fixture::new().await;
+    let (url, server, requests) = api_upstream("openai", vec![
+        json!({"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[
+            {"id":"read","type":"function","function":{"name":"ferry_request","arguments":"{\"method\":\"GET\",\"path\":\"/workflows?page_size=1\"}"}},
+            {"id":"write","type":"function","function":{"name":"ferry_request","arguments":"{\"method\":\"POST\",\"path\":\"/workflows\",\"body\":{\"name\":\"must not create\"}}"}}
+        ]}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}),
+        api_answer("{\"summary\":\"read succeeded, write denied\"}")
+    ]).await;
+    let profile = api_model(&fixture, "openai", &url).await;
+    let profile = crate::agents::model_profile(&fixture.s.db, 1.into(), profile.into())
+        .await
+        .unwrap();
+    crate::entities::ai_providers::Entity::update_many()
+        .col_expr(
+            crate::entities::ai_providers::Column::Qps,
+            Expr::value(1_i64),
+        )
+        .filter(crate::entities::ai_providers::Column::Id.eq(profile.provider_id))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    let count = fixture.workflow_count().await;
+    assert_eq!(
+        fixture.execute().await.unwrap()[0].json["summary"],
+        "read succeeded, write denied"
+    );
+    assert_eq!(fixture.workflow_count().await, count);
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    let messages = requests[1]["messages"].as_array().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(messages[2]["content"].as_str().unwrap()).unwrap()["status"],
+        200
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(messages[3]["content"].as_str().unwrap()).unwrap()["status"],
+        403
+    );
+    assert_eq!(requests[0]["tools"].as_array().unwrap().len(), 2);
+    assert!(fixture.requests().is_empty());
+    server.abort();
+}
+
+#[tokio::test]
+async fn anthropic_api_agent_supports_tool_results_and_one_schema_correction() {
+    let fixture = Fixture::new().await;
+    let (url, server, requests) = api_upstream("anthropic", vec![
+        json!({"content":[{"type":"tool_use","id":"catalog","name":"ferry_discover","input":{"search":"workflows"}}],"usage":{"input_tokens":1,"output_tokens":1}}),
+        json!({"content":[{"type":"text","text":"{\"summary\":3}"}],"usage":{"input_tokens":1,"output_tokens":1}}),
+        json!({"content":[{"type":"text","text":"{\"summary\":\"corrected\"}"}],"usage":{"input_tokens":1,"output_tokens":1}})
+    ]).await;
+    api_model(&fixture, "anthropic", &url).await;
+    assert_eq!(
+        fixture.execute().await.unwrap()[0].json["summary"],
+        "corrected"
+    );
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests[1]["messages"][2]["content"][0]["type"],
+        "tool_result"
+    );
+    assert!(
+        requests[2]["messages"][4]["content"]
+            .as_str()
+            .unwrap()
+            .contains("rejected")
+    );
+    assert!(requests[0]["tools"][0]["input_schema"].is_object());
+    assert!(fixture.requests().is_empty());
+    server.abort();
+}
+
+#[tokio::test]
+async fn api_agent_failure_never_resends_an_uncertain_paid_request() {
+    let fixture = Fixture::new().await;
+    let (url, server, requests) = api_upstream("openai", vec![json!({"invalid":"response"})]).await;
+    api_model(&fixture, "openai", &url).await;
+    assert!(fixture.execute().await.is_err());
+    assert!(fixture.execute().await.is_err());
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    assert!(fixture.requests().is_empty());
+    server.abort();
+}
+
+#[tokio::test]
+async fn api_agent_refuses_file_execution_and_bounds_tool_calls() {
+    let fixture = Fixture::new().await;
+    let (url, server, requests) = api_upstream(
+        "openai",
+        vec![
+            json!({"choices":[{"message":{"role":"assistant","tool_calls":[
+        {"id":"one","type":"function","function":{"name":"ferry_discover","arguments":"{}"}},
+        {"id":"two","type":"function","function":{"name":"ferry_discover","arguments":"{}"}}
+    ]}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}),
+        ],
+    )
+    .await;
+    api_model(&fixture, "openai", &url).await;
+    let mut p = params(fixture.agent.id);
+    p["files"] = json!({"enabled":true});
+    assert_eq!(
+        key(&fixture
+            .execute_params(p, Duration::from_secs(5))
+            .await
+            .unwrap_err()),
+        "workflow.agentFilesRuntime"
+    );
+    assert!(requests.lock().unwrap().is_empty());
+    let mut p = params(fixture.agent.id);
+    p["max_tool_calls"] = json!(1);
+    assert_eq!(
+        key(&fixture
+            .execute_params(p, Duration::from_secs(5))
+            .await
+            .unwrap_err()),
+        "workflow.agentToolLimit"
+    );
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    server.abort();
+}
+
+#[tokio::test]
+async fn ordinary_api_nodes_ignore_legacy_money_caps_but_still_record_actual_costs() {
+    let fixture = Fixture::new().await;
+    let (url, server, requests) = api_upstream("openai", vec![api_answer("ordinary answer")]).await;
+    let profile = api_model(&fixture, "openai", &url).await;
+    let profile = crate::agents::model_profile(&fixture.s.db, 1.into(), profile.into())
+        .await
+        .unwrap();
+    let backend = crate::artifact_store::ArtifactStore::for_state(&fixture.s)
+        .await
+        .unwrap();
+    let storage = crate::content_assets::Store {
+        db: &fixture.s.db,
+        backend: &backend,
+        vault: &fixture.s.vault,
+        ids: &fixture.s.ids,
+        quota: crate::content_assets::DEFAULT_QUOTA,
+    };
+    let p = json!({"provider_id":profile.provider_id.to_string(),"model":"m","prompt":"Summarize","max_tokens":1024,"output_field":"answer","max_cost_micros":0});
+    let out = super::super::ai::execute(
+        &fixture.s,
+        &storage,
+        &fixture.run,
+        0,
+        &json!({"id":"ordinary","type":"ai.llm.chat"}),
+        &[Item {
+            json: Map::new(),
+            binary: BTreeMap::new(),
+            paired: vec![],
+        }],
+        &[p],
+    )
+    .await
+    .unwrap();
+    assert_eq!(out[0].json["answer"], "ordinary answer");
+    let call = crate::entities::ai_calls::Entity::find()
+        .one(&fixture.s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(call.actual_micros, 29);
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    server.abort();
+}
+
+#[tokio::test]
+async fn api_agent_runs_without_a_runner_and_journals_actual_usage_without_money_limits() {
+    use axum::{Router, routing::post};
+    let fixture = Fixture::new().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, Router::new().route("/chat/completions", post(|axum::Json(body): axum::Json<Value>| async move {
+            assert_eq!(body["model"], "m");
+            assert!(body["messages"][0]["content"].as_str().unwrap().contains("workflow_input_items"));
+            axum::Json(json!({"choices":[{"message":{"role":"assistant","content":"{\"summary\":\"API done\"}"}}],
+                "usage":{"prompt_tokens":7,"completion_tokens":5}}))
+        }))).await.unwrap();
+    });
+    api_model(&fixture, "openai", &format!("http://{address}")).await;
+    create_workflow(&fixture.s, graph(params(fixture.agent.id)))
+        .await
+        .unwrap();
+    let items = fixture.execute().await.unwrap();
+    assert_eq!(items[0].json["summary"], "API done");
+    assert_eq!(items[0].paired[0].node, "start");
+    assert!(fixture.requests().is_empty());
+    // Replaying the same round reuses its journal; a different prompt must
+    // not consume the old result or send a duplicate request.
+    assert_eq!(
+        fixture.execute().await.unwrap()[0].json["summary"],
+        "API done"
+    );
+    let mut changed = params(fixture.agent.id);
+    changed["prompt"] = json!("A different task");
+    assert_eq!(
+        key(&fixture
+            .execute_params(changed, Duration::from_secs(5))
+            .await
+            .unwrap_err()),
+        "workflow.aiUnknown"
+    );
+    let calls = crate::entities::ai_calls::Entity::find()
+        .all(&fixture.s.db)
+        .await
+        .unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].state, "succeeded");
+    assert_eq!(calls[0].actual_micros, 29);
+    assert_eq!(calls[0].reserved_micros, 0);
+    server.abort();
+}
 fn call(id: &str, name: &str, arguments: Value) -> AgentStep {
     AgentStep::Event(Event::PlatformCall {
         request_id: id.into(),
@@ -891,6 +1364,42 @@ async fn model_hosts_are_tried_in_order_and_every_failure_is_named() {
     );
     assert!(a < b, "{text}");
     assert!(text.contains("codex"), "{text}");
+}
+
+#[tokio::test]
+async fn successive_cli_nodes_use_their_own_hosts_and_transfer_structured_outputs() {
+    let fixture = Fixture::new().await;
+    let second_id = fixture.host + 1_000_000;
+    crate::entities::hosts::Entity::insert(
+        fake::host_row(1, second_id, "Second runner", "online").into_active_model(),
+    )
+    .exec(&fixture.s.db)
+    .await
+    .unwrap();
+    let second = fake::register(second_id);
+    fixture.script(answer("{\"summary\":\"data from first host\"}"));
+    second
+        .agent_scripts
+        .lock()
+        .unwrap()
+        .push_back(answer("{\"summary\":\"second host consumed data\"}"));
+    let p = params(fixture.agent.id);
+    let first_input = Item {
+        json: Map::new(),
+        binary: BTreeMap::new(),
+        paired: vec![],
+    };
+    let first = execute_with(&fixture.s, &fixture.run, 0,
+        &json!({"id":"first","type":"ai.agent.run","settings":{"runtime":"host","target_kind":"host","target_ref":fixture.host.to_string()}}),
+        &[first_input], std::slice::from_ref(&p), Limits {timeout:Duration::from_secs(10)}).await.unwrap();
+    let output = execute_with(&fixture.s, &fixture.run, 0,
+        &json!({"id":"second","type":"ai.agent.run","settings":{"runtime":"host","target_kind":"host","target_ref":second_id.to_string()}}),
+        &first, &[p], Limits {timeout:Duration::from_secs(10)}).await.unwrap();
+    assert_eq!(output[0].json["summary"], "second host consumed data");
+    assert_eq!(fixture.requests().len(), 1);
+    let requests = second.agent_requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].prompt.contains("data from first host"));
 }
 
 fn file_params(agent: i64, files: Value, schema: Option<Value>) -> Value {

@@ -22,6 +22,7 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -123,12 +124,13 @@ pub(crate) struct Body {
     pub(crate) api_key: Option<String>,
     pub(crate) base_url: String,
     pub(crate) protocol: String,
-    /// Metering is optional: a connection without prices is unmetered and has no budget.
+    /// Prices are optional and used for reporting, never for financial admission.
     #[serde(default = "default_currency")]
     currency: String,
     #[serde(default = "default_timezone")]
     timezone: String,
     #[serde(default)]
+    /// Deprecated compatibility field; retained for round trips, not enforced.
     monthly_limit_micros: i64,
     qps: i64,
     concurrency: i64,
@@ -171,8 +173,6 @@ async fn validate(conn: &impl ConnectionTrait, workspace: Id, body: &Body) -> Re
         || body.currency.len() != 3
         || !body.currency.bytes().all(|b| b.is_ascii_uppercase())
         || body.timezone.parse::<chrono_tz::Tz>().is_err()
-        || body.monthly_limit_micros < 0
-        || body.monthly_limit_micros > 1_000_000_000_000
         || !(1..=1000).contains(&body.qps)
         || !(1..=100).contains(&body.concurrency)
         || body.prices.len() > 100
@@ -424,6 +424,13 @@ fn cost(input: i64, output: i64, price: &Price) -> Result<i64> {
 fn aad(workspace: i64, id: i64) -> String {
     format!("workflow:{workspace}:ai-call:{id}")
 }
+fn agent_request_hash(params: &Value) -> Option<String> {
+    params.get("agent_messages").map(|_| {
+        // Internal Agent parameters are deterministic JSON, including all
+        // preceding tool results. Never replay a round for a different input.
+        hex::encode(Sha256::digest(params.to_string().as_bytes()))
+    })
+}
 async fn reserve(
     s: &AppState,
     run: &workflow_executions::Model,
@@ -435,10 +442,6 @@ async fn reserve(
     let provider = p["provider_id"]
         .as_str()
         .and_then(|x| x.parse::<i64>().ok())
-        .ok_or_else(invalid)?;
-    let cap = p["max_cost_micros"]
-        .as_i64()
-        .filter(|n| *n >= 0)
         .ok_or_else(invalid)?;
     let scope = Scope::for_actor(s, Id::from(run.workspace_id), Id::from(run.triggered_by)).await?;
     scope.require("credentials.use")?;
@@ -462,6 +465,11 @@ async fn reserve(
         .await?
     {
         let frozen: Value = serde_json::from_str(&call.price_snapshot).map_err(|_| invalid())?;
+        if let Some(hash) = agent_request_hash(p) {
+            if frozen["request_hash"] != hash {
+                return Err(error("workflow.aiUnknown"));
+            }
+        }
         let price: Price =
             serde_json::from_value(frozen["price"].clone()).map_err(|_| invalid())?;
         row.base_url = frozen["base_url"].as_str().ok_or_else(invalid)?.into();
@@ -471,14 +479,19 @@ async fn reserve(
         return Ok((row, price, call));
     }
     let prices = serde_json::from_str::<Vec<Price>>(&row.prices).map_err(|_| invalid())?;
-    // An unpriced connection is unmetered: no cost, no budget. A priced connection
-    // still refuses models it has no price for, so metered spend is never uncounted.
+    // Pricing is observational. Missing model prices must not block execution.
     let metered = !prices.is_empty();
     let price: Price = if metered {
         prices
             .into_iter()
             .find(|x| x.model == p["model"] && x.operation == operation)
-            .ok_or_else(|| error("workflow.aiPriceMissing"))?
+            .unwrap_or(Price {
+                model: p["model"].as_str().unwrap_or_default().into(),
+                operation: operation.into(),
+                input_micros: 0,
+                output_micros: 0,
+                unit_size: 1,
+            })
     } else {
         Price {
             model: p["model"].as_str().unwrap_or_default().into(),
@@ -488,7 +501,6 @@ async fn reserve(
             unit_size: 1,
         }
     };
-    let cap = if metered { cap } else { 0 };
     let tz = row
         .timezone
         .parse::<chrono_tz::Tz>()
@@ -503,26 +515,11 @@ async fn reserve(
         .filter(calls::Column::CredentialId.eq(row.credential_id))
         .all(&tx)
         .await?;
-    let used = all
+    if all
         .iter()
-        .filter(|c| c.currency == row.currency && c.period_key == period)
-        .try_fold(0i64, |sum, c| {
-            sum.checked_add(if c.state == "succeeded" || c.state == "reconciled" {
-                c.actual_micros
-            } else {
-                c.reserved_micros
-            })
-        })
-        .ok_or_else(invalid)?;
-    if (metered
-        && used
-            .checked_add(cap)
-            .is_none_or(|total| total > row.monthly_limit_micros))
-        || all
-            .iter()
-            .filter(|c| matches!(c.state.as_str(), "reserved" | "sent" | "unknown"))
-            .count()
-            >= row.concurrency as usize
+        .filter(|c| matches!(c.state.as_str(), "reserved" | "sent" | "unknown"))
+        .count()
+        >= row.concurrency as usize
         || all.iter().filter(|c| c.created_at > now - 1000).count() >= row.qps as usize
     {
         return Err(error("workflow.aiLimit"));
@@ -538,9 +535,9 @@ async fn reserve(
         currency: row.currency.clone(),
         period_key: period,
         state: "reserved".into(),
-        reserved_micros: cap,
+        reserved_micros: 0,
         actual_micros: 0,
-        price_snapshot: json!({"price":price,"base_url":row.base_url,"protocol":row.protocol})
+        price_snapshot: json!({"price":price,"base_url":row.base_url,"protocol":row.protocol,"request_hash":agent_request_hash(p)})
             .to_string(),
         result: None,
         created_at: now,
@@ -575,6 +572,51 @@ async fn state(
         )?));
     }
     active.update(&s.db).await?;
+    Ok(())
+}
+
+/// A dropped API Agent request no longer has a future which can record its
+/// outcome. Release unsent reservations and make sent calls reconcilable;
+/// neither state permits replay of that operation key.
+pub(super) async fn interrupted(
+    s: &AppState,
+    run: &workflow_executions::Model,
+    node: i64,
+    index: usize,
+) -> Result<()> {
+    let call = calls::Entity::find()
+        .filter(calls::Column::WorkspaceId.eq(run.workspace_id))
+        .filter(calls::Column::OperationKey.eq(format!("{}:{node}:{index}", run.id)))
+        .one(&s.db)
+        .await?;
+    if let Some(call) = call.filter(|call| matches!(call.state.as_str(), "reserved" | "sent")) {
+        calls::Entity::update_many()
+            .col_expr(
+                calls::Column::State,
+                sea_orm::sea_query::Expr::value(if call.state == "sent" {
+                    "unknown"
+                } else {
+                    "reconciled"
+                }),
+            )
+            .col_expr(
+                calls::Column::Version,
+                sea_orm::sea_query::Expr::value(call.version + 1),
+            )
+            .col_expr(
+                calls::Column::UpdatedAt,
+                sea_orm::sea_query::Expr::value(db::now()),
+            )
+            .col_expr(
+                calls::Column::UpdatedBy,
+                sea_orm::sea_query::Expr::value(run.triggered_by),
+            )
+            .filter(calls::Column::Id.eq(call.id))
+            .filter(calls::Column::Version.eq(call.version))
+            .filter(calls::Column::State.eq(call.state))
+            .exec(&s.db)
+            .await?;
+    }
     Ok(())
 }
 async fn bytes(mut response: reqwest::Response) -> Result<Vec<u8>> {
@@ -624,11 +666,27 @@ pub(super) async fn execute(
     items: &[Item],
     params: &[Value],
 ) -> Result<Vec<Item>> {
+    execute_indexed(s, storage, run, node, spec, items, params, 0).await
+}
+
+/// API Agent rounds have distinct journal keys while sharing admission,
+/// credentials, metering, encrypted results and uncertain-outcome handling.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn execute_indexed(
+    s: &AppState,
+    storage: &Store<'_>,
+    run: &workflow_executions::Model,
+    node: i64,
+    spec: &Value,
+    items: &[Item],
+    params: &[Value],
+    offset: usize,
+) -> Result<Vec<Item>> {
     let mut out = Vec::new();
     let operation = spec["type"].as_str().ok_or_else(invalid)?;
     for (index, item) in items.iter().enumerate() {
         let p = params.get(index).ok_or_else(invalid)?;
-        let (provider, price, call) = reserve(s, run, node, index, p, operation).await?;
+        let (provider, price, call) = reserve(s, run, node, offset + index, p, operation).await?;
         if call.state == "succeeded" {
             let text = s.vault.open_secret(
                 call.result.as_deref().ok_or_else(invalid)?,
@@ -648,10 +706,6 @@ pub(super) async fn execute(
                 return Err(e);
             }
         };
-        if known.is_some_and(|v| v > call.reserved_micros) {
-            state(s, &call, "reconciled", 0, None).await?;
-            return Err(error("workflow.aiLimit"));
-        }
         // Once sent, a crash/timeout never causes an automatic paid duplicate.
         let claimed = calls::Entity::update_many()
             .col_expr(
@@ -764,6 +818,10 @@ async fn prepare(
     let model = p["model"].as_str().ok_or_else(invalid)?;
     match operation {
         "ai.llm.chat"=>{
+            if let Some(messages) = p.get("agent_messages") {
+                let body = json!({"model":model,"messages":messages,"max_tokens":p["max_tokens"],"stream":false,"tools":p["agent_tools"]});
+                return Ok((request.json(&body), None));
+            }
             let mut content=vec![json!({"type":"text","text":p["prompt"]})];
             if let Some(field)=p["image_field"].as_str().filter(|s|!s.is_empty()) {
                 let file=item.binary.get(field).ok_or_else(invalid)?;super::media::resolve(s,run.workspace_id,run.workflow_id,file).await?;
@@ -821,6 +879,7 @@ async fn finish(
                 .pointer("/choices/0/message/content")
                 .and_then(Value::as_str)
                 .or(anthropic.as_deref())
+                .or_else(|| p.get("agent_messages").map(|_| ""))
                 .ok_or_else(invalid)?;
             let actual = if price.input_micros == 0 && price.output_micros == 0 {
                 0
@@ -837,7 +896,14 @@ async fn finish(
                     price,
                 )?
             };
-            output.json.insert(field.into(), json!(text));
+            output.json.insert(
+                field.into(),
+                if p.get("agent_messages").is_some() {
+                    body
+                } else {
+                    json!(text)
+                },
+            );
             Ok((output, actual))
         }
         "ai.image.generate" => {

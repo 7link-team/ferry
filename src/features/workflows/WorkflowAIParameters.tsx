@@ -57,7 +57,7 @@ function CallLedger() {
             {row.execution_id} · {row.state} · {row.currency}
           </p>
           <p>
-            {t("aiCallBudget")}: {row.reserved_micros} · {t("aiActualCost")}:{" "}
+            {t("aiActualCost")}:{" "}
             {row.actual_micros}
           </p>
           {row.state === "unknown" && (
@@ -325,7 +325,6 @@ export function WorkflowAIParameters({
           {type === "ai.audio.speech" && field("voice", "aiVoice")}
           {type === "ai.audio.transcribe" && field("file_field", "binaryField")}
           {field("output_field", "outputField")}
-          {field("max_cost_micros", "aiCallBudget", true)}
         </>
       )}
       {error && (

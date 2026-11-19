@@ -399,6 +399,13 @@ fn call_guidance(call: &Call, status: u16) -> &'static str {
     if status == 413 && path == "/workflow-node-catalog" {
         return "Read a bounded catalog page with GET /workflow-node-catalog?page_size=5&offset=0, or use ?type=exact.node.type / ?search=keyword. Follow next_offset until null; both nodes and builtin_nodes contain contracts. Do not repeat the same oversized query. The limit is response bytes, not the model context window.";
     }
+    if matches!(status, 400 | 422)
+        && call.method == "POST"
+        && path.starts_with("/workflows/")
+        && (path.ends_with("/executions") || path.ends_with("/publications"))
+    {
+        return "The draft was rejected before execution/publication. GET /workflow-definition-format and inspect execution_support, then read the workflow's current definition and version. An error at /settings identifies an unsupported execution policy, not a missing Runner. Correct only optional settings whose removal preserves the user's requirements; otherwise explain the missing capability and request a decision. Retry the corrected draft before publishing or scheduling. Never claim a report or notification was produced by this rejected request.";
+    }
     guidance(status)
 }
 

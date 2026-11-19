@@ -1,4 +1,8 @@
 {
+  "workflow.runTimeoutUnsupported": "当前运行器不支持工作流总超时。请省略 timeout_seconds 或设为 0；各节点仍可配置超时。",
+  "workflow.runSaveDataUnsupported": "当前运行器不支持自定义 save_data 策略。请省略该字段，使用现有执行记录机制。",
+  "workflow.runConcurrencyUnsupported": "当前运行器不支持工作流并发策略。请省略 concurrency 或将 scope 设为 none。",
+  "workflow.runErrorWorkflowUnsupported": "当前运行器不支持错误工作流。请省略 error_workflow_id 或设为空字符串。",
   "workflow.repositoryConnectionRequired": "请选择仓库连接。公开 Git 操作需显式选择免认证并填写 HTTP(S) 地址。",
   "reviews.waitingAi": "等待模型并发空闲容量。",
   "reviews.invalid": "代码走查配置无效：{reason}。",
@@ -174,7 +178,7 @@
   "workflow.mediaInvalid": "文件、媒体类型或文件节点参数无效。",
   "workflow.mediaTooLarge": "文件超过 32 MB。",
   "workflow.aiInvalid": "请检查 AI 连接、文件与模型参数。",
-  "workflow.aiLimit": "AI 预算、请求速率或并发额度不足。",
+  "workflow.aiLimit": "AI 请求速率或并发额度不足。",
   "workflow.aiPriceMissing": "请先配置此模型和能力的价格。",
   "workflow.aiUnknown": "AI 请求结果未知（连接中断或响应不完整），服务商可能已处理。系统未自动重发；确认后可重新运行。",
   "workflow.aiRemote": "AI 服务商拒绝了请求，请检查模型连接。",

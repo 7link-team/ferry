@@ -1,4 +1,8 @@
 {
+  "workflow.runTimeoutUnsupported": "Masa tamat seluruh aliran kerja tidak disokong. Abaikan timeout_seconds atau tetapkan kepada 0; masa tamat setiap nod masih tersedia.",
+  "workflow.runSaveDataUnsupported": "Dasar save_data tersuai tidak disokong. Abaikan medan ini untuk menggunakan rekod pelaksanaan sedia ada.",
+  "workflow.runConcurrencyUnsupported": "Dasar keserentakan aliran kerja tidak disokong. Abaikan concurrency atau tetapkan scope kepada none.",
+  "workflow.runErrorWorkflowUnsupported": "Aliran kerja ralat tidak disokong. Abaikan error_workflow_id atau biarkan kosong.",
   "workflow.repositoryConnectionRequired": "Pilih sambungan repositori. Operasi Git awam memerlukan pilihan tanpa pengesahan dan URL HTTP(S) yang jelas.",
   "reviews.waitingAi": "Menunggu kapasiti serentak model.",
   "reviews.invalid": "Konfigurasi semakan kod tidak sah: {reason}.",
@@ -174,7 +178,7 @@
   "workflow.mediaInvalid": "Fail, jenis media atau parameter tidak sah.",
   "workflow.mediaTooLarge": "Fail melebihi 32 MB.",
   "workflow.aiInvalid": "Semak sambungan AI, fail dan tetapan model.",
-  "workflow.aiLimit": "Had bajet, kadar atau keserentakan AI dicapai.",
+  "workflow.aiLimit": "Had kadar permintaan atau keserentakan AI dicapai.",
   "workflow.aiPriceMissing": "Tetapkan harga model dan keupayaan ini dahulu.",
   "workflow.aiUnknown": "Hasil permintaan AI tidak diketahui (sambungan terputus atau respons tidak lengkap); penyedia mungkin telah memprosesnya. Ia tidak dihantar semula secara automatik; jalankan semula selepas menyemak.",
   "workflow.aiRemote": "Penyedia AI menolak permintaan. Semak sambungan model.",

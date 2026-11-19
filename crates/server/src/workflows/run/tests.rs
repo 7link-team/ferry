@@ -646,6 +646,44 @@ fn pin_items_preserve_literals_and_accept_json_integer_numbers_without_fabricati
 }
 
 #[test]
+fn unsupported_global_settings_name_the_field_and_policy_not_an_executor() {
+    let base = json!({"nodes":[]});
+    let plan = plan::Plan {
+        version: 1,
+        entry_node_id: String::new(),
+        nodes: vec![],
+    };
+    for (settings, path, reason) in [
+        (
+            json!({"timeout_seconds":1800}),
+            "/settings/timeout_seconds",
+            "workflow.runTimeoutUnsupported",
+        ),
+        (
+            json!({"save_data":{"success":"all"}}),
+            "/settings/save_data",
+            "workflow.runSaveDataUnsupported",
+        ),
+        (
+            json!({"concurrency":{"scope":"workflow"}}),
+            "/settings/concurrency",
+            "workflow.runConcurrencyUnsupported",
+        ),
+        (
+            json!({"error_workflow_id":"1"}),
+            "/settings/error_workflow_id",
+            "workflow.runErrorWorkflowUnsupported",
+        ),
+    ] {
+        let mut graph = base.clone();
+        graph["settings"] = settings;
+        let error = supported(&graph, &plan).unwrap_err();
+        let expected = super::error(reason, path);
+        assert_eq!(error.2, expected.2, "{graph}");
+    }
+}
+
+#[test]
 fn unsupported_execution_policies_are_rejected_instead_of_silently_ignored() {
     let base = json!({"nodes":[{"id":"start","type":"core.trigger.manual","params":{}}]});
     let plan = plan::Plan {

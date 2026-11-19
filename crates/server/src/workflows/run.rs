@@ -97,16 +97,27 @@ fn supported(graph: &Value, plan: &plan::Plan) -> Result<()> {
         .pointer("/settings/timeout_seconds")
         .and_then(Value::as_f64)
         .is_some_and(|seconds| seconds != 0.0)
-        || graph.pointer("/settings/save_data").is_some()
     {
-        return Err(error("workflow.runImplementation", "/settings"));
+        return Err(error(
+            "workflow.runTimeoutUnsupported",
+            "/settings/timeout_seconds",
+        ));
+    }
+    if graph.pointer("/settings/save_data").is_some() {
+        return Err(error(
+            "workflow.runSaveDataUnsupported",
+            "/settings/save_data",
+        ));
     }
     if graph
         .pointer("/settings/concurrency/scope")
         .and_then(Value::as_str)
         .is_some_and(|scope| scope != "none")
     {
-        return Err(error("workflow.runImplementation", "/settings/concurrency"));
+        return Err(error(
+            "workflow.runConcurrencyUnsupported",
+            "/settings/concurrency",
+        ));
     }
     if graph
         .pointer("/settings/error_workflow_id")
@@ -114,7 +125,7 @@ fn supported(graph: &Value, plan: &plan::Plan) -> Result<()> {
         .is_some_and(|id| !id.is_empty())
     {
         return Err(error(
-            "workflow.runImplementation",
+            "workflow.runErrorWorkflowUnsupported",
             "/settings/error_workflow_id",
         ));
     }
@@ -131,7 +142,7 @@ fn supported(graph: &Value, plan: &plan::Plan) -> Result<()> {
         {
             return Err(error("workflow.runImplementation", &node.path));
         }
-        // An AI agent node without a target runs on its Agent's own host.
+        // Untargeted CLI Agents resolve their model's candidate Runner hosts.
         if super::host::requested(spec)
             && !super::agent::supports(spec)
             && spec

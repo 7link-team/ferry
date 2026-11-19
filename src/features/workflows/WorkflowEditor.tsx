@@ -1190,7 +1190,7 @@ export function WorkflowEditor({
                     <h3 className="border-t pt-4 text-sm font-semibold">
                       {t("parameters")}
                     </h3>
-                    {(integrationManifest(node.type) || node.type === "host.command" || node.type === "ai.agent.run") && <WorkflowExecutionTarget workspace={workspace} value={node.settings ?? {}} change={settings => updateNode({settings})} readOnly={readOnly} hostOnly={node.type === "host.command" || node.type === "ai.agent.run" || !!integrationManifest(node.type)?.git} inherit />}
+                    {(integrationManifest(node.type) || node.type === "host.command" || node.type === "ai.agent.run") && <WorkflowExecutionTarget workspace={workspace} agentId={node.type === "ai.agent.run" ? String(node.params.agent_id ?? "") : undefined} value={node.settings ?? {}} change={settings => updateNode({settings})} readOnly={readOnly} hostOnly={node.type === "host.command" || node.type === "ai.agent.run" || !!integrationManifest(node.type)?.git} inherit />}
                     <WorkflowInputFields.Provider value={inputFields}>
                       <WorkflowNodeParameters
                         key={node.id}

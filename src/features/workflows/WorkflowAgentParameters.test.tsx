@@ -7,6 +7,7 @@ import { WorkflowAssetContext } from "./WorkflowAssets";
 import { WorkflowNodeParameters } from "./WorkflowNodeParameters";
 import { formatsProblem, parseFormats, schemaProblem } from "./WorkflowAgentParameters";
 import { emptyGraph, newNode, type GraphNode } from "./graph";
+import { WorkflowExecutionTarget } from "./WorkflowExecutionTarget";
 
 vi.mock("../../shared/api/api", () => ({
   api: vi.fn(),
@@ -18,6 +19,7 @@ const agents = [
   { id: "12", name: "Writer", state: "enabled", runtime: "kimi", host_id: "5", host_name: "Build runner" },
   { id: "13", name: "Retired", state: "disabled", runtime: "claude", host_id: "5", host_name: "Build runner" },
   { id: "14", name: "Floating", state: "enabled", runtime: "claude", host_id: "0" },
+  { id: "15", name: "API analyst", state: "enabled", runtime: "api", host_id: "0" },
 ];
 
 let host: HTMLDivElement, root: Root;
@@ -28,8 +30,10 @@ beforeEach(async () => {
   calls.mockReset();
   invalid.mockReset();
   calls.mockImplementation(async (path: string) => {
+    const detail = path.match(/\/ai-agents\/(\d+)$/);
+    if (detail) return agents.find(agent => agent.id === detail[1]) as never;
     if (path.includes("/ai-agents")) return { items: agents } as never;
-    if (path.includes("/nodes")) return { items: [{ id: "9", name: "GPU runner" }] } as never;
+    if (path.includes("/nodes")) return { items: [{ id: "9", name: "GPU runner" }], total: 1, page: 1, page_size: 200 } as never;
     throw new Error(`unexpected ${path}`);
   });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
@@ -59,6 +63,31 @@ async function change(label: string, value: string) {
 const reported = (key: string) => invalid.mock.calls.filter(([name]) => name === key).at(-1)?.[1];
 const location = () => host.querySelector('[data-testid="agent-location"]')?.textContent;
 
+it("explains that API Agents need no host even when a CLI host target was saved", async () => {
+  current.agent_id = "15";
+  await render(<Harness settings={{ runtime: "host", target_kind: "host", target_ref: "9" }} />);
+  expect(location()).toBe(t("agent.locationApi"));
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("uses model candidate selection for an untargeted CLI Agent instead of claiming no host", async () => {
+  current.agent_id = "14";
+  await render(<Harness />);
+  expect(location()).toBe(t("agent.locationAutomatic"));
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("hides host controls for API models and restores CLI controls after switching", async () => {
+  const value = { runtime: "host", target_kind: "host", target_ref: "9" };
+  const change = vi.fn();
+  await render(<WorkflowExecutionTarget workspace="7" value={value} change={change} readOnly={false} hostOnly inherit agentId="15" />);
+  expect(host.querySelector("select")).toBeNull();
+  expect(calls.mock.calls.some(([path]) => String(path).includes("/nodes"))).toBe(false);
+  await render(<WorkflowExecutionTarget workspace="7" value={value} change={change} readOnly={false} hostOnly inherit agentId="14" />);
+  expect(host.querySelector("select")).not.toBeNull();
+  expect(change).not.toHaveBeenCalled();
+});
+
 it("starts unconfigured, lists usable agents and states the Runner and CLI it runs on", async () => {
   expect(current).toMatchObject({ agent_id: "", prompt: "", timeout_s: 600, max_tool_calls: 64, output_schema: { type: "object" } });
   await render(<Harness />);
@@ -79,9 +108,10 @@ it("starts unconfigured, lists usable agents and states the Runner and CLI it ru
   await change(t("agent.timeout"), "900");
   await change(t("agent.maxToolCalls"), "16");
   expect(current).toMatchObject({ timeout_s: 900, max_tool_calls: 16 });
-  // An Agent without a default host needs a node target.
+  // An untargeted CLI uses model candidates, not an obligatory Agent binding.
   await change(t("agent.agent"), "14");
-  expect(host.querySelector('[role="alert"]')?.textContent).toBe(t("agent.noHost"));
+  expect(location()).toBe(t("agent.locationAutomatic"));
+  expect(host.querySelector('[role="alert"]')).toBeNull();
   await render(<Harness settings={{ runtime: "host", target_kind: "host", target_ref: "9" }} />);
   await act(async () => {});
   expect(location()).toBe("执行位置：Runner GPU runner 上的 Claude Code");

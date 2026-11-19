@@ -1,4 +1,8 @@
 {
+  "workflow.runTimeoutUnsupported": "This runtime does not support a workflow-wide timeout. Omit timeout_seconds or set it to 0; node timeouts remain available.",
+  "workflow.runSaveDataUnsupported": "This runtime does not support custom save_data policies. Omit save_data to use existing execution records.",
+  "workflow.runConcurrencyUnsupported": "This runtime does not support workflow concurrency policies. Omit concurrency or set scope to none.",
+  "workflow.runErrorWorkflowUnsupported": "This runtime does not support error workflows. Omit error_workflow_id or leave it empty.",
   "workflow.repositoryConnectionRequired": "Choose a repository connection. Public Git operations require an explicit anonymous HTTP(S) URL.",
   "reviews.waitingAi": "Waiting for model concurrency capacity.",
   "reviews.invalid": "Invalid code review configuration: {reason}.",
@@ -174,7 +178,7 @@
   "workflow.mediaInvalid": "Invalid file, media type or file node parameters.",
   "workflow.mediaTooLarge": "File exceeds 32 MB.",
   "workflow.aiInvalid": "Check the AI connection, file and model parameters.",
-  "workflow.aiLimit": "AI budget, request rate or concurrency limit reached.",
+  "workflow.aiLimit": "AI request rate or concurrency limit reached.",
   "workflow.aiPriceMissing": "Configure a price for this model and capability first.",
   "workflow.aiUnknown": "The AI request outcome is unknown (the connection dropped or the response was incomplete); the provider may have processed it. It was not resent automatically; run again once you have checked.",
   "workflow.aiRemote": "The AI provider rejected the request. Check the model connection.",

@@ -1,4 +1,8 @@
 {
+  "workflow.runTimeoutUnsupported": "이 실행기는 워크플로 전체 시간 제한을 지원하지 않습니다. timeout_seconds를 생략하거나 0으로 설정하세요. 노드별 시간 제한은 사용할 수 있습니다.",
+  "workflow.runSaveDataUnsupported": "이 실행기는 사용자 지정 save_data 정책을 지원하지 않습니다. 기존 실행 기록을 사용하려면 이 필드를 생략하세요.",
+  "workflow.runConcurrencyUnsupported": "이 실행기는 워크플로 동시 실행 정책을 지원하지 않습니다. concurrency를 생략하거나 scope를 none으로 설정하세요.",
+  "workflow.runErrorWorkflowUnsupported": "이 실행기는 오류 워크플로를 지원하지 않습니다. error_workflow_id를 생략하거나 빈 문자열로 설정하세요.",
   "workflow.repositoryConnectionRequired": "저장소 연결을 선택하세요. 공개 Git은 인증 없음과 HTTP(S) URL을 명시해야 합니다.",
   "reviews.waitingAi": "모델 동시 실행 용량을 기다리는 중입니다.",
   "reviews.invalid": "코드 검토 설정이 올바르지 않습니다: {reason}.",
@@ -174,7 +178,7 @@
   "workflow.mediaInvalid": "파일, 미디어 유형 또는 매개변수가 잘못되었습니다.",
   "workflow.mediaTooLarge": "파일이 32 MB를 초과합니다.",
   "workflow.aiInvalid": "AI 연결, 파일 및 모델 설정을 확인하세요.",
-  "workflow.aiLimit": "AI 예산, 요청 속도 또는 동시 실행 한도에 도달했습니다.",
+  "workflow.aiLimit": "AI 요청 속도 또는 동시 실행 한도에 도달했습니다.",
   "workflow.aiPriceMissing": "이 모델과 기능의 가격을 먼저 설정하세요.",
   "workflow.aiUnknown": "AI 요청 결과를 알 수 없습니다(연결이 끊겼거나 응답이 불완전함). 제공업체가 처리했을 수 있습니다. 자동으로 다시 보내지 않았으니 확인 후 다시 실행하세요.",
   "workflow.aiRemote": "AI 제공업체가 요청을 거부했습니다. 모델 연결을 확인하세요.",

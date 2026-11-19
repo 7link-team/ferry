@@ -88,9 +88,9 @@ export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
   const agentId = String(p.agent_id ?? "");
   const agent = agents?.find((row) => row.id === agentId);
   const hostName = target ? hosts[target] ?? target : agent?.host_id && agent.host_id !== "0" ? agent.host_name || agent.host_id : "";
-  const location = agent && hostName
+  const location = agent?.runtime === "api" ? t("agent.locationApi") : agent && hostName
     ? t("agent.location").replace("{host}", hostName).replace("{cli}", cliToolLabel(agent.runtime))
-    : t("agent.locationPending");
+    : t(agent ? "agent.locationAutomatic" : "agent.locationPending");
 
   const prompt = String(p.prompt ?? "");
   const promptTooLong = !prompt.startsWith("=") && bytes(prompt) > MAX_PROMPT_BYTES;
@@ -126,16 +126,15 @@ export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
     </label>
   );
 
-  const number = (key: "timeout_s" | "max_tool_calls", label: Parameters<typeof t>[0], min: number, max: number) => (
+  const number = (key: "timeout_s" | "max_tool_calls" | "max_tokens", label: Parameters<typeof t>[0], min: number, max: number) => (
     <label className="block min-w-0 space-y-2 text-sm">
       <span className="block font-medium"><FieldCaption label={<>{t(label)}</>} /></span>
       <Input aria-label={t(label)} type="number" min={min} max={max} step="1" required readOnly={readOnly}
-        value={String(p[key] ?? "")} onChange={(event) => patch({ [key]: Number(event.target.value) })} />
+        value={String(p[key] ?? (key === "max_tokens" ? 1024 : ""))} onChange={(event) => patch({ [key]: Number(event.target.value) })} />
     </label>
   );
   return <>
     <p className="text-sm leading-6 text-muted-foreground" data-testid="agent-location">{location}</p>
-    {agent && !target && (!agent.host_id || agent.host_id === "0") && <p role="alert" className="text-sm text-destructive">{t("agent.noHost")}</p>}
     <label className="block min-w-0 space-y-2 text-sm">
       <span className="block font-medium"><FieldCaption label={<>{t("agent.agent")}</>} /></span>
       <select aria-label={t("agent.agent")} className={`${control} h-10`} disabled={readOnly} required value={agentId}
@@ -205,6 +204,7 @@ export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
     <p className="text-xs leading-5 text-muted-foreground">{t(filesOn ? "agent.schemaOptional" : "agent.schemaHelp")}</p>
     {number("timeout_s", "agent.timeout", 30, 1800)}
     {number("max_tool_calls", "agent.maxToolCalls", 1, 128)}
+    {agent?.runtime === "api" && number("max_tokens", "aiMaxTokens", 1, 32768)}
     <p className="text-xs leading-5 text-muted-foreground">{t("agent.help")}</p>
   </>;
 }

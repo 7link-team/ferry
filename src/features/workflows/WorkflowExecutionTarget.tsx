@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { listResource } from "../../shared/api/resource";
-import { errorText } from "../../shared/api/api";
+import { api, errorText } from "../../shared/api/api";
 import { FieldCaption } from "../../shared/forms/FieldHelp";
 import { workflowText as t } from "../../shared/i18n/i18n";
 import { InlineAlert } from "../../shared/ui/inline-alert";
@@ -8,14 +8,25 @@ import { InlineAlert } from "../../shared/ui/inline-alert";
 type Settings = Record<string, unknown>;
 const control = "h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm";
 
-export function WorkflowExecutionTarget({ workspace, value, change, readOnly, hostOnly = false, inherit = false }: {
-  workspace: string; value: Settings; change: (value: Settings) => void; readOnly: boolean; hostOnly?: boolean; inherit?: boolean;
+export function WorkflowExecutionTarget({ workspace, value, change, readOnly, hostOnly = false, inherit = false, agentId }: {
+  workspace: string; value: Settings; change: (value: Settings) => void; readOnly: boolean; hostOnly?: boolean; inherit?: boolean; agentId?: string | undefined;
 }) {
   const [hosts, setHosts] = useState<{id: string; name: string; connection?: string}[]>([]);
   const [error, setError] = useState("");
+  const [agent, setAgent] = useState<{ id: string; runtime: string }>();
+  useEffect(() => {
+    if (!agentId) return;
+    const abort = new AbortController();
+    setAgent(undefined); setError("");
+    api<{ runtime: string }>(`/workspaces/${workspace}/ai-agents/${agentId}`, { signal: abort.signal })
+      .then(row => { if (!abort.signal.aborted) setAgent({ id: agentId, runtime: row.runtime }); })
+      .catch(cause => { if (!abort.signal.aborted) setError(errorText(cause)); });
+    return () => abort.abort();
+  }, [workspace, agentId]);
+  const apiAgent = !!agentId && agent?.id === agentId && agent.runtime === "api";
   const runtime = String(value.runtime ?? (inherit ? "" : hostOnly ? "host" : "server"));
   useEffect(() => {
-    if (runtime !== "host") return;
+    if (runtime !== "host" || apiAgent || (agentId && agent?.id !== agentId)) return;
     const abort = new AbortController();
     setError(""); setHosts([]);
     void (async () => {
@@ -28,7 +39,9 @@ export function WorkflowExecutionTarget({ workspace, value, change, readOnly, ho
       if (!abort.signal.aborted) setHosts(rows);
     })().catch(cause => { if (!abort.signal.aborted) setError(errorText(cause)); });
     return () => abort.abort();
-  }, [workspace, runtime]);
+  }, [workspace, runtime, agentId, agent, apiAgent]);
+  if (apiAgent) return null;
+  if (agentId && agent?.id !== agentId && !error) return null;
   return <div className="space-y-3">
     <label className="block space-y-2 text-sm">
       <FieldCaption label={t("execution.location")} help={t("execution.help")} />

@@ -1,4 +1,8 @@
 {
+  "workflow.runTimeoutUnsupported": "この実行環境はワークフロー全体のタイムアウトに対応していません。timeout_seconds を省略するか 0 にしてください。ノードごとのタイムアウトは使用できます。",
+  "workflow.runSaveDataUnsupported": "この実行環境は独自の save_data 設定に対応していません。省略すると既存の実行記録が使用されます。",
+  "workflow.runConcurrencyUnsupported": "この実行環境はワークフローの同時実行設定に対応していません。concurrency を省略するか scope を none にしてください。",
+  "workflow.runErrorWorkflowUnsupported": "この実行環境はエラーワークフローに対応していません。error_workflow_id を省略するか空にしてください。",
   "workflow.repositoryConnectionRequired": "リポジトリ接続を選択してください。公開 Git では認証なしと HTTP(S) URL を明示してください。",
   "reviews.waitingAi": "モデルの同時実行枠を待機中です。",
   "reviews.invalid": "コードレビュー設定が無効です：{reason}。",
@@ -174,7 +178,7 @@
   "workflow.mediaInvalid": "ファイル、メディア形式、またはパラメーターが無効です。",
   "workflow.mediaTooLarge": "ファイルが 32 MB を超えています。",
   "workflow.aiInvalid": "AI 接続、ファイル、モデル設定を確認してください。",
-  "workflow.aiLimit": "AI 予算、リクエスト数、または同時実行制限に達しました。",
+  "workflow.aiLimit": "AI リクエスト数または同時実行制限に達しました。",
   "workflow.aiPriceMissing": "このモデルと機能の料金を設定してください。",
   "workflow.aiUnknown": "AI リクエストの結果は不明です（接続が切れたか応答が不完全です）。提供元で処理された可能性があります。自動再送はしていません。確認してから再実行してください。",
   "workflow.aiRemote": "AI プロバイダーがリクエストを拒否しました。モデル接続を確認してください。",

@@ -1,5 +1,5 @@
 //! AI agent node (`ai.agent.run`, PRD §26.2). One execution runs the selected
-//! Agent's CLI once on a Runner host, headlessly and read-only, with the
+//! Agent through its model API or a native CLI on a Runner, read-only, with
 //! platform tools. Platform reads run under (execution identity ∩ Agent role),
 //! rechecked for every call; any write is answered with a 403 tool result,
 //! never an approval prompt. The final answer must be one JSON object that
@@ -27,6 +27,7 @@ use tokio::{
     task::JoinSet,
     time::Instant,
 };
+mod api;
 
 const MAX_PROMPT_BYTES: usize = 32 * 1024;
 const MAX_SCHEMA_BYTES: usize = 64 * 1024;
@@ -115,7 +116,7 @@ fn agent_id(params: &Value, path: &str) -> Result<Id> {
         .ok_or_else(|| invalid("workflow.agentUnavailable", path.to_owned()))
 }
 
-/// An Agent usable by `scope` whose resolved runtime is a CLI able to run read-only.
+/// An Agent usable by `scope` with an API model or a read-only capable CLI.
 async fn usable(
     conn: &impl sea_orm::ConnectionTrait,
     scope: &Scope,
@@ -133,7 +134,15 @@ async fn usable(
         })?;
     let resolved = crate::agents::resolve_model(conn, &agent).await?;
     if resolved.runtime == "api" {
-        return Err(invalid("workflow.agentApiModel", path.to_owned()));
+        if files {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("workflow.agentFilesRuntime")
+                    .with("path", path.to_owned())
+                    .with("cli", "API"),
+            ));
+        }
+        return Ok((agent, resolved));
     }
     let runtime = Runtime::parse(&resolved.runtime)
         .ok_or_else(|| invalid("workflow.agentUnavailable", path.to_owned()))?;
@@ -158,7 +167,7 @@ async fn usable(
 }
 
 /// Save-time checks that need the workspace: every literal Agent reference is
-/// visible to the saving user, enabled, and runs a read-only capable CLI.
+/// visible to the saving user, enabled, and uses a supported API or CLI runtime.
 pub(super) async fn validate_agents(
     conn: &impl sea_orm::ConnectionTrait,
     scope: &Scope,
@@ -628,6 +637,28 @@ pub(super) async fn execute_with(
         files.is_some(),
     )
     .await?;
+    if resolved.runtime == "api" {
+        let object = api::execute(
+            s,
+            run,
+            node_run,
+            &resolved,
+            params,
+            items,
+            validator.as_ref().ok_or_else(ApiError::missing)?,
+            max_calls,
+            limits.timeout,
+        )
+        .await?;
+        return Ok(vec![Item {
+            json: object,
+            binary: BTreeMap::new(),
+            paired: items
+                .iter()
+                .flat_map(|item| item.paired.iter().cloned())
+                .collect(),
+        }]);
+    }
     let config = crate::conversations::Configuration::from_agent(&resolved)?;
     let prompt = compose(
         &config.system_prompt,
