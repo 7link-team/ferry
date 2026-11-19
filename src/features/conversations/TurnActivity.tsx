@@ -268,14 +268,27 @@ export function EndedDecisionCard({
   canAct,
   busy,
   onContinue,
+  continueDisabled = false,
+  onDismiss,
 }: {
   request: string;
   decision: Decision;
   canAct: boolean;
   busy: boolean;
   onContinue: (operation: string) => void;
+  continueDisabled?: boolean;
+  onDismiss?: () => Promise<void>;
 }) {
   const { title } = describeOperation(decision.tool, decision.input);
+  const [dismissing, setDismissing] = useState(false);
+  const [error, setError] = useState("");
+  const dismiss = async () => {
+    setDismissing(true);
+    setError("");
+    try { await onDismiss?.(); }
+    catch (cause) { setError(errorText(cause)); }
+    finally { setDismissing(false); }
+  };
   return (
     <div data-ended-decision={request} className="space-y-2 rounded-lg border border-dashed border-muted-foreground/40 bg-muted/40 p-3 text-sm">
       <p className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
@@ -284,8 +297,8 @@ export function EndedDecisionCard({
       </p>
       <RawToggle value={decision.input}><Summary tool={decision.tool} input={decision.input} /></RawToggle>
       {canAct && (
-        <div className="flex gap-2">
-          <Button size="sm" className="min-h-11" disabled={busy} onClick={() => {
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" className="min-h-11" disabled={busy || dismissing || continueDisabled} onClick={() => {
             // Inputs here are the server's redacted viewer representation. Build
             // the visible follow-up only when requested, with the same raw cap.
             const input = JSON.stringify(decision.input, null, 2) ?? "";
@@ -293,8 +306,10 @@ export function EndedDecisionCard({
           }}>
             {tv("continueTask")}
           </Button>
+          {onDismiss && <Button type="button" size="sm" variant="outline" className="min-h-11" disabled={busy || dismissing} onClick={() => void dismiss()}>{tv("dismissOperation")}</Button>}
         </div>
       )}
+      {error && <p role="alert" className="break-words text-destructive">{error}</p>}
     </div>
   );
 }
@@ -363,6 +378,8 @@ function decisionText(turnState: string, decision: Decision) {
   if(decision.automatic) return tv("automaticApproval");
   if (decision.decision === true) return tv("decisionAllowed");
   if (decision.decision === false) return tv("decisionDenied");
+  if (decision.resolved === "dismissed") return tv("decisionDismissed");
+  if (decision.resolved === "resumed") return tv("decisionResumed");
   if (turnState === "running") return tv("decisionWaiting");
   return tv("decisionEnded");
 }

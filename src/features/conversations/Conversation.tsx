@@ -43,7 +43,6 @@ import {
   ConversationApproval,
   liveDecision,
   PendingDecisionCard,
-  platformFailed,
   timelineSummary,
   type ActivityEvent,
   type Decision,
@@ -197,6 +196,7 @@ export function Conversation({
   onDraftChange,
   onDeleted,
   onOpenConversation,
+  onPendingChange,
 }: {
   workspace: string;
   id: string;
@@ -206,10 +206,13 @@ export function Conversation({
   onDraftChange?: (draft: ConversationDraft) => void;
   onDeleted?: () => void;
   onOpenConversation?: (id: string) => void;
+  onPendingChange?: (id: string, count: number) => void;
 }) {
   useCommonTranslation();
   const endpoint = `${base(workspace, "conversations")}/${encodeURIComponent(id)}`;
   const [data, setData] = useState<ConversationData>();
+  // Invalidate reads started before a decision write completed.
+  const decisionRevision = useRef(0);
   const [events, setEvents] = useState<Event[]>([]);
   const [draft, setDraft] = useState(initialDraft?.prompt ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>(
@@ -304,26 +307,22 @@ export function Conversation({
     }
     return index;
   }, [events]);
-  // Turns that need someone: accessible decisions (live or left
-  // undecided when the reply ended) and failed platform requests.
+  // Count actionable requests, matching the conversation list API.
   const attention = useMemo(() => {
     const turns = new Set<string>();
-    const mine: string[] = [];
-    let questions = 0;
+    let count = 0;
     for (const turn of data?.turns ?? []) {
-      for (const [request, decision] of Object.entries(turn.decisions)) {
+      for (const decision of Object.values(turn.decisions)) {
         if (!awaitingDecision(turn, decision)) continue;
         turns.add(turn.id);
-        if (turn.owner_id === data?.viewer_id) {
-          mine.push(`${turn.id}:${request}`);
-          if (decision.tool === "ferry_ask_user") questions++;
-        }
+        count++;
       }
-      if ((turnEvents.get(turn.id) ?? []).some((event) => event.type === "platform_result" && platformFailed(event.result)))
-        turns.add(turn.id);
     }
-    return { turns, mine, questions };
-  }, [data?.turns, data?.viewer_id, turnEvents]);
+    return { turns, count };
+  }, [data?.turns]);
+  useEffect(() => {
+    if (data) onPendingChange?.(id, attention.count);
+  }, [id, data, attention.count, onPendingChange]);
   const scroll = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   const readCursor = useRef("");
@@ -364,12 +363,13 @@ export function Conversation({
     let timer: ReturnType<typeof setTimeout>;
     async function refresh() {
       try {
+        const revision = decisionRevision.current;
         const row = await api<ConversationData>(endpoint, {
           signal: controller.signal,
         });
         if (controller.signal.aborted) return;
         const snapshot = JSON.stringify(row);
-        if (snapshot !== applied.current) {
+        if (revision === decisionRevision.current && snapshot !== applied.current) {
           applied.current = snapshot;
           setData(row);
         }
@@ -456,7 +456,12 @@ export function Conversation({
   }, [queue, data, busy]);
   const lastTurn = data?.turns.at(-1);
   const retryable = lastTurn && ["failed", "interrupted", "timed_out", "cancelled"].includes(lastTurn.state);
-  async function act(path: string, body: unknown = {}) {
+  function updateDecision(turnId: string, request: string, patch: Partial<Decision>) {
+    setData(previous => previous ? { ...previous, turns: previous.turns.map(turn => turn.id === turnId ? {
+      ...turn, decisions: { ...turn.decisions, [request]: { ...turn.decisions[request]!, ...patch } },
+    } : turn) } : previous);
+  }
+  async function act(path: string, body: unknown = {}, committed?: () => void) {
     setError("");
     setBusy(true);
     try {
@@ -464,7 +469,10 @@ export function Conversation({
         method: "POST",
         body: JSON.stringify(body),
       });
-      setData(await api<ConversationData>(endpoint));
+      const revision = ++decisionRevision.current;
+      committed?.();
+      const latest = await api<ConversationData>(endpoint);
+      if (revision === decisionRevision.current) setData(latest);
     } catch (cause) {
       setError(errorText(cause));
     } finally {
@@ -479,20 +487,6 @@ export function Conversation({
     });
     if (!sent) return;
     await act(`/turns/${turn.id}/decision-resolutions`, { request_id: request, action: "resumed" });
-  }
-  function showOldestPending() {
-    const first = attention.mine[0];
-    if (!first) return;
-    setActivity("allMessages");
-    setThread("");
-    setSearch("");
-    const request = first.slice(first.indexOf(":") + 1);
-    requestAnimationFrame(() => {
-      const node = [...(scroll.current?.querySelectorAll("[data-pending-decision],[data-ended-decision],[data-user-question]") ?? [])].find(
-        (card) => (card.getAttribute("data-pending-decision") ?? card.getAttribute("data-ended-decision") ?? card.getAttribute("data-user-question")) === request,
-      );
-      node?.scrollIntoView({ block: "center", behavior: "smooth" });
-    });
   }
   async function send(retry?: Turn, followUp?: { prompt: string; targets: string[] }): Promise<boolean> {
     const prompt = followUp?.prompt ?? retry?.prompt ?? draft;
@@ -780,7 +774,7 @@ export function Conversation({
             {value === "unread" && data.messages.some((m) => m.unread)
               ? ` · ${data.messages.filter((m) => m.unread).length}`
               : ""}
-            {value === "pending" && attention.turns.size ? ` · ${attention.turns.size}` : ""}
+            {value === "pending" && attention.count ? ` · ${attention.count}` : ""}
           </Button>
         ))}
         {activity === "unread" && data.messages.some((m) => m.unread) && (
@@ -1089,7 +1083,7 @@ export function Conversation({
                           return (
                             <>
                               {questions.map(([request,decision])=><QuestionCard key={request} request={request} decision={decision} canAnswer={owner&&permissions.has("conversations.run")} busy={busy} executing={active(turn.state)} onAnswer={async response=>{
-                                setBusy(true);try {await api(endpoint+`/turns/${turn.id}/question-answers`,{method:"POST",body:JSON.stringify({request_id:request,...response})});setData(await api<ConversationData>(endpoint));}finally{setBusy(false);}
+                                setBusy(true);try {await api(endpoint+`/turns/${turn.id}/question-answers`,{method:"POST",body:JSON.stringify({request_id:request,...response})});decisionRevision.current++;setData(await api<ConversationData>(endpoint));}finally{setBusy(false);}
                               }}/>) }
                               {live.map(([request, decision]) => (
                                 <PendingDecisionCard
@@ -1099,7 +1093,7 @@ export function Conversation({
                                   canDecide={runnable && owner}
                                   ownerName={ownerName}
                                   busy={busy}
-                                  onDecide={(allow) => void act(`/turns/${turn.id}/decisions`, { request_id: request, allow })}
+                                  onDecide={(allow) => void act(`/turns/${turn.id}/decisions`, { request_id: request, allow }, () => updateDecision(turn.id, request, { decision: allow }))}
                                 />
                               ))}
                               {ended.map(([request, decision]) => (
@@ -1107,9 +1101,19 @@ export function Conversation({
                                   key={request}
                                   request={request}
                                   decision={decision}
-                                  canAct={runnable && owner}
-                                  busy={busy || !!current}
+                                  canAct={permissions.has("conversations.run") && owner}
+                                  busy={busy}
+                                  continueDisabled={!runnable || !!current}
                                   onContinue={(operation) => void resolveEnded(turn, request, operation)}
+                                  onDismiss={async () => {
+                                    await api(endpoint + `/turns/${turn.id}/decision-resolutions`, {
+                                      method: "POST", body: JSON.stringify({ request_id: request, action: "dismissed" }),
+                                    });
+                                    const revision = ++decisionRevision.current;
+                                    updateDecision(turn.id, request, { resolved: "dismissed" });
+                                    const latest = await api<ConversationData>(endpoint);
+                                    if (revision === decisionRevision.current) setData(latest);
+                                  }}
                                 />
                               ))}
                               {hasDetails && (
@@ -1301,14 +1305,6 @@ export function Conversation({
         <p role="status" className="px-3 text-sm text-muted-foreground sm:px-6">{t("archived")}</p>
       )}
       <div className="shrink-0 px-3 pb-3 pt-2 sm:px-6 sm:pb-5">
-        {!!attention.mine.length && (
-          <div role="status" data-pending-banner className="mb-2 flex items-center gap-2 rounded-lg border border-amber-500/60 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow-sm dark:bg-amber-950/40 dark:text-amber-100">
-            <span className="min-w-0 flex-1">{commonText(attention.questions ? "conversations:pendingResponseBanner" : "conversations:pendingBanner", { count: attention.mine.length })}</span>
-            <Button type="button" size="sm" className="min-h-11" variant="outline" onClick={showOldestPending}>
-              {t("showPending")}
-            </Button>
-          </div>
-        )}
         {error && (
           <InlineAlert className="mb-2" onDismiss={() => setError("")}>
             {error}

@@ -270,7 +270,11 @@ impl HostChannel for RunnerChannel {
                         // Backpressure must never strand an owned remote process.
                         match tokio::time::timeout(Duration::from_secs(10), events.send(event)).await {
                             Ok(Ok(())) => {},
-                            _ => { let _ = socket.send(Message::Close(None)).await; return Err(garbled()); }
+                            _ => {
+                                tracing::warn!(host_id=%self.host_id, "Runner event consumer closed or remained blocked for 10 seconds");
+                                let _ = socket.send(Message::Close(None)).await;
+                                return Err(runner_extra("runner.eventDeliveryFailed"));
+                            }
                         }
                         if finished { return Ok(()); }
                     }

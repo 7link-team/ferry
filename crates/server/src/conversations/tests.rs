@@ -1754,3 +1754,106 @@ async fn an_approval_left_undecided_when_its_turn_ends_stays_pending_until_resol
     .unwrap();
     assert_eq!(pending(&s).await, 0);
 }
+
+#[tokio::test]
+async fn dismissing_an_ended_approval_clears_pending_without_executing_or_replaying_it() {
+    let (_dir, s, id) = seeded().await;
+    let turn = sent(&s, id, "dismiss-approval").await;
+    let (row, _, owner) = run::claim(&s, turn).await.unwrap().unwrap();
+    run::append(
+        &s,
+        &row,
+        &owner,
+        Event::Session {
+            native_session_id: "dismiss-test".into(),
+        },
+    )
+    .await
+    .unwrap();
+    run::append(
+        &s,
+        &row,
+        &owner,
+        Event::Approval {
+            request_id: "old".into(),
+            tool: "ferry_request".into(),
+            input: json!({"method":"POST","path":"/workflows","body":{"name":"Never create"}}),
+        },
+    )
+    .await
+    .unwrap();
+    let resolve = |scope: Scope, action: &str| {
+        resolve_decision(
+            State(s.clone()),
+            scope,
+            Path(("1".into(), id, turn)),
+            Json(Resolution {
+                request_id: "old".into(),
+                action: action.into(),
+            }),
+        )
+    };
+    assert!(
+        resolve(admin(1), "dismissed").await.is_err(),
+        "cannot close a live approval through resolutions"
+    );
+    run::finish(&s, &row, &owner, Some(Outcome::Completed), "", true)
+        .await
+        .unwrap();
+    assert!(
+        resolve(admin(2), "dismissed").await.is_err(),
+        "workspace isolation"
+    );
+    let mut foreign = admin(1);
+    foreign.user.id = 2.into();
+    assert!(
+        resolve(foreign, "dismissed").await.is_err(),
+        "only the turn owner can dismiss"
+    );
+    let mut denied = admin(1);
+    denied.permissions.remove("conversations.run");
+    assert!(
+        resolve(denied, "dismissed").await.is_err(),
+        "run permission required"
+    );
+    assert!(resolve(admin(1), "unknown").await.is_err());
+    // Old stored decisions without the newer ended_undecided marker remain actionable.
+    let mut old = turns::Entity::find_by_id(turn)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut decisions: Value = serde_json::from_str(&old.decisions).unwrap();
+    decisions["old"]
+        .as_object_mut()
+        .unwrap()
+        .remove("ended_undecided");
+    old.decisions = decisions.to_string();
+    old.into_active_model()
+        .reset_all()
+        .update(&s.db)
+        .await
+        .unwrap();
+    resolve(admin(1), "dismissed").await.unwrap();
+    resolve(admin(1), "dismissed").await.unwrap();
+    let saved = turns::Entity::find_by_id(turn)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(pending_in(&saved), 0);
+    let decisions: Value = serde_json::from_str(&saved.decisions).unwrap();
+    assert_eq!(decisions["old"]["resolved"], "dismissed");
+    assert!(decisions["old"]["decision"].is_null());
+    assert_eq!(decisions["old"]["sent"], false);
+    assert_eq!(decisions["old"]["dispatching"], false);
+    assert_eq!(
+        turns::Entity::find().all(&s.db).await.unwrap().len(),
+        1,
+        "no follow-up turn"
+    );
+    let Json(listed) = list(State(s.clone()), admin(1), Query(HashMap::new()))
+        .await
+        .unwrap();
+    assert_eq!(listed["items"][0]["pending"], 0);
+}

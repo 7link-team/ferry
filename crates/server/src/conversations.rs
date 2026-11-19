@@ -349,37 +349,8 @@ async fn pending_counts(
         .filter(turns::Column::ConversationId.is_in(rows.iter().map(|r| r.id)))
         .all(db)
         .await?;
-    let owned: HashMap<_, _> = turns
-        .iter()
-        .map(|turn| (turn.id, turn.conversation_id))
-        .collect();
-    let mut failed = std::collections::HashSet::new();
-    if !owned.is_empty() {
-        for event in events::Entity::find()
-            .filter(events::Column::TurnId.is_in(owned.keys().copied()))
-            .all(db)
-            .await?
-        {
-            let Ok(value) = serde_json::from_str::<Value>(&event.payload) else {
-                continue;
-            };
-            if value["type"] == "platform_result"
-                && (value["result"]["ok"] == false
-                    || value["result"]["status"]
-                        .as_u64()
-                        .is_some_and(|status| status >= 400))
-            {
-                failed.insert(event.turn_id);
-            }
-        }
-    }
     for turn in turns {
         let count = pending_in(&turn);
-        let count = if failed.contains(&turn.id) {
-            count.max(1)
-        } else {
-            count
-        };
         if count > 0 {
             *counts.entry(turn.conversation_id).or_default() += count;
         }
@@ -945,11 +916,11 @@ pub struct Decision {
 #[serde(deny_unknown_fields)]
 pub struct Resolution {
     request_id: String,
-    /// "resumed": the task was continued in a new message.
+    /// "resumed": continued in a new message; "dismissed": closed without executing.
     action: String,
 }
 /// Clears an approval that ended undecided from the conversation's pending
-/// items once its owner continued the task.
+/// items once its owner continued or abandoned the operation.
 async fn resolve_decision(
     State(s): State<AppState>,
     scope: Scope,
@@ -957,7 +928,7 @@ async fn resolve_decision(
     Json(body): Json<Resolution>,
 ) -> Result<Json<Value>> {
     scope.require("conversations.run")?;
-    if body.action != "resumed" {
+    if !matches!(body.action.as_str(), "resumed" | "dismissed") {
         return Err(invalid());
     }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
@@ -969,7 +940,11 @@ async fn resolve_decision(
     let mut decisions: Value = serde_json::from_str(&row.decisions).map_err(|_| invalid())?;
     let item = decisions
         .get_mut(&body.request_id)
-        .filter(|item| !active(&row.state) && item["decision"].is_null())
+        .filter(|item| {
+            !active(&row.state)
+                && item["decision"].is_null()
+                && (body.action != "dismissed" || item["tool"] != "ferry_ask_user")
+        })
         .ok_or_else(|| error(StatusCode::CONFLICT, "conversations.staleDecision"))?;
     if item["resolved"].is_string() {
         return Ok(Json(json!({"ok":true})));
@@ -978,6 +953,16 @@ async fn resolve_decision(
     row.decisions = decisions.to_string();
     row.version += 1;
     row.into_active_model().reset_all().update(&tx).await?;
+    crate::hosts::activity_in(
+        &s,
+        &tx,
+        &scope,
+        "decision",
+        "conversations",
+        &id,
+        json!({"turn_id":turn,"request_id":body.request_id,"resolution":body.action}),
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(json!({"ok":true})))
 }

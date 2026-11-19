@@ -118,12 +118,16 @@ async fn send_frame<T: Serialize>(socket: &mut Socket, frame: &T) -> Result<()> 
 async fn next_frame<T: serde::de::DeserializeOwned>(socket: &mut Socket) -> Result<T> {
     while let Some(message) = socket.recv().await {
         match message.map_err(connection_failed)? {
-            Message::Text(text) => return serde_json::from_str(&text).map_err(|_| garbled()),
+            Message::Text(text) => return serde_json::from_str(&text).map_err(|error| {
+                // Do not log the frame: it may contain model input or credentials.
+                tracing::warn!(category=?error.classify(), line=error.line(), column=error.column(), bytes=text.len(), "Runner control response could not be decoded");
+                garbled()
+            }),
             Message::Close(_) => break,
             _ => {}
         }
     }
-    Err(garbled())
+    Err(runner_extra("runner.sessionClosed"))
 }
 
 async fn handshake<T: serde::de::DeserializeOwned>(socket: &mut Socket) -> Result<T> {
@@ -263,6 +267,49 @@ mod tests {
                 assert_eq!(error.2.unwrap().key, "runner.remoteFailed");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn a_closed_runner_socket_is_not_reported_as_an_invalid_response() {
+        use axum::{Router, routing::get};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (results, mut received) = tokio::sync::mpsc::channel(2);
+        let app = Router::new().route(
+            "/",
+            get(move |upgrade: WebSocketUpgrade| {
+                let results = results.clone();
+                async move {
+                    upgrade.on_upgrade(move |socket| async move {
+                        let failure = next_frame::<serde_json::Value>(&mut socket.into())
+                            .await
+                            .unwrap_err();
+                        results.send(failure.2.unwrap().key).await.unwrap();
+                    })
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        for (payload, expected) in [
+            (vec![0x88, 0x80, 0, 0, 0, 0], "runner.sessionClosed"),
+            (
+                vec![0x81, 0x83, 0, 0, 0, 0, b'b', b'a', b'd'],
+                "runner.garbled",
+            ),
+        ] {
+            let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+            client.write_all(format!("GET / HTTP/1.1\r\nHost: {address}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").as_bytes()).await.unwrap();
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                headers.push(client.read_u8().await.unwrap());
+            }
+            client.write_all(&payload).await.unwrap();
+            assert_eq!(received.recv().await.unwrap(), expected);
+        }
+        server.abort();
     }
 
     #[tokio::test]

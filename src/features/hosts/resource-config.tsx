@@ -383,6 +383,7 @@ export function hostsLists({
 
 export function hostsForms({
   workspace,
+  permissions,
 }: ResourceConfigContext): Record<string, FormConfig<AnyRow>> {
   return {
     "host-groups": form({
@@ -522,7 +523,7 @@ export function hostsForms({
               labelKey: "resource-domain:fileTools.label",
               type: "custom",
               span: 2,
-              when: (row: Partial<Host>) => row.connection === "runner" && !!row.id,
+              when: (row: Partial<Host>) => row.connection === "runner" && !!row.id && !!permissions?.has("ai-agents.probe"),
               render: ({ draft }) => <HostFileTools workspace={workspace} hostId={String(draft.id)} />,
             },
             {

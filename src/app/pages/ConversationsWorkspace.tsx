@@ -59,6 +59,10 @@ export function ConversationsWorkspace({
   const [total, setTotal] = useState(0);
   const [mobile, setMobile] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [activePending, setActivePending] = useState<{ id: string; count: number }>();
+  const updatePending = useCallback((id: string, count: number) => {
+    setActivePending(previous => previous?.id === id && previous.count === count ? previous : { id, count });
+  }, []);
   const readable = permissions.has("conversations.read");
   const editing = route.mode === "new" || route.mode === "edit";
   const selected = route.mode !== "new" ? route.id : undefined;
@@ -195,7 +199,11 @@ export function ConversationsWorkspace({
             {t(query ? "noSearchResults" : "noConversations")}
           </p>
         )}
-        {rows.map((row) => (
+        {rows.map((listed) => {
+          // The selected conversation's detail is authoritative; a slow list poll
+          // must not put back the badge that was just cleared by its owner.
+          const row = activePending && activePending.id === selected && listed.id === selected ? { ...listed, pending: activePending.count } : listed;
+          return (
           <a
             key={row.id}
             href={href(
@@ -272,7 +280,7 @@ export function ConversationsWorkspace({
               </span>
             )}
           </a>
-        ))}
+        ); })}
         {rows.length < total && (
           <Button
             className="w-full"
@@ -315,6 +323,7 @@ export function ConversationsWorkspace({
             permissions={permissions}
             initialDraft={drafts.current.get(selected)}
             onDraftChange={saveDraft}
+            onPendingChange={updatePending}
             onOpenConversation={id => { setRevision(value => value + 1); go(id, "view"); }}
             onDeleted={() => {
               drafts.current.delete(selected);

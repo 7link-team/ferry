@@ -8,7 +8,11 @@ vi.mock("../router", () => ({
   navigate: () => undefined,
   useRoute: () => ({ mode: "view", id: "1" }),
 }));
-vi.mock("../../features/conversations/Conversation", () => ({ Conversation: () => null }));
+const activeConversation = vi.hoisted(() => ({ onPendingChange: undefined as undefined | ((id: string, count: number) => void) }));
+vi.mock("../../features/conversations/Conversation", () => ({ Conversation: (props: typeof activeConversation) => {
+  activeConversation.onPendingChange = props.onPendingChange;
+  return null;
+} }));
 vi.mock("../../shared/api/resource", () => ({
   listResource: async () => ({
     items: [
@@ -34,6 +38,12 @@ it("badges private and group conversations that have approvals waiting for the v
     expect(badges.map((badge) => badge.textContent)).toEqual(["2", "1"]);
     expect(badges[0]?.getAttribute("aria-label")).toBe(`${conversationText("pendingFilter")} 2`);
     expect(badges[1]?.closest("a")?.textContent).toContain("Team room");
+    // The active conversation takes precedence over a stale list snapshot.
+    expect(activeConversation.onPendingChange).toBeDefined();
+    await act(async () => activeConversation.onPendingChange!("1", 1));
+    expect([...host.querySelectorAll("[data-pending-badge]")].map(badge => badge.textContent)).toEqual(["1", "1"]);
+    await act(async () => activeConversation.onPendingChange!("1", 0));
+    expect([...host.querySelectorAll("[data-pending-badge]")].map(badge => badge.textContent)).toEqual(["1"]);
   } finally {
     await act(async () => root.unmount());
     host.remove();

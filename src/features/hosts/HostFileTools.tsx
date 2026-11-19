@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorText } from "../../shared/api/api";
 import { base } from "../../shared/api/resource";
 import { commonText } from "../../shared/i18n/i18n";
@@ -7,24 +7,34 @@ import { InlineAlert } from "../../shared/ui/inline-alert";
 
 const t = (key: string) => commonText(`resource-domain:fileTools.${key}`);
 
-/** What the Runner's user can already use to produce files; checked on request. */
+/** Inspect on entry; explicit refresh is available after tools are installed. */
 export function HostFileTools({ workspace, hostId }: { workspace: string; hostId: string }) {
   const [result, setResult] = useState<{ tools: string[]; write_workdir: boolean }>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function check() {
+  const request = useRef<AbortController | undefined>(undefined);
+  const check = useCallback(async () => {
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
     setBusy(true);
+    setResult(undefined);
     setError("");
     try {
-      setResult(await api<{ tools: string[]; write_workdir: boolean }>(`${base(workspace, "hosts")}/${encodeURIComponent(hostId)}/file-tools`));
+      const value = await api<{ tools: string[]; write_workdir: boolean }>(`${base(workspace, "hosts")}/${encodeURIComponent(hostId)}/file-tools`, { signal: controller.signal });
+      if (!controller.signal.aborted) setResult(value);
     } catch (cause) {
-      setError(errorText(cause));
+      if (!controller.signal.aborted) setError(errorText(cause));
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
-  }
+  }, [workspace, hostId]);
+  useEffect(() => {
+    void check();
+    return () => request.current?.abort();
+  }, [check]);
   return (
-    <div className="space-y-2 text-sm" data-testid="host-file-tools">
+    <div className="space-y-2 text-sm" data-testid="host-file-tools" aria-busy={busy}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{t("label")}</span>
         <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void check()}>

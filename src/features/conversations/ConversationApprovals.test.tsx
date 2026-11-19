@@ -48,6 +48,101 @@ afterEach(async () => {
 const permissions = new Set(["conversations.read", "conversations.run"]);
 const buttons = (text: string) => [...host.querySelectorAll("button")].filter((button) => button.textContent?.trim() === text);
 
+it("counts six actionable requests rather than turns or historical platform errors", async () => {
+  const row = conversation([
+    turn("10", { state: "completed", decisions: { a: createWorkflow, b: createWorkflow, c: createWorkflow, d: createWorkflow } }),
+    turn("20", { decisions: { e: createWorkflow, f: createWorkflow } }),
+    turn("30", { state: "failed" }),
+  ], []);
+  vi.spyOn(apiModule, "api").mockImplementation(async path => (String(path).includes("/events?")
+    ? { items: [{ sequence: 1, turn_id: "30", event: { type: "platform_result", result: { ok: false, status: 413 } } }], next: 1, has_more: false }
+    : structuredClone(row)) as never);
+  await act(async () => root.render(<Conversation workspace="1" id="2" permissions={permissions} />));
+  const tab = buttons(`${conversationText("pendingFilter")} · 6`)[0];
+  expect(tab).toBeDefined();
+  expect(host.querySelector("[data-pending-banner]")).toBeNull();
+  await act(async () => tab!.click());
+  expect([...host.querySelectorAll("article[data-turn-id]")].map(item => item.getAttribute("data-turn-id"))).toEqual(["10", "20"]);
+});
+
+it("dismisses an ended operation while another reply runs without sending a follow-up or losing a draft", async () => {
+  let row = conversation([
+    turn("10", { state: "completed", decisions: { old: createWorkflow } }), turn("20"),
+  ], []);
+  const posts: [string, unknown][] = [];
+  vi.spyOn(apiModule, "api").mockImplementation(async (path, options) => {
+    if (String(path).includes("/events?")) return { items: [], next: 0, has_more: false } as never;
+    if (options?.method === "POST") {
+      posts.push([String(path), JSON.parse(String(options.body))]);
+      row = conversation([turn("10", { state: "completed", decisions: { old: { ...createWorkflow, resolved: "dismissed" } } }), turn("20")], []);
+      return { ok: true } as never;
+    }
+    return structuredClone(row) as never;
+  });
+  const render = () => root.render(<Conversation workspace="1" id="2" permissions={permissions} initialDraft={{ prompt: "My draft", attachments: [] }} />);
+  await act(async () => render());
+  const dismiss = buttons(conversationText("dismissOperation"))[0];
+  expect(dismiss).toBeDefined();
+  expect(dismiss!.disabled).toBe(false);
+  await act(async () => dismiss!.click());
+  expect(posts).toEqual([[expect.stringMatching(/\/turns\/10\/decision-resolutions$/), { request_id: "old", action: "dismissed" }]]);
+  expect(host.querySelector("[data-ended-decision]")).toBeNull();
+  expect(buttons(conversationText("pendingFilter"))).toHaveLength(1);
+  expect(host.querySelector<HTMLTextAreaElement>("#conversation-message")?.value).toBe("My draft");
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  await act(async () => render());
+  expect(host.querySelector("[data-ended-decision]")).toBeNull();
+});
+
+it("keeps a failed dismissal actionable and shows the error in its own card", async () => {
+  const row = conversation([turn("10", { state: "completed", decisions: { old: createWorkflow } })], []);
+  vi.spyOn(apiModule, "api").mockImplementation(async (path, options) => {
+    if (String(path).includes("/events?")) return { items: [], next: 0, has_more: false } as never;
+    if (options?.method === "POST") throw Error("Offline");
+    return structuredClone(row) as never;
+  });
+  await act(async () => root.render(<Conversation workspace="1" id="2" permissions={permissions} />));
+  const dismiss = buttons(conversationText("dismissOperation"))[0];
+  expect(dismiss).toBeDefined();
+  await act(async () => dismiss!.click());
+  expect(host.querySelector('[data-ended-decision="old"] [role="alert"]')?.textContent).toContain("Offline");
+  expect(dismiss!.disabled).toBe(false);
+});
+
+it.each([true, false])("publishes the pending count after allow=%s and ignores an older in-flight poll", async allow => {
+  vi.useFakeTimers();
+  const row = conversation([turn("10", { decisions: { a: createWorkflow, b: createWorkflow } })], []);
+  let releasePoll: ((value: never) => void) | undefined;
+  let releaseRefresh: ((value: never) => void) | undefined;
+  let reads = 0;
+  vi.spyOn(apiModule, "api").mockImplementation(async (path, options) => {
+    if (String(path).includes("/events?")) return { items: [], next: 0, has_more: false } as never;
+    if (options?.method === "POST") {
+      (row.turns[0] as ReturnType<typeof turn>).decisions = { a: { ...createWorkflow, decision: allow }, b: createWorkflow };
+      return { ok: true } as never;
+    }
+    if (++reads === 2) return new Promise<never>(resolve => { releasePoll = resolve; });
+    if (reads === 3) return new Promise<never>(resolve => { releaseRefresh = resolve; });
+    return structuredClone(row) as never;
+  });
+  const changed = vi.fn();
+  try {
+    await act(async () => root.render(<Conversation workspace="1" id="2" permissions={permissions} onPendingChange={changed} />));
+    const before = structuredClone(row);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(releasePoll).toBeDefined();
+    await act(async () => buttons(conversationText(allow ? "allow" : "deny"))[0]!.click());
+    expect(changed).toHaveBeenLastCalledWith("2", 1);
+    expect(buttons(`${conversationText("pendingFilter")} · 1`)).toHaveLength(1);
+    expect(releaseRefresh).toBeDefined();
+    await act(async () => releaseRefresh!(structuredClone(row) as never));
+    await act(async () => releasePoll!(before as never));
+    expect(host.querySelectorAll("[data-pending-decision]")).toHaveLength(1);
+    expect(changed).toHaveBeenLastCalledWith("2", 1);
+  } finally { vi.useRealTimers(); }
+});
+
 it("keeps approval summaries and raw controls in the same header row", async () => {
   for (const ended of [false, true]) {
     await act(async () => root.render(ended
@@ -58,7 +153,7 @@ it("keeps approval summaries and raw controls in the same header row", async () 
   }
 });
 
-it("labels a user question as a response and jumps directly to its card", async () => {
+it("shows a user question in the single pending filter without a duplicate banner", async () => {
   const question = { tool: "ferry_ask_user", input: { title: "Need input", question: "What next?" }, decision: null, dispatching: false, sent: false };
   const row = conversation([turn("10", { state: "succeeded", decisions: { "question-1": question } })], [chat("9", "user", "10")]);
   vi.spyOn(apiModule, "api").mockImplementation(async (path) => String(path).includes("/events?")
@@ -66,12 +161,9 @@ it("labels a user question as a response and jumps directly to its card", async 
   await act(async () => root.render(<Conversation workspace="1" id="2" permissions={permissions} />));
   const card = host.querySelector('[data-user-question="question-1"]')!;
   expect(card).not.toBeNull();
-  const banner = host.querySelector("[data-pending-banner]")!;
-  expect(banner.textContent).toContain(commonText("conversations:pendingResponseBanner", { count: 1 }));
-  const scrolled = vi.fn();
-  card.scrollIntoView = scrolled;
-  await act(async () => { banner.querySelector<HTMLButtonElement>("button")!.click(); await new Promise(resolve => requestAnimationFrame(resolve)); });
-  expect(scrolled).toHaveBeenCalled();
+  expect(host.querySelector("[data-pending-banner]")).toBeNull();
+  await act(async () => buttons(`${conversationText("pendingFilter")} · 1`)[0]!.click());
+  expect(host.querySelector('[data-user-question="question-1"]')).not.toBeNull();
 });
 
 it("accepts a custom question response without any fixed choice and preserves it on failure", async () => {
@@ -130,14 +222,10 @@ it("shows a waiting approval inline with a readable summary even before any repl
   expect(card.querySelector("pre")).toBeNull();
   await act(async () => (card.querySelector("[data-raw-toggle]") as HTMLButtonElement).click());
   expect(card.querySelector("pre")?.textContent).toContain('"path": "/workflows"');
-  // Banner above the composer counts it and scrolls to it.
-  const banner = host.querySelector("[data-pending-banner]")!;
-  expect(banner.textContent).toContain(commonText("conversations:pendingBanner", { count: 1 }));
-  const scrolled = vi.fn();
-  (card as HTMLElement).scrollIntoView = scrolled;
-  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callback(0); return 0; });
-  await act(async () => (banner.querySelector("button") as HTMLButtonElement).click());
-  expect(scrolled).toHaveBeenCalled();
+  // The pending tab is the single navigation entry, without a duplicate composer banner.
+  expect(host.querySelector("[data-pending-banner]")).toBeNull();
+  await act(async () => buttons(`${conversationText("pendingFilter")} · 1`)[0]!.click());
+  expect(host.querySelector('[data-pending-decision="req-1"]')).not.toBeNull();
   await act(async () => buttons(conversationText("allow"))[0]!.click());
   expect(decided).toEqual([[expect.stringMatching(/\/conversations\/2\/turns\/10\/decisions$/), { request_id: "req-1", allow: true }]]);
 });
@@ -253,7 +341,7 @@ it("describes operations in words and falls back to the tool name", () => {
   ]);
 });
 
-it.each(["private", "group"])("includes pending, historical undecided and failed-platform turns in the %s action filter", async (kind) => {
+it.each(["private", "group"])("counts pending requests and keeps historical failures in all messages in %s conversations", async (kind) => {
   const row = conversation([
     turn("10", { decisions: { a: createWorkflow, b: createWorkflow } }),
     turn("20", { state: "completed", decisions: { old: createWorkflow } }),
@@ -266,7 +354,8 @@ it.each(["private", "group"])("includes pending, historical undecided and failed
   expect(host.querySelectorAll("[data-pending-decision]")).toHaveLength(2);
   expect(host.querySelectorAll("[data-ended-decision]")).toHaveLength(1);
   await act(async () => buttons(`${conversationText("pendingFilter")} · 3`)[0]!.click());
-  expect([...host.querySelectorAll("article[data-turn-id]")].map((item) => item.getAttribute("data-turn-id"))).toEqual(["10", "20", "30"]);
+  expect([...host.querySelectorAll("article[data-turn-id]")].map((item) => item.getAttribute("data-turn-id"))).toEqual(["10", "20"]);
+  await act(async () => buttons(conversationText("allMessages"))[0]!.click());
   const trigger = host.querySelector('article[data-turn-id="30"] button[data-execution-details]') as HTMLButtonElement;
   expect(trigger).not.toBeNull();
   await act(async () => trigger.click());

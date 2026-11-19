@@ -485,7 +485,7 @@ async fn parallel_approvals_survive_every_terminal_outcome_and_lease_loss() {
 }
 
 #[tokio::test]
-async fn failed_platform_read_returns_specific_error_to_the_agent_and_list_badge() {
+async fn failed_platform_read_returns_specific_error_without_creating_a_pending_approval() {
     let (_dir, s, row, owner) = enabled().await;
     let result = platform_call(
         s.clone(),
@@ -508,7 +508,7 @@ async fn failed_platform_read_returns_specific_error_to_the_agent_and_list_badge
         .await
         .unwrap()
         .0;
-    assert_eq!(listed["items"][0]["pending"], 1);
+    assert_eq!(listed["items"][0]["pending"], 0);
 }
 
 async fn enabled() -> (tempfile::TempDir, AppState, turns::Model, String) {

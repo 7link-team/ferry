@@ -6,6 +6,16 @@ import { CONNECTIONS, hostsLists, type Host } from "./resource-config";
 import { label } from "../../shared/resources/config";
 import { hostsForms } from "./resource-config";
 
+it("only automatically probes file tools when the viewer can probe agents", () => {
+  for (const allowed of [false, true]) {
+    const config = hostsForms({ workspace: "ops", navigate: () => {}, permissions: new Set(allowed ? ["ai-agents.probe"] : []) }).hosts!;
+    const field = config.sections.flatMap(section => section.fields).find(field => field.key === "file_tools")!;
+    expect(field.when!({ id: "1", connection: "runner" })).toBe(allowed);
+    expect(field.when!({ id: "1", connection: "ssh" })).toBe(false);
+    expect(field.when!({ connection: "runner" })).toBe(false);
+  }
+});
+
 it("excludes the edited host from jump choices while allowing other hosts and new records", () => {
   const config = hostsForms({ workspace: "ops", navigate: () => {} }).hosts!;
   const jump = config.sections.flatMap(section => section.fields).find(field => field.key === "jump_host_id")!;
