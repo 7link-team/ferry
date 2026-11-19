@@ -31,6 +31,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY src/shared/workflow-contracts ./src/shared/workflow-contracts
 COPY src/shared/mail ./src/shared/mail
+COPY src/shared/ai ./src/shared/ai
 COPY src/shared/i18n/locales ./src/shared/i18n/locales
 COPY examples/workflow-extensions/public-repository.json ./examples/workflow-extensions/public-repository.json
 # Marketplace tests embed the official index with include_str!.

@@ -141,6 +141,7 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
         shutil.copytree(repo/'crates/server', source/'crates/server')
         shutil.copytree(repo/'src/shared/workflow-contracts', source/'src/shared/workflow-contracts')
         shutil.copytree(repo/'src/shared/mail', source/'src/shared/mail')
+        shutil.copytree(repo/'src/shared/ai', source/'src/shared/ai')
         shutil.copytree(repo/'src/shared/i18n/locales', source/'src/shared/i18n/locales')
         fixture = Path('examples/workflow-extensions/public-repository.json')
         (source/fixture).parent.mkdir(parents=True)

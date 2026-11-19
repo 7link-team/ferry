@@ -189,6 +189,18 @@ try {
   }
   assert.deepEqual(errors, []);
   pass('shared session settings render in three required locales and four widths without horizontal overflow or page errors');
+  const legacyBefore = await (await a('/me')).json();
+  const legacyCookie = (await admin.cookies()).find(cookie => cookie.name === 'ferry_session');
+  sql('DELETE FROM session_refresh_tokens WHERE session_id=(SELECT id FROM sessions WHERE token_hash=?)', [hash(legacyCookie.value)]);
+  const legacyAfter = await (await a('/me')).json();
+  const { session: oldMetadata, ...oldIdentity } = legacyBefore;
+  const { session: legacyMetadata, ...legacyIdentity } = legacyAfter;
+  assert.deepEqual(legacyIdentity, oldIdentity);
+  assert.equal(legacyMetadata.access_expires_at_ms, oldMetadata.access_expires_at_ms);
+  assert(legacyMetadata.access_expires_at_ms > legacyMetadata.server_time_ms && legacyMetadata.server_time_ms > 0);
+  assert.equal(legacyMetadata.refresh_expires_at_ms, 0); assert.equal(legacyMetadata.access_ttl_ms, 0);
+  assert.equal(legacyMetadata.refreshable, false); assert.equal(legacyMetadata.auto_renew, false);
+  pass('legacy session without a refresh grant retains identity, workspace permissions and access deadline; additive metadata is nonrenewable');
   report.status = 'PASS';
 } catch (error) {
   report.status = 'FAIL'; report.error = error.stack;

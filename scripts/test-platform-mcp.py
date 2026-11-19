@@ -17,6 +17,7 @@ class Handler(BaseHTTPRequestHandler):
         if data['name']=='ferry_discover':value={'workspace_id':'1','total':21,'next_offset':20,'operations':[]}
         elif data['name']=='ferry_request':
             value={'ok':False,'status':403,'error':'permission denied'} if data['arguments']['path']=='/denied' else {'ok':True,'status':200,'data':{'total':2}}
+        elif data['name']=='ferry_ask_user':value={'ok':True,'question_id':'question-1','state':'awaiting_user'}
         else:self.send_error(400);return
         payload=json.dumps(value).encode()
         self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
@@ -33,6 +34,7 @@ requests=[
     {'id':5,'method':'tools/call','params':{'name':'ferry_request','arguments':{'method':'GET','path':'/denied'}}},
     {'id':6,'method':'tools/call','params':{'name':'unknown_tool','arguments':{}}},
     {'id':7,'method':'ping'},
+    {'id':8,'method':'tools/call','params':{'name':'ferry_ask_user','arguments':{'title':'Continue task','question':'What would you like to do next?'}}},
 ]
 flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
 try:
@@ -41,20 +43,24 @@ try:
     rows=[json.loads(line) for line in result.stdout.splitlines()]
     # Calls are served concurrently (a ping must not wait behind a tool call
     # that is waiting for approval), so responses are matched by id.
-    assert sorted(row['id'] for row in rows)==list(range(1,8)),rows
+    assert sorted(row['id'] for row in rows)==list(range(1,9)),rows
     rows=sorted(rows,key=lambda row:row['id'])
     assert rows[0]['result']['protocolVersion']=='2025-06-18'
     assert rows[0]['result']['serverInfo']['name']=='ferry'
-    tools=rows[1]['result']['tools'];assert {tool['name'] for tool in tools}=={'ferry_discover','ferry_request'}
-    assert 'offset' in tools[0]['inputSchema']['properties']
-    assert 'transfer' in tools[1]['inputSchema']['properties']
+    tools={tool['name']:tool for tool in rows[1]['result']['tools']}
+    assert set(tools)=={'ferry_discover','ferry_request','ferry_ask_user'}
+    assert 'offset' in tools['ferry_discover']['inputSchema']['properties']
+    assert 'transfer' in tools['ferry_request']['inputSchema']['properties']
+    assert set(tools['ferry_ask_user']['inputSchema']['required'])=={'title','question'}
     assert json.loads(rows[2]['result']['content'][0]['text'])['next_offset']==20
     assert json.loads(rows[3]['result']['content'][0]['text'])['data']['total']==2
     assert rows[4]['result']['isError'] is True
     assert rows[5]['error']['code']==-32000
     assert rows[6]['result']=={}
+    assert json.loads(rows[7]['result']['content'][0]['text'])=={'ok':True,'question_id':'question-1','state':'awaiting_user'}
+    assert next(call for call in seen if call['name']=='ferry_ask_user')['arguments']==requests[-1]['params']['arguments']
     assert token not in result.stdout.decode()
-    assert len(seen)==4
+    assert len(seen)==5
     invalid=dict(env,FERRY_PLATFORM_BRIDGE_URL='https://example.invalid/call')
     rejected=subprocess.run([str(binary),'platform-mcp'],env=invalid,input=b'',stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10,**flags)
     assert rejected.returncode!=0 and not rejected.stdout

@@ -25,6 +25,7 @@ try {
       const path = new URL(route.request().url()).pathname;
       if ((path === '/api/me' || path === '/api/setup') && !requests.has(path)) requests.set(path, route);
       else if (path === '/api/setup') await route.fulfill({ json: { required: false } });
+      else if (path === '/api/me' || path === '/api/sessions/refresh') await route.fulfill({ status: 401, json: { error: 'Sign in' } });
       else await route.fulfill({ json: {} });
     });
     await page.goto(`${origin}/en-US/workspaces/1/nodes`);

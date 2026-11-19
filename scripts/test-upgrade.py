@@ -185,6 +185,15 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 if '/repositories/' in path:
                     assert after['provider'] == before[path].get('provider', 'git')
                     before[path]['provider'] = before[path].get('provider', 'git')
+                if path == '/me':
+                    # alpha.1 has no session metadata. The existing cookie must
+                    # remain a valid legacy session without a new refresh grant;
+                    # all identity/workspace fields still compare exactly below.
+                    session = after.pop('session')
+                    assert set(session) == {'access_expires_at_ms', 'refresh_expires_at_ms', 'server_time_ms', 'refreshable', 'auto_renew', 'access_ttl_ms'}, session
+                    assert session['access_expires_at_ms'] > session['server_time_ms'] > 0, session
+                    assert session['refresh_expires_at_ms'] == 0 and session['access_ttl_ms'] == 0, session
+                    assert session['refreshable'] is False and session['auto_renew'] is False, session
                 if '/hosts/' in path:
                     assert after.get('tag_ids') == [] and after.get('tags') == []
                     before[path]['tag_ids'] = []
