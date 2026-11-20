@@ -63,6 +63,9 @@ func generate() error {
 		{"AutoStop  bool", "AutoStop  atomic.Bool"},
 		{"if w.AutoStop &&", "if w.AutoStop.Load() &&"},
 		{"writer.AutoStop = true", "writer.AutoStop.Store(true)"},
+		// A nonzero exit must drain the PTY just like a successful command.
+		// Closing it immediately raced the output reader and lost final stderr.
+		{"err = cmd.Run()\n\tif err != nil {\n\t\treturn err\n\t}\n", "err = cmd.Run()\n"},
 	} {
 		if strings.Count(patched, change[0]) != 1 {
 			return fmt.Errorf("act PTY patch no longer applies: %q", change[0])
