@@ -227,6 +227,14 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         arch=command(['docker','info','--format','{{.Architecture}}']).decode().strip()
         compose_arch='aarch64' if arch in ('aarch64','arm64') else 'x86_64'
         build_dir=work/'image';build_dir.mkdir()
+        if base_image == 'ubuntu:24.04':
+            # The minimal base has no CA package yet. Bootstrap HTTPS with the
+            # Linux build host's public trust bundle, then install the normal
+            # ca-certificates package. HTTP archive downloads stall in CI.
+            shutil.copyfile('/etc/ssl/certs/ca-certificates.crt', build_dir/'fixture-ca-certificates.crt')
+            dockerfile=dockerfile.replace(b'RUN apt-get update', b'''COPY fixture-ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=30 update''')
+            dockerfile=dockerfile.replace(b'apt-get install', b'apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=30 install')
         if mode=='native':
             dockerfile=dockerfile.replace(b'openssh-server docker.io',b'openssh-server systemd systemd-sysv git python3 curl docker.io')
             dockerfile=dockerfile.replace(b'CMD ["/usr/sbin/sshd","-D","-e"]',b'RUN systemctl enable ssh && systemctl disable docker.service docker.socket containerd.service\nCMD ["/sbin/init"]')
