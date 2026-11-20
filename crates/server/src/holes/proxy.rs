@@ -29,12 +29,12 @@ use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
-    sync::{LazyLock, Mutex, MutexGuard, Weak},
+    sync::{Arc, LazyLock, Mutex, MutexGuard, Weak},
     task::{Context, Poll},
     time::Duration,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 
 const MAX_PER_HOLE: usize = 32;
 const MAX_PER_HOST: usize = 128;
@@ -142,7 +142,11 @@ impl Target {
 
 /// The state a hole's connections use, and when a request last needed it.
 /// Weak, so a test's state is not kept alive by the process-wide pool.
-type Handle = (Weak<AppStateInner>, tokio::time::Instant);
+struct Handle {
+    state: Weak<AppStateInner>,
+    used: tokio::time::Instant,
+    generation: Arc<()>,
+}
 static STATES: LazyLock<Mutex<HashMap<i64, Handle>>> = LazyLock::new(Default::default);
 
 fn states() -> MutexGuard<'static, HashMap<i64, Handle>> {
@@ -151,15 +155,43 @@ fn states() -> MutexGuard<'static, HashMap<i64, Handle>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn remember_state(hole: i64, s: &AppState) {
+    let mut states = states();
+    let state = Arc::downgrade(s);
+    let now = tokio::time::Instant::now();
+    if let Some(handle) = states.get_mut(&hole)
+        && handle.state.ptr_eq(&state)
+    {
+        handle.used = now;
+    } else {
+        states.insert(
+            hole,
+            Handle {
+                state,
+                used: now,
+                generation: Arc::new(()),
+            },
+        );
+    }
+}
+
+fn current_generation(hole: i64, generation: &Arc<()>) -> bool {
+    states()
+        .get(&hole)
+        .is_some_and(|handle| Arc::ptr_eq(&handle.generation, generation))
+}
+
 /// Drops handles nothing has used for a while and nothing still holds open;
 /// called from the monitor so the map cannot grow without bound. The grace
 /// period keeps a handle a request has only just registered.
 pub(super) fn forget_stale() {
     let live = registry();
     let now = tokio::time::Instant::now();
-    states().retain(|hole, (state, used)| {
-        state.strong_count() > 0
-            && (live.holes.contains_key(hole) || now.duration_since(*used) < POOL_IDLE * 2)
+    states().retain(|hole, handle| {
+        handle.state.strong_count() > 0
+            && (live.holes.contains_key(hole)
+                || Arc::strong_count(&handle.generation) > 1
+                || now.duration_since(handle.used) < POOL_IDLE * 2)
     });
 }
 
@@ -172,6 +204,7 @@ struct Registry {
 }
 
 static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(Default::default);
+static CAPACITY_CHANGED: LazyLock<Notify> = LazyLock::new(Notify::new);
 
 fn registry() -> MutexGuard<'static, Registry> {
     REGISTRY
@@ -201,6 +234,8 @@ impl Drop for Held {
                 registry.hosts.remove(&self.host);
             }
         }
+        drop(registry);
+        CAPACITY_CHANGED.notify_waiters();
     }
 }
 
@@ -227,6 +262,31 @@ fn hold(target: &Target) -> Option<(Held, watch::Receiver<bool>)> {
     ))
 }
 
+/// A browser can request more modules than there are upstream connections.
+/// Keep the active bounds, but wait inside the existing response deadline.
+async fn wait_for_capacity(
+    target: &Target,
+    generation: &Arc<()>,
+) -> Result<(Held, watch::Receiver<bool>), Refused> {
+    loop {
+        let changed = CAPACITY_CHANGED.notified();
+        tokio::pin!(changed);
+        // Register before checking capacity so a concurrent release is not lost.
+        changed.as_mut().enable();
+        if !current_generation(target.hole, generation) {
+            return Err(Refused::Unavailable);
+        }
+        if let Some(held) = hold(target) {
+            return if current_generation(target.hole, generation) {
+                Ok(held)
+            } else {
+                Err(Refused::Unavailable)
+            };
+        }
+        changed.await;
+    }
+}
+
 /// Live upstream connections this replica holds for a hole.
 pub(super) fn active(hole: i64) -> usize {
     registry().holes.get(&hole).map_or(0, |entry| entry.0)
@@ -239,14 +299,12 @@ pub(super) fn close(hole: i64) {
         entry.1.send_replace(true);
     }
     states().remove(&hole);
+    CAPACITY_CHANGED.notify_waiters();
 }
 
 #[cfg(test)]
 pub(super) fn tests_register(hole: i64, s: &AppState) {
-    states().insert(
-        hole,
-        (std::sync::Arc::downgrade(s), tokio::time::Instant::now()),
-    );
+    remember_state(hole, s);
 }
 
 #[cfg(test)]
@@ -278,6 +336,133 @@ pub(super) fn tests_hold(hole: i64, host: i64) -> Option<impl Drop> {
 }
 
 // ------------------------------------------------------- probe & open
+
+#[cfg(test)]
+mod capacity_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cancelled_and_timed_out_waiters_never_reserve_capacity() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        tokio::time::pause();
+        let target = Target {
+            hole: 995_091,
+            workspace: 1,
+            host: 995_092,
+            port: 8091,
+            address: String::new(),
+            tls: Tls::Plain,
+        };
+        remember_state(target.hole, &s);
+        let generation = states().get(&target.hole).unwrap().generation.clone();
+        let held: Vec<_> = (0..MAX_PER_HOLE).map(|_| hold(&target).unwrap()).collect();
+        let mut cancelled = Box::pin(wait_for_capacity(&target, &generation));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), &mut cancelled)
+                .await
+                .is_err()
+        );
+        drop(cancelled);
+        assert_eq!(active(target.hole), MAX_PER_HOLE);
+        let mut connection = Box::pin(connect(
+            format!("http://{}/", target.authority()).parse().unwrap(),
+        ));
+        assert!(futures::poll!(&mut connection).is_pending());
+        tokio::time::advance(RESPONSE_TIMEOUT - Duration::from_millis(1)).await;
+        assert!(
+            futures::poll!(&mut connection).is_pending(),
+            "the request deadline must not fire early"
+        );
+        // Tokio rounds deadlines to its millisecond timer-wheel resolution.
+        tokio::time::advance(Duration::from_millis(2)).await;
+        let result = futures::poll!(&mut connection);
+        assert!(
+            matches!(result, std::task::Poll::Ready(Err(Refused::Busy))),
+            "a background pool connector must have a bounded wait"
+        );
+        assert_eq!(active(target.hole), MAX_PER_HOLE);
+        drop(held);
+        assert_eq!(active(target.hole), 0);
+        assert!(
+            hold(&target).is_some(),
+            "cancelled waiters must not consume a released slot"
+        );
+        close(target.hole);
+    }
+
+    #[tokio::test]
+    async fn closed_entry_waiter_cannot_join_a_new_generation() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let target = Target {
+            hole: 995_093,
+            workspace: 1,
+            host: 995_094,
+            port: 8091,
+            address: String::new(),
+            tls: Tls::Plain,
+        };
+        remember_state(target.hole, &s);
+        let generation = states().get(&target.hole).unwrap().generation.clone();
+        let mut held: Vec<_> = (0..MAX_PER_HOLE).map(|_| hold(&target).unwrap()).collect();
+        let mut waiting = Box::pin(wait_for_capacity(&target, &generation));
+        assert!(futures::poll!(&mut waiting).is_pending());
+        close(target.hole);
+        remember_state(target.hole, &s);
+        drop(held.pop());
+        assert!(matches!(
+            futures::poll!(&mut waiting),
+            std::task::Poll::Ready(Err(Refused::Unavailable))
+        ));
+        assert!(!current_generation(target.hole, &generation));
+        let current = states().get(&target.hole).unwrap().generation.clone();
+        assert!(
+            wait_for_capacity(&target, &current).await.is_ok(),
+            "the new generation remains usable"
+        );
+        drop(held);
+        close(target.hole);
+    }
+
+    #[tokio::test]
+    async fn maintenance_keeps_a_queued_connector_until_it_is_cancelled() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        tokio::time::pause();
+        let target = Target {
+            hole: 995_095,
+            workspace: 1,
+            host: 995_096,
+            port: 8091,
+            address: String::new(),
+            tls: Tls::Plain,
+        };
+        remember_state(target.hole, &s);
+        let mut held = Vec::new();
+        for hole in [995_097, 995_098, 995_099, 995_100] {
+            let occupied = Target {
+                hole,
+                ..target.clone()
+            };
+            held.extend((0..MAX_PER_HOLE).map(|_| hold(&occupied).unwrap()));
+        }
+        let mut waiting = Box::pin(connect(
+            format!("http://{}/", target.authority()).parse().unwrap(),
+        ));
+        assert!(futures::poll!(&mut waiting).is_pending());
+        tokio::time::advance(POOL_IDLE * 2 + Duration::from_millis(1)).await;
+        forget_stale();
+        assert!(
+            tests_registered(target.hole),
+            "queued work is not an idle pool entry"
+        );
+        drop(waiting);
+        forget_stale();
+        assert!(
+            !tests_registered(target.hole),
+            "cancelling releases the pending state reference"
+        );
+        drop(held);
+    }
+}
 
 /// Maps a failure to open a forward onto the stored probe state.
 fn classify(error: &ApiError) -> (&'static str, String) {
@@ -464,10 +649,18 @@ impl tower_service::Service<Uri> for Connector {
 
 async fn connect(uri: Uri) -> Result<Pipe, Refused> {
     let mut target = Target::parse(&uri).ok_or(Refused::Unavailable)?;
-    let s = states()
-        .get(&target.hole)
-        .and_then(|(state, _)| state.upgrade())
-        .ok_or(Refused::Unavailable)?;
+    let (s, generation) = {
+        let states = states();
+        let handle = states.get(&target.hole).ok_or(Refused::Unavailable)?;
+        (
+            handle.state.upgrade().ok_or(Refused::Unavailable)?,
+            handle.generation.clone(),
+        )
+    };
+    let (held, closing) =
+        tokio::time::timeout(RESPONSE_TIMEOUT, wait_for_capacity(&target, &generation))
+            .await
+            .map_err(|_| Refused::Busy)??;
     let row = holes::Entity::find_by_id(target.hole)
         .one(&s.db)
         .await
@@ -475,11 +668,13 @@ async fn connect(uri: Uri) -> Result<Pipe, Refused> {
         .flatten()
         .ok_or(Refused::Unavailable)?;
     // The pool key was made under a setting that has since changed.
-    if Tls::of(&row.target_scheme, row.target_tls_insecure) != target.tls {
+    if !current_generation(target.hole, &generation)
+        || state(&row, db::now()) != "active"
+        || Tls::of(&row.target_scheme, row.target_tls_insecure) != target.tls
+    {
         return Err(Refused::Unavailable);
     }
     target.address = row.target_host;
-    let (held, closing) = hold(&target).ok_or(Refused::Busy)?;
     let socket = match open(&s, &target).await {
         Ok(socket) => socket,
         Err(error) => {
@@ -718,10 +913,7 @@ pub(super) async fn serve_entry(
     if declared.is_some_and(|length| length > BODY_LIMIT) {
         return refuse(StatusCode::PAYLOAD_TOO_LARGE, "holes.tooLarge");
     }
-    states().insert(
-        target.hole,
-        (std::sync::Arc::downgrade(&s), tokio::time::Instant::now()),
-    );
+    remember_state(target.hole, &s);
     let prefix = String::new();
     let forwarded_path = path;
     let query = request

@@ -597,6 +597,84 @@ async fn state_handles_outlive_a_fresh_request_but_not_idleness() {
     assert!(proxy::tests_registered(-951));
 }
 
+#[tokio::test]
+async fn http_preview_burst_waits_for_capacity_instead_of_rejecting_modules() {
+    let (_dir, s) = own_ids(setup().await);
+    let host = 41_091;
+    add_host(&s, host, 1, KEY).await;
+    let address = server(s.clone()).await;
+    fake_runner(&s, address, host, KEY, true).await;
+    let port = upstream().await;
+    let hole = create_hole(&s, host, port).await;
+    let id = i64::from(hole_id(&hole));
+    let mut held: Vec<_> = (0..32)
+        .map(|_| proxy::tests_hold(id, host).unwrap())
+        .collect();
+    let client = http();
+    let url = hole["url"].as_str().unwrap().to_owned();
+    let mut request = tokio::spawn(async move { client.get(url).send().await.unwrap() });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut request)
+            .await
+            .is_err(),
+        "a normal HTTP module request must wait for a slot instead of returning 503"
+    );
+    assert_eq!(
+        proxy::active(id),
+        32,
+        "waiting must not exceed the active limit"
+    );
+    drop(held.pop());
+    let response = tokio::time::timeout(Duration::from_secs(5), request)
+        .await
+        .expect("releasing a connection must wake the waiting request")
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response.json::<Value>().await.unwrap()["path"].is_string());
+    drop(held);
+    until("burst connections released", async || {
+        proxy::active(id) == 0
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn http_preview_waits_for_host_capacity_released_by_another_entry() {
+    let (_dir, s) = own_ids(setup().await);
+    let host = 41_093;
+    add_host(&s, host, 1, KEY).await;
+    let address = server(s.clone()).await;
+    fake_runner(&s, address, host, KEY, true).await;
+    let hole = create_hole(&s, host, upstream().await).await;
+    let id = i64::from(hole_id(&hole));
+    let mut held = Vec::new();
+    for entry in [-41_093_1, -41_093_2, -41_093_3, -41_093_4] {
+        for _ in 0..32 {
+            held.push(proxy::tests_hold(entry, host).unwrap());
+        }
+    }
+    let url = hole["url"].as_str().unwrap().to_owned();
+    let mut request = tokio::spawn(async move { http().get(url).send().await.unwrap() });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut request)
+            .await
+            .is_err()
+    );
+    assert_eq!(proxy::active(id), 0);
+    drop(held.pop());
+    let response = tokio::time::timeout(Duration::from_secs(5), request)
+        .await
+        .expect("a different entry freeing host capacity must wake this request")
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    response.bytes().await.unwrap();
+    drop(held);
+    until("host burst connections released", async || {
+        proxy::active(id) == 0
+    })
+    .await;
+}
+
 // ------------------------------------------------------------ proxy
 
 /// A local service that reports what it received and returns every header
