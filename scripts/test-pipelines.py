@@ -67,13 +67,14 @@ def main():
     username = 'user-' + uuid.uuid4().hex
     root_dir = '/tmp/' + name
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    platform_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
-    def api(path, body=None, method=None, status=200):
+    def api(path, body=None, method=None, status=200, client=None):
         req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(),
                                      headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN'},
                                      method=method or ('POST' if body is not None else 'GET'))
         try:
-            with opener.open(req, timeout=15) as response:
+            with (client or opener).open(req, timeout=15) as response:
                 code, raw = response.status, response.read()
         except urllib.error.HTTPError as e:
             code, raw = e.code, e.read()
@@ -209,7 +210,10 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
                 return False
         eventually(ready)
         command(['python3', 'scripts/test-setup.py', base, str(work / 'data')])
+        api('/sessions', {'email':'platform-fixture@example.invalid', 'password':'temporary-platform-password'}, client=platform_opener)
         api('/users', {'email': 'test@example.invalid', 'password': 'correct-horse-battery', 'name': 'test'})
+        api('/platform/settings/1', status=403)
+        check('workspace actor cannot manage platform settings', True)
         workspace = api('/workspaces', {'name': 'ops', 'slug': 'ops'})
         workspace_ops = workspace['id']
         workspace_other = api('/workspaces', {'name': 'other', 'slug': 'other'})['id']
@@ -386,14 +390,14 @@ jobs:
         global_var=create('variables',{'name':'build-token','scope':'global','kind':'secret','value':'global-build-secret'})
         build_var=create('variables',{'name':'build-token','scope':'build','kind':'secret','value':'module-build-secret'})
         def pipeline_limit(value):
-            current=api('/platform/settings/1')
+            current=api('/platform/settings/1', client=platform_opener)
             api('/platform/settings/1', {
                 'version':current['version'],
                 'registration_enabled':current['registration_enabled'],
                 'public_url':current.get('public_url'),
                 'preview_domain':current.get('preview_domain'),
                 'resource_limits':{'pipeline_concurrent_runs':value},
-            }, method='PATCH')
+            }, method='PATCH', client=platform_opener)
         for kind, host in [('runner',runner),('ssh',ssh)]:
             value='build-secret-'+uuid.uuid4().hex+"' $HOME {{run}}\nsecond-line"
             variable_secrets.append(value)
@@ -409,7 +413,7 @@ jobs:
             api(f'/workspaces/{workspace_ops}/pipelines/'+build,row,method='PATCH')
             marker=root_dir+'/variables-'+kind
             # Default capacity is unlimited. Explicitly queue behind one active run.
-            previous_limit=api('/platform/settings/1')['resource_limits']['pipeline_concurrent_runs']
+            previous_limit=api('/platform/settings/1', client=platform_opener)['resource_limits']['pipeline_concurrent_runs']
             pipeline_limit(1)
             try:
                 blocker=pipeline(host,[{'name':'hold queue','run':f'mkdir -p {root_dir}; touch {marker}-entered; while [ ! -f {marker}-release ]; do sleep 0.1; done'}])
