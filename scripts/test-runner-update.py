@@ -26,7 +26,8 @@ with tempfile.TemporaryDirectory(prefix='runner-update-') as directory:
         signer('sign', '--', '--private-key-path', str(root/'test.key'), '--password', '', str(path))
     for name, changes in [('bad-url', {'url': 'http://example.invalid/runner'}),
                           ('credential-url', {'url': 'https://user:secret@example.invalid/runner'}),
-                          ('bad-size', {'size': 0}), ('oversize', {'size': 268435457}),
+                          ('bad-size', {'size': 0}), ('unrepresentable-size', {'size': 2**64}),
+                          ('large-size', {'size': 268435457}),
                           ('bad-hash', {'sha256': 'not-a-sha256'})]:
         invalid = json.loads(json.dumps(catalog))
         for artifact in invalid['targets'].values(): artifact.update(changes)

@@ -56,7 +56,7 @@ trap 'rm -rf "$stage"' EXIT
 trap 'exit 1' HUP INT TERM
 printf 'Authorization: Bearer %s\n' "$FERRY_TOKEN" > "$stage/auth"
 # Do not redirect this authenticated request to another origin.
-curl --fail --silent --show-error --connect-timeout 15 --max-time 60 \
+curl --fail --silent --show-error \
     --max-filesize 8192 --proto '=http,https' --header "@$stage/auth" \
     --output "$stage/metadata" "${server%/}/api/runners/install/$target"
 [ "$(wc -c < "$stage/metadata" | tr -d ' ')" -le 8192 ] || fail 'Installation metadata is too large'
@@ -76,9 +76,10 @@ case "$url" in *[[:space:]]*) fail 'Invalid artifact URL' ;; esac
 [ "${#expected_hash}" = 64 ] || fail 'Invalid SHA256'
 case "$expected_hash" in *[!0-9a-f]*) fail 'Invalid SHA256' ;; esac
 case "$expected_size" in ''|0*|*[!0-9]*) fail 'Invalid artifact size' ;; esac
-[ "${#expected_size}" -le 9 ] && [ "$expected_size" -le 268435456 ] || fail 'Artifact exceeds size limit'
-curl --fail --silent --show-error --location --max-redirs 5 --connect-timeout 15 \
-    --max-time 300 --max-filesize "$expected_size" --proto '=https' --proto-redir '=https' \
+# curl's byte count uses a signed 64-bit representation, not a product size ceiling.
+[ "${#expected_size}" -le 19 ] && [ "$expected_size" -le 9223372036854775807 ] 2>/dev/null || fail 'Invalid artifact size'
+curl --fail --silent --show-error --location --max-redirs 5 \
+    --max-filesize "$expected_size" --proto '=https' --proto-redir '=https' \
     --output "$stage/ferry-runner" "$url"
 actual_size=$(wc -c < "$stage/ferry-runner" | tr -d ' ')
 [ "$actual_size" = "$expected_size" ] || fail 'Artifact size mismatch; nothing installed'

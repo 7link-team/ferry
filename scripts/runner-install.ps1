@@ -61,7 +61,7 @@ try {
     $handler = [Net.Http.HttpClientHandler]::new()
     $handler.AllowAutoRedirect = $false
     $client = [Net.Http.HttpClient]::new($handler)
-    $client.Timeout = [TimeSpan]::FromSeconds(300)
+    $client.Timeout = [Threading.Timeout]::InfiniteTimeSpan
     function Save-Download([Uri]$Url, [string]$Path, [long]$Limit, [bool]$Metadata) {
         $originalUrl = $Url
         $attempt = 0
@@ -72,7 +72,7 @@ try {
           if (-not $Metadata -and $offset -eq $Limit) { return }
           if ($offset -gt $Limit) { throw 'Download exceeds size limit.' }
           $retryable = $false
-          $deadline = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($(if ($Metadata) { 60 } else { 300 })))
+          $deadline = [Threading.CancellationTokenSource]::new()
           try {
             for ($redirect = 0; $redirect -le 5; $redirect++) {
                 if (-not $Metadata -and $Url.Scheme -ne 'https') { throw 'Artifact URL and redirects must use HTTPS.' }
@@ -148,11 +148,10 @@ try {
     Save-Download ($Server.TrimEnd('/') + '/api/runners/install/x86_64-pc-windows-msvc') $metadataPath 8192 $true
     $metadata = [IO.File]::ReadAllText($metadataPath)
     $lines = $metadata.Split([char]10)
-    if ($lines.Length -ne 5 -or $lines[4] -ne '' -or $lines[0] -cnotmatch '^[a-zA-Z0-9.+-]+$' -or $lines[2] -cnotmatch '^[0-9a-f]{64}$' -or $lines[3] -cnotmatch '^[1-9][0-9]{0,8}$') { throw 'Invalid installation metadata.' }
+    if ($lines.Length -ne 5 -or $lines[4] -ne '' -or $lines[0] -cnotmatch '^[a-zA-Z0-9.+-]+$' -or $lines[2] -cnotmatch '^[0-9a-f]{64}$' -or $lines[3] -cnotmatch '^[1-9][0-9]{0,18}$') { throw 'Invalid installation metadata.' }
     $url = [Uri]$lines[1]
     if (-not $url.IsAbsoluteUri -or $url.Scheme -ne 'https') { throw 'Artifact URL must use HTTPS.' }
     $size = [long]$lines[3]
-    if ($size -gt 268435456) { throw 'Artifact exceeds size limit.' }
     $binary = Join-Path $stage 'ferry-runner.exe'
     Write-Host ('Downloading Runner {0} ({1:N1} MiB)...' -f $lines[0], ($size / 1MB))
     Save-Download $url $binary $size $false

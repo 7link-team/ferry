@@ -35,6 +35,14 @@ jobs:
         os: [ubuntu-24.04, macos-26, windows-2022]
     steps:
       - uses: actions/checkout@v4
+      - name: Keep Windows test symbols within linker limits
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import os
+          with open(os.environ['GITHUB_ENV'], 'a') as environment:
+              environment.write('CARGO_PROFILE_DEV_DEBUG=0\nCARGO_PROFILE_TEST_DEBUG=0\n')
+              environment.write('CARGO_PROFILE_DEV_DEBUG_ASSERTIONS=true\nCARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true\n')
       - name: Windows service directory security preflight
         if: runner.os == 'Windows'
         shell: python

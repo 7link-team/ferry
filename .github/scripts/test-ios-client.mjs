@@ -82,12 +82,21 @@ let mode = 'stable';
 let command = '';
 let reloaded = false;
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
-function run(binary, argv, allowFailure = false) {
-  const result = spawnSync(binary, argv, { encoding: 'utf8', windowsHide: true, timeout: 60000, maxBuffer: 8 * 1024 * 1024 });
+function run(binary, argv, allowFailure = false, timeout = 60000) {
+  const result = spawnSync(binary, argv, { encoding: 'utf8', windowsHide: true, timeout, maxBuffer: 8 * 1024 * 1024 });
   commands.push({ at: Date.now(), binary, argv, status: result.status,
     stdout: result.stdout, stderr: result.stderr, error: result.error?.message });
   if (!allowFailure) assert.equal(result.status, 0, `${binary} ${argv.join(' ')}\n${result.stderr || result.stdout || result.error}`);
   return result;
+}
+function captureNativeFailure() {
+  // A launch timeout can also leave simulator control commands unresponsive.
+  // Collect independent, bounded evidence before cleanup; preserve the failure.
+  run('/bin/ps', ['-axo', 'pid,ppid,state,etime,comm'], true, 5000);
+  run('/usr/bin/log', ['show', '--last', '5m', '--style', 'compact', '--predicate',
+    'process == "CoreSimulatorService" OR process == "SpringBoard" OR process == "runningboardd"'], true, 10000);
+  run('xcrun', ['simctl', 'list', 'devices', 'available', '-j'], true, 10000);
+  run('xcrun', ['simctl', 'io', args.udid, 'screenshot', join(output, 'failure-native.png')], true, 10000);
 }
 const sim = (...argv) => run('xcrun', ['simctl', ...argv]);
 function applicationInventory() {
@@ -348,6 +357,7 @@ try {
 } catch (error) {
   report.nativeAcceptance = 'FAIL'; report.error = error.stack;
   console.error(error); process.exitCode = 1;
+  captureNativeFailure();
 } finally {
   saveReport();
   for (const server of servers) { server.closeAllConnections?.(); server.close(); }

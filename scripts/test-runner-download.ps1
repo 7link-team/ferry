@@ -46,12 +46,49 @@ public class DownloadFixture : HttpMessageHandler {
         return Task.FromResult(response);
     }
 }
+public class LargeDownload : Stream {
+    public override bool CanRead { get { return true; } }
+    public override bool CanSeek { get { return false; } }
+    public override bool CanWrite { get { return false; } }
+    public override long Length { get { return 268435457; } }
+    public override long Position { get; set; }
+    public override int Read(byte[] buffer, int offset, int count) {
+        int size = (int)Math.Min(count, Length - Position);
+        Array.Clear(buffer, offset, size);
+        Position += size;
+        return size;
+    }
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token) {
+        token.ThrowIfCancellationRequested();
+        return Task.FromResult(Read(buffer, offset, count));
+    }
+    public override void Flush() { throw new NotSupportedException(); }
+    public override long Seek(long offset, SeekOrigin origin) { throw new NotSupportedException(); }
+    public override void SetLength(long value) { throw new NotSupportedException(); }
+    public override void Write(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
+}
+public class LargeDownloadFixture : HttpMessageHandler {
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) {
+        var response = new HttpResponseMessage(HttpStatusCode.OK);
+        response.Content = new StreamContent(new LargeDownload());
+        response.Content.Headers.ContentLength = 268435457;
+        return Task.FromResult(response);
+    }
+}
 '@
 $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'runner-install.ps1'),[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw ($errors | Out-String) }
 $function=$ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Save-Download' },$true)
 if (-not $function) { throw 'Download function not found' }
+# Execute the actual HttpClient timeout assignment without platform/service setup.
+$timeout = $ast.Find({ param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$client.Timeout' }, $true)
+$client = [Net.Http.HttpClient]::new()
+try {
+    . ([ScriptBlock]::Create($timeout.Extent.Text))
+    if ($client.Timeout -ne [Threading.Timeout]::InfiniteTimeSpan) { throw 'Hidden installer HttpClient deadline' }
+} finally { $client.Dispose() }
+if ($function.Extent.Text -match 'FromSeconds') { throw 'Hidden installer download cancellation deadline' }
 . ([ScriptBlock]::Create($function.Extent.Text))
 # Skip real backoff in the fixture while executing all production retry logic.
 function Start-Sleep { param([int]$Seconds) }
@@ -60,6 +97,26 @@ $null=New-Item -ItemType Directory -Path $root
 $previousToken=$env:FERRY_TOKEN
 $env:FERRY_TOKEN='fixture-only'
 try {
+    # Execute the real metadata-validation statements, excluding platform/ACL/service effects.
+    $source = $ast.Extent.Text
+    $start = $source.IndexOf('    $metadata = [IO.File]::ReadAllText($metadataPath)')
+    $end = $source.IndexOf('    $binary = Join-Path', $start)
+    if ($start -lt 0 -or $end -le $start) { throw 'Metadata validation block not found' }
+    $validate = [ScriptBlock]::Create($source.Substring($start, $end - $start))
+    $metadataPath = Join-Path $root 'metadata'
+    foreach ($value in @('268435457', '9223372036854775807', '0', '-1', '01', '1.5', '9223372036854775808')) {
+        [IO.File]::WriteAllText($metadataPath, "1.2.3`nhttps://fixture.invalid/runner`n$('0' * 64)`n$value`n")
+        $accepted = $true
+        try { . $validate } catch { $accepted = $false }
+        if ($accepted -ne ($value -in @('268435457', '9223372036854775807'))) { throw "Wrong size validation: $value" }
+        Write-Output "PASS metadata-size $value"
+    }
+    $client = [Net.Http.HttpClient]::new([LargeDownloadFixture]::new())
+    $largePath = Join-Path $root 'large-payload'
+    try { Save-Download 'https://fixture.invalid/runner' $largePath 268435457 $false }
+    finally { $client.Dispose() }
+    if ((Get-Item -LiteralPath $largePath).Length -ne 268435457) { throw 'Large streamed download length mismatch' }
+    Write-Output 'PASS large-payload 268435457'
     foreach ($scenario in @('resume','ignore-range','invalid-range','transient','auth')) {
         $handler=[DownloadFixture]::new($scenario)
         $client=[Net.Http.HttpClient]::new($handler)

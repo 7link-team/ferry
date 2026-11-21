@@ -6,7 +6,7 @@ use std::{io::Read, path::Path};
 
 #[cfg(test)]
 use ferry_protocol::release::MAX_CATALOG;
-use ferry_protocol::release::{Artifact, MAX_PAYLOAD, verify_catalog};
+use ferry_protocol::release::{Artifact, verify_catalog};
 
 pub(crate) fn verify_files(
     manifest: &Path,
@@ -298,11 +298,22 @@ mod tests {
         assert!(check(&bytes, &sig, &key, "wrong-target", "0.1.0", "9.9.9").is_err());
         assert!(check(&bytes, &sig, &key, "fixture-target", "0.1.0", "9.9.10").is_err());
         assert!(check(&bytes, &sig, &key, "fixture-target", "9.9.9", "9.9.9").is_err());
+        // Signed metadata above the former 256 MiB ceiling needs no payload allocation.
+        let large = check(
+            &std::fs::read(root.join("large-size.json")).unwrap(),
+            &std::fs::read_to_string(root.join("large-size.json.sig")).unwrap(),
+            &key,
+            "fixture-target",
+            "0.1.0",
+            "9.9.9",
+        )
+        .unwrap();
+        assert_eq!(large.size, 268435457);
         for invalid in [
             "bad-url",
             "credential-url",
             "bad-size",
-            "oversize",
+            "unrepresentable-size",
             "bad-hash",
         ] {
             let data = std::fs::read(root.join(format!("{invalid}.json"))).unwrap();

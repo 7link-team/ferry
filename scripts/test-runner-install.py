@@ -23,6 +23,7 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-test-') as temp:
 import os, pathlib, sys
 args = sys.argv[1:]
 assert os.environ['FERRY_TOKEN'] not in ' '.join(args), 'token leaked to argv'
+assert '--max-time' not in args and '--connect-timeout' not in args, 'hidden installer deadline'
 out = pathlib.Path(args[args.index('--output') + 1])
 if '/api/runners/install/' in args[-1]:
     header = args[args.index('--header') + 1]
@@ -30,7 +31,9 @@ if '/api/runners/install/' in args[-1]:
     assert pathlib.Path(header[1:]).read_text().strip() == 'Authorization: Bearer ' + os.environ['FERRY_TOKEN']
     out.write_bytes(pathlib.Path(os.environ['TEST_METADATA']).read_bytes())
 else:
-    out.write_bytes(pathlib.Path(os.environ['TEST_PAYLOAD']).read_bytes())
+    import shutil
+    with pathlib.Path(os.environ['TEST_PAYLOAD']).open('rb') as source, out.open('wb') as target:
+        shutil.copyfileobj(source, target)
 ''')
     for path in tools.iterdir(): path.chmod(0o755)
     env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ['PATH'],
@@ -40,6 +43,7 @@ else:
     valid = f'1.2.3\nhttps://example.invalid/runner\n{digest}\n{len(payload)}\n'
     cases = [('valid', valid, True), ('tamper', valid.replace(digest, '0' * 64), False),
              ('truncated', valid.replace(str(len(payload))+'\n', str(len(payload)+1)+'\n'), False),
+             ('extra-bytes', valid.replace(str(len(payload))+'\n', str(len(payload)-1)+'\n'), False),
              ('http-artifact', valid.replace('https:', 'http:'), False),
              ('extra-line', valid + 'extra\n', False),
              ('partial-extra-line', valid + 'extra', False),
@@ -47,7 +51,7 @@ else:
              ('zero-size', valid.replace(str(len(payload))+'\n', '0\n'), False),
              ('negative-size', valid.replace(str(len(payload))+'\n', '-1\n'), False),
              ('uppercase-hash', valid.replace(digest, digest.upper()), False),
-             ('oversized', valid.replace(str(len(payload))+'\n', '268435457\n'), False)]
+             ('unrepresentable-size', valid.replace(str(len(payload))+'\n', '9223372036854775808\n'), False)]
     server_cases = [('remote-http', 'http://example.invalid', False),
                     ('remote-https', 'https://example.invalid', True),
                     ('loopback-ipv4', 'http://127.0.0.1:1234', True),
@@ -69,3 +73,26 @@ else:
             assert marker.read_text().splitlines() == ['service', 'install', '--server', server, '--name', 'installer-test', '--rebind']
             assert Path(str(marker)+'.token').read_text() == env['FERRY_TOKEN']
         print('PASS', label)
+    # Stream a real executable across the former cutoff, without a large in-memory fixture.
+    large_size = 268435457
+    large_payload = payload + b'exit 0\n'
+    with (root / 'payload').open('wb') as output:
+        output.write(large_payload)
+        output.write(b'#')
+        block = b' ' * (1024 * 1024)
+        remaining = large_size - len(large_payload) - 2
+        while remaining:
+            count = min(remaining, len(block))
+            output.write(block[:count])
+            remaining -= count
+        output.write(b'\n')
+    with (root / 'payload').open('rb') as source:
+        digest = hashlib.file_digest(source, 'sha256').hexdigest()
+    (root / 'metadata').write_text(f'1.2.3\nhttps://example.invalid/runner\n{digest}\n{large_size}\n')
+    marker.unlink(missing_ok=True)
+    result = subprocess.run(['/bin/sh', str(repo / 'scripts/runner-install.sh'), '--server',
+                             'http://localhost:1234', '--name', 'installer-test'],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 0, ('large-payload', result.stdout, result.stderr)
+    assert marker.exists(), 'verified large artifact was not executed'
+    print('PASS large-payload', large_size)
