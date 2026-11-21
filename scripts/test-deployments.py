@@ -531,8 +531,14 @@ RUN sed -i 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu
             def two_routes(ip,port_number):
                 routes=(monitor(ip,port_number,'/routez') or {}).get('routes') or []
                 return len({r.get('remote_name') or r.get('remote_id') for r in routes})==2
+            observed_meta = {}
             def meta_cluster(ip,port_number):
-                meta=(monitor(ip,port_number,'/jsz') or {}).get('meta_cluster') or {}
+                jsz=monitor(ip,port_number,'/jsz') or {}
+                meta=jsz.get('meta_cluster') or {}
+                observation={'endpoint':f'{ip}:{port_number}','meta_cluster':meta,'response_keys':sorted(jsz)}
+                if observed_meta.get((ip,port_number)) != observation:
+                    observed_meta[(ip,port_number)]=observation
+                    print('JetStream metadata observation: '+json.dumps(observation),flush=True)
                 return meta if meta.get('cluster_size')==3 and meta.get('leader') else None
             def nats_request(ip,port_number,subject,payload):
                 # Minimal NATS client: one request/reply over the text protocol.
