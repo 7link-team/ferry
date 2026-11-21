@@ -84,7 +84,10 @@ jobs:
       - id: backend
         run: cargo build --locked -p ferry-server -p ferry-runner
       - if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
-        run: cargo test --locked -p ferry-server
+        run: |
+          set -o pipefail
+          mkdir -p harness-logs
+          cargo test --locked -p ferry-server 2>&1 | tee harness-logs/server-tests.log
       - name: Pipeline and connection browser acceptance
         if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
         run: |
@@ -113,15 +116,18 @@ jobs:
         env:
           FERRY_TEST_ACTIONS: "1"
         run: |
+          set -o pipefail
           mkdir -p harness-logs
           python3 -I scripts/test-pipelines.py 2>&1 | tee harness-logs/pipelines.log
       - name: Transfer and marketplace compatibility
         if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
         run: |
+          set -o pipefail
+          mkdir -p harness-logs
           python3 -m venv "$RUNNER_TEMP/transfer-venv"
           "$RUNNER_TEMP/transfer-venv/bin/pip" install openpyxl==3.1.5
-          "$RUNNER_TEMP/transfer-venv/bin/python" -I scripts/test-transfers.py
-          python3 -I scripts/test-marketplace.py
+          "$RUNNER_TEMP/transfer-venv/bin/python" -I scripts/test-transfers.py 2>&1 | tee harness-logs/transfers.log
+          python3 -I scripts/test-marketplace.py 2>&1 | tee harness-logs/marketplace.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

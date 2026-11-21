@@ -94,6 +94,15 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
             for row in rows:sheet.append(row)
             out=io.BytesIO();book.save(out);return out.getvalue()
         def count(resource):return request(owner,root+'/'+{'hosts':'nodes', 'host-groups':'node-groups'}.get(resource,resource))['total']
+        def configure_limits(limits):
+            current=request(admin,'/platform/settings/1')
+            return request(admin,'/platform/settings/1',{
+                'version':current['version'],
+                'registration_enabled':current['registration_enabled'],
+                'public_url':current.get('public_url'),
+                'preview_domain':current.get('preview_domain'),
+                'resource_limits':limits,
+            },method='PATCH')
         first=upload('hosts',[{'name':'CSV host','connection':'runner','description':'first\nsecond,"quoted"'}])
         check(first['valid'] and first['rows'][0]['row']==2 and count('hosts')==0,'CSV preview validates without committing hosts')
         check(count('activity')==0,'preview rolls back creation audit')
@@ -114,10 +123,30 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         upload('tags',raw=xlsx([['name'],['=1+1']]),ext='xlsx',status=400)
         check(True,'uploaded XLSX formulas rejected')
         book=openpyxl.Workbook();book.active['A1']='name';book.active['A1048576']='distant';out=io.BytesIO();book.save(out)
-        upload('tags',raw=out.getvalue(),ext='xlsx',status=400)
-        check(True,'sparse XLSX oversized range rejected before allocation')
-        upload('tags',raw=b'name\n'+b'row\n'*1001,status=400)
-        check(True,'1000-row bound enforced')
+        sparse=upload('tags',raw=out.getvalue(),ext='xlsx')
+        check(sparse['valid'] and sparse['count']==1 and sparse['rows'][0]['row']==1048576,
+              'default unlimited XLSX accepts sparse coordinates and preserves the source row')
+        request(owner,root+'/tags/imports/'+sparse['id'],method='DELETE',expected=204)
+        many_rows=upload('tags',raw=b'name\n'+b''.join(f'row {i}\n'.encode() for i in range(1001)))
+        check(many_rows['valid'] and many_rows['count']==1001,
+              'default unlimited CSV accepts more than the former 1000-row bound')
+        request(owner,root+'/tags/imports/'+many_rows['id'],method='DELETE',expected=204)
+        previous_limits=request(admin,'/platform/settings/1')['resource_limits']
+        limited_xlsx=xlsx([['name'],['Configured limit']])
+        archive_entries=len(zipfile.ZipFile(io.BytesIO(limited_xlsx)).infolist())
+        try:
+            configure_limits({'file_upload_bytes':len(limited_xlsx)-1})
+            upload('tags',raw=limited_xlsx,ext='xlsx',status=400)
+            check(True,'configured upload byte limit rejects an oversized XLSX')
+            configure_limits({'file_upload_bytes':previous_limits['file_upload_bytes'],
+                              'file_count':archive_entries-1})
+            upload('tags',raw=limited_xlsx,ext='xlsx',status=400)
+            check(True,'configured file count rejects excess XLSX archive entries')
+        finally:
+            configure_limits({key:previous_limits[key] for key in ['file_upload_bytes','file_count']})
+        restored=upload('tags',raw=limited_xlsx,ext='xlsx')
+        check(restored['valid'],'restoring resource limits permits the same XLSX again')
+        request(owner,root+'/tags/imports/'+restored['id'],method='DELETE',expected=204)
         secret='transfer-secret-never-in-preview'
         pending=upload('credentials',[{'name':'API secret','kind':'token','secret':secret}])
         check(pending['valid'] and secret not in json.dumps(pending) and count('credentials')==0,'credential preview masks value and rolls back')

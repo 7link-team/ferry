@@ -385,6 +385,15 @@ jobs:
         # Managed build variables must be consumed, not merely editable in CRUD.
         global_var=create('variables',{'name':'build-token','scope':'global','kind':'secret','value':'global-build-secret'})
         build_var=create('variables',{'name':'build-token','scope':'build','kind':'secret','value':'module-build-secret'})
+        def pipeline_limit(value):
+            current=api('/platform/settings/1')
+            api('/platform/settings/1', {
+                'version':current['version'],
+                'registration_enabled':current['registration_enabled'],
+                'public_url':current.get('public_url'),
+                'preview_domain':current.get('preview_domain'),
+                'resource_limits':{'pipeline_concurrent_runs':value},
+            }, method='PATCH')
         for kind, host in [('runner',runner),('ssh',ssh)]:
             value='build-secret-'+uuid.uuid4().hex+"' $HOME {{run}}\nsecond-line"
             variable_secrets.append(value)
@@ -399,20 +408,21 @@ jobs:
             row=api(f'/workspaces/{workspace_ops}/pipelines/'+build); row['definition']=json.dumps(definition)
             api(f'/workspaces/{workspace_ops}/pipelines/'+build,row,method='PATCH')
             marker=root_dir+'/variables-'+kind
-            # Runs execute concurrently (pipeline_concurrent_runs, default 10).
-            # Allow one at a time so the variable run really waits in the queue.
-            limit=next(r for r in api(f'/workspaces/{workspace_ops}/settings')['items'] if r['key']=='pipeline_concurrent_runs')
-            limit=api(f'/workspaces/{workspace_ops}/settings/'+limit['id'],{'version':limit['version'],'value':1},method='PATCH')
-            blocker=pipeline(host,[{'name':'hold queue','run':f'mkdir -p {root_dir}; touch {marker}-entered; while [ ! -f {marker}-release ]; do sleep 0.1; done'}])
-            blocked=trigger(blocker)['id']; all_runs.append(blocked)
-            eventually(lambda: local_or_ssh(kind, f'if [ -f {marker}-entered ]; then echo yes; fi').strip()=='yes')
-            rid=trigger(build)['id']; all_runs.append(rid)
-            check(kind+' variable run waits in queue',detail(rid)['state']=='queued')
-            rotated=api(f'/workspaces/{workspace_ops}/variables/'+object_var); rotated['value']='rotated-'+kind
-            api(f'/workspaces/{workspace_ops}/variables/'+object_var,rotated,method='PATCH')
-            local_or_ssh(kind,f'touch {marker}-release')
-            done(blocked)
-            api(f'/workspaces/{workspace_ops}/settings/'+limit['id'],{'version':limit['version'],'value':10},method='PATCH')
+            # Default capacity is unlimited. Explicitly queue behind one active run.
+            previous_limit=api('/platform/settings/1')['resource_limits']['pipeline_concurrent_runs']
+            pipeline_limit(1)
+            try:
+                blocker=pipeline(host,[{'name':'hold queue','run':f'mkdir -p {root_dir}; touch {marker}-entered; while [ ! -f {marker}-release ]; do sleep 0.1; done'}])
+                blocked=trigger(blocker)['id']; all_runs.append(blocked)
+                eventually(lambda: local_or_ssh(kind, f'if [ -f {marker}-entered ]; then echo yes; fi').strip()=='yes')
+                rid=trigger(build)['id']; all_runs.append(rid)
+                check(kind+' variable run waits in queue',detail(rid)['state']=='queued')
+                rotated=api(f'/workspaces/{workspace_ops}/variables/'+object_var); rotated['value']='rotated-'+kind
+                api(f'/workspaces/{workspace_ops}/variables/'+object_var,rotated,method='PATCH')
+                local_or_ssh(kind,f'touch {marker}-release')
+                done(blocked)
+            finally:
+                pipeline_limit(previous_limit)
             result=done(rid); output=''.join(v['chunk'] for v in logs(rid))
             check(kind+' managed variables prefer pipeline scope and preserve literal bytes',result['state']=='succeeded')
             # Secrets delivered to the worker are masked there as "***" (GitHub's
