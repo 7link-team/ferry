@@ -2,6 +2,27 @@ use super::*;
 use sea_orm::ConnectionTrait;
 
 #[test]
+fn dispatch_future_keeps_executor_state_off_the_scheduler_stack() {
+    fn future_bytes<F: std::future::Future>(
+        _: impl FnOnce(
+            &'static AppState,
+            &'static ArtifactStore,
+            &'static Lease,
+            &'static tokio::sync::watch::Receiver<bool>,
+        ) -> F,
+    ) -> usize {
+        std::mem::size_of::<F>()
+    }
+    let inner = future_bytes(dispatch_inner);
+    let outer = future_bytes(dispatch);
+    println!("Workflow future bytes: inner={inner}, dispatch={outer}");
+    assert!(
+        outer < 64 * 1024,
+        "scheduler must not embed the complete executor state"
+    );
+}
+
+#[test]
 fn manual_input_defaults_unlimited_and_obeys_packet_policy_and_schema() {
     let spec = json!({"params":{"input_schema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}});
     let inputs = Map::from_iter([("text".into(), json!("x".repeat(1024 * 1024 + 1)))]);

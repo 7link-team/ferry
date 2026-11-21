@@ -1077,46 +1077,52 @@ async fn current_in(tx: &sea_orm::DatabaseTransaction, lease: &Lease) -> Result<
         .ok_or_else(ApiError::missing)
 }
 
-async fn dispatch(
-    s: &AppState,
-    backend: &ArtifactStore,
-    lease: &Lease,
-    stop: &tokio::sync::watch::Receiver<bool>,
-) -> Result<()> {
-    let run = current(s, lease.execution().id).await?;
-    let context: Value = serde_json::from_str(&s.vault.open_secret(
-        run.context.as_deref().ok_or_else(ApiError::missing)?,
-        &context_aad(run.workspace_id, run.id),
-    )?)
-    .map_err(|_| ApiError::missing())?;
-    if let Some(id) = context
-        .get("origin_agent_id")
-        .filter(|value| !value.is_null())
-    {
-        let agent_id: Id = serde_json::from_value(id.clone()).map_err(|_| ApiError::forbidden())?;
-        let scope = Scope::for_actor(s, run.workspace_id.into(), run.triggered_by.into()).await?;
-        crate::platform_tools::delegated_future(
-            s,
-            scope,
-            agent_id,
-            dispatch_inner(s, backend, lease, stop),
-        )
-        .await
-        // A run started by an Agent is bounded by the Agent role; say so rather
-        // than reporting the user's own permission as revoked.
-        .map_err(|error| {
-            if matches!(error.0, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
-                ApiError::localized(
-                    StatusCode::FORBIDDEN,
-                    Message::new("workflow.agentPermission"),
-                )
-            } else {
-                error
-            }
-        })
-    } else {
-        dispatch_inner(s, backend, lease, stop).await
-    }
+fn dispatch<'a>(
+    s: &'a AppState,
+    backend: &'a ArtifactStore,
+    lease: &'a Lease,
+    stop: &'a tokio::sync::watch::Receiver<bool>,
+) -> impl std::future::Future<Output = Result<()>> + 'a {
+    // Allocate before the supervisor embeds the dispatcher and its task-local
+    // execution scopes in its own async state.
+    Box::pin(async move {
+        let run = current(s, lease.execution().id).await?;
+        let context: Value = serde_json::from_str(&s.vault.open_secret(
+            run.context.as_deref().ok_or_else(ApiError::missing)?,
+            &context_aad(run.workspace_id, run.id),
+        )?)
+        .map_err(|_| ApiError::missing())?;
+        if let Some(id) = context
+            .get("origin_agent_id")
+            .filter(|value| !value.is_null())
+        {
+            let agent_id: Id =
+                serde_json::from_value(id.clone()).map_err(|_| ApiError::forbidden())?;
+            let scope =
+                Scope::for_actor(s, run.workspace_id.into(), run.triggered_by.into()).await?;
+            crate::platform_tools::delegated_future(
+                s,
+                scope,
+                agent_id,
+                dispatch_inner(s, backend, lease, stop),
+            )
+            .await
+            // A run started by an Agent is bounded by the Agent role; say so rather
+            // than reporting the user's own permission as revoked.
+            .map_err(|error| {
+                if matches!(error.0, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+                    ApiError::localized(
+                        StatusCode::FORBIDDEN,
+                        Message::new("workflow.agentPermission"),
+                    )
+                } else {
+                    error
+                }
+            })
+        } else {
+            dispatch_inner(s, backend, lease, stop).await
+        }
+    })
 }
 
 async fn dispatch_inner(
