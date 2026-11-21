@@ -856,7 +856,7 @@ export function Conversation({
             node.scrollHeight - node.scrollTop - node.clientHeight < 80;
           if (follow.current) setNewBelow(false);
         }}
-        className="conversation-feed min-h-0 flex-1 overflow-auto overscroll-contain px-2 pb-6 pt-3 sm:px-6"
+        className="conversation-feed min-h-[min(50dvh,16rem)] flex-1 overflow-auto overscroll-contain px-2 pb-6 pt-3 sm:px-6"
         aria-label={t("messages")}
       >
         <div className={`mx-auto w-full max-w-4xl ${!data.turns.length && !data.messages.length ? "flex min-h-full flex-col" : ""}`}>
@@ -977,7 +977,7 @@ export function Conversation({
                       <IdentityAvatar id={m?.role === "user" ? m.owner_id : m?.agent_id || turn?.agent_id || data.agent_id} name={name} kind={m?.role === "user" ? "user" : "agent"}
                         value={m?.role === "user" ? data.members.find(member => member.id === m.owner_id)?.avatar : data.kind === "group" ? data.agents.find(agent => agent.id === (m?.agent_id || turn?.agent_id))?.avatar : data.agent_avatar} className="size-10" />
                     </button>
-                    <div className={`min-w-0 flex-1 rounded-xl border px-3 py-2.5 shadow-xs sm:px-4 ${m?.role === "user" ? "rounded-tl-sm border-primary/20 bg-muted text-foreground" : "rounded-tl-sm bg-card text-card-foreground"}`}>
+                    <div className={`min-w-[min(100%,12rem)] flex-1 rounded-xl border px-3 py-2.5 shadow-xs sm:px-4 ${m?.role === "user" ? "rounded-tl-sm border-primary/20 bg-muted text-foreground" : "rounded-tl-sm bg-card text-card-foreground"}`}>
                       <div className="mb-1 flex min-h-6 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                         <span className="font-semibold text-foreground">
                           {name}

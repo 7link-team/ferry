@@ -256,17 +256,19 @@ input[type="checkbox"]:not([aria-hidden="true"]) {
   flex-shrink: 0;
   accent-color: var(--primary);
 }
-/* Configuration detail/edit pages: reachable touch controls and safe footer. */
+/* Touch controls outside the zoomed diagram and safe form footers. */
 @media (max-width: 1199px) {
-  .crud-config-page [data-slot="button"],
-  .crud-config-page input:not([type="hidden"]):not([type="checkbox"]),
-  .crud-config-page select,
-  .crud-config-page [role="combobox"] {
+  button:not(.react-flow__viewport *),
+  [data-slot="button"]:not(.react-flow__viewport *),
+  [data-app-header] a,
+  input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([aria-hidden="true"]),
+  select:not([aria-hidden="true"]),
+  [role="combobox"],
+  [role="tab"] {
     min-height: 44px;
     min-width: 44px;
   }
-  .crud-config-page label:has([role="checkbox"]:not(:disabled)),
-  .crud-config-page [role="tab"] {
+  label:has([role="checkbox"]:not(:disabled)) {
     min-height: 44px;
   }
 }

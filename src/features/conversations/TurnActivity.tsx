@@ -73,16 +73,16 @@ export function QuestionCard({ request, decision, canAnswer, busy, executing, on
     catch (cause) { setError(errorText(cause)); }
     finally { setSending(false); }
   };
-  return <section data-user-question={request} className="min-w-0 space-y-3 rounded-xl border border-primary/40 bg-card p-3 text-sm sm:p-4">
+  return <section data-user-question={request} className="min-w-0 space-y-3 rounded-xl border border-primary/40 bg-card p-3 text-sm [overflow-wrap:anywhere] sm:p-4">
     <div className="flex items-start gap-2"><ShieldQuestion aria-hidden className="mt-0.5 size-4 shrink-0 text-primary" /><div className="min-w-0 flex-1"><p className="text-xs font-medium text-primary">{tv(resolved === "answered" ? "questionAnswered" : resolved === "abandoned" ? "questionAbandoned" : resolved === "paused" ? "questionPaused" : "questionWaiting")}</p><h3 className="mt-1 break-words font-semibold">{String(question.title ?? "")}</h3></div></div>
     <p className="whitespace-pre-wrap break-words">{String(question.question ?? "")}</p>
     {typeof question.reason === "string" && question.reason && <p className="whitespace-pre-wrap break-words text-muted-foreground">{String(question.reason)}</p>}
     {settled ? <p className="whitespace-pre-wrap break-words">{decision.response?.answer || options.find(option => option.id === decision.response?.option_id)?.label as string || tv(resolved === "abandoned" ? "questionAbandoned" : "questionAnswered")}</p> : canAnswer ? <AutoForm className="space-y-3" onSubmit={event => { event.preventDefault(); void submit("continue"); }}>
-      {options.length > 0 && <div className="grid gap-2" role="group" aria-label={tv("questionSuggestions")}>{options.map(option => <button key={String(option.id)} type="button" disabled={disabled} aria-pressed={selected === option.id} className={`min-h-11 rounded-lg border p-3 text-left focus-visible:outline-2 focus-visible:outline-ring ${selected === option.id ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`} onClick={() => setSelected(selected === option.id ? "" : String(option.id))}><span className="flex flex-wrap items-center gap-2 font-medium"><span>{String(option.label)}</span>{question.recommended_option_id === option.id && <span className="text-xs text-primary">{tv("questionRecommended")}</span>}</span>{typeof option.description === "string" && option.description && <span className="mt-1 block whitespace-pre-wrap break-words text-xs text-muted-foreground">{String(option.description)}</span>}</button>)}</div>}
+      {options.length > 0 && <div className="grid gap-2" role="group" aria-label={tv("questionSuggestions")}>{options.map(option => <button key={String(option.id)} type="button" disabled={disabled} aria-pressed={selected === option.id} className={`min-h-11 min-w-0 max-w-full whitespace-normal rounded-lg border p-3 text-left [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-ring ${selected === option.id ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`} onClick={() => setSelected(selected === option.id ? "" : String(option.id))}><span className="flex flex-wrap items-center gap-2 font-medium"><span>{String(option.label)}</span>{question.recommended_option_id === option.id && <span className="text-xs text-primary">{tv("questionRecommended")}</span>}</span>{typeof option.description === "string" && option.description && <span className="mt-1 block whitespace-pre-wrap break-words text-xs text-muted-foreground">{String(option.description)}</span>}</button>)}</div>}
       <AutoField name={`question-${request}`} label={tv("questionResponse")} help={tv("questionResponseHelp")}><FieldControl name={`question-${request}`} field={{name:tv("questionResponse"),type:"textarea",config:{maxLength:4096}}} value={text} onChange={value=>setText(String(value))} disabled={disabled} /></AutoField>
       {executing && <p role="status" className="text-xs text-muted-foreground">{tv("questionFinishing")}</p>}
       {error && <p role="alert" className="break-words text-destructive">{error}</p>}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3"><Button type="submit" className="min-h-11" disabled={disabled || executing || !text.trim() && !selected}>{tv("questionContinue")}</Button><Button type="button" variant="outline" className="min-h-11" disabled={disabled} onClick={()=>void submit("pause")}>{tv("questionPause")}</Button><Button type="button" variant="outline" className="min-h-11" disabled={disabled} onClick={()=>void submit("abandon")}>{tv("questionAbandon")}</Button></div>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-2 [&>button]:h-auto [&>button]:min-h-11 [&>button]:min-w-0 [&>button]:whitespace-normal"><Button type="submit" disabled={disabled || executing || !text.trim() && !selected}>{tv("questionContinue")}</Button><Button type="button" variant="outline" disabled={disabled} onClick={()=>void submit("pause")}>{tv("questionPause")}</Button><Button type="button" variant="outline" disabled={disabled} onClick={()=>void submit("abandon")}>{tv("questionAbandon")}</Button></div>
     </AutoForm> : <p className="text-xs text-muted-foreground">{tv("questionOwnerOnly")}</p>}
   </section>;
 }
@@ -189,7 +189,7 @@ function Summary({ tool, input }: { tool: string; input: unknown }) {
     <>
       <p data-operation-title className="break-words font-medium text-foreground">{title}</p>
       {!!fields.length && (
-        <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+        <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-x-3 gap-y-0.5 text-xs text-muted-foreground [overflow-wrap:anywhere]">
           {fields.map(([label, text]) => (
             <FieldRow key={label} label={label} text={text} />
           ))}
@@ -201,8 +201,8 @@ function Summary({ tool, input }: { tool: string; input: unknown }) {
 function FieldRow({ label, text }: { label: string; text: string }) {
   return (
     <>
-      <dt>{label}</dt>
-      <dd className="line-clamp-3 break-words text-foreground/80">{text}</dd>
+      <dt className="min-w-0">{label}</dt>
+      <dd className="min-w-0 line-clamp-3 text-foreground/80">{text}</dd>
     </>
   );
 }
@@ -211,9 +211,9 @@ function RawToggle({ value, label, children }: { value: unknown; label?: string;
   const [open, setOpen] = useState(false);
   return (
     <div>
-      <div className="flex min-w-0 items-start gap-3">
-      {children && <div className="min-w-0 flex-1 pt-2.5">{children}</div>}
-      <button type="button" data-raw-toggle aria-expanded={open} className="ml-auto inline-flex min-h-11 shrink-0 items-center text-xs text-muted-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-ring" onClick={() => setOpen(!open)}>
+      <div className="flex min-w-0 flex-wrap items-start gap-3">
+      {children && <div className="min-w-0 flex-1 basis-40 pt-2.5 [overflow-wrap:anywhere]">{children}</div>}
+      <button type="button" data-raw-toggle aria-expanded={open} className="ml-auto inline-flex min-h-11 max-w-full shrink-0 items-center whitespace-normal text-xs text-muted-foreground underline-offset-2 [overflow-wrap:anywhere] hover:underline focus-visible:outline focus-visible:outline-ring" onClick={() => setOpen(!open)}>
         {open ? tv("hideRaw") : label ?? tv("rawData")}
       </button>
       </div>
@@ -246,7 +246,7 @@ export function PendingDecisionCard({
       </p>
       <RawToggle value={decision.input}><Summary tool={decision.tool} input={decision.input} /></RawToggle>
       {canDecide ? (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 [&>button]:h-auto [&>button]:min-w-0 [&>button]:max-w-full [&>button]:whitespace-normal [&>button]:[overflow-wrap:anywhere]">
           <Button size="sm" className="min-h-11" disabled={busy || decision.dispatching} onClick={() => onDecide(true)}>
             {tv("allow")}
           </Button>
@@ -398,7 +398,7 @@ export function ExecutionDetailsPanel({ summary, children }: { summary: string; 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
-        <Button type="button" data-execution-details variant="ghost" className="min-h-11 max-w-full justify-start whitespace-normal px-0 text-left text-xs text-muted-foreground">
+        <Button type="button" data-execution-details variant="ghost" className="h-auto min-h-11 max-w-full justify-start whitespace-normal px-0 text-left text-xs text-muted-foreground">
           {summary}
         </Button>
       </Dialog.Trigger>

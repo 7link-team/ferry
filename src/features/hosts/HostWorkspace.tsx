@@ -95,7 +95,7 @@ export function HostWorkspace({ navigation, workspace, hostId, permissions, head
 
   const renderPane = (node: Pane, tab: WorkspaceTab, canClose: boolean): React.ReactNode => {
     return <Tabs.Root value={node.kind} onValueChange={value => changeTab(current => ({ ...current, root: replace(current.root, node.id, old => ({ ...old, kind: value as Kind, opened: [...new Set([...old.opened, value as Kind])] })) }))} asChild><section aria-label={node.kind === "terminal" ? hostRepositoryText("host.073") : hostRepositoryText("host.074")} className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${tab.activePane === node.id ? "bg-accent/20" : ""}`} onPointerDown={() => { if (tab.id === activeTab) changeTab(current => ({ ...current, activePane: node.id })); }}>
-      <div className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-2">
+      <div className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-2 max-[1199px]:h-auto max-[1199px]:min-h-11">
         <Tabs.List aria-label={hostRepositoryText("host.075")} className="inline-flex shrink-0 items-center gap-1">
           {canTerminal && <Tabs.Trigger value="terminal" asChild><Button variant={node.kind === "terminal" ? "secondary" : "ghost"} size="sm" className="h-8 px-2"><SquareTerminal className="size-4" />{hostRepositoryText("host.071")}</Button></Tabs.Trigger>}
           {canFiles && <Tabs.Trigger value="files" asChild><Button variant={node.kind === "files" ? "secondary" : "ghost"} size="sm" className="h-8 px-2"><FolderOpen className="size-4" />{hostRepositoryText("host.072")}</Button></Tabs.Trigger>}
@@ -115,7 +115,7 @@ export function HostWorkspace({ navigation, workspace, hostId, permissions, head
   if (!canTerminal && !canFiles) return <p role="alert" className="p-6">{hostRepositoryText("host.080")}</p>;
   return <HostTelemetry workspace={workspace} hostId={hostId} enabled={tabs.some(tab => tab.id === activeTab && hasTerminal(tab.root))}><div className="flex h-dvh min-h-[420px] min-w-0 flex-col bg-background text-foreground">
     <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-3 border-b px-3">
-      <a href={navigation.href({ workspace, group: "ops", item: "hosts", id: hostId, mode: "view" }, {})} className="inline-flex size-8 items-center justify-center rounded hover:bg-accent" aria-label={hostRepositoryText("host.081")} title={hostRepositoryText("host.081")}><ArrowLeft className="size-4" /></a>
+      <a href={navigation.href({ workspace, group: "ops", item: "hosts", id: hostId, mode: "view" }, {})} className="inline-flex size-8 items-center justify-center rounded hover:bg-accent max-[1199px]:size-11" aria-label={hostRepositoryText("host.081")} title={hostRepositoryText("host.081")}><ArrowLeft className="size-4" /></a>
       <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" title={hostName || hostRepositoryText("host.070")}>{hostName || hostRepositoryText("host.070")}</h1>
       <HostLatency workspace={workspace} hostId={hostId} />
       {canTerminal && <Button variant="outline" size="icon" aria-label={hostRepositoryText("host.082")} title={hostRepositoryText("host.082")} onClick={() => addTab("terminal")}><SquareTerminal className="size-4" /></Button>}
@@ -124,8 +124,8 @@ export function HostWorkspace({ navigation, workspace, hostId, permissions, head
       {headerActions}
     </header>
     {error && <InlineAlert className="m-2">{error}</InlineAlert>}
-    <div role="tablist" aria-label={hostRepositoryText("host.084")} className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-2">
-      {tabs.map(tab => <div key={tab.id} className={`inline-flex h-8 shrink-0 items-center rounded border ${activeTab === tab.id ? "bg-accent" : ""}`}>
+    <div role="tablist" aria-label={hostRepositoryText("host.084")} className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-2 max-[1199px]:h-auto max-[1199px]:min-h-11">
+      {tabs.map(tab => <div key={tab.id} className={`inline-flex h-8 shrink-0 items-center rounded border max-[1199px]:h-auto max-[1199px]:min-h-11 ${activeTab === tab.id ? "bg-accent" : ""}`}>
         <button type="button" role="tab" aria-selected={activeTab === tab.id} className="h-full px-3 text-sm" onClick={() => setActiveTab(tab.id)}>{tabLabel(tab)}</button>
         <Button variant="ghost" size="icon" className="size-7" aria-label={hostRepositoryText("host.085", {value1: tabLabel(tab)})} onClick={() => closeTab(tab.id)}><X className="size-3.5" /></Button>
       </div>)}
