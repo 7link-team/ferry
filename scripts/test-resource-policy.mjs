@@ -41,10 +41,47 @@ async function until(name, probe, seconds = 60) {
   throw Error(`${name} did not become ready: ${last?.message ?? ''}`);
 }
 const serverPort = await port(), base = `http://127.0.0.1:${serverPort}`;
+const sessionCookieJar = new Map();
+let accessExpiresAt = 0, sessionRefresh = null;
+const refreshEvents = [];
+function absorbSessionCookies(response) {
+  for (const value of response.headers.getSetCookie()) {
+    const pair = value.split(';')[0], at = pair.indexOf('='), name = pair.slice(0, at), token = pair.slice(at + 1);
+    if (token) sessionCookieJar.set(name, token); else sessionCookieJar.delete(name);
+    if (name === 'ferry_session') {
+      const age = /max-age=(\d+)/i.exec(value);
+      if (age) accessExpiresAt = Date.now() + Number(age[1]) * 1000;
+    }
+  }
+  cookie = [...sessionCookieJar].map(([name, value]) => name + '=' + value).join('; ');
+}
+async function refreshSession() {
+  if (!sessionRefresh) sessionRefresh = (async () => {
+    const response = await fetch(base + '/api/sessions/refresh', {method:'POST', headers:{'x-ferry-request':'1', cookie}, signal:AbortSignal.timeout(15000)});
+    assert.equal(response.status, 200, 'Ordinary fixture session refresh failed');
+    absorbSessionCookies(response); await response.text();
+    refreshEvents.push({at:new Date().toISOString(), method:'POST', path:'/api/sessions/refresh', status:200});
+    await writeFile(join(work, 'ordinary-auth-refresh.json'), JSON.stringify({events:refreshEvents}, null, 2));
+  })().finally(() => { sessionRefresh = null; });
+  return sessionRefresh;
+}
+async function sessionBoundary() {
+  if (sessionRefresh) await sessionRefresh;
+  if (sessionCookieJar.has('session_refresh') && (!accessExpiresAt || Date.now() + 120000 >= accessExpiresAt)) await refreshSession();
+}
 async function api(path, body, method = body === undefined ? 'GET' : 'POST') {
-  const response = await fetch(base + path, {method, headers:{'content-type':'application/json', 'x-ferry-request':'1', cookie}, ...(body === undefined ? {} : {body:JSON.stringify(body)}), signal:AbortSignal.timeout(15000)});
-  const cookies = response.headers.getSetCookie();
-  if (cookies.length) cookie = cookies.map(value => value.split(';')[0]).join('; ');
+  await sessionBoundary();
+  const send = () => fetch(base + path, {method, headers:{'content-type':'application/json', 'x-ferry-request':'1', cookie}, ...(body === undefined ? {} : {body:JSON.stringify(body)}), signal:AbortSignal.timeout(15000)});
+  let response = await send();
+  // Never replay a mutation or an uncertain network outcome. Reads retry only
+  // after the server's own /me endpoint confirms the session was denied.
+  if (response.status === 401 && method === 'GET' && sessionCookieJar.has('session_refresh')) {
+    await response.text();
+    const proof = await fetch(base + '/api/me', {headers:{cookie}, signal:AbortSignal.timeout(15000)});
+    assert.equal(proof.status, 401, '401 was not a confirmed expired fixture session'); await proof.text();
+    await refreshSession(); response = await send();
+  }
+  absorbSessionCookies(response);
   const text = await response.text();
   assert.equal(response.ok, true, `Isolated fixture API ${method} ${path}: ${response.status} ${text.slice(0,300)}`);
   return text ? JSON.parse(text) : null;
@@ -170,7 +207,8 @@ lines.on('line',line=>{const value=JSON.parse(line);
   })();
   let metadataWrites=0;
   const writeProgress=(async()=>{try{while(monitoring){await api(root+'/workflows',{name:'Concurrent metadata '+metadataWrites,definition:JSON.stringify({engine:'ferry-graph',schema:1,settings:{timezone:'UTC'},nodes:[{id:'start',name:'Start',type:'core.trigger.manual',type_version:1,params:{input_schema:{type:'object'}},position:[0,0]}],connections:[]})});metadataWrites++;await sleep(500);}}catch(error){monitorFailure=error;}})();
-  function fileRequest(path,method='GET',headers={},body){
+  async function fileRequest(path,method='GET',headers={},body){
+    await sessionBoundary();
     return new Promise((done,fail)=>{
       const request=http.request(base+path,{method,headers:{cookie,...headers}},done);
       request.on('error',fail);
