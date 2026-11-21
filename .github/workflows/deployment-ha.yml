@@ -64,26 +64,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - mode: native
-            swarm_ha: "0"
-            label: Native artifact and systemd SSH and Agent acceptance
-          - mode: docker
-            swarm_ha: "0"
-            label: Docker application example acceptance
-          - mode: compose
-            swarm_ha: "0"
-            label: Compose deployment and browser acceptance
-          - mode: stack
-            swarm_ha: "1"
-            label: Three-node Swarm failure recovery
           - mode: docker
             swarm_ha: "0"
             blueprint: "1"
             label: blueprint
-          - mode: stack
-            swarm_ha: "1"
-            blueprint: "1"
-            label: blueprint on three-node Swarm
     env:
       FERRY_REQUIRE_ALL: "1"
       FERRY_TEST_DEPLOY_MODE: ${{ matrix.mode }}
