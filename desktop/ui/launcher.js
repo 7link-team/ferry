@@ -1,3 +1,7 @@
+if (window.__MOBILE_CLIENT__) {
+  await import('./mobile-launcher.js');
+} else {
+document.querySelector('.updates').hidden = false;
 const { core, app, event } = window.__TAURI__;
 const byId = (id) => document.getElementById(id);
 const check = byId("check-update"), install = byId("install-update");
@@ -64,4 +68,5 @@ try {
   }
 } catch (error) {
   byId("connection-error").textContent = String(error);
+}
 }

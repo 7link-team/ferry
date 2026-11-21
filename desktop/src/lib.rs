@@ -3,11 +3,18 @@
 //! deployment serves. Business logic never lives here — only the tray, the
 //! connection settings and the service lifecycle.
 
+mod connection;
+#[cfg(any(mobile, test))]
+mod mobile;
+#[cfg(desktop)]
 mod server;
+#[cfg(desktop)]
 mod updater;
 
+#[cfg(desktop)]
 use tauri::Manager;
 
+#[cfg(desktop)]
 fn show_primary(app: &tauri::AppHandle) {
     if let Some(workspace) = app.get_webview_window("workspace") {
         let _ = workspace.show();
@@ -23,6 +30,7 @@ fn show_primary(app: &tauri::AppHandle) {
     }
 }
 
+#[cfg(desktop)]
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     use tauri::{
         menu::{Menu, MenuItem},
@@ -69,7 +77,16 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(mobile)]
+    mobile::run();
+    #[cfg(desktop)]
+    run_desktop();
+}
+
+#[cfg(desktop)]
+fn run_desktop() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             show_primary(app);

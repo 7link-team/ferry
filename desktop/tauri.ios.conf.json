@@ -1,0 +1,5 @@
+{
+  "app": { "windows": [{ "label": "launcher", "title": "Connection settings", "visible": true }] },
+  "bundle": { "externalBin": [], "resources": null, "createUpdaterArtifacts": false, "iOS": { "template": "ios/project.yml" } },
+  "plugins": { "updater": null }
+}

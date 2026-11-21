@@ -1,0 +1,155 @@
+name: Mobile client builds
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["feat/**"]
+    paths:
+      - "desktop/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/mobile-client.yml"
+      - ".github/scripts/test-ios-client.mjs"
+      - ".github/scripts/ios-client-*.swift"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/mobile-client.yml"
+      - ".github/scripts/test-ios-client.mjs"
+      - ".github/scripts/ios-client-*.swift"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-client-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop -> target
+          key: mobile-android
+      - run: npm ci
+      - name: Launcher and navigation regressions
+        run: npx vitest run --config desktop/vitest.config.js
+      - name: Install Android build tools
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - name: Generate native project from official templates
+        working-directory: desktop
+        run: |
+          npx tauri android init --ci --skip-targets-install
+          node mobile-prepare.mjs
+      - name: Build installable debug APKs
+        working-directory: desktop
+        run: npx tauri android build --debug --target aarch64 x86_64 --apk --split-per-abi --ci
+      - name: Verify package identity and absence of server sidecars
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess, zipfile
+          root = pathlib.Path('desktop')
+          config = json.loads((root / 'tauri.conf.json').read_text())
+          apks = list((root / 'gen/android/app/build/outputs/apk').rglob('*.apk'))
+          assert len(apks) >= 2, 'Both arm64 and x86_64 APKs are required'
+          for apk in apks:
+              metadata = subprocess.check_output([str(pathlib.Path(__import__('os').environ['ANDROID_HOME']) / 'build-tools/36.0.0/aapt'), 'dump', 'badging', str(apk)], text=True)
+              assert f"name='{config['identifier']}'" in metadata
+              with zipfile.ZipFile(apk) as package:
+                  assert not any(any(value in name.lower() for value in ('ferry-server', 'ferry-sandbox', 'actions-worker-')) for name in package.namelist())
+              apk.with_suffix('.apk.sha256').write_text(hashlib.file_digest(apk.open('rb'), 'sha256').hexdigest() + '  ' + apk.name + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-client-debug-apks
+          if-no-files-found: error
+          path: |
+            desktop/gen/android/app/build/outputs/apk/**/*.apk
+            desktop/gen/android/app/build/outputs/apk/**/*.sha256
+
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop -> target
+          key: mobile-ios
+      - run: npm ci
+      - name: Install Xcode project generator
+        run: command -v xcodegen || brew install xcodegen
+      - name: Generate native project from official templates
+        working-directory: desktop
+        run: npx tauri ios init --ci --skip-targets-install
+      - name: Build simulator client
+        working-directory: desktop
+        run: npx tauri ios build --debug --target aarch64-sim --no-sign --ci
+      - name: Exercise native iPhone client flows
+        run: |
+          set -eu
+          device_id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$device_id" || test "$(xcrun simctl list devices -j | python3 -c 'import json,sys; print(next(d["state"] for group in json.load(sys.stdin)["devices"].values() for d in group if d["udid"] == sys.argv[1]))' "$device_id")" = Booted
+          xcrun simctl bootstatus "$device_id" -b
+          app=$(find desktop/gen/apple/build/arm64-sim -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$app"
+          mkdir -p build-artifacts/mobile-ios
+          ditto -c -k --sequesterRsrc --keepParent "$app" build-artifacts/mobile-ios/simulator-client.app.zip
+          node .github/scripts/test-ios-client.mjs --udid "$device_id" --app-path "$app"
+      - name: Build unsigned device IPA
+        working-directory: desktop
+        run: npx tauri ios build --target aarch64 --no-sign --ci
+      - name: Verify client contents and record unsigned status
+        run: |
+          python3 - <<'PY'
+          import hashlib, pathlib, shutil, zipfile
+          root = pathlib.Path('desktop/gen/apple/build')
+          output = pathlib.Path('build-artifacts/mobile-ios')
+          packages = list((root / 'arm64').glob('*.ipa'))
+          assert len(packages) == 1, 'One unsigned device IPA is required'
+          with zipfile.ZipFile(packages[0]) as package:
+              assert not any(any(value in name.lower() for value in ('ferry-server', 'ferry-sandbox', 'actions-worker-')) for name in package.namelist())
+          target = output / 'unsigned-device-client.ipa'
+          shutil.copyfile(packages[0], target)
+          (output / 'SIGNING.txt').write_text('The simulator app runs in the iOS simulator. The device IPA is unsigned and cannot be installed on a physical iPhone until signed with a valid Apple team and provisioning profile. No App Store publication was performed.\n')
+          hashes = []
+          for path in sorted(output.iterdir()):
+              if path.is_file():
+                  with path.open('rb') as source:
+                      hashes.append(hashlib.file_digest(source, 'sha256').hexdigest() + '  ' + path.name)
+          (output / 'SHA256SUMS.txt').write_text('\n'.join(hashes) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-client-simulator-and-unsigned-device
+          if-no-files-found: warn
+          path: build-artifacts/mobile-ios/

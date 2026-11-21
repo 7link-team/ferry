@@ -1,0 +1,3 @@
+/target-mobile/
+/.tauri/
+/ios/.build/
