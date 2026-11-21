@@ -1,7 +1,7 @@
 name: Container sandbox acceptance
 on:
   push:
-    branches: [main]
+    branches: [main, ci/e2e-remediation-sandbox-repaired]
     paths:
       - sandbox-seccomp.json
       - sandbox-seccomp.LICENSE
