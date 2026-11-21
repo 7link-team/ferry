@@ -158,7 +158,9 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
         production_url = 'format!("https://github.com/{repository}/releases/download/v{version}/runner-update.json")'
         assert production_url in text, 'fixture must replace the exact release URL, never weaken signature verification'
         shutil.copy2(root/'ca.crt', catalog_source.parent/'fixture-ca.crt')
-        text = text.replace('reqwest::Client::builder()', 'reqwest::Client::builder().add_root_certificate(reqwest::Certificate::from_pem(include_bytes!("fixture-ca.crt")).expect("fixture certificate"))')
+        catalog_builder = 'crate::accounts::resource_policy::http(&policy)'
+        assert text.count(catalog_builder) == 1, 'fixture must trust its CA on the actual catalog client'
+        text = text.replace(catalog_builder, catalog_builder + '.add_root_certificate(reqwest::Certificate::from_pem(include_bytes!("fixture-ca.crt")).expect("fixture certificate"))', 1)
         text = text.replace(production_url, f'format!("https://localhost:{http.server_port}/{{version}}.json")', 1)
         catalog_source.write_text(text, encoding='utf-8')
         server_manifest = (repo/'Cargo.toml').read_text(encoding='utf-8').replace(', "crates/desktop-updater"', '')

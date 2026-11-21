@@ -1,4 +1,11 @@
 # Task State
+## Latest continuation checkpoint (2026-11-21)
+- User reconfirmed automatic model-generated first introduction. Already implemented in conversations/introductions.rs: configured model/context, once per new private room or Agent membership; platform-maintained switch/instructions, no refresh/backfill. No new semantics or permission question.
+- Current HEAD ed4af20; root resource worktree remains frozen 0b31d61. Six-file followup reviewed: Actions slots null/0 unlimited and >64 capacities with existing-lock drain; Windows driver uses central host_task_concurrency; upgrade fixture CA targets actual resource-policy HTTP client; settings/footer two-line enlarged-text layout fix.
+- Fresh final frontend 952 PASS/1 existing skipped (mobile-final-frontend-tests.log); npm run build PASS (combined-final-frontend-build.log), Python AST and git diff check PASS. Independent UI review PASS; actual fresh-bundle 30 resource form cases +18 introduction/model cases PASS (mock API only).
+- Go full patched suite PASS318.626s, actual Windows capacity17/FULL24 PASS, real worker null/configured129/omitted-slot cases3 PASS. Independent source/driver/CA review PASS without Critical/Important findings. Packages ferry-go-slots-review-v1 and ferry-go-slots-driver-review-v1 in TEMP; no Rust source changes since full workspace1398 PASS.
+- Latest mobile CI44904052736 at ed4af20: Android PASS, iOS native flow FAIL. Current artifact14707418045 being inspected by ios_native_failure_review; do not attribute stale sixth-artifact compiler failure to this run. Prior pipeline/Runner failures correlate with old invalid execution slot and missing fixture-CA injection; fixes require fresh CI verification.
+- Next: explicitly stage/commit only six reviewed followup paths plus this state, SSH push feature to run fresh gates; inspect latest iOS failure and fix only proven cause. No new release/main merge/production update until gates pass. Overall NOT_READY; original local4291/PID17088 preserved.
 ## Objective
 Finish approved stability/resource/conversation work and deliver Android+iOS remote-only clients. Mobile has no default server; users configure/change it. Desktop retains service/client modes. SSH push; immutable release tags; no store publication.
 ## Current Phase / Step

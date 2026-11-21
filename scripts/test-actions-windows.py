@@ -132,8 +132,16 @@ with tempfile.TemporaryDirectory(prefix='actions-windows-') as directory:
               f"{echo_result['state']} {echo_output}")
         if os.environ.get('FERRY_TEST_EXECUTION_CAPACITY_ONLY') == '1':
             def policy(enabled=True, shared=False, capacity=1):
+                settings = api('/platform/settings/1')
+                api('/platform/settings/1', {
+                    'version': settings['version'],
+                    'registration_enabled': settings['registration_enabled'],
+                    'public_url': settings.get('public_url'),
+                    'preview_domain': settings.get('preview_domain'),
+                    'resource_limits': dict(settings['resource_limits'], host_task_concurrency=capacity),
+                }, method='PATCH')
                 current = api(f'{root}/nodes/{host}')
-                api(f'{root}/nodes/{host}', dict(current, execution={'enabled': enabled, 'shared': shared, 'capacity': capacity}), method='PATCH')
+                api(f'{root}/nodes/{host}', dict(current, execution=dict(current['execution'], enabled=enabled, shared=shared)), method='PATCH')
                 return api(f'{root}/nodes/{host}')
 
             def occupancy():
@@ -145,7 +153,16 @@ with tempfile.TemporaryDirectory(prefix='actions-windows-') as directory:
 
             holder = pipeline('Capacity real holder', {'hold': {'runs-on': 'self-hosted', 'steps': [{'run': 'Write-Output CAPACITY_HOLDER; Start-Sleep -Seconds 180'}]}})
             if os.environ.get('FERRY_TEST_EXECUTION_POOL_ONLY') != '1':
-                check('existing hosts default to private one-slot execution', node['execution'] == {'enabled': True, 'shared': False, 'capacity': 1})
+                check('existing hosts default to enabled private unlimited execution',
+                      node['execution']['enabled'] and not node['execution']['shared'] and occupancy()['capacity'] is None)
+                default_holders = [run(holder), run(holder)]
+                eventually(lambda: all('CAPACITY_HOLDER' in text(run_id) for run_id in default_holders),
+                           120, 'two default unlimited real holders')
+                check('default unlimited capacity admits two real workers', occupancy()['active'] == 2 and occupancy()['capacity'] is None)
+                for run_id in default_holders:
+                    check('default unlimited holder cancels cleanly', cancel(run_id)['state'] == 'cancelled')
+                eventually(lambda: occupancy()['active'] == 0, 60, 'default unlimited cleanup')
+                policy(capacity=1)
                 first_hold = run(holder)
                 eventually(lambda: 'CAPACITY_HOLDER' in text(first_hold), 120, 'first real holder')
                 second_hold = run(holder)

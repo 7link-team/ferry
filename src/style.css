@@ -274,7 +274,7 @@ input[type="checkbox"]:not([aria-hidden="true"]) {
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
 }
 [data-form-actions-placement="footer"] > [data-slot="button"] {
-  flex: 1 1 0;
+  flex: 1 1 max-content;
   min-width: 0;
   min-height: 44px;
   height: auto;

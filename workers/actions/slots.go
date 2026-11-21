@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,7 +18,8 @@ func acquireExecutionSlot(ctx context.Context, request Request) (func(), error) 
 	if request.ExecutionHost == "" {
 		return func() {}, nil
 	} // standalone callers
-	if _, err := strconv.ParseUint(request.ExecutionHost, 10, 64); err != nil || request.ExecutionCapacity < 1 || request.ExecutionCapacity > 64 || request.ExecutionSlot < 0 || request.ExecutionSlot >= request.ExecutionCapacity {
+	// JSON null decodes to zero: the server uses it for unlimited capacity.
+	if _, err := strconv.ParseUint(request.ExecutionHost, 10, 64); err != nil || request.ExecutionCapacity < 0 || request.ExecutionSlot < 0 || (request.ExecutionCapacity > 0 && request.ExecutionSlot >= request.ExecutionCapacity) {
 		return nil, fmt.Errorf("invalid execution slot")
 	}
 	root := "/tmp"
@@ -57,29 +59,46 @@ func tryExecutionSlot(dir string, slot, capacity int) (func(), error) {
 		return nil, err
 	}
 	defer gate()
+	selectedName := strconv.Itoa(slot) + ".lock"
+	selected, err := tryFileLock(filepath.Join(dir, selectedName))
+	if err != nil || selected == nil {
+		return nil, err
+	}
+	if capacity == 0 {
+		return selected, nil
+	}
+	// Scan existing slots, including old owners above a reduced capacity. Never
+	// iterate up to capacity: configured capacities can be arbitrarily large.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		selected()
+		return nil, err
+	}
 	active := 0
-	var selected func()
-	for i := 0; i < 64; i++ {
-		release, err := tryFileLock(filepath.Join(dir, strconv.Itoa(i)+".lock"))
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.Type().IsRegular() || name == selectedName || !strings.HasSuffix(name, ".lock") {
+			continue
+		}
+		number := strings.TrimSuffix(name, ".lock")
+		index, err := strconv.ParseUint(number, 10, 64)
+		if err != nil || strconv.FormatUint(index, 10) != number {
+			continue
+		}
+		release, err := tryFileLock(filepath.Join(dir, name))
 		if err != nil {
-			if selected != nil {
-				selected()
-			}
+			selected()
 			return nil, err
 		}
 		if release == nil {
 			active++
-		} else if i == slot {
-			selected = release
+			if active >= capacity {
+				selected()
+				return nil, nil
+			}
 		} else {
 			release()
 		}
-	}
-	if active >= capacity || selected == nil {
-		if selected != nil {
-			selected()
-		}
-		return nil, nil
 	}
 	return selected, nil
 }
