@@ -779,3 +779,23 @@ async fn model_field_errors_name_the_field() {
         assert_eq!(error.2.as_ref().unwrap().key, key, "{input}");
     }
 }
+#[test]
+fn max_output_tokens_round_trips_as_optional_api_model_parameter_and_rejects_invalid_values() {
+    let input = |limit: Value, kind: &str| json!({"name":"Output setting","kind":kind,"runtime":if kind=="cli" {"claude"}else{""},"default_model":"m","state":"enabled","max_output_tokens":limit});
+    for value in [json!(1), json!(9_007_199_254_740_991_i64), Value::Null] {
+        let mut model: Body = serde_json::from_value(input(value.clone(), "api")).unwrap();
+        model.check_fields().unwrap();
+        assert_eq!(
+            serde_json::to_value(model).unwrap()["max_output_tokens"],
+            value
+        );
+    }
+    for value in [json!(0), json!(-1), json!(9_007_199_254_740_992_i64)] {
+        let mut model: Body = serde_json::from_value(input(value, "api")).unwrap();
+        assert!(model.check_fields().is_err());
+    }
+    assert!(serde_json::from_value::<Body>(input(json!(1.5), "api")).is_err());
+    let mut cli: Body = serde_json::from_value(input(json!(1), "cli")).unwrap();
+    assert!(cli.check_fields().is_err());
+    body().check_fields().unwrap();
+}

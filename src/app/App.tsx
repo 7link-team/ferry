@@ -270,7 +270,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
     </div>;
 
   return (
-    <div className="grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] md:grid-rows-[auto_minmax(0,1fr)]">
+    <div className={cn("grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] md:grid-rows-[auto_minmax(0,1fr)]", item.resource === "conversations" && "[@media(max-height:500px)]:grid-rows-[auto_minmax(28rem,1fr)_auto] [@media(max-height:500px)]:overflow-y-auto")}>
       <AppHeader home={to(nav[0]!.key, nav[0]!.items[0]!.key)} navigation={
         <nav className="hidden min-w-0 max-w-full gap-1 overflow-x-auto md:flex" aria-label={t("app.modules")}>
           {groups.map((g) => (

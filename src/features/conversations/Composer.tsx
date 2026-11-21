@@ -554,7 +554,7 @@ export function Composer({
           aria-valuemin={80}
           aria-valuemax={Math.min(440, window.innerHeight * 0.45)}
           aria-valuenow={height}
-          className="absolute right-1 top-1 z-10 flex size-7 touch-none cursor-ns-resize items-center justify-center rounded text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+          className="absolute right-1 top-1 z-10 flex size-7 touch-none cursor-ns-resize items-center justify-center rounded text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring [@media(max-height:500px)]:hidden"
           onPointerDown={(e) => {
             e.preventDefault();
             resizing.current = { y: e.clientY, height };
@@ -601,7 +601,7 @@ export function Composer({
           id="conversation-message"
           value={draft.prompt}
           disabled={locked || recording}
-          style={{ height, maxHeight: "45dvh" }}
+          style={{ height }}
           placeholder={t(group ? "groupPlaceholder" : "messagePlaceholder")}
           onKeyDown={keyDown}
           role={group ? "combobox" : undefined}
@@ -646,7 +646,7 @@ export function Composer({
               void attach(files);
             }
           }}
-          className="block min-h-20 w-full resize-none border-0 bg-transparent px-3 py-3 pr-9 text-sm leading-6 shadow-none outline-none focus:ring-0 disabled:opacity-50"
+          className="block min-h-20 max-h-[45dvh] w-full resize-none border-0 bg-transparent px-3 py-3 pr-9 text-sm leading-6 shadow-none outline-none focus:ring-0 disabled:opacity-50 [@media(max-height:500px)]:min-h-8 [@media(max-height:500px)]:max-h-8 [@media(max-height:500px)]:py-1"
         />
         {!!draft.attachments.length && (
           <div className="flex max-h-36 flex-wrap gap-2 overflow-auto px-3 pb-3">
@@ -720,7 +720,7 @@ export function Composer({
         )}
         <div
           data-composer-toolbar
-          className="flex flex-wrap items-center gap-1 border-t border-border/50 bg-muted/20 px-2 py-1.5 [&>button]:size-11"
+          className="flex flex-wrap items-center gap-1 border-t border-border/50 bg-muted/20 px-2 py-1.5 [&>button]:size-11 [&_button]:min-h-11 [&_button]:min-w-11"
         >
           <input
             ref={fileInput}

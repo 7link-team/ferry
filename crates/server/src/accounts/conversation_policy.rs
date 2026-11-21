@@ -10,6 +10,7 @@ use serde_json::{Map, Value, json};
 
 pub const DEFAULT_INSTRUCTIONS: &str =
     include_str!("../../../../src/shared/ai/conversation-instructions.md");
+pub const DEFAULT_INTRODUCTION_INSTRUCTIONS: &str = "Briefly greet the user, introduce your actual name and configured role/description, explain the help grounded in that configuration and your effective permissions, and ask what the user wants. Never claim to have performed checks or actions, and never invent capabilities.";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -17,6 +18,8 @@ pub struct Configuration {
     pub instructions: String,
     pub tool_response_limit_kib: usize,
     pub default_approval_mode: String,
+    pub introduction_enabled: bool,
+    pub introduction_instructions: String,
 }
 impl Default for Configuration {
     fn default() -> Self {
@@ -24,6 +27,8 @@ impl Default for Configuration {
             instructions: DEFAULT_INSTRUCTIONS.trim().into(),
             tool_response_limit_kib: 1024,
             default_approval_mode: "request".into(),
+            introduction_enabled: true,
+            introduction_instructions: DEFAULT_INTRODUCTION_INSTRUCTIONS.into(),
         }
     }
 }
@@ -45,7 +50,12 @@ impl Configuration {
         Self::read(row.conversation_config.as_deref())
     }
     fn validate(&self) -> Result<()> {
-        if self.instructions.len() > 16 * 1024
+        if self.introduction_instructions.len() > 16 * 1024
+            || self
+                .introduction_instructions
+                .chars()
+                .any(|c| c.is_control() && !['\n', '\r', '\t'].contains(&c))
+            || self.instructions.len() > 16 * 1024
             || self
                 .instructions
                 .chars()
@@ -66,6 +76,11 @@ impl Configuration {
                 "tool_response_limit_kib",
             ),
             ("conversation_approval_mode", "default_approval_mode"),
+            ("conversation_introduction_enabled", "introduction_enabled"),
+            (
+                "conversation_introduction_instructions",
+                "introduction_instructions",
+            ),
         ] {
             if let Some(value) = patch.get(key) {
                 values[field] = value.clone();
@@ -79,7 +94,10 @@ impl Configuration {
         json!({"conversation_instructions":self.instructions,
             "conversation_instructions_default":DEFAULT_INSTRUCTIONS.trim(),
             "conversation_tool_response_limit_kib":self.tool_response_limit_kib,
-            "conversation_approval_mode":self.default_approval_mode})
+            "conversation_approval_mode":self.default_approval_mode,
+            "conversation_introduction_enabled":self.introduction_enabled,
+            "conversation_introduction_instructions":self.introduction_instructions,
+            "conversation_introduction_instructions_default":DEFAULT_INTRODUCTION_INSTRUCTIONS})
     }
 }
 fn invalid() -> ApiError {
@@ -115,7 +133,8 @@ mod tests {
             .0;
         let body = || {
             serde_json::from_value(json!({"version":before["version"],"registration_enabled":true,
-            "conversation_instructions":"Internal policy acceptance marker","conversation_tool_response_limit_kib":4096,"conversation_approval_mode":"assisted"})).unwrap()
+            "conversation_instructions":"Internal policy acceptance marker","conversation_tool_response_limit_kib":4096,"conversation_approval_mode":"assisted",
+            "conversation_introduction_enabled":false,"conversation_introduction_instructions":"Private introduction settings marker"})).unwrap()
         };
         super::super::platform::update_settings(
             State(s.clone()),
@@ -127,6 +146,11 @@ mod tests {
         let loaded = Configuration::load(&s.db).await.unwrap();
         assert_eq!(loaded.instructions, "Internal policy acceptance marker");
         assert_eq!(loaded.default_approval_mode, "assisted");
+        assert!(!loaded.introduction_enabled);
+        assert_eq!(
+            loaded.introduction_instructions,
+            "Private introduction settings marker"
+        );
         let stale = super::super::platform::update_settings(
             State(s.clone()),
             admin(),
@@ -142,6 +166,7 @@ mod tests {
         let bytes = to_bytes(public.into_body(), 1024 * 1024).await.unwrap();
         assert!(!String::from_utf8_lossy(&bytes).contains("Internal policy acceptance marker"));
         assert!(!String::from_utf8_lossy(&bytes).contains("conversation_instructions"));
+        assert!(!String::from_utf8_lossy(&bytes).contains("Private introduction settings marker"));
         crate::entities::users::Entity::update_many()
             .col_expr(crate::entities::users::Column::IsSuperadmin, Expr::value(0))
             .filter(crate::entities::users::Column::Id.eq(1))
@@ -163,6 +188,16 @@ mod tests {
         let original = Configuration::default();
         assert_eq!(original.tool_response_limit_kib, 1024);
         assert_eq!(original.default_approval_mode, "request");
+        assert!(original.introduction_enabled);
+        assert!(
+            Configuration::read(Some("{}"))
+                .unwrap()
+                .introduction_enabled
+        );
+        let intro = Configuration::update(None, json!({"conversation_introduction_enabled":false,"conversation_introduction_instructions":""}).as_object().unwrap()).unwrap();
+        let intro = Configuration::read(Some(&intro)).unwrap();
+        assert!(!intro.introduction_enabled);
+        assert!(intro.introduction_instructions.is_empty());
         assert!(original.instructions.contains("ferry_ask_user"));
         let edited = Configuration::update(None, json!({"conversation_instructions":"Custom policy", "conversation_tool_response_limit_kib":4096,"conversation_approval_mode":"assisted"}).as_object().unwrap()).unwrap();
         let read = Configuration::read(Some(&edited)).unwrap();
@@ -191,6 +226,9 @@ mod tests {
         for patch in [
             json!({"conversation_instructions":"x".repeat(16385)}),
             json!({"conversation_instructions":"bad\u{0000}"}),
+            json!({"conversation_introduction_instructions":"x".repeat(16385)}),
+            json!({"conversation_introduction_instructions":"bad\u{0000}"}),
+            json!({"conversation_introduction_enabled":"true"}),
             json!({"conversation_tool_response_limit_kib":255}),
             json!({"conversation_tool_response_limit_kib":8193}),
             json!({"conversation_tool_response_limit_kib":"1024"}),

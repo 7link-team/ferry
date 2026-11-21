@@ -43,6 +43,10 @@ pub(crate) async fn setup() -> (tempfile::TempDir, AppState) {
         cluster: None,
     });
     crate::entities::platform_state::Entity::update_many()
+        // Existing fixture scenarios start with empty rooms; introduction tests
+        // explicitly restore the production default or set their policy.
+        .col_expr(crate::entities::platform_state::Column::ConversationConfig,
+            sea_orm::sea_query::Expr::value(json!({"introduction_enabled":false}).to_string()))
         .col_expr(crate::entities::platform_state::Column::AccessConfig,
             sea_orm::sea_query::Expr::value(json!({"public_url":"http://console.localhost", "preview_domain":"preview.localhost"}).to_string()))
         .exec(&s.db).await.unwrap();
@@ -137,6 +141,7 @@ pub(crate) async fn setup() -> (tempfile::TempDir, AppState) {
                     provider_id: 0,
                     models: "[]".into(),
                     default_model: String::new(),
+                    max_output_tokens: None,
                     tool_version: String::new(),
                     state: "enabled".into(),
                     cli_options: None,
@@ -371,6 +376,7 @@ async fn model_profile_agents_need_no_host_and_resolve_only_the_selected_catalog
                 provider_id: 0,
                 models: json!(["model-a", "model-b"]).to_string(),
                 default_model: "model-a".into(),
+                max_output_tokens: None,
                 tool_version: String::new(),
                 state: state.into(),
                 cli_options: None,
@@ -442,6 +448,24 @@ async fn model_profile_agents_need_no_host_and_resolve_only_the_selected_catalog
         .unwrap();
     assert_eq!(row.host_id, 0);
     assert_eq!(row.runtime, "api");
+    let probe_error = super::probe(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), Id::from(row.id))),
+    )
+    .await
+    .err()
+    .unwrap();
+    assert_eq!(probe_error.0, StatusCode::CONFLICT);
+    assert_eq!(probe_error.2.unwrap().key, "conversations.apiPending");
+    let text: Value =
+        serde_json::from_str(include_str!("../i18n/conversations-en-US.json")).unwrap();
+    assert!(
+        text["conversations.apiPending"]
+            .as_str()
+            .unwrap()
+            .contains("model page")
+    );
 }
 
 #[tokio::test]

@@ -1806,3 +1806,28 @@ async fn the_published_definition_example_validates_and_saves_with_real_ids() {
     }
     assert_eq!(fixture.workflow_count().await, count);
 }
+
+#[tokio::test]
+async fn priced_api_agent_keeps_valid_known_output_when_provider_usage_is_missing() {
+    let fixture = Fixture::new().await;
+    let mut reply = api_answer(&json!({"summary":"known without usage"}).to_string());
+    reply.as_object_mut().unwrap().remove("usage");
+    let (url, server, requests) = api_upstream("openai", vec![reply]).await;
+    api_model(&fixture, "openai", &url).await;
+    assert_eq!(
+        fixture.execute().await.unwrap()[0].json["summary"],
+        "known without usage"
+    );
+    let call = crate::entities::ai_calls::Entity::find()
+        .one(&fixture.s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(call.state, "succeeded");
+    assert!(call.result.is_some());
+    let snapshot: Value = serde_json::from_str(&call.price_snapshot).unwrap();
+    assert_eq!(snapshot["cost_known"], false);
+    assert_eq!(snapshot["price_known"], true);
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    server.abort();
+}

@@ -17,7 +17,7 @@
   "conversations.outputLimit": "执行输出超过限制，已停止执行。",
   "conversations.fileTooLarge": "每个附件不能超过 32 MiB。",
   "conversations.groupAgentPrivate": "群聊只能添加工作空间共享的智能体。",
-  "conversations.apiPending": "该智能体使用 API 模型，暂不能用于会话；请改用 CLI 模型的智能体。",
+  "conversations.apiPending": "API Agent 无需探测主机 CLI。请在模型页面检查连接。",
   "conversations.noRunner": "没有可执行此模型的可用 Runner。",
   "conversations.cliPermissionUnsupported": "此CLI当前仅支持只读会话，请选择只读权限。",
   "conversations.runnerUpgradeRequired": "请先升级主机 Runner 以启用平台工具，再运行此会话。",
@@ -45,5 +45,13 @@
   "conversations.questionInvalid": "问题或回复无效。请提供明确的问题、唯一的建议项，或不超过 4096 UTF-8 字节的回复。",
   "conversations.questionPending": "已有问题等待用户回复，或本轮尚在收尾。请停止推进，等待用户；收尾完成后可提交回复。",
   "conversations.questionAnswered": "此问题已有不同的回复，请刷新查看，不要重复提交冲突的答案。",
-  "conversations.approvalModeInvalid": "请选择 request、assisted 或 yolo 审批模式。"
+  "conversations.approvalModeInvalid": "请选择 request、assisted 或 yolo 审批模式。",
+  "conversations.apiContextChanged": "此会话的模型配置、提供方或模型已变更。请恢复原配置或新建会话；已保存的上下文仍保留。",
+  "conversations.apiOutputRequired": "此 Anthropic 模型要求在模型配置中设置输出 Token 上限。请先配置上限，再发送消息。",
+  "conversations.introductionTask": "现在用简体中文生成首次自我介绍。这是自动任务，不是用户消息。仅依据配置事实和有效权限，简短问候、介绍角色及有依据的帮助，并询问用户的需求。不得声称已执行检查或操作，不得编造能力。",
+  "conversations.introductionPermission": "介绍未执行：你缺少对话运行或读取权限。请管理员授予权限后，明确重试介绍。",
+  "conversations.introductionDisabled": "自动介绍已关闭。请先在平台设置中启用，再重试。",
+  "conversations.introductionStale": "此介绍属于之前的 Agent 成员身份，不能重试。",
+  "conversations.introductionCompleted": "此 Agent 已完成本次成员身份的介绍。",
+  "conversations.introductionRetryWarning": "之前的尝试可能已请求模型或执行操作，结果尚不明确。请核实结果后再明确发起新的介绍；新的模型调用可能产生用量。"
 }

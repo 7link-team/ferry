@@ -10,9 +10,11 @@ mod account_preferences;
 mod agent_models;
 mod ai_agents;
 mod ai_model_cli_options;
+mod ai_model_output;
 mod ai_models;
 mod blueprint_deployments;
 mod chat;
+pub(crate) mod chat_api;
 mod chat_interactions;
 mod chat_messages;
 mod conversations;
@@ -23,6 +25,7 @@ mod hole_tls;
 mod holes;
 mod holes_sources;
 mod identity_avatars;
+pub(crate) mod introductions;
 mod login_guard;
 mod marketplace_platform;
 mod model_hosts;
@@ -176,7 +179,11 @@ impl MigratorTrait for Migrator {
             Box::new(runner_timezones::Migration),
             // Also before agent_models, for the same reason.
             Box::new(model_hosts::Migration),
+            // Backfill selects the complete ai_turns entity.
+            Box::new(introductions::Migration),
             Box::new(chat_messages::Migration),
+            // Before agent_models: it selects the complete profile entity.
+            Box::new(ai_model_output::Migration),
             Box::new(agent_models::Migration),
             Box::new(chat_interactions::Migration),
             Box::new(holes::Migration),
@@ -197,6 +204,7 @@ impl MigratorTrait for Migrator {
             Box::new(hole_tls::Migration),
             Box::new(platform_conversation::Migration),
             Box::new(session_policy::Migration),
+            Box::new(chat_api::Migration),
         ]
     }
 }

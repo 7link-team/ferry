@@ -790,6 +790,7 @@ async fn on_runner(
     deadline: Instant,
     timeout: Duration,
 ) -> Result<OnHost> {
+    let runtime = config.runtime.cli()?;
     // The resolved CLI (a model profile may select another one than the Agent row).
     let cli = agent.runtime.clone();
     let unusable = |key| Ok(OnHost::Unusable(runner_error(key, &row, &cli)));
@@ -807,16 +808,16 @@ async fn on_runner(
     let probe = if files.is_some() {
         channel
             .agent_workspace(
-                config.runtime,
+                runtime,
                 &format!("{}-{}", run.id, node_run.unwrap_or(run.id)),
             )
             .await
     } else if config.cwd.is_empty() {
         channel
-            .agent_workspace(config.runtime, &format!("{}-{}", run.workflow_id, agent.id))
+            .agent_workspace(runtime, &format!("{}-{}", run.workflow_id, agent.id))
             .await
     } else {
-        channel.agent_probe(config.runtime, &config.cwd, None).await
+        channel.agent_probe(runtime, &config.cwd, None).await
     };
     let probe = match probe {
         Ok(probe) => probe,
@@ -840,13 +841,12 @@ async fn on_runner(
     let prompt = match files {
         Some((mode, _)) => within_limit(format!(
             "{prompt}\n\n{}",
-            super::agent_files::contract(mode, config.runtime, &probe.file_tools)
+            super::agent_files::contract(mode, runtime, &probe.file_tools)
         ))?,
         None => prompt,
     };
     let provider =
-        crate::models::cli_provider(s, Id::from(run.workspace_id), agent.id, config.runtime)
-            .await?;
+        crate::models::cli_provider(s, Id::from(run.workspace_id), agent.id, runtime).await?;
     if provider.is_none() && !config.authentication_usable(&probe.authentication) {
         return unusable("workflow.agentLoginRequired");
     }
@@ -902,7 +902,7 @@ async fn on_runner(
     }
     let request = |prompt: String, native_session_id: Option<String>| Request {
         binding: Some(binding.clone()),
-        runtime: config.runtime,
+        runtime: runtime,
         cwd: directory.clone(),
         prompt,
         model: (!config.model.is_empty()).then(|| config.model.clone()),

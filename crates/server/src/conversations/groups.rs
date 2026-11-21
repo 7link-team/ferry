@@ -260,7 +260,11 @@ pub(super) async fn detail(
     if let Some(turns) = value["turns"].as_array_mut() {
         for t in turns {
             if let Some(l) = links.iter().find(|l| json!(Id::from(l.id)) == t["id"]) {
-                t["message_id"] = json!(Id::from(l.message_id));
+                t["message_id"] = if l.message_id == 0 {
+                    Value::Null
+                } else {
+                    json!(Id::from(l.message_id))
+                };
                 if let Some(a) = snapshots.iter().find(|a| a.id == l.chat_agent_id) {
                     t["agent_id"] = json!(Id::from(a.agent_id));
                 }
@@ -445,6 +449,9 @@ pub(super) async fn send_message(
         let turn = s.next_id()?;
         turns::Entity::insert(
             turns::Model {
+                purpose: "message".into(),
+                introduction_id: 0,
+                introduction_locale: String::new(),
                 id: turn.into(),
                 workspace_id: scope.workspace_id.into(),
                 conversation_id: id.into(),
@@ -522,6 +529,18 @@ pub(super) async fn context(
     row: &turns::Model,
     budget: usize,
 ) -> Result<String> {
+    context_in(conn, row, budget, Some(20)).await
+}
+/// API history is canonical and uses no CLI prompt-window truncation.
+pub(super) async fn api_context(conn: &impl ConnectionTrait, row: &turns::Model) -> Result<String> {
+    context_in(conn, row, usize::MAX, None).await
+}
+async fn context_in(
+    conn: &impl ConnectionTrait,
+    row: &turns::Model,
+    budget: usize,
+    limit: Option<u64>,
+) -> Result<String> {
     let Some(link) = links::Entity::find_by_id(row.id).one(conn).await? else {
         return Ok(String::new());
     };
@@ -531,7 +550,7 @@ pub(super) async fn context(
         .filter(messages::Column::ConversationId.eq(row.conversation_id))
         .filter(messages::Column::Id.lt(link.message_id))
         .order_by_desc(messages::Column::Id)
-        .limit(20)
+        .limit(limit)
         .all(conn)
         .await?;
     history.reverse();

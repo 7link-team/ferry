@@ -3,7 +3,7 @@ import { conversationAgentOptions } from "./resource-config";
 
 afterEach(() => vi.unstubAllGlobals());
 
-it("does not offer Agents that use an API model for conversations", async () => {
+it("offers both API and CLI Agents while retaining the server's use filter", async () => {
   const urls: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     urls.push(url);
@@ -14,6 +14,6 @@ it("does not offer Agents that use an API model for conversations", async () => 
     ], total: 3, page: 1, page_size: 200 }) };
   }));
   const options = await conversationAgentOptions("ops", { for_use: "true" })();
-  expect(options.map(o => o.label)).toEqual(["CLI agent", "Claude agent"]);
+  expect(options.map(o => o.label)).toEqual(["CLI agent", "API agent", "Claude agent"]);
   expect(urls[0]).toContain("for_use=true");
 });

@@ -130,6 +130,67 @@ async fn creating_needs_no_runner_and_the_first_message_names_why_none_runs() {
 }
 
 #[tokio::test]
+async fn introduction_cli_real_turn_preserves_native_session_for_first_human_message() {
+    let (_dir, s, _) = seeded().await;
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(crate::entities::platform_state::Column::ConversationConfig,sea_orm::sea_query::Expr::value(json!({"introduction_enabled":true,"introduction_instructions":"PRIVATE CLI INTRO"}).to_string()))
+        .exec(&s.db).await.unwrap();
+    let agent = floating_agent(&s).await;
+    let (_, fake) = runner(&s, "introduction-runner").await;
+    fake.agent_scripts.lock().unwrap().push_back(reply(
+        "intro-native-session",
+        "Generated native introduction",
+    ));
+    let id = conversation(&s, &agent, json!({})).await;
+    let intro = turns::Entity::find()
+        .filter(turns::Column::ConversationId.eq(id))
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let (_stop, signal) = tokio::sync::watch::channel(false);
+    super::super::run::execute(s.clone(), intro.id.into(), signal)
+        .await
+        .unwrap();
+    let first = turns::Entity::find_by_id(intro.id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.state, "completed", "{}", first.error);
+    fake.agent_scripts
+        .lock()
+        .unwrap()
+        .push_back(reply("intro-native-session", "First human answer"));
+    assert_eq!(
+        turn(&s, id, "human-after-native-intro").await.state,
+        "completed"
+    );
+    let sent = requests(&fake);
+    assert_eq!(sent.len(), 2);
+    assert!(sent[0].prompt.contains("<automatic_task"));
+    assert!(sent[0].prompt.contains("PRIVATE CLI INTRO"));
+    assert!(!sent[0].prompt.contains("<user_message>"));
+    assert_eq!(
+        sent[1].native_session_id.as_deref(),
+        Some("intro-native-session")
+    );
+    let Json(public) = super::super::detail(State(s.clone()), admin(1), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert!(!public.to_string().contains("PRIVATE CLI INTRO"));
+    assert_eq!(
+        public["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "user")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn the_first_message_binds_a_host_that_later_messages_keep() {
     let (_dir, s, _) = seeded().await;
     let agent = floating_agent(&s).await;

@@ -263,6 +263,26 @@ function DefaultModel({
     </AutoField>
   );
 }
+function OutputTokens({ draft, readOnly, onPatch, onValidityChange }: {
+  draft: Partial<AnyRow>;
+  readOnly: boolean;
+  onPatch: (patch: Partial<AnyRow>) => void;
+  onValidityChange: (blocked: boolean) => void;
+}) {
+  const value = draft.max_output_tokens;
+  const invalid = value != null && (!Number.isSafeInteger(value) || value < 1);
+  const validity = useRef(onValidityChange);
+  validity.current = onValidityChange;
+  useEffect(() => {
+    validity.current(!readOnly && invalid);
+    return () => validity.current(false);
+  }, [invalid, readOnly]);
+  return <AutoField label={t("maxOutputTokens")} help={t("maxOutputTokensHelp")}>
+    <FieldControl name="max_output_tokens" field={{ name: t("maxOutputTokens"), type: "number", config: { min: 1, max: Number.MAX_SAFE_INTEGER } }}
+      value={value ?? ""} readonly={readOnly} onChange={next => onPatch({ max_output_tokens: next === "" ? null : next })} />
+    {invalid && !readOnly && <p role="alert" className="text-sm text-destructive">{t("maxOutputInvalid")}</p>}
+  </AutoField>;
+}
 export function modelsLists(
   _: ResourceConfigContext,
 ): Record<string, ListConfig<AnyRow>> {
@@ -347,6 +367,7 @@ export function modelsForms({
         connection: newConnection(),
         models: [],
         default_model: "",
+        max_output_tokens: null,
         tool_version: "",
         state: "enabled",
         cli_options: null,
@@ -398,6 +419,7 @@ export function modelsForms({
                         connection: kind === "api" ? newConnection() : null,
                         models: [],
                         default_model: "",
+                        max_output_tokens: null,
                         timezone: "",
                         hosts: [],
                       })
@@ -508,6 +530,14 @@ export function modelsForms({
               // An API model calls one concrete model; the server rejects an empty one.
               required: (draft) => draft.kind === "api",
               render: (p) => <DefaultModel {...p} />,
+            },
+            {
+              key: "max_output_tokens",
+              label: "Conversation output tokens",
+              labelKey: key("maxOutputTokens"),
+              type: "custom",
+              when: draft => draft.kind === "api",
+              render: props => <OutputTokens {...props} />,
             },
             {
               key: "skip_check",

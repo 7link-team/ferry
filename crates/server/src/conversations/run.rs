@@ -85,7 +85,7 @@ pub(super) fn turn_prompt(
     prompt
 }
 
-async fn platform_call(
+pub(super) async fn platform_call(
     s: AppState,
     row: turns::Model,
     owner: String,
@@ -169,7 +169,7 @@ async fn platform_call(
     (request_id, value)
 }
 
-async fn approved_platform_call(
+pub(super) async fn approved_platform_call(
     s: &AppState,
     row: &turns::Model,
     owner: &str,
@@ -241,7 +241,14 @@ pub(super) async fn claim(
             row.error = crate::i18n::store_message(&Message::new("conversations.interrupted"));
             row.version += 1;
             row.updated_at = db::now();
-            if !groups::finish(&tx, &row, None, true).await? {
+            let api = groups::execution(&tx, &row, c.clone())
+                .await
+                .ok()
+                .and_then(|execution| serde_json::from_str::<Configuration>(&execution.config).ok())
+                .is_some_and(|config| config.runtime == Runtime::Api);
+            if api {
+                crate::workflows::ai::conversation_interrupted_in(&tx, &row).await?;
+            } else if !groups::finish(&tx, &row, None, true).await? {
                 c.state = "interrupted".into();
                 c.native_session_id.clear();
             }
@@ -250,6 +257,28 @@ pub(super) async fn claim(
             c.into_active_model().reset_all().update(&tx).await?;
             tx.commit().await?;
         }
+        return Ok(None);
+    }
+    if row.purpose == "introduction"
+        && !crate::accounts::conversation_policy::Configuration::load(&tx)
+            .await?
+            .introduction_enabled
+    {
+        row.state = "cancelled".into();
+        row.error = crate::i18n::store_message(&Message::new("conversations.introductionDisabled"));
+        row.version += 1;
+        row.updated_at = db::now();
+        row.into_active_model().reset_all().update(&tx).await?;
+        tx.commit().await?;
+        return Ok(None);
+    }
+    if let Err(e) = super::introductions::validate(&tx, &row, &c).await {
+        row.state = "failed".into();
+        row.error = e.stored();
+        row.version += 1;
+        row.updated_at = db::now();
+        row.into_active_model().reset_all().update(&tx).await?;
+        tx.commit().await?;
         return Ok(None);
     }
     // Serialize room replies, including queued replies from earlier messages.
@@ -326,7 +355,32 @@ pub(super) async fn leased(
         .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
+    super::introductions::validate(&tx, &current, &c).await?;
     Ok((tx, current, c))
+}
+/// Live chat authority, also used immediately before API transport dispatch.
+pub(crate) async fn api_authorized(s: &AppState, row: &turns::Model, owner: &str) -> Result<Scope> {
+    let (tx, current, c) = leased(s, row, owner).await?;
+    if current.state != "running" {
+        return Err(conflict());
+    }
+    let scope = api_authorized_in(&tx, &current, &c).await?;
+    tx.rollback().await?;
+    Ok(scope)
+}
+pub(super) async fn api_authorized_in(
+    conn: &impl ConnectionTrait,
+    row: &turns::Model,
+    c: &conversations::Model,
+) -> Result<Scope> {
+    let scope = Scope::for_actor_in(conn, row.workspace_id.into(), row.owner_id.into()).await?;
+    scope.require("conversations.run")?;
+    scope.require("credentials.use")?;
+    scope.require("conversations.read")?;
+    find(conn, &scope, c.id.into()).await?;
+    let execution = groups::execution(conn, row, c.clone()).await?;
+    usable(conn, &scope, execution.agent_id.into()).await?;
+    Ok(scope)
 }
 pub(super) async fn append(
     s: &AppState,
@@ -484,6 +538,9 @@ async fn failed_on(conn: &impl ConnectionTrait, c: &conversations::Model) -> Mes
     let Ok(config) = serde_json::from_str::<Configuration>(&c.config) else {
         return general;
     };
+    let Ok(runtime) = config.runtime.cli() else {
+        return general;
+    };
     let host = crate::entities::hosts::Entity::find_by_id(i64::from(config.host_id))
         .filter(crate::entities::hosts::Column::WorkspaceId.eq(c.workspace_id))
         .one(conn)
@@ -492,7 +549,7 @@ async fn failed_on(conn: &impl ConnectionTrait, c: &conversations::Model) -> Mes
         .flatten();
     match host {
         Some(host) => Message::new("conversations.executionFailedOn")
-            .with("cli", crate::agent_hosts::cli_name(config.runtime))
+            .with("cli", crate::agent_hosts::cli_name(runtime))
             .with("host", host.name),
         None => general,
     }
@@ -582,12 +639,17 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
     let Some((row, c, owner)) = claim(&s, id).await? else {
         return Ok(());
     };
+    let config: Configuration = serde_json::from_str(&c.config).map_err(|_| invalid())?;
+    if config.runtime == Runtime::Api {
+        return super::api::execute(s, row, c, owner, stop).await;
+    }
     let prepare = async {
         let scope = actor(&s, &row, &c).await?;
         let agent = available(&s.db, &scope, c.agent_id.into()).await?;
         let stored: Configuration = serde_json::from_str(&c.config).map_err(|_| invalid())?;
         let provider =
-            crate::models::cli_provider(&s, scope.workspace_id, c.agent_id, stored.runtime).await?;
+            crate::models::cli_provider(&s, scope.workspace_id, c.agent_id, stored.runtime.cli()?)
+                .await?;
         let custom_upstream = provider.is_some();
         // A custom upstream replaces the CLI's own login for this execution.
         let login_usable =
@@ -603,7 +665,7 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
         // Files the user asks for are written to ./output of the Runner-managed
         // directory (never a chosen one) and attached to the reply. A read-only
         // conversation may then write only inside that directory.
-        let confinable = crate::workflows::agent_files::runtime_supported(config.runtime);
+        let confinable = crate::workflows::agent_files::runtime_supported(config.runtime.cli()?);
         let pinned = config.directory_pinned(c.id, c.agent_id);
         let files = capability.write_workdir && confinable && !pinned;
         let confined = files && config.permission == Permission::ReadOnly;
@@ -616,15 +678,9 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
         };
         let timezone =
             crate::models::cli_timezone(&s, scope.workspace_id, c.agent_id, &host).await?;
-        let attachments =
-            serde_json::from_str::<Vec<Attachment>>(&row.attachments).map_err(|_| invalid())?;
         let policy = crate::accounts::conversation_policy::Configuration::load(&s.db).await?;
-        let mut prompt = turn_prompt(
-            &policy.instructions,
-            &config.system_prompt,
-            &row.prompt,
-            &attachments,
-        );
+        let mut prompt =
+            super::introductions::prompt(&s, &row, &c, &scope, &policy, &config).await?;
         if prompt.len() > 64 * 1024 {
             return Err(invalid());
         }
@@ -663,7 +719,7 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
         // Agent explains it instead of pretending.
         let contract = if files {
             crate::workflows::agent_files::conversation_contract(
-                config.runtime,
+                config.runtime.cli()?,
                 confined,
                 &capability.tools,
             )
@@ -684,7 +740,7 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             files,
             Request {
                 binding: Some(binding),
-                runtime: config.runtime,
+                runtime: config.runtime.cli()?,
                 cwd: config.cwd,
                 prompt,
                 model: (!config.model.is_empty()).then_some(config.model),

@@ -3,84 +3,7 @@
 use super::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-fn tools(anthropic: bool) -> Value {
-    Value::Array(ferry_protocol::agent::platform_tools().as_array().unwrap().iter()
-        .filter(|tool| matches!(tool["name"].as_str(), Some("ferry_discover" | "ferry_request")))
-        .map(|tool| if anthropic {
-            json!({"name":tool["name"],"description":tool["description"],"input_schema":tool["inputSchema"]})
-        } else {
-            json!({"type":"function","function":{"name":tool["name"],"description":tool["description"],"parameters":tool["inputSchema"]}})
-        }).collect())
-}
-
-/// Validate the wire response before feeding it back to the provider. Tool
-/// arguments remain untrusted and pass through platform_call's normal checks.
-fn response(
-    body: &Value,
-    anthropic: bool,
-) -> Result<(Value, String, Vec<(String, String, Value)>)> {
-    let malformed = || failed("workflow.aiInvalid");
-    let mut calls: Vec<(String, String, Value)> = Vec::new();
-    let (message, text) = if anthropic {
-        let content = body["content"].as_array().ok_or_else(malformed)?;
-        for block in content.iter().filter(|block| block["type"] == "tool_use") {
-            calls.push((
-                block["id"].as_str().ok_or_else(malformed)?.into(),
-                block["name"].as_str().ok_or_else(malformed)?.into(),
-                block["input"].clone(),
-            ));
-        }
-        (
-            json!({"role":"assistant","content":content}),
-            content
-                .iter()
-                .filter(|block| block["type"] == "text")
-                .filter_map(|block| block["text"].as_str())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-    } else {
-        let message = body
-            .pointer("/choices/0/message")
-            .filter(|value| value.is_object())
-            .ok_or_else(malformed)?;
-        if message["role"] != "assistant" {
-            return Err(malformed());
-        }
-        if let Some(raw) = message.get("tool_calls").filter(|raw| !raw.is_null()) {
-            for call in raw.as_array().ok_or_else(malformed)? {
-                if call["type"] != "function" {
-                    return Err(malformed());
-                }
-                calls.push((
-                    call["id"].as_str().ok_or_else(malformed)?.into(),
-                    call["function"]["name"]
-                        .as_str()
-                        .ok_or_else(malformed)?
-                        .into(),
-                    serde_json::from_str(
-                        call["function"]["arguments"]
-                            .as_str()
-                            .ok_or_else(malformed)?,
-                    )
-                    .map_err(|_| malformed())?,
-                ));
-            }
-        }
-        (
-            message.clone(),
-            message["content"].as_str().unwrap_or_default().into(),
-        )
-    };
-    let mut ids = std::collections::BTreeSet::new();
-    if calls
-        .iter()
-        .any(|(id, _, _)| id.is_empty() || id.len() > 128 || !ids.insert(id.clone()))
-    {
-        return Err(malformed());
-    }
-    Ok((message, text, calls))
-}
+use super::super::ai::{agent_response, agent_tools};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn execute(
@@ -142,7 +65,7 @@ pub(super) async fn execute(
                 }
                 let p = json!({"provider_id":profile.provider_id.to_string(),"model":agent.model,
                     "prompt":"","output_field":"response","max_tokens":params.get("max_tokens").cloned().unwrap_or(json!(1024)),
-                    "agent_messages":messages,"agent_tools":tools(anthropic)});
+                    "agent_messages":messages,"agent_tools":agent_tools(anthropic, false)});
                 if serde_json::to_vec(&p)
                     .map_err(|_| ApiError::missing())?
                     .len()
@@ -192,7 +115,7 @@ pub(super) async fn execute(
                 if received > MAX_RECEIVED_BYTES {
                     return Err(failed("workflow.agentOutputTooLarge"));
                 }
-                let (message, text, calls) = response(body, anthropic)?;
+                let (message, text, calls) = agent_response(body, anthropic)?;
                 messages.push(message);
                 if calls.is_empty() {
                     match accept(&text, validator) {

@@ -1,4 +1,5 @@
 {
+  "aiCostUnknown": ["Unknown", "未知", "未知", "不明", "알 수 없음", "Tidak diketahui"],
   "agent.locationApi": ["Execution location: model API on the server; no Runner host is required. Host targets apply only to CLI models.","执行位置：由服务端调用模型 API，无需 Runner 主机；主机目标仅用于 CLI 模型。","執行位置：由伺服器呼叫模型 API，無需 Runner 主機；主機目標僅用於 CLI 模型。","実行場所：サーバーからモデル API を呼び出します。Runner は不要です。ホスト指定は CLI モデルにのみ適用されます。","실행 위치: 서버에서 모델 API를 호출하며 Runner 호스트가 필요하지 않습니다. 호스트 지정은 CLI 모델에만 적용됩니다.","Lokasi pelaksanaan: API model dipanggil oleh pelayan; hos Runner tidak diperlukan. Sasaran hos hanya untuk model CLI."],
   "agent.locationAutomatic": ["Execution location: a compatible workflow default, otherwise an available Runner from the model's candidate hosts.","执行位置：优先使用兼容的工作流默认目标，否则从模型候选主机中选择可用 Runner。","執行位置：優先使用相容的工作流預設目標，否則從模型候選主機選擇可用 Runner。","実行場所：対応するワークフロー既定の実行先、またはモデルの候補から利用可能な Runner を選択します。","실행 위치: 호환되는 워크플로 기본 대상을 우선 사용하고, 없으면 모델 후보 호스트에서 사용 가능한 Runner를 선택합니다.","Lokasi pelaksanaan: gunakan sasaran lalai aliran kerja yang serasi, atau pilih Runner tersedia daripada hos calon model."],
   "editorError.invalidGraph": [

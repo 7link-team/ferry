@@ -1,6 +1,7 @@
 import { ConversationMembers, type ConversationMember } from "./ConversationMembers";
 import { InlineAlert } from "../../shared/ui/inline-alert";
 import { cliToolLabel } from "../../shared/forms/cli-tools";
+import { randomUUID } from "../../shared/uuid";
 import { IdentityAvatar, type AvatarValue } from "../../shared/ui/identity-avatar";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, api, errorText } from "../../shared/api/api";
@@ -28,7 +29,7 @@ import { CollapsibleMessage } from "./CollapsibleMessage";
 import { ConversationAppearance, conversationBackground, type ChatAppearance } from "./ConversationAppearance";
 import { AttachmentView, type Attachment } from "./AttachmentView";
 import { Composer, type ComposerDraft } from "./Composer";
-import { commonText, i18n, useCommonTranslation } from "../../shared/i18n/i18n";
+import { commonText, i18n, useCommonTranslation, workflowText } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
@@ -52,6 +53,11 @@ interface Turn {
   id: string;
   owner_id: string;
   message_id?: string;
+  purpose?: "message" | "introduction";
+  introduction_id?: string;
+  can_retry_introduction?: boolean;
+  introduction_retry_warning?: string | null;
+  introduction_retry_reason?: string | null;
   agent_id?: string;
   state: string;
   prompt: string;
@@ -104,7 +110,7 @@ interface ConversationData {
   state: string;
   revision_id: string;
   config: { name: string; runtime: string; model: string; cwd: string; appearance?: ChatAppearance; approval_mode?: string };
-  /** Null until the first message chooses a host. */
+  /** API execution has no binding; CLI execution binds at its first message. */
   binding: { execution_user: string; canonical_directory: string } | null;
   host?: BoundHost | null;
   turns: Turn[];
@@ -455,6 +461,7 @@ export function Conversation({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queue, data, busy]);
   const lastTurn = data?.turns.at(-1);
+  const introductionRetryClients = useRef(new Map<string, string>());
   const retryable = lastTurn && ["failed", "interrupted", "timed_out", "cancelled"].includes(lastTurn.state);
   function updateDecision(turnId: string, request: string, patch: Partial<Decision>) {
     setData(previous => previous ? { ...previous, turns: previous.turns.map(turn => turn.id === turnId ? {
@@ -478,6 +485,14 @@ export function Conversation({
     } finally {
       setBusy(false);
     }
+  }
+  async function retryIntroduction(turn: Turn) {
+    const key = `${id}:${turn.id}`;
+    const clientId = introductionRetryClients.current.get(key) ?? randomUUID();
+    introductionRetryClients.current.set(key, clientId);
+    await act(`/turns/${turn.id}/introduction-retries`, { client_id: clientId }, () => {
+      introductionRetryClients.current.delete(key);
+    });
   }
   /** Continue an approval left when its reply ended through the normal send path. */
   async function resolveEnded(turn: Turn, request: string, operation: string) {
@@ -509,7 +524,7 @@ export function Conversation({
       thread: replyTo,
     });
     if (pending.current?.signature !== signature)
-      pending.current = { signature, client_id: crypto.randomUUID() };
+      pending.current = { signature, client_id: randomUUID() };
     setError("");
     setBusy(true);
     try {
@@ -664,16 +679,16 @@ export function Conversation({
       className="relative flex min-h-0 min-w-0 flex-1 flex-col"
       aria-label={t("title")}
     >
-      <header className="shrink-0 border-b bg-background px-3 py-3 pl-12 sm:px-6">
-        <div className="flex items-center justify-between gap-3">
+      <header className="shrink-0 border-b bg-background px-3 py-3 md:px-6">
+        <div className="flex flex-col items-stretch gap-3 md:flex-row md:flex-wrap md:items-center md:justify-between">
           <button
             type="button"
-            className="flex min-w-0 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-h-11 min-w-0 max-w-full items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:pl-11"
             onClick={() => { setSelectedMember(""); setInfoOpen(true); }}
           >
             <span
               aria-hidden
-              className="hidden size-10 shrink-0 items-center justify-center rounded-lg bg-muted sm:flex"
+              className="hidden size-10 shrink-0 items-center justify-center rounded-lg bg-muted md:flex"
             >
               {data.kind === "group" ? (
                 <Users className="size-5" />
@@ -685,12 +700,12 @@ export function Conversation({
               <h2 className="truncate text-base font-semibold">{data.title}</h2>
               <p className="mt-0.5 truncate text-xs text-muted-foreground">
                 {data.kind === "group"
-                  ? `${t("group")} · ${data.members.length + data.agents.length} ${t("participants")}${data.agents.length ? ` · ${t("executionHost")} ${data.agents.map(agent => `${agent.name}: ${agent.host?.name || t("hostPending")}`).join(", ")}` : ""}`
-                  : <>{data.config.name} · <ModelLabel model={data.config.model} hasModel={data.agent_has_model} /> · {t("executionHost")} {data.host?.name || t("hostPending")}</>}
+                  ? `${t("group")} · ${data.members.length + data.agents.length} ${t("participants")}${data.agents.length ? ` · ${t("executionLocation")} ${data.agents.map(agent => `${agent.name}: ${agent.runtime === "api" ? workflowText("execution.server") : agent.host?.name || t("hostPending")}`).join(", ")}` : ""}`
+                  : <>{data.config.name} · <ModelLabel model={data.config.model} hasModel={data.agent_has_model} /> · {data.config.runtime === "api" ? workflowText("execution.server") : <>{t("executionHost")} {data.host?.name || t("hostPending")}</>}</>}
               </p>
             </div>
           </button>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1 [&>button]:min-h-11 [&>button]:min-w-11">
             <ConversationApproval endpoint={endpoint} mode={data.config.approval_mode??"request"} version={data.version} canManage={!!data.can_manage&&permissions.has("conversations.update")} executing={executing} onSaved={(mode,version)=>setData(old=>old?{...old,version,config:{...old.config,approval_mode:mode}}:old)}/>
             {data.can_manage && permissions.has("conversations.update") && <ConversationAppearance endpoint={endpoint} value={data.config.appearance} canUpload={permissions.has("conversations.run") && data.state === "active"} onSaved={appearance => setData(old => old ? { ...old, config: { ...old.config, appearance } } : old)} />}
             <Button
@@ -794,7 +809,7 @@ export function Conversation({
       <ConversationMembers open={infoOpen} onOpenChange={setInfoOpen} selected={selectedMember} onSelect={setSelectedMember}
         title={data.title} workspace={workspace} permissions={permissions} members={[
           ...data.members.map(member => ({ ...member, kind: "user" as const })),
-          ...(data.kind === "group" ? data.agents : [{ id: data.agent_id, name: data.config.name, avatar: data.agent_avatar, runtime: data.config.runtime, model: data.config.model, revision_id: data.revision_id, host: data.host }]).map(agent => ({ ...agent, host: agent.host?.name || t("hostPending"), kind: "agent" as const })),
+          ...(data.kind === "group" ? data.agents : [{ id: data.agent_id, name: data.config.name, avatar: data.agent_avatar, runtime: data.config.runtime, model: data.config.model, revision_id: data.revision_id, host: data.host }]).map(agent => ({ ...agent, host: agent.runtime === "api" ? workflowText("execution.server") : agent.host?.name || t("hostPending"), kind: "agent" as const })),
         ] satisfies ConversationMember[]} turns={data.turns} connected={!connection}
         activity={turnItems}
         files={turnFiles}
@@ -813,17 +828,17 @@ export function Conversation({
               <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2">
                 <dt>{t("runtime")}</dt>
                 <dd>
-                  {cliToolLabel(data.config.runtime)}{" "}
+                  {data.config.runtime === "api" ? "API" : cliToolLabel(data.config.runtime)}{" "}
                   · <ModelLabel model={data.config.model} hasModel={data.agent_has_model} />
                 </dd>
                 <dt>{t("revision")}</dt>
                 <dd className="break-all">{data.revision_id}</dd>
-                <dt>{t("executionHost")}</dt>
-                <dd className="break-all">{data.host?.name || t("hostPending")}</dd>
-                <dt>{t("directory")}</dt>
+                <dt>{t(data.config.runtime === "api" ? "executionLocation" : "executionHost")}</dt>
+                <dd className="break-all">{data.config.runtime === "api" ? workflowText("execution.server") : data.host?.name || t("hostPending")}</dd>
+                {data.config.runtime !== "api" && <><dt>{t("directory")}</dt>
                 <dd className="break-all">
                   {data.binding?.canonical_directory || "—"}
-                </dd>
+                </dd></>}
               </dl>
             </details>
 </>} />
@@ -1050,6 +1065,7 @@ export function Conversation({
                         )
                       )}
                       <div className="space-y-3">
+                        {turn?.purpose === "introduction" && <p data-model-introduction className="text-xs text-muted-foreground">{t("modelIntroduction")}</p>}
                         {reply && !reply.retracted_at && (
                           <div
                             data-agent-text
@@ -1158,7 +1174,11 @@ export function Conversation({
                                     {t("useAnotherHost")}
                                   </Button>
                                 )}
-                                {data.kind === "private" && runnable && retryable && turn.id === lastTurn?.id && (
+                                {turn.purpose === "introduction" && <>
+                                  {turn.introduction_retry_warning && <p className="break-words text-xs text-muted-foreground">{turn.introduction_retry_warning}</p>}
+                                  {turn.can_retry_introduction && runnable ? <Button type="button" variant="outline" size="sm" className="min-h-11" disabled={busy || !!current} onClick={() => void retryIntroduction(turn)}><RotateCcw className="size-3.5" />{t("retryIntroduction")}</Button> : turn.introduction_retry_reason && <p className="break-words text-xs text-muted-foreground">{turn.introduction_retry_reason}</p>}
+                                </>}
+                                {turn.purpose !== "introduction" && data.kind === "private" && runnable && retryable && turn.id === lastTurn?.id && (
                                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                                     <Button type="button" variant="ghost" size="sm" className="min-h-11 px-2 text-foreground" disabled={busy || !!current} onClick={() => void send(turn)}>
                                       <RotateCcw className="size-3.5" />{t("retryLastTurn")}

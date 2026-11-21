@@ -17,7 +17,7 @@
   "conversations.outputLimit": "執行輸出超過限制，已停止執行。",
   "conversations.fileTooLarge": "每個附件不能超過 32 MiB。",
   "conversations.groupAgentPrivate": "群聊只能新增工作空間共用的智慧體。",
-  "conversations.apiPending": "該智慧體使用 API 模型，暫不能用於會話；請改用 CLI 模型的智慧體。",
+  "conversations.apiPending": "API Agent 無需探測主機 CLI。請在模型頁面檢查連線。",
   "conversations.noRunner": "沒有可執行此模型的可用 Runner。",
   "conversations.cliPermissionUnsupported": "此CLI目前僅支援唯讀會話，請選擇唯讀權限。",
   "conversations.runnerUpgradeRequired": "請先升級主機 Runner 以啟用平台工具，再執行此會話。",
@@ -45,5 +45,13 @@
   "conversations.questionInvalid": "問題或回覆無效。請提供明確的問題、唯一的建議項，或不超過 4096 UTF-8 位元組的回覆。",
   "conversations.questionPending": "已有問題等待使用者回覆，或本輪尚在收尾。請停止推進，等待使用者；收尾完成後可提交回覆。",
   "conversations.questionAnswered": "此問題已有不同的回覆，請重新整理查看，不要重複提交衝突的答案。",
-  "conversations.approvalModeInvalid": "請選擇 request、assisted 或 yolo 審批模式。"
+  "conversations.approvalModeInvalid": "請選擇 request、assisted 或 yolo 審批模式。",
+  "conversations.apiContextChanged": "此會話的模型設定、提供者或模型已變更。請還原原設定或建立新會話；已儲存的上下文仍保留。",
+  "conversations.apiOutputRequired": "此 Anthropic 模型需要在模型設定中設定輸出 Token 上限。請先設定上限，再傳送訊息。",
+  "conversations.introductionTask": "現在用繁體中文生成首次自我介紹。這是自動任務，不是使用者訊息。僅依據設定事實和有效權限，簡短問候、介紹角色及有依據的協助，並詢問使用者的需求。不得聲稱已執行檢查或操作，不得編造能力。",
+  "conversations.introductionPermission": "介紹未執行：你缺少對話執行或讀取權限。請管理員授予權限後，明確重試介紹。",
+  "conversations.introductionDisabled": "自動介紹已關閉。請先在平台設定中啟用，再重試。",
+  "conversations.introductionStale": "此介紹屬於先前的 Agent 成員身分，不能重試。",
+  "conversations.introductionCompleted": "此 Agent 已完成本次成員身分的介紹。",
+  "conversations.introductionRetryWarning": "先前的嘗試可能已請求模型或執行操作，結果尚不明確。請核實結果後再明確發起新的介紹；新的模型呼叫可能產生用量。"
 }

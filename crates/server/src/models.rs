@@ -68,6 +68,9 @@ struct Body {
     models: Vec<String>,
     #[serde(default)]
     default_model: String,
+    /// Optional API provider output parameter; absent leaves upstream defaults.
+    #[serde(default)]
+    max_output_tokens: Option<i64>,
     #[serde(default)]
     tool_version: String,
     state: String,
@@ -175,6 +178,15 @@ async fn provider(conn: &impl ConnectionTrait, workspace: Id, id: Id) -> Result<
 impl Body {
     /// Checks needing no database or network, run before anything slower.
     fn check_fields(&mut self) -> Result<()> {
+        if self
+            .max_output_tokens
+            .is_some_and(|value| !(1..=9_007_199_254_740_991).contains(&value))
+        {
+            return Err(bad("models.maxOutputInvalid"));
+        }
+        if self.kind != "api" && self.max_output_tokens.is_some() {
+            return Err(bad("models.maxOutputApiOnly"));
+        }
         self.name = self.name.trim().into();
         self.default_model = self.default_model.trim().into();
         self.tool_version = self.tool_version.trim().into();
@@ -318,7 +330,7 @@ impl Body {
     }
 }
 fn view(p: &profiles::Model) -> Value {
-    json!({"cli_options":p.cli_options.as_deref().and_then(|v|serde_json::from_str::<Value>(v).ok()).unwrap_or(Value::Null),"id":Id::from(p.id),"name":p.name,"kind":p.kind,"runtime":p.runtime,"provider_id":Id::from(p.provider_id),"models":serde_json::from_str::<Value>(&p.models).unwrap_or(json!([])),"default_model":p.default_model,"tool_version":p.tool_version,"timezone":p.timezone,"hosts":host_ids(p).into_iter().map(Id::from).collect::<Vec<_>>(),"state":p.state,"revision_id":Id::from(p.revision_id),"version":p.version,"created_at":p.created_at,"updated_at":p.updated_at})
+    json!({"cli_options":p.cli_options.as_deref().and_then(|v|serde_json::from_str::<Value>(v).ok()).unwrap_or(Value::Null),"id":Id::from(p.id),"name":p.name,"kind":p.kind,"runtime":p.runtime,"provider_id":Id::from(p.provider_id),"models":serde_json::from_str::<Value>(&p.models).unwrap_or(json!([])),"default_model":p.default_model,"max_output_tokens":p.max_output_tokens,"tool_version":p.tool_version,"timezone":p.timezone,"hosts":host_ids(p).into_iter().map(Id::from).collect::<Vec<_>>(),"state":p.state,"revision_id":Id::from(p.revision_id),"version":p.version,"created_at":p.created_at,"updated_at":p.updated_at})
 }
 async fn find(conn: &impl ConnectionTrait, scope: &Scope, id: Id) -> Result<profiles::Model> {
     scope.require("ai-models.read")?;
@@ -473,6 +485,7 @@ async fn save(s: &AppState, scope: &Scope, id: Option<Id>, mut body: Body) -> Re
         provider_id: provider_id.into(),
         models: serde_json::to_string(&body.models).map_err(crate::error::internal_fault)?,
         default_model: body.default_model,
+        max_output_tokens: body.max_output_tokens,
         tool_version: body.tool_version,
         state: body.state,
         cli_options: (!body.cli_options.is_null()).then(|| body.cli_options.to_string()),

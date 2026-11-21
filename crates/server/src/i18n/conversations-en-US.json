@@ -17,7 +17,7 @@
   "conversations.outputLimit": "Execution exceeded the output limit and was stopped.",
   "conversations.fileTooLarge": "Each file must be at most 32 MiB.",
   "conversations.groupAgentPrivate": "Group conversations require workspace-shared Agents.",
-  "conversations.apiPending": "This Agent uses an API model, which cannot be used in conversations yet. Choose an Agent with a CLI model.",
+  "conversations.apiPending": "API Agents do not need a host CLI probe. Check the connection on the model page.",
   "conversations.noRunner": "No available Runner can execute this model.",
   "conversations.cliPermissionUnsupported": "This CLI supports read-only conversations only. Choose read-only access.",
   "conversations.runnerUpgradeRequired": "Upgrade the host Runner to enable platform tools before starting this conversation.",
@@ -45,5 +45,13 @@
   "conversations.questionInvalid": "Invalid question or response. Provide a clear question, unique suggestions, or a response of at most 4096 UTF-8 bytes.",
   "conversations.questionPending": "A saved question is waiting for the user, or this turn is still finishing. Do not continue operations; wait for the user or retry the response after the turn ends.",
   "conversations.questionAnswered": "This question already has a different response. Refresh to see it; do not submit a conflicting answer.",
-  "conversations.approvalModeInvalid": "Choose request, assisted or yolo approval mode."
+  "conversations.approvalModeInvalid": "Choose request, assisted or yolo approval mode.",
+  "conversations.apiContextChanged": "The model profile, provider or model for this conversation has changed. Restore its original configuration or start a new conversation; the saved context has been retained.",
+  "conversations.apiOutputRequired": "This Anthropic model requires an output token limit in its model configuration. Configure that limit before sending another message.",
+  "conversations.introductionTask": "Generate your first introduction in English now. This automatic task is not a human message. Use only the configured facts and effective permissions; briefly greet, explain your role and grounded help, and ask what the user wants. Do not claim completed checks or actions or invent capabilities.",
+  "conversations.introductionPermission": "The introduction did not run because you lack conversation run or read permission. Ask an administrator to grant access, then retry the introduction explicitly.",
+  "conversations.introductionDisabled": "Automatic introductions are disabled. Enable them in platform settings before retrying.",
+  "conversations.introductionStale": "This introduction belongs to an earlier Agent membership and cannot be retried.",
+  "conversations.introductionCompleted": "This Agent has already completed its introduction for this membership.",
+  "conversations.introductionRetryWarning": "A previous attempt may have reached the model or performed operations with an unknown outcome. Verify its result before explicitly starting another introduction; another model call may incur usage."
 }

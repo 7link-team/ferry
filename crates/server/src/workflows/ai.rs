@@ -44,8 +44,23 @@ async fn list_calls(State(s): State<AppState>, scope: Scope) -> Result<Json<Valu
         .all(&s.db)
         .await?;
     Ok(Json(
-        json!({"items":rows.iter().map(|c|json!({"id":Id::from(c.id),"provider_id":Id::from(c.provider_id),"execution_id":Id::from(c.execution_id),"state":c.state,"currency":c.currency,"period_key":c.period_key,"reserved_micros":c.reserved_micros,"actual_micros":c.actual_micros,"created_at":c.created_at})).collect::<Vec<_>>()}),
+        json!({"items":rows.iter().map(call_view).collect::<Vec<_>>()}),
     ))
+}
+fn observation_flag(call: &calls::Model, name: &str) -> bool {
+    serde_json::from_str::<Value>(&call.price_snapshot)
+        .ok()
+        .and_then(|snapshot| snapshot[name].as_bool())
+        .unwrap_or(true)
+}
+fn call_view(call: &calls::Model) -> Value {
+    let cost_known = observation_flag(call, "cost_known");
+    json!({"id":Id::from(call.id),"provider_id":Id::from(call.provider_id),"execution_id":Id::from(call.execution_id),
+        "source_type":if call.conversation_id == 0 { "workflow" } else { "conversation" },
+        "conversation_id":Id::from(call.conversation_id),"conversation_turn_id":Id::from(call.conversation_turn_id),
+        "state":call.state,"currency":call.currency,"period_key":call.period_key,"reserved_micros":call.reserved_micros,
+        "actual_micros":cost_known.then_some(call.actual_micros),"cost_known":cost_known,
+        "price_known":observation_flag(call,"price_known"),"created_at":call.created_at})
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -79,7 +94,10 @@ async fn reconcile(
     {
         return Err(invalid());
     }
+    let mut snapshot: Value = serde_json::from_str(&row.price_snapshot).map_err(|_| invalid())?;
+    snapshot["cost_known"] = json!(true);
     let mut active = row.into_active_model();
+    active.price_snapshot = Set(snapshot.to_string());
     active.state = Set("reconciled".into());
     active.actual_micros = Set(body.actual_micros);
     active.updated_at = Set(db::now());
@@ -413,7 +431,12 @@ pub(super) fn supports(spec: &Value) -> bool {
     operations().contains(&spec["type"].as_str().unwrap_or_default())
 }
 fn cost(input: i64, output: i64, price: &Price) -> Result<i64> {
-    if input < 0 || output < 0 {
+    if input < 0
+        || output < 0
+        || price.unit_size <= 0
+        || price.input_micros < 0
+        || price.output_micros < 0
+    {
         return Err(invalid());
     }
     let units = price.unit_size as i128;
@@ -421,8 +444,70 @@ fn cost(input: i64, output: i64, price: &Price) -> Result<i64> {
         input as i128 * price.input_micros as i128 + output as i128 * price.output_micros as i128;
     i64::try_from((numerator + units - 1) / units).map_err(|_| invalid())
 }
-fn aad(workspace: i64, id: i64) -> String {
-    format!("workflow:{workspace}:ai-call:{id}")
+/// Pricing is an observation; missing/partial usage and overflow are not an
+/// execution failure and must never discard a known provider response.
+fn observed_cost(body: &Value, price: &Price) -> Option<i64> {
+    if price.input_micros == 0 && price.output_micros == 0 {
+        return Some(0);
+    }
+    cost(
+        body["usage"]["prompt_tokens"]
+            .as_i64()
+            .or_else(|| body["usage"]["input_tokens"].as_i64())?,
+        body["usage"]["completion_tokens"]
+            .as_i64()
+            .or_else(|| body["usage"]["output_tokens"].as_i64())?,
+        price,
+    )
+    .ok()
+}
+fn aad(call: &calls::Model) -> String {
+    if call.conversation_id == 0 {
+        format!("workflow:{}:ai-call:{}", call.workspace_id, call.id)
+    } else {
+        format!(
+            "conversation:{}:{}:{}:{}:ai-call:{}",
+            call.workspace_id,
+            call.conversation_id,
+            call.conversation_turn_id,
+            call.operation_key,
+            call.id
+        )
+    }
+}
+/// Actual caller provenance, independent of the workflow execution model.
+struct CallOrigin {
+    workspace_id: i64,
+    actor_id: i64,
+    execution_id: i64,
+    node_run_id: i64,
+    conversation_id: i64,
+    conversation_turn_id: i64,
+    key: String,
+}
+impl CallOrigin {
+    fn workflow(run: &workflow_executions::Model, node: i64, index: usize) -> Self {
+        Self {
+            workspace_id: run.workspace_id,
+            actor_id: run.triggered_by,
+            execution_id: run.id,
+            node_run_id: node,
+            conversation_id: 0,
+            conversation_turn_id: 0,
+            key: format!("{}:{node}:{index}", run.id),
+        }
+    }
+    fn conversation(turn: &crate::entities::ai_turns::Model, agent: i64, index: usize) -> Self {
+        Self {
+            workspace_id: turn.workspace_id,
+            actor_id: turn.owner_id,
+            execution_id: 0,
+            node_run_id: 0,
+            conversation_id: turn.conversation_id,
+            conversation_turn_id: turn.id,
+            key: format!("chat:{}:{agent}:{}:{index}", turn.conversation_id, turn.id),
+        }
+    }
 }
 fn agent_request_hash(params: &Value) -> Option<String> {
     params.get("agent_messages").map(|_| {
@@ -433,9 +518,7 @@ fn agent_request_hash(params: &Value) -> Option<String> {
 }
 async fn reserve(
     s: &AppState,
-    run: &workflow_executions::Model,
-    node: i64,
-    index: usize,
+    origin: &CallOrigin,
     p: &Value,
     operation: &str,
 ) -> Result<(providers::Model, Price, calls::Model)> {
@@ -443,24 +526,25 @@ async fn reserve(
         .as_str()
         .and_then(|x| x.parse::<i64>().ok())
         .ok_or_else(invalid)?;
-    let scope = Scope::for_actor(s, Id::from(run.workspace_id), Id::from(run.triggered_by)).await?;
+    let scope =
+        Scope::for_actor(s, Id::from(origin.workspace_id), Id::from(origin.actor_id)).await?;
     scope.require("credentials.use")?;
-    let tx = crate::variables::transaction(s, Id::from(run.workspace_id)).await?;
+    let tx = crate::variables::transaction(s, Id::from(origin.workspace_id)).await?;
     let mut row = providers::Entity::find_by_id(provider)
-        .filter(providers::Column::WorkspaceId.eq(run.workspace_id))
+        .filter(providers::Column::WorkspaceId.eq(origin.workspace_id))
         .one(&tx)
         .await?
         .ok_or_else(invalid)?;
-    let name = format!("ai:{}:{}", run.workspace_id, row.credential_id);
+    let name = format!("ai:{}:{}", origin.workspace_id, row.credential_id);
     let owner = s.next_id()?.to_string();
     let now = db::now();
     if !crate::lock::acquire(&tx, &name, &owner, now, 30_000).await? {
         return Err(error("workflow.aiLimit"));
     }
-    let key = format!("{}:{node}:{index}", run.id);
+    let key = &origin.key;
     if let Some(call) = calls::Entity::find()
-        .filter(calls::Column::WorkspaceId.eq(run.workspace_id))
-        .filter(calls::Column::OperationKey.eq(&key))
+        .filter(calls::Column::WorkspaceId.eq(origin.workspace_id))
+        .filter(calls::Column::OperationKey.eq(key.clone()))
         .one(&tx)
         .await?
     {
@@ -480,27 +564,17 @@ async fn reserve(
     }
     let prices = serde_json::from_str::<Vec<Price>>(&row.prices).map_err(|_| invalid())?;
     // Pricing is observational. Missing model prices must not block execution.
-    let metered = !prices.is_empty();
-    let price: Price = if metered {
-        prices
-            .into_iter()
-            .find(|x| x.model == p["model"] && x.operation == operation)
-            .unwrap_or(Price {
-                model: p["model"].as_str().unwrap_or_default().into(),
-                operation: operation.into(),
-                input_micros: 0,
-                output_micros: 0,
-                unit_size: 1,
-            })
-    } else {
-        Price {
-            model: p["model"].as_str().unwrap_or_default().into(),
-            operation: operation.into(),
-            input_micros: 0,
-            output_micros: 0,
-            unit_size: 1,
-        }
-    };
+    let configured_price = prices
+        .into_iter()
+        .find(|price| price.model == p["model"] && price.operation == operation);
+    let price_known = configured_price.is_some();
+    let price = configured_price.unwrap_or(Price {
+        model: p["model"].as_str().unwrap_or_default().into(),
+        operation: operation.into(),
+        input_micros: 0,
+        output_micros: 0,
+        unit_size: 1,
+    });
     let tz = row
         .timezone
         .parse::<chrono_tz::Tz>()
@@ -511,7 +585,7 @@ async fn reserve(
         .format("%Y-%m")
         .to_string();
     let all = calls::Entity::find()
-        .filter(calls::Column::WorkspaceId.eq(run.workspace_id))
+        .filter(calls::Column::WorkspaceId.eq(origin.workspace_id))
         .filter(calls::Column::CredentialId.eq(row.credential_id))
         .all(&tx)
         .await?;
@@ -526,24 +600,26 @@ async fn reserve(
     }
     let call = calls::Model {
         id: s.next_id()?.into(),
-        workspace_id: run.workspace_id,
+        workspace_id: origin.workspace_id,
         provider_id: row.id,
         credential_id: row.credential_id,
-        execution_id: run.id,
-        node_run_id: node,
-        operation_key: key,
+        execution_id: origin.execution_id,
+        node_run_id: origin.node_run_id,
+        conversation_id: origin.conversation_id,
+        conversation_turn_id: origin.conversation_turn_id,
+        operation_key: key.clone(),
         currency: row.currency.clone(),
         period_key: period,
         state: "reserved".into(),
         reserved_micros: 0,
         actual_micros: 0,
-        price_snapshot: json!({"price":price,"base_url":row.base_url,"protocol":row.protocol,"request_hash":agent_request_hash(p)})
+        price_snapshot: json!({"price":price,"base_url":row.base_url,"protocol":row.protocol,"request_hash":agent_request_hash(p),"price_known":price_known,"cost_known":false})
             .to_string(),
         result: None,
         created_at: now,
-        created_by: run.triggered_by,
+        created_by: origin.actor_id,
         updated_at: now,
-        updated_by: run.triggered_by,
+        updated_by: origin.actor_id,
         version: 1,
     };
     calls::Entity::insert(call.clone().into_active_model())
@@ -557,18 +633,22 @@ async fn state(
     s: &AppState,
     call: &calls::Model,
     status: &str,
-    actual: i64,
+    actual: Option<i64>,
     result: Option<&Item>,
 ) -> Result<()> {
     let mut active = call.clone().into_active_model();
     active.state = Set(status.into());
-    active.actual_micros = Set(actual);
+    // The schema's numeric zero is storage only when cost_known is false.
+    active.actual_micros = Set(actual.unwrap_or(0));
+    let mut snapshot: Value = serde_json::from_str(&call.price_snapshot).map_err(|_| invalid())?;
+    snapshot["cost_known"] = json!(actual.is_some());
+    active.price_snapshot = Set(snapshot.to_string());
     active.updated_at = Set(db::now());
     active.version = Set(call.version + 1);
     if let Some(item) = result {
         active.result = Set(Some(s.vault.seal(
             &serde_json::to_string(item).map_err(|_| invalid())?,
-            &aad(call.workspace_id, call.id),
+            &aad(call),
         )?));
     }
     active.update(&s.db).await?;
@@ -686,12 +766,17 @@ pub(super) async fn execute_indexed(
     let operation = spec["type"].as_str().ok_or_else(invalid)?;
     for (index, item) in items.iter().enumerate() {
         let p = params.get(index).ok_or_else(invalid)?;
-        let (provider, price, call) = reserve(s, run, node, offset + index, p, operation).await?;
+        let (provider, price, call) = reserve(
+            s,
+            &CallOrigin::workflow(run, node, offset + index),
+            p,
+            operation,
+        )
+        .await?;
         if call.state == "succeeded" {
-            let text = s.vault.open_secret(
-                call.result.as_deref().ok_or_else(invalid)?,
-                &aad(run.workspace_id, call.id),
-            )?;
+            let text = s
+                .vault
+                .open_secret(call.result.as_deref().ok_or_else(invalid)?, &aad(&call))?;
             out.push(serde_json::from_str(&text).map_err(|_| invalid())?);
             continue;
         }
@@ -702,7 +787,7 @@ pub(super) async fn execute_indexed(
         let (request, known) = match prepared {
             Ok(v) => v,
             Err(e) => {
-                state(s, &call, "reconciled", 0, None).await?;
+                state(s, &call, "reconciled", Some(0), None).await?;
                 return Err(e);
             }
         };
@@ -724,14 +809,14 @@ pub(super) async fn execute_indexed(
         let response = match request.send().await {
             Ok(v) => v,
             Err(e) => {
-                state(s, &call, "unknown", 0, None).await?;
+                state(s, &call, "unknown", None, None).await?;
                 // Never reached: nothing was sent. Otherwise the outcome is unknown.
                 return Err(crate::upstream::unreachable("ai", &host, &e)
                     .unwrap_or_else(|| error("workflow.aiUnknown")));
             }
         };
         if !response.status().is_success() {
-            state(s, &call, "unknown", 0, None).await?;
+            state(s, &call, "unknown", None, None).await?;
             return Err(crate::upstream::status(
                 "ai",
                 &host,
@@ -745,16 +830,246 @@ pub(super) async fn execute_indexed(
         .await;
         match parsed {
             Ok((output, actual)) => {
-                state(s, &call, "succeeded", actual, Some(&output)).await?;
+                state(
+                    s,
+                    &call,
+                    "succeeded",
+                    actual.filter(|_| observation_flag(&call, "price_known")),
+                    Some(&output),
+                )
+                .await?;
                 out.push(output);
             }
             Err(e) => {
-                state(s, &call, "unknown", 0, None).await?;
+                state(s, &call, "unknown", None, None).await?;
                 return Err(e);
             }
         }
     }
     Ok(out)
+}
+/// Application chat uses the same admission, credential transport and encrypted
+/// journal as workflows, with real non-workflow provenance and live turn authority.
+pub(crate) async fn conversation_round(
+    s: &AppState,
+    turn: &crate::entities::ai_turns::Model,
+    conversation: &crate::entities::ai_conversations::Model,
+    owner: &str,
+    round: usize,
+    params: &Value,
+) -> Result<Value> {
+    let scope = crate::conversations::run::api_authorized(s, turn, owner).await?;
+    scope.require("credentials.use")?;
+    let origin = CallOrigin::conversation(turn, conversation.agent_id, round);
+    let (provider, price, call) = reserve(s, &origin, params, "ai.llm.chat").await?;
+    if call.state == "succeeded" {
+        let plain = s
+            .vault
+            .open_secret(call.result.as_deref().ok_or_else(invalid)?, &aad(&call))?;
+        let item: Item = serde_json::from_str(&plain).map_err(|_| invalid())?;
+        return item.json.get("response").cloned().ok_or_else(invalid);
+    }
+    if call.state != "reserved" {
+        return Err(error("workflow.aiUnknown"));
+    }
+    let prepared = async {
+        if provider.protocol == "anthropic" && !params["max_tokens"].as_u64().is_some_and(|n| n > 0)
+        {
+            return Err(crate::conversations::error(
+                StatusCode::BAD_REQUEST,
+                "conversations.apiOutputRequired",
+            ));
+        }
+        let mut body = json!({"model":params["model"], "messages":params["agent_messages"],
+            "tools":params["agent_tools"], "stream":false});
+        if !Value::is_null(&params["max_tokens"]) {
+            body["max_tokens"] = params["max_tokens"].clone();
+        }
+        if !Value::is_null(&params["system"]) {
+            body["system"] = params["system"].clone();
+        }
+        let request = provider_request(s, turn.workspace_id, &provider, "ai.llm.chat")
+            .await?
+            .json(&body);
+        crate::conversations::run::api_authorized(s, turn, owner)
+            .await?
+            .require("credentials.use")?;
+        Ok(request)
+    }
+    .await;
+    let request = match prepared {
+        Ok(request) => request,
+        Err(error) => {
+            state(s, &call, "reconciled", Some(0), None).await?;
+            return Err(error);
+        }
+    };
+    if calls::Entity::update_many()
+        .col_expr(
+            calls::Column::State,
+            sea_orm::sea_query::Expr::value("sent"),
+        )
+        .filter(calls::Column::Id.eq(call.id))
+        .filter(calls::Column::State.eq("reserved"))
+        .exec(&s.db)
+        .await?
+        .rows_affected
+        != 1
+    {
+        return Err(error("workflow.aiUnknown"));
+    }
+    let result = async {
+        let response = request
+            .send()
+            .await
+            .map_err(|_| error("workflow.aiUnknown"))?;
+        if !response.status().is_success() {
+            return Err(crate::upstream::status(
+                "ai",
+                &crate::upstream::host(&provider.base_url),
+                response.status().as_u16(),
+                true,
+            ));
+        }
+        let data = bytes(response).await?;
+        let body: Value = serde_json::from_slice(&data).map_err(|_| invalid())?;
+        let actual = observed_cost(&body, &price);
+        Ok((body, actual))
+    }
+    .await;
+    match result {
+        Ok((body, actual)) => {
+            let item = Item {
+                json: serde_json::Map::from_iter([("response".into(), body.clone())]),
+                binary: Default::default(),
+                paired: vec![],
+            };
+            state(
+                s,
+                &call,
+                "succeeded",
+                actual.filter(|_| observation_flag(&call, "price_known")),
+                Some(&item),
+            )
+            .await?;
+            Ok(body)
+        }
+        Err(error) => {
+            state(s, &call, "unknown", None, None).await?;
+            Err(error)
+        }
+    }
+}
+/// Recover a paid result already recorded before a worker lost its lease.
+/// This is a local journal read and never contacts the provider.
+pub(crate) enum ConversationOutcome {
+    Known(Value),
+    Unsent,
+    Unknown,
+}
+pub(crate) async fn conversation_outcome(
+    s: &AppState,
+    turn: &crate::entities::ai_turns::Model,
+    agent: i64,
+    round: usize,
+) -> Result<ConversationOutcome> {
+    let origin = CallOrigin::conversation(turn, agent, round);
+    let call = calls::Entity::find()
+        .filter(calls::Column::WorkspaceId.eq(turn.workspace_id))
+        .filter(calls::Column::ConversationId.eq(turn.conversation_id))
+        .filter(calls::Column::ConversationTurnId.eq(turn.id))
+        .filter(calls::Column::OperationKey.eq(origin.key))
+        .one(&s.db)
+        .await?;
+    let Some(call) = call else {
+        return Ok(ConversationOutcome::Unsent);
+    };
+    if call.state == "reserved" {
+        return Ok(ConversationOutcome::Unsent);
+    }
+    // Reconciled can also mean a human settled an uncertain sent call; it does
+    // not prove that a request was never sent.
+    if call.state != "succeeded" {
+        return Ok(ConversationOutcome::Unknown);
+    }
+    let plain = s
+        .vault
+        .open_secret(call.result.as_deref().ok_or_else(invalid)?, &aad(&call))?;
+    let item: Item = serde_json::from_str(&plain).map_err(|_| invalid())?;
+    Ok(ConversationOutcome::Known(
+        item.json.get("response").cloned().ok_or_else(invalid)?,
+    ))
+}
+/// Cancellation/crash may drop a sent future. Mark it unknown without replay.
+pub(crate) async fn conversation_interrupted(
+    s: &AppState,
+    turn: &crate::entities::ai_turns::Model,
+) -> Result<()> {
+    conversation_interrupted_in(&s.db, turn).await
+}
+pub(crate) async fn conversation_interrupted_in(
+    conn: &impl ConnectionTrait,
+    turn: &crate::entities::ai_turns::Model,
+) -> Result<()> {
+    for (previous, next) in [("reserved", "reconciled"), ("sent", "unknown")] {
+        calls::Entity::update_many()
+            .col_expr(calls::Column::State, sea_orm::sea_query::Expr::value(next))
+            .col_expr(
+                calls::Column::UpdatedAt,
+                sea_orm::sea_query::Expr::value(db::now()),
+            )
+            .col_expr(
+                calls::Column::UpdatedBy,
+                sea_orm::sea_query::Expr::value(turn.owner_id),
+            )
+            .col_expr(
+                calls::Column::Version,
+                sea_orm::sea_query::Expr::col(calls::Column::Version).add(1),
+            )
+            .filter(calls::Column::WorkspaceId.eq(turn.workspace_id))
+            .filter(calls::Column::ConversationId.eq(turn.conversation_id))
+            .filter(calls::Column::ConversationTurnId.eq(turn.id))
+            .filter(calls::Column::State.eq(previous))
+            .exec(conn)
+            .await?;
+    }
+    Ok(())
+}
+
+async fn provider_request(
+    s: &AppState,
+    workspace: i64,
+    provider: &providers::Model,
+    operation: &str,
+) -> Result<reqwest::RequestBuilder> {
+    credential(&s.db, workspace, provider.credential_id).await?;
+    let (_, _, secret) =
+        crate::credentials::unseal(s, &Id::from(workspace), &Id::from(provider.credential_id))
+            .await?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| invalid())?;
+    let suffix = match operation {
+        "ai.llm.chat" if provider.protocol == "anthropic" => "messages",
+        "ai.llm.chat" => "chat/completions",
+        "ai.image.generate" => "images/generations",
+        "ai.audio.speech" => "audio/speech",
+        _ => "audio/transcriptions",
+    };
+    if provider.protocol == "anthropic" && operation != "ai.llm.chat" {
+        return Err(invalid());
+    }
+    let request = client.post(format!("{}/{suffix}", provider.base_url));
+    let request = if provider.protocol == "anthropic" {
+        request
+            .header("x-api-key", secret)
+            .header("anthropic-version", "2023-06-01")
+    } else {
+        request.bearer_auth(secret)
+    };
+    Ok(request)
 }
 async fn prepare(
     s: &AppState,
@@ -785,36 +1100,7 @@ async fn prepare(
     if workflow.lifecycle != "active" || current.state != "running" {
         return Err(ApiError::forbidden());
     }
-    credential(&s.db, run.workspace_id, provider.credential_id).await?;
-    let (_, _, secret) = crate::credentials::unseal(
-        s,
-        &Id::from(run.workspace_id),
-        &Id::from(provider.credential_id),
-    )
-    .await?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|_| invalid())?;
-    let suffix = match operation {
-        "ai.llm.chat" if provider.protocol == "anthropic" => "messages",
-        "ai.llm.chat" => "chat/completions",
-        "ai.image.generate" => "images/generations",
-        "ai.audio.speech" => "audio/speech",
-        _ => "audio/transcriptions",
-    };
-    if provider.protocol == "anthropic" && operation != "ai.llm.chat" {
-        return Err(invalid());
-    }
-    let request = client.post(format!("{}/{suffix}", provider.base_url));
-    let request = if provider.protocol == "anthropic" {
-        request
-            .header("x-api-key", secret)
-            .header("anthropic-version", "2023-06-01")
-    } else {
-        request.bearer_auth(secret)
-    };
+    let request = provider_request(s, run.workspace_id, provider, operation).await?;
     let model = p["model"].as_str().ok_or_else(invalid)?;
     match operation {
         "ai.llm.chat"=>{
@@ -832,14 +1118,14 @@ async fn prepare(
             }
             Ok((request.json(&json!({"model":model,"messages":[{"role":"user","content":content}],"max_tokens":p["max_tokens"],"stream":false})),None))
         },
-        "ai.image.generate"=>Ok((request.json(&json!({"model":model,"prompt":p["prompt"],"n":1,"size":p["size"],"response_format":"b64_json"})),Some(cost(1,0,price)?))),
-        "ai.audio.speech"=>Ok((request.json(&json!({"model":model,"input":p["prompt"],"voice":p["voice"],"response_format":"mp3"})),Some(cost(p["prompt"].as_str().ok_or_else(invalid)?.chars().count() as i64,0,price)?))),
+        "ai.image.generate"=>Ok((request.json(&json!({"model":model,"prompt":p["prompt"],"n":1,"size":p["size"],"response_format":"b64_json"})),cost(1,0,price).ok())),
+        "ai.audio.speech"=>Ok((request.json(&json!({"model":model,"input":p["prompt"],"voice":p["voice"],"response_format":"mp3"})),cost(p["prompt"].as_str().ok_or_else(invalid)?.chars().count() as i64,0,price).ok())),
         _=>{
             let file=item.binary.get(p["file_field"].as_str().ok_or_else(invalid)?).ok_or_else(invalid)?;
             if !file.mime.starts_with("audio/")&&!file.mime.starts_with("video/"){return Err(invalid());}
             let row=super::media::resolve(s,run.workspace_id,run.workflow_id,file).await?;let data=storage.read_bytes(&s.db,run.workspace_id,row.id).await?;
             let part=reqwest::multipart::Part::bytes(data).file_name(file.name.clone()).mime_str(&file.mime).map_err(|_|invalid())?;
-            Ok((request.multipart(reqwest::multipart::Form::new().text("model",model.to_owned()).part("file",part)),Some(cost(1,0,price)?)))
+            Ok((request.multipart(reqwest::multipart::Form::new().text("model",model.to_owned()).part("file",part)),cost(1,0,price).ok()))
         }
     }
 }
@@ -854,7 +1140,7 @@ async fn finish(
     response: reqwest::Response,
     price: &Price,
     known: Option<i64>,
-) -> Result<(Item, i64)> {
+) -> Result<(Item, Option<i64>)> {
     let data = bytes(response).await?;
     let mut output = item.clone();
     let field = p["output_field"].as_str().ok_or_else(invalid)?;
@@ -862,7 +1148,7 @@ async fn finish(
     if operation == "ai.audio.speech" {
         let file = asset(s, storage, run, node, &data, "audio/mpeg", "speech.mp3").await?;
         output.binary.insert(field.into(), file);
-        return Ok((output, known.ok_or_else(invalid)?));
+        return Ok((output, known));
     }
     let body: Value = serde_json::from_slice(&data).map_err(|_| invalid())?;
     match operation {
@@ -881,21 +1167,7 @@ async fn finish(
                 .or(anthropic.as_deref())
                 .or_else(|| p.get("agent_messages").map(|_| ""))
                 .ok_or_else(invalid)?;
-            let actual = if price.input_micros == 0 && price.output_micros == 0 {
-                0
-            } else {
-                cost(
-                    body["usage"]["prompt_tokens"]
-                        .as_i64()
-                        .or_else(|| body["usage"]["input_tokens"].as_i64())
-                        .ok_or_else(|| error("workflow.aiUnknown"))?,
-                    body["usage"]["completion_tokens"]
-                        .as_i64()
-                        .or_else(|| body["usage"]["output_tokens"].as_i64())
-                        .ok_or_else(|| error("workflow.aiUnknown"))?,
-                    price,
-                )?
-            };
+            let actual = observed_cost(&body, price);
             output.json.insert(
                 field.into(),
                 if p.get("agent_messages").is_some() {
@@ -934,14 +1206,14 @@ async fn finish(
             )
             .await?;
             output.binary.insert(field.into(), file);
-            Ok((output, known.ok_or_else(invalid)?))
+            Ok((output, known))
         }
         _ => {
             output.json.insert(
                 field.into(),
                 json!(body["text"].as_str().ok_or_else(invalid)?),
             );
-            Ok((output, known.ok_or_else(invalid)?))
+            Ok((output, known))
         }
     }
 }
@@ -962,4 +1234,382 @@ mod tests {
         assert_eq!(cost(1000, 1000, &p).unwrap(), 10);
         assert!(cost(-1, 0, &p).is_err());
     }
+    #[tokio::test]
+    async fn normal_provider_operations_preserve_auth_assets_prices_and_cached_responses() {
+        use crate::agents::tests::admin;
+        use axum::response::IntoResponse;
+        use std::sync::{Arc, Mutex};
+        let (_dir, s) = crate::platform_tools::tests::setup().await;
+        let png=STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jB6kAAAAASUVORK5CYII=").unwrap();
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (captured, picture) = (seen.clone(), png.clone());
+        let handler = move |uri: axum::http::Uri,
+                            headers: axum::http::HeaderMap,
+                            body: axum::body::Bytes| {
+            let (captured, picture) = (captured.clone(), picture.clone());
+            async move {
+                captured.lock().unwrap().push(uri.path().to_owned());
+                let value: Value = if uri.path() == "/audio/transcriptions" {
+                    Value::Null
+                } else {
+                    serde_json::from_slice(&body).unwrap()
+                };
+                if uri.path() == "/messages" {
+                    assert_eq!(headers["x-api-key"], "ordinary-secret");
+                    assert_eq!(headers["anthropic-version"], "2023-06-01");
+                    assert!(headers.get("authorization").is_none());
+                    assert_eq!(
+                        value["messages"][0]["content"][1]["source"]["media_type"],
+                        "image/png"
+                    );
+                    return axum::Json(json!({"content":[{"type":"text","text":"anthropic answer"}],"usage":{"input_tokens":3,"output_tokens":2}})).into_response();
+                }
+                assert_eq!(headers["authorization"], "Bearer ordinary-secret");
+                match uri.path() {
+                    "/chat/completions" => {
+                        assert_eq!(value["max_tokens"], 64);
+                        assert!(
+                            value["messages"][0]["content"][1]["image_url"]["url"]
+                                .as_str()
+                                .unwrap()
+                                .starts_with("data:image/png;base64,")
+                        );
+                        axum::Json(json!({"choices":[{"message":{"role":"assistant","content":"plain answer"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}})).into_response()
+                    }
+                    "/images/generations" => {
+                        axum::Json(json!({"data":[{"b64_json":STANDARD.encode(picture)}]}))
+                            .into_response()
+                    }
+                    "/audio/speech" => (
+                        [("content-type", "audio/mpeg")],
+                        b"ID3-known-audio".to_vec(),
+                    )
+                        .into_response(),
+                    "/audio/transcriptions" => {
+                        assert!(
+                            headers["content-type"]
+                                .to_str()
+                                .unwrap()
+                                .starts_with("multipart/form-data;")
+                        );
+                        assert!(String::from_utf8_lossy(&body).contains("RIFF"));
+                        axum::Json(json!({"text":"transcribed audio"})).into_response()
+                    }
+                    _ => panic!("unexpected provider path"),
+                }
+            }
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                axum::Router::new()
+                    .route("/chat/completions", axum::routing::post(handler.clone()))
+                    .route("/images/generations", axum::routing::post(handler.clone()))
+                    .route("/audio/speech", axum::routing::post(handler.clone()))
+                    .route(
+                        "/audio/transcriptions",
+                        axum::routing::post(handler.clone()),
+                    )
+                    .route("/messages", axum::routing::post(handler)),
+            )
+            .await
+            .unwrap();
+        });
+        let prices = vec![
+            ("ai.llm.chat", 2, 3),
+            ("ai.image.generate", 7, 0),
+            ("ai.audio.speech", 2, 0),
+            ("ai.audio.transcribe", 13, 0),
+        ];
+        let model=crate::platform_tools::dispatch(&s,admin(1),crate::platform_tools::Call {method:"POST".into(),path:"/ai-models".into(),
+            body:json!({"name":"Normal operator model","kind":"api","skip_check":true,"state":"enabled","default_model":"m",
+                "connection":{"name":"Normal operator provider","api_key":"ordinary-secret","protocol":"openai","base_url":url,"qps":1000,"concurrency":10,"monthly_limit_micros":0,
+                    "prices":prices.iter().map(|(operation,input,output)|json!({"model":"m","operation":operation,"input_micros":input,"output_micros":output,"unit_size":1})).collect::<Vec<_>>()}}),..Default::default()}).await.unwrap();
+        assert_eq!(model["status"], 201, "{model}");
+        let provider = model["data"]["provider_id"]
+            .as_str()
+            .unwrap()
+            .parse::<i64>()
+            .unwrap();
+        let graph = json!({"engine":"ferry-graph","schema":1,"settings":{"timezone":"UTC"},"nodes":[{"id":"start","name":"Start","type":"core.trigger.manual","type_version":1,"params":{"input_schema":{"type":"object"}},"position":[0,0]}],"connections":[]});
+        let workflow = crate::platform_tools::dispatch(
+            &s,
+            admin(1),
+            crate::platform_tools::Call {
+                method: "POST".into(),
+                path: "/workflows".into(),
+                body: json!({"name":"Normal AI operations","definition":graph.to_string()}),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(workflow["status"], 201, "{workflow}");
+        let workflow: Id = serde_json::from_value(workflow["data"]["id"].clone()).unwrap();
+        let (_, Json(created)) = super::super::run::create(
+            State(s.clone()),
+            admin(1),
+            Path(("1".into(), workflow)),
+            Json(
+                serde_json::from_value(
+                    json!({"mode":"manual","revision":"draft","version":1,"entry_node_id":"start"}),
+                )
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let execution: Id = serde_json::from_value(created["id"].clone()).unwrap();
+        workflow_executions::Entity::update_many()
+            .col_expr(
+                workflow_executions::Column::State,
+                sea_orm::sea_query::Expr::value("running"),
+            )
+            .filter(workflow_executions::Column::Id.eq(execution))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let run = workflow_executions::Entity::find_by_id(execution)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let backend = crate::artifact_store::ArtifactStore::for_state(&s)
+            .await
+            .unwrap();
+        let storage = Store {
+            db: &s.db,
+            backend: &backend,
+            vault: &s.vault,
+            ids: &s.ids,
+            quota: crate::content_assets::DEFAULT_QUOTA,
+        };
+        let image = storage
+            .stage_bytes(1, &png, "image/png", run.id, "picture", 1)
+            .await
+            .unwrap();
+        let audio = storage
+            .stage_bytes(1, b"RIFF-test-wave", "audio/wav", run.id, "audio", 1)
+            .await
+            .unwrap();
+        let tx = s.db.begin().await.unwrap();
+        storage
+            .attach(&tx, 1, image.id, "workflow", i64::from(workflow))
+            .await
+            .unwrap();
+        storage
+            .attach(&tx, 1, audio.id, "workflow", i64::from(workflow))
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let input = Item {
+            json: Default::default(),
+            binary: std::collections::BTreeMap::from([
+                (
+                    "picture".into(),
+                    Asset {
+                        asset: format!("sha256:{}", image.sha256),
+                        mime: "image/png".into(),
+                        size: png.len() as u64,
+                        name: "picture.png".into(),
+                    },
+                ),
+                (
+                    "audio".into(),
+                    Asset {
+                        asset: format!("sha256:{}", audio.sha256),
+                        mime: "audio/wav".into(),
+                        size: 14,
+                        name: "voice.wav".into(),
+                    },
+                ),
+            ]),
+            paired: vec![],
+        };
+        for (node, operation, field) in [
+            (1, "ai.llm.chat", "chat"),
+            (2, "ai.image.generate", "image"),
+            (3, "ai.audio.speech", "speech"),
+            (4, "ai.audio.transcribe", "transcript"),
+        ] {
+            let p = json!({"provider_id":provider.to_string(),"model":"m","prompt":"hello","max_tokens":64,"image_field":"picture","file_field":"audio","voice":"alloy","size":"1024x1024","output_field":field});
+            let output = execute(
+                &s,
+                &storage,
+                &run,
+                node,
+                &json!({"id":format!("plain-{node}"),"type":operation}),
+                std::slice::from_ref(&input),
+                &[p],
+            )
+            .await
+            .unwrap();
+            match operation {
+                "ai.llm.chat" => assert_eq!(output[0].json["chat"], "plain answer"),
+                "ai.audio.transcribe" => {
+                    assert_eq!(output[0].json["transcript"], "transcribed audio")
+                }
+                _ => {
+                    let asset = super::super::media::resolve(
+                        &s,
+                        1,
+                        i64::from(workflow),
+                        &output[0].binary[field],
+                    )
+                    .await
+                    .unwrap();
+                    let bytes = storage.read_bytes(&s.db, 1, asset.id).await.unwrap();
+                    assert_eq!(
+                        bytes,
+                        if field == "image" {
+                            png.clone()
+                        } else {
+                            b"ID3-known-audio".to_vec()
+                        }
+                    );
+                }
+            }
+        }
+        providers::Entity::update_many()
+            .col_expr(
+                providers::Column::Protocol,
+                sea_orm::sea_query::Expr::value("anthropic"),
+            )
+            .filter(providers::Column::Id.eq(provider))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let p = json!({"provider_id":provider.to_string(),"model":"m","prompt":"hello","max_tokens":64,"image_field":"picture","output_field":"chat"});
+        let output = execute(
+            &s,
+            &storage,
+            &run,
+            5,
+            &json!({"id":"anthropic","type":"ai.llm.chat"}),
+            std::slice::from_ref(&input),
+            std::slice::from_ref(&p),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output[0].json["chat"], "anthropic answer");
+        let cached = execute(
+            &s,
+            &storage,
+            &run,
+            1,
+            &json!({"id":"plain-1","type":"ai.llm.chat"}),
+            std::slice::from_ref(&input),
+            &[p],
+        )
+        .await
+        .unwrap();
+        assert_eq!(cached[0].json["chat"], "plain answer");
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            5,
+            "known workflow journal result never sends again"
+        );
+        let calls = calls::Entity::find().all(&s.db).await.unwrap();
+        assert_eq!(calls.len(), 5);
+        for (node, expected) in [(1, 12), (2, 7), (3, 10), (4, 13), (5, 12)] {
+            let call = calls.iter().find(|call| call.node_run_id == node).unwrap();
+            assert_eq!(call.state, "succeeded");
+            assert_eq!(call.actual_micros, expected);
+            assert!(observation_flag(call, "cost_known") && observation_flag(call, "price_known"));
+            assert_eq!(call.execution_id, run.id);
+            assert_eq!(call.conversation_id, 0);
+            assert_eq!(call.conversation_turn_id, 0);
+            assert!(
+                s.vault
+                    .open_secret(
+                        call.result.as_deref().unwrap(),
+                        &format!("workflow:1:ai-call:{}", call.id)
+                    )
+                    .is_ok(),
+                "workflow AAD remains byte-compatible"
+            );
+        }
+        server.abort();
+    }
+}
+
+pub(crate) fn agent_tools(anthropic: bool, conversational: bool) -> Value {
+    Value::Array(ferry_protocol::agent::platform_tools().as_array().unwrap().iter()
+        .filter(|tool| conversational || matches!(tool["name"].as_str(), Some("ferry_discover" | "ferry_request")))
+        .map(|tool| if anthropic {
+            json!({"name":tool["name"],"description":tool["description"],"input_schema":tool["inputSchema"]})
+        } else {
+            json!({"type":"function","function":{"name":tool["name"],"description":tool["description"],"parameters":tool["inputSchema"]}})
+        }).collect())
+}
+
+/// Validate the wire response before feeding it back to the provider. Tool
+/// arguments remain untrusted and pass through platform_call's normal checks.
+pub(crate) fn agent_response(
+    body: &Value,
+    anthropic: bool,
+) -> Result<(Value, String, Vec<(String, String, Value)>)> {
+    let malformed = || error("workflow.aiInvalid");
+    let mut calls: Vec<(String, String, Value)> = Vec::new();
+    let (message, text) = if anthropic {
+        let content = body["content"].as_array().ok_or_else(malformed)?;
+        for block in content.iter().filter(|block| block["type"] == "tool_use") {
+            calls.push((
+                block["id"].as_str().ok_or_else(malformed)?.into(),
+                block["name"].as_str().ok_or_else(malformed)?.into(),
+                block["input"].clone(),
+            ));
+        }
+        (
+            json!({"role":"assistant","content":content}),
+            content
+                .iter()
+                .filter(|block| block["type"] == "text")
+                .filter_map(|block| block["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    } else {
+        let message = body
+            .pointer("/choices/0/message")
+            .filter(|value| value.is_object())
+            .ok_or_else(malformed)?;
+        if message["role"] != "assistant" {
+            return Err(malformed());
+        }
+        if let Some(raw) = message.get("tool_calls").filter(|raw| !raw.is_null()) {
+            for call in raw.as_array().ok_or_else(malformed)? {
+                if call["type"] != "function" {
+                    return Err(malformed());
+                }
+                calls.push((
+                    call["id"].as_str().ok_or_else(malformed)?.into(),
+                    call["function"]["name"]
+                        .as_str()
+                        .ok_or_else(malformed)?
+                        .into(),
+                    serde_json::from_str(
+                        call["function"]["arguments"]
+                            .as_str()
+                            .ok_or_else(malformed)?,
+                    )
+                    .map_err(|_| malformed())?,
+                ));
+            }
+        }
+        (
+            message.clone(),
+            message["content"].as_str().unwrap_or_default().into(),
+        )
+    };
+    let mut ids = std::collections::BTreeSet::new();
+    if calls
+        .iter()
+        .any(|(id, _, _)| id.is_empty() || id.len() > 128 || !ids.insert(id.clone()))
+    {
+        return Err(malformed());
+    }
+    Ok((message, text, calls))
 }

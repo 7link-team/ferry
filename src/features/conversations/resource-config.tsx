@@ -12,17 +12,14 @@ import { listResource } from "../../shared/api/resource";
 export const conversationText = (key: string) =>
   commonText(`conversations:${key}`);
 const key = (value: string) => `conversations:${value}`;
-/**
- * Agents a conversation can run: API-model Agents cannot hold a conversation
- * yet, so they are not offered (the server refuses them with the same reason).
- */
+/** The server applies Agent visibility and use permissions for API and CLI models. */
 export const conversationAgentOptions = (workspace: string, conditions: Record<string, string>) =>
   async (): Promise<Option[]> => {
     const items: Option[] = [];
     for (let page = 1; ; page += 1) {
       const result = await listResource<{ id: string; name: string; runtime?: string }>(
         workspace, "ai-agents", { ...conditions, page, page_size: 200 });
-      items.push(...result.items.filter(row => row.runtime !== "api").map(row => ({ value: row.id, label: row.name })));
+      items.push(...result.items.map(row => ({ value: row.id, label: row.name })));
       if (!result.items.length || page * result.page_size >= result.total) return items;
     }
   };
@@ -123,7 +120,6 @@ export function conversationForms({
               immutable: true,
               when: (r) => r.kind !== "group",
               options: conversationAgentOptions(workspace, { for_use: "true" }),
-              helpKey: key("apiAgentsHidden"),
               display: (r) => r.agent_name,
             },
             {

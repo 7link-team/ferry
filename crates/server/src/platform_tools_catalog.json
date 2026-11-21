@@ -330,7 +330,7 @@
     "source": "crates/server/src/models.rs",
     "signature": "async fn create(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Body>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n    /// CLI-only IANA zone its executions run in; empty follows the runner.\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    timezone: String,\n    /// CLI-only: Runner hosts to use, first preferred; empty = any ready Runner.\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    hosts: Vec<Id>,\n    /// Input only: save an API connection whose model list could not be loaded.\n    #[serde(default, skip_serializing)]\n    skip_check: bool,\n}"
+      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    /// Optional API provider output parameter; absent leaves upstream defaults.\n    #[serde(default)]\n    max_output_tokens: Option<i64>,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n    /// CLI-only IANA zone its executions run in; empty follows the runner.\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    timezone: String,\n    /// CLI-only: Runner hosts to use, first preferred; empty = any ready Runner.\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    hosts: Vec<Id>,\n    /// Input only: save an API connection whose model list could not be loaded.\n    #[serde(default, skip_serializing)]\n    skip_check: bool,\n}"
     ],
     "permission_checks": [
       "ai-models.create",
@@ -363,7 +363,7 @@
     "signature": "async fn discover(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<Discovery>,\n) -> Result<Json<Value>>",
     "definitions": [
       "struct Discovery {\n    #[serde(default)]\n    provider_id: Id,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    host_id: Id,\n    #[serde(default)]\n    connection: Option<crate::workflows::ai::Body>,\n}",
-      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n    /// CLI-only IANA zone its executions run in; empty follows the runner.\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    timezone: String,\n    /// CLI-only: Runner hosts to use, first preferred; empty = any ready Runner.\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    hosts: Vec<Id>,\n    /// Input only: save an API connection whose model list could not be loaded.\n    #[serde(default, skip_serializing)]\n    skip_check: bool,\n}"
+      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    /// Optional API provider output parameter; absent leaves upstream defaults.\n    #[serde(default)]\n    max_output_tokens: Option<i64>,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n    /// CLI-only IANA zone its executions run in; empty follows the runner.\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    timezone: String,\n    /// CLI-only: Runner hosts to use, first preferred; empty = any ready Runner.\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    hosts: Vec<Id>,\n    /// Input only: save an API connection whose model list could not be loaded.\n    #[serde(default, skip_serializing)]\n    skip_check: bool,\n}"
     ],
     "permission_checks": [
       "ai-agents.probe",
@@ -393,7 +393,7 @@
     "source": "crates/server/src/models.rs",
     "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Body>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n    /// CLI-only IANA zone its executions run in; empty follows the runner.\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    timezone: String,\n    /// CLI-only: Runner hosts to use, first preferred; empty = any ready Runner.\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    hosts: Vec<Id>,\n    /// Input only: save an API connection whose model list could not be loaded.\n    #[serde(default, skip_serializing)]\n    skip_check: bool,\n}"
+      "struct Body {\n    name: String,\n    kind: String,\n    #[serde(default)]\n    runtime: String,\n    #[serde(default)]\n    provider_id: String,\n    #[serde(default)]\n    models: Vec<String>,\n    #[serde(default)]\n    default_model: String,\n    /// Optional API provider output parameter; absent leaves upstream defaults.\n    #[serde(default)]\n    max_output_tokens: Option<i64>,\n    #[serde(default)]\n    tool_version: String,\n    state: String,\n    #[serde(default)]\n    version: i64,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    connection: Option<crate::workflows::ai::Body>,\n    /// CLI-only: upstream format and per-tool options. Null for native CLI configuration.\n    #[serde(default)]\n    cli_options: Value,\n    /// CLI-only IANA zone its executions run in; empty follows the runner.\n    #[serde(default, skip_serializing_if = \"String::is_empty\")]\n    timezone: String,\n    /// CLI-only: Runner hosts to use, first preferred; empty = any ready Runner.\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    hosts: Vec<Id>,\n    /// Input only: save an API connection whose model list could not be loaded.\n    #[serde(default, skip_serializing)]\n    skip_check: bool,\n}"
     ],
     "permission_checks": [
       "ai-models.create",
@@ -1722,6 +1722,22 @@
       "conversations.read",
       "conversations.run",
       "conversations.update"
+    ],
+    "permission": "conversations.run"
+  },
+  {
+    "path": "/conversations/{id}/turns/{turn}/introduction-retries",
+    "method": "POST",
+    "handler": "retry",
+    "source": "crates/server/src/conversations/introductions.rs",
+    "signature": "async fn retry(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, turn)): Path<(String, Id, Id)>,\n    Json(body): Json<Retry>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct Retry {\n    client_id: String,\n}"
+    ],
+    "permission_checks": [
+      "conversations.read",
+      "conversations.run",
+      "credentials.use"
     ],
     "permission": "conversations.run"
   },

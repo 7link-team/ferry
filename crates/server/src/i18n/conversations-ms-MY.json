@@ -17,7 +17,7 @@
   "conversations.outputLimit": "Output melebihi had dan pelaksanaan dihentikan.",
   "conversations.fileTooLarge": "Setiap fail mestilah tidak melebihi 32 MiB.",
   "conversations.groupAgentPrivate": "Kumpulan memerlukan ejen yang dikongsi dalam ruang kerja.",
-  "conversations.apiPending": "Ejen ini menggunakan model API, yang belum boleh digunakan dalam perbualan. Pilih Ejen dengan model CLI.",
+  "conversations.apiPending": "Ejen API tidak memerlukan pemeriksaan CLI hos. Semak sambungan pada halaman model.",
   "conversations.noRunner": "Tiada Runner tersedia untuk melaksanakan model ini.",
   "conversations.cliPermissionUnsupported": "CLI ini hanya menyokong perbualan baca sahaja. Pilih akses baca sahaja.",
   "conversations.runnerUpgradeRequired": "Naik taraf Runner hos untuk mendayakan alat platform sebelum menjalankan perbualan ini.",
@@ -45,5 +45,13 @@
   "conversations.questionInvalid": "Soalan atau jawapan tidak sah. Berikan soalan yang jelas, cadangan unik, atau jawapan maksimum 4096 bait UTF-8.",
   "conversations.questionPending": "Soalan sedang menunggu jawapan atau giliran masih ditamatkan. Jangan teruskan operasi; tunggu pengguna atau cuba jawapan selepas giliran tamat.",
   "conversations.questionAnswered": "Soalan ini sudah mempunyai jawapan berbeza. Muat semula untuk melihatnya; jangan hantar jawapan bercanggah.",
-  "conversations.approvalModeInvalid": "Pilih mod kelulusan request, assisted atau yolo."
+  "conversations.approvalModeInvalid": "Pilih mod kelulusan request, assisted atau yolo.",
+  "conversations.apiContextChanged": "Profil model, penyedia atau model perbualan ini telah berubah. Pulihkan konfigurasi asal atau mulakan perbualan baharu; konteks yang disimpan dikekalkan.",
+  "conversations.apiOutputRequired": "Model Anthropic ini memerlukan had token output dalam konfigurasi modelnya. Tetapkan had itu sebelum menghantar mesej seterusnya.",
+  "conversations.introductionTask": "Jana pengenalan pertama anda dalam bahasa Melayu sekarang. Ini ialah tugas automatik, bukan mesej manusia. Gunakan hanya fakta yang dikonfigurasi dan kebenaran berkesan; beri salam ringkas, terangkan peranan dan bantuan berasas, kemudian tanya keperluan pengguna. Jangan dakwa semakan atau tindakan telah dilakukan dan jangan reka keupayaan.",
+  "conversations.introductionPermission": "Pengenalan tidak dijalankan kerana anda tiada kebenaran menjalankan atau membaca perbualan. Minta pentadbir memberikan akses, kemudian cuba semula pengenalan secara jelas.",
+  "conversations.introductionDisabled": "Pengenalan automatik dinyahdayakan. Dayakannya dalam tetapan platform sebelum mencuba semula.",
+  "conversations.introductionStale": "Pengenalan ini milik keahlian Agent terdahulu dan tidak boleh dicuba semula.",
+  "conversations.introductionCompleted": "Agent ini sudah melengkapkan pengenalannya untuk keahlian ini.",
+  "conversations.introductionRetryWarning": "Percubaan terdahulu mungkin telah menghubungi model atau menjalankan operasi dengan hasil yang tidak diketahui. Sahkan hasilnya sebelum memulakan pengenalan baharu secara jelas; panggilan model baharu mungkin menghasilkan penggunaan."
 }

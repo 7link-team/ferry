@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { randomUUID } from "../uuid";
 import { createAvatar } from "@dicebear/core";
 import * as micah from "@dicebear/micah";
 import * as adventurer from "@dicebear/adventurer";
@@ -99,11 +100,11 @@ export function AvatarEditor({ id, name, kind, value, onChange, readOnly = false
         {emojis.map(emoji => <Button type="button" key={emoji} variant={value.emoji === emoji ? "secondary" : "ghost"} className="min-h-11 min-w-11 text-2xl" aria-label={emoji} aria-pressed={value.emoji === emoji} onClick={() => onChange({ style: "emoji", emoji })}>{emoji}</Button>)}
       </div>}
       {!readOnly && ["portrait", "adventurer", "notionists", "lorelei", "pixel-art"].includes(value?.style ?? (kind === "agent" ? "pixel" : "portrait")) && <AutoField label={t("gender")} help={t("genderHelp")}><select className="h-11 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={value?.gender ?? "neutral"}
-        onChange={event => onChange({ style: value?.style ?? "portrait", gender: event.target.value as AvatarValue["gender"], seed: crypto.randomUUID() })}>
+        onChange={event => onChange({ style: value?.style ?? "portrait", gender: event.target.value as AvatarValue["gender"], seed: randomUUID() })}>
         {["neutral", "male", "female"].map(gender => <option key={gender} value={gender}>{t(gender)}</option>)}
       </select></AutoField>}
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" className="min-h-11" disabled={uploading || value?.style === "image" || value?.style === "emoji" || value?.style === "initials"} onClick={() => onChange({ style: value?.style ?? (kind === "agent" ? "pixel" : "portrait"), gender: value?.gender ?? "neutral", seed: crypto.randomUUID() })}>{t("regenerate")}</Button>
+        <Button type="button" variant="outline" className="min-h-11" disabled={uploading || value?.style === "image" || value?.style === "emoji" || value?.style === "initials"} onClick={() => onChange({ style: value?.style ?? (kind === "agent" ? "pixel" : "portrait"), gender: value?.gender ?? "neutral", seed: randomUUID() })}>{t("regenerate")}</Button>
         <Button type="button" variant="outline" className="min-h-11" disabled={uploading} onClick={() => input.current?.click()}>{t(uploading ? "processing" : "upload")}</Button>
         <input ref={input} className="hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void upload(event.target.files?.[0])} />
       </div>

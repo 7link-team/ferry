@@ -1208,7 +1208,12 @@
     "platform.sessionRefreshDays": "Refresh validity (days)",
     "platform.sessionAutoRenew": "Renew while active",
     "platform.sessionLifetimesHelp": "Applies to new logins. Renewal rotates credentials but never extends the original refresh deadline.",
-    "platform.sessionAutoRenewHelp": "Renew only during user interaction or returning to the foreground; background polling does not renew. Disabling blocks refresh immediately; existing access remains valid until expiry."
+    "platform.sessionAutoRenewHelp": "Renew only during user interaction or returning to the foreground; background polling does not renew. Disabling blocks refresh immediately; existing access remains valid until expiry.",
+    "platform.conversationIntroduction": "Model-generated introductions",
+    "platform.conversationIntroductionHelp": "New private conversations and newly added group Agents call their configured model once to introduce themselves. Uses normal model usage and availability; reopening does not repeat it. Existing conversations are not backfilled.",
+    "platform.introductionInstructions": "Introduction instructions",
+    "platform.introductionInstructionsHelp": "Applied only to the automatic introduction. Up to 16 KiB of UTF-8 text. Blank uses only the platform task. Save to apply; completed introductions are not regenerated.",
+    "platform.restoreIntroductionInstructions": "Restore default introduction instructions"
   },
   "zh-CN": {
     "runner.scopeFallback": "节点未上报服务安装方式。下方默认生成系统服务安装命令，不代表现有代理以系统服务运行；需要安装到当前用户时可切换。",
@@ -2419,7 +2424,12 @@
     "platform.sessionRefreshDays": "刷新有效期（天）",
     "platform.sessionAutoRenew": "活跃时自动续期",
     "platform.sessionLifetimesHelp": "仅对新登录生效。每次续期轮换凭证，但不延长本次登录最初的刷新截止时间。",
-    "platform.sessionAutoRenewHelp": "仅在用户操作或返回前台时续期；后台轮询不会续期。关闭后立即禁止刷新，已签发的访问凭证保留至到期。"
+    "platform.sessionAutoRenewHelp": "仅在用户操作或返回前台时续期；后台轮询不会续期。关闭后立即禁止刷新，已签发的访问凭证保留至到期。",
+    "platform.conversationIntroduction": "自动调用模型介绍",
+    "platform.conversationIntroductionHelp": "新建单聊或智能体入群时，调用其配置的模型介绍一次，会产生正常用量并依赖模型可用性。重新打开不重复，已有会话不补发。",
+    "platform.introductionInstructions": "首次介绍指令",
+    "platform.introductionInstructionsHelp": "仅用于自动介绍，最多 16 KiB UTF-8 文本。留空仅保留平台介绍任务。保存后生效，不重新生成已完成的介绍。",
+    "platform.restoreIntroductionInstructions": "恢复默认介绍指令"
   },
   "zh-TW": {
     "runner.scopeFallback": "節點未回報服務安裝方式。下方預設產生系統服務安裝命令，不代表現有代理以系統服務運行；需要安裝到目前使用者時可切換。",
@@ -3630,7 +3640,12 @@
     "platform.sessionRefreshDays": "更新有效期（天）",
     "platform.sessionAutoRenew": "使用時自動續期",
     "platform.sessionLifetimesHelp": "僅對新登入生效。每次續期輪換憑證，但不延長本次登入最初的更新截止時間。",
-    "platform.sessionAutoRenewHelp": "僅於使用者操作或返回前景時續期；背景輪詢不會續期。關閉後立即禁止更新，既有存取憑證保留至到期。"
+    "platform.sessionAutoRenewHelp": "僅於使用者操作或返回前景時續期；背景輪詢不會續期。關閉後立即禁止更新，既有存取憑證保留至到期。",
+    "platform.conversationIntroduction": "自動呼叫模型介紹",
+    "platform.conversationIntroductionHelp": "新建單聊或智慧體加入群組時，呼叫其設定的模型介紹一次，會產生正常用量並依賴模型可用性。重新開啟不重複，既有對話不補發。",
+    "platform.introductionInstructions": "首次介紹指示",
+    "platform.introductionInstructionsHelp": "僅用於自動介紹，最多 16 KiB UTF-8 文字。留空僅保留平台介紹任務。儲存後生效，不重新產生已完成的介紹。",
+    "platform.restoreIntroductionInstructions": "還原預設介紹指示"
   },
   "ja-JP": {
     "runner.scopeFallback": "ノードからサービスのインストール範囲が報告されていません。コマンドの既定値はシステムサービスですが、現在のエージェントの実行方式を示すものではありません。必要に応じて現在のユーザーに切り替えてください。",
@@ -4841,7 +4856,12 @@
     "platform.sessionRefreshDays": "更新有効期間（日）",
     "platform.sessionAutoRenew": "操作中に自動更新",
     "platform.sessionLifetimesHelp": "新しいログインに適用されます。更新で認証情報を交換しますが、最初の更新期限は延長しません。",
-    "platform.sessionAutoRenewHelp": "ユーザー操作や画面への復帰時だけ更新します。バックグラウンドのポーリングでは更新しません。無効にすると更新を即座に停止し、既存のアクセスは期限まで有効です。"
+    "platform.sessionAutoRenewHelp": "ユーザー操作や画面への復帰時だけ更新します。バックグラウンドのポーリングでは更新しません。無効にすると更新を即座に停止し、既存のアクセスは期限まで有効です。",
+    "platform.conversationIntroduction": "モデルによる自動自己紹介",
+    "platform.conversationIntroductionHelp": "新規の個別会話やグループに追加されたエージェントが、設定されたモデルで一度だけ自己紹介します。通常の使用量が発生し、モデルの稼働が必要です。再度開いても繰り返さず、既存の会話には追加しません。",
+    "platform.introductionInstructions": "自己紹介の指示",
+    "platform.introductionInstructionsHelp": "自動自己紹介にのみ適用します。UTF-8で最大16 KiB。空欄ではプラットフォームのタスクのみ使用します。保存後に適用し、完了済みの紹介は再生成しません。",
+    "platform.restoreIntroductionInstructions": "既定の自己紹介指示に戻す"
   },
   "ko-KR": {
     "runner.scopeFallback": "노드가 서비스 설치 범위를 보고하지 않았습니다. 명령의 기본값은 시스템 서비스이며 현재 에이전트의 실행 방식을 뜻하지 않습니다. 필요하면 현재 사용자로 전환하세요.",
@@ -6052,7 +6072,12 @@
     "platform.sessionRefreshDays": "갱신 유효 기간(일)",
     "platform.sessionAutoRenew": "사용 중 자동 갱신",
     "platform.sessionLifetimesHelp": "새 로그인에 적용됩니다. 갱신 시 인증 정보를 교체하지만 최초 갱신 기한은 연장하지 않습니다.",
-    "platform.sessionAutoRenewHelp": "사용자 조작이나 화면 복귀 시에만 갱신하며 백그라운드 폴링으로는 갱신하지 않습니다. 끄면 갱신이 즉시 차단되고 기존 접근 권한은 만료까지 유지됩니다."
+    "platform.sessionAutoRenewHelp": "사용자 조작이나 화면 복귀 시에만 갱신하며 백그라운드 폴링으로는 갱신하지 않습니다. 끄면 갱신이 즉시 차단되고 기존 접근 권한은 만료까지 유지됩니다.",
+    "platform.conversationIntroduction": "모델 자동 소개",
+    "platform.conversationIntroductionHelp": "새 개인 대화나 그룹에 추가된 에이전트가 설정된 모델로 한 번 소개합니다. 일반 사용량이 발생하며 모델이 사용 가능해야 합니다. 다시 열어도 반복하지 않고 기존 대화에는 추가하지 않습니다.",
+    "platform.introductionInstructions": "첫 소개 지침",
+    "platform.introductionInstructionsHelp": "자동 소개에만 적용됩니다. UTF-8 텍스트 최대 16 KiB입니다. 비워 두면 플랫폼 작업만 사용합니다. 저장 후 적용되며 완료된 소개는 다시 생성하지 않습니다.",
+    "platform.restoreIntroductionInstructions": "기본 소개 지침 복원"
   },
   "ms-MY": {
     "runner.scopeFallback": "Nod belum melaporkan skop pemasangan perkhidmatan. Arahan lalai ialah perkhidmatan sistem; ini tidak menerangkan ejen yang sedang berjalan. Pilih Pengguna semasa jika diperlukan.",
@@ -7263,6 +7288,11 @@
     "platform.sessionRefreshDays": "Tempoh pembaharuan (hari)",
     "platform.sessionAutoRenew": "Perbaharui semasa aktif",
     "platform.sessionLifetimesHelp": "Digunakan untuk log masuk baharu. Pembaharuan menggilir bukti kelayakan tanpa melanjutkan tarikh tamat pembaharuan asal.",
-    "platform.sessionAutoRenewHelp": "Perbaharui hanya semasa interaksi pengguna atau kembali ke latar depan; tinjauan latar belakang tidak memperbaharui sesi. Mematikannya menyekat pembaharuan serta-merta; akses sedia ada kekal sehingga tamat."
+    "platform.sessionAutoRenewHelp": "Perbaharui hanya semasa interaksi pengguna atau kembali ke latar depan; tinjauan latar belakang tidak memperbaharui sesi. Mematikannya menyekat pembaharuan serta-merta; akses sedia ada kekal sehingga tamat.",
+    "platform.conversationIntroduction": "Pengenalan automatik oleh model",
+    "platform.conversationIntroductionHelp": "Perbualan peribadi baharu dan Ejen yang baru ditambah ke kumpulan memanggil model yang dikonfigurasi sekali untuk memperkenalkan diri. Menggunakan penggunaan biasa dan memerlukan model tersedia. Membuka semula tidak mengulanginya. Perbualan sedia ada tidak menerima pengenalan tambahan.",
+    "platform.introductionInstructions": "Arahan pengenalan",
+    "platform.introductionInstructionsHelp": "Digunakan untuk pengenalan automatik sahaja. Teks UTF-8 sehingga 16 KiB. Jika kosong, hanya tugas platform digunakan. Simpan untuk menerapkan; pengenalan yang selesai tidak dijana semula.",
+    "platform.restoreIntroductionInstructions": "Pulihkan arahan pengenalan lalai"
   }
 }

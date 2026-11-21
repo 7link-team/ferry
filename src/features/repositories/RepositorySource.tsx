@@ -1,4 +1,5 @@
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
+import { randomUUID } from "../../shared/uuid";
 import { useEffect,useRef,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
 import { named } from "../../shared/api/resource";
@@ -114,7 +115,7 @@ export function RepositorySource({ navigation, workspace, draft, readOnly, onCha
     closeAuthorization(); popup.current = opened;
     const request = authorizationRequest.current;
     setWaiting(true); setAuthorizationError("");
-    const key = crypto.randomUUID();
+    const key = randomUUID();
     const broadcast = new BroadcastChannel(`repository-authorized-${key}`); channel.current = broadcast;
     broadcast.onmessage = event => {
       if (request !== authorizationRequest.current || channel.current !== broadcast || event.data?.type !== "repository-authorized" || event.data.provider !== provider) return;

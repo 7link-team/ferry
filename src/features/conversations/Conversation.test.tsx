@@ -4,9 +4,41 @@ import { createRoot } from "react-dom/client";
 import { Conversation, conversationTimeline } from "./Conversation";
 import * as apiModule from "../../shared/api/api";
 import { conversationText } from "./resource-config";
+import { workflowText } from "../../shared/i18n/i18n";
 
 type Message = Parameters<typeof conversationTimeline>[0][number];
 type Turn = Parameters<typeof conversationTimeline>[1][number];
+
+it.each(["private", "group"])("shows server execution for an API Agent in a %s conversation", async kind => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  const row = {
+    id: "2", title: "API conversation", kind, state: "active", viewer_id: "2", owner_id: "2", agent_id: "1",
+    can_manage: true, members: [], agents: kind === "group" ? [{ id: "1", name: "API Agent", runtime: "api", model: "model" }] : [],
+    messages: [], turns: [], version: 1, revision_id: "1", members_version: "1",
+    config: { name: "API Agent", runtime: "api", model: "model", cwd: "" }, binding: null, host: null,
+  };
+  const mocked = vi.spyOn(apiModule, "api").mockImplementation(async path => String(path).includes("/events?")
+    ? { items: [], next: 0, has_more: false } as never : structuredClone(row) as never);
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<Conversation workspace="1" id="2" permissions={new Set(["conversations.read"])} />));
+    expect(host.querySelector("header")?.textContent).toContain(workflowText("execution.server"));
+    expect(host.querySelector("header")?.textContent).not.toContain(conversationText("hostPending"));
+    const info = host.querySelector<HTMLButtonElement>(`button[aria-label="${conversationText(kind === "group" ? "conversationMembers" : "conversationInfo")}"]`)!;
+    await act(async () => info.click());
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).not.toContain(conversationText("hostPending"));
+    if (kind === "private") expect(dialog.textContent).not.toContain(conversationText("directory"));
+    const member = [...dialog.querySelectorAll("button")].find(button => button.textContent?.includes("API Agent"))!;
+    await act(async () => member.click());
+    expect(dialog.textContent).toContain(workflowText("execution.server"));
+    expect(dialog.textContent).toContain(conversationText("executionLocation"));
+    expect(dialog.textContent).not.toContain(conversationText("executionHost"));
+  } finally {
+    await act(async () => root.unmount()); host.remove(); mocked.mockRestore(); vi.unstubAllGlobals();
+  }
+});
 
 it("keeps reply context and draft after failure, then clears them only after a successful send", async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -278,4 +310,64 @@ it("offers another host only for that failure", async () => {
   } finally {
     await act(async()=>root.unmount());host.remove();mocked.mockRestore();vi.unstubAllGlobals();
   }
+});
+
+it.each(['private', 'group'])("retries a failed model introduction without sending a human message in %s", async kind => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  const intro = { ...turn('10'), purpose: 'introduction', introduction_id: '10', state: 'failed', prompt: '', error: 'Model unavailable', can_retry_introduction: true, introduction_retry_warning: 'Previous response may have been charged.' };
+  const row = { id: '2', title: 'Introduction', kind, state: 'active', viewer_id: '2', owner_id: '2', agent_id: '1', can_manage: true, members: [], agents: kind === 'group' ? [{ id: '1', name: 'Agent', runtime: 'api', state: 'active' }] : [], messages: [], turns: [intro], version: 1, revision_id: '1', members_version: '1', config: { name: 'Agent', runtime: 'api', model: 'model', cwd: '' }, binding: null };
+  const posts: { path: string; body: Record<string, unknown> }[] = [];
+  let fail = true;
+  const mocked = vi.spyOn(apiModule, 'api').mockImplementation(async (path, options) => {
+    if (String(path).includes('/events?')) return { items: [], next: 0, has_more: false } as never;
+    if (options?.method === 'POST') {
+      posts.push({ path: String(path), body: JSON.parse(String(options.body)) });
+      if (fail) throw Error('Temporary failure');
+      row.turns[0] = { ...intro, can_retry_introduction: false, state: 'queued' };
+      return {} as never;
+    }
+    return structuredClone(row) as never;
+  });
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<Conversation workspace='1' id='2' permissions={new Set(['conversations.read', 'conversations.run'])} initialDraft={{ prompt: 'My draft', attachments: [] }} />));
+    expect(host.textContent).toContain(conversationText('modelIntroduction'));
+    expect(host.textContent).toContain(intro.introduction_retry_warning);
+    expect(host.textContent).not.toContain(conversationText('retryLastTurn'));
+    let retry = [...host.querySelectorAll('button')].find(button => button.textContent?.includes(conversationText('retryIntroduction')))!;
+    expect(retry).toBeDefined();
+    await act(async () => retry.click());
+    expect(host.textContent).toContain('Temporary failure');
+    fail = false;
+    retry = [...host.querySelectorAll('button')].find(button => button.textContent?.includes(conversationText('retryIntroduction')))!;
+    await act(async () => retry.click());
+    expect(posts).toHaveLength(2);
+    expect(posts[0]?.path).toBe('/workspaces/1/conversations/2/turns/10/introduction-retries');
+    expect(posts[0]?.body.client_id).toBe(posts[1]?.body.client_id);
+    expect(posts[0]?.body).not.toHaveProperty('prompt');
+    expect(host.querySelector<HTMLTextAreaElement>('#conversation-message')?.value).toBe('My draft');
+    expect(host.textContent).not.toContain(conversationText('retryIntroduction'));
+  } finally { await act(async () => root.unmount()); host.remove(); mocked.mockRestore(); vi.unstubAllGlobals(); }
+});
+
+it('starts a fresh explicit introduction retry after a confirmed attempt also fails', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  const intro = { ...turn('10'), purpose: 'introduction', introduction_id: '10', state: 'failed', prompt: '', error: 'Model unavailable', can_retry_introduction: true };
+  const row = { id: '2', title: 'Introduction', kind: 'private', state: 'active', viewer_id: '2', owner_id: '2', agent_id: '1', can_manage: true, members: [], agents: [], messages: [], turns: [intro], version: 1, revision_id: '1', members_version: '1', config: { name: 'Agent', runtime: 'api', model: 'model', cwd: '' }, binding: null };
+  const tokens: string[] = [];
+  const mocked = vi.spyOn(apiModule, 'api').mockImplementation(async (path, options) => {
+    if (String(path).includes('/events?')) return { items: [], next: 0, has_more: false } as never;
+    if (options?.method === 'POST') { tokens.push(JSON.parse(String(options.body)).client_id); return { id: String(10 + tokens.length) } as never; }
+    // The accepted new attempt failed before this refresh; the root is retryable again.
+    return structuredClone(row) as never;
+  });
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<Conversation workspace='1' id='2' permissions={new Set(['conversations.read', 'conversations.run'])} />));
+    for (let attempt = 0; attempt < 2; attempt++) await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent?.includes(conversationText('retryIntroduction')))!.click());
+    expect(tokens).toHaveLength(2);
+    expect(tokens[1]).not.toBe(tokens[0]);
+  } finally { await act(async () => root.unmount()); host.remove(); mocked.mockRestore(); vi.unstubAllGlobals(); }
 });

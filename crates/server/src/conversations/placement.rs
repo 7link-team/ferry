@@ -230,7 +230,12 @@ async fn current(
     binding: &Binding,
     login_usable: impl Fn(&str) -> bool,
 ) -> std::result::Result<(hosts::Model, Box<dyn HostChannel>, FileCapability), Unusable> {
-    let cli = agent_hosts::cli_name(config.runtime);
+    let runtime = config.runtime.cli().map_err(|_| Unusable {
+        host: None,
+        reason: Message::new("conversations.invalid"),
+        same_host_ok: false,
+    })?;
+    let cli = agent_hosts::cli_name(runtime);
     let host = hosts::Entity::find_by_id(config.host_id)
         .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
         .one(&s.db)
@@ -266,7 +271,7 @@ async fn current(
         let reached =
             match crate::hosts::remote::open(s, &scope.workspace_id, &config.host_id).await {
                 Ok(channel) => match channel
-                    .agent_probe(config.runtime, &config.cwd, Some(binding))
+                    .agent_probe(runtime, &config.cwd, Some(binding))
                     .await
                 {
                     Ok(probe) => Ok((channel, probe)),
@@ -327,7 +332,7 @@ async fn allocate(
     candidates: Vec<hosts::Model>,
     login_usable: impl Fn(&str) -> bool + Copy,
 ) -> std::result::Result<(hosts::Model, Box<dyn HostChannel>, Binding, FileCapability), Unplaced> {
-    let cli = agent_hosts::cli_name(config.runtime);
+    let cli = agent_hosts::cli_name(config.runtime.cli()?);
     let mut reasons = Reasons::default();
     for host in candidates {
         if host.state != "online" {
@@ -353,10 +358,12 @@ async fn allocate(
                 }
             };
         let probe = if pinned && !config.cwd.is_empty() {
-            channel.agent_probe(config.runtime, &config.cwd, None).await
+            channel
+                .agent_probe(config.runtime.cli()?, &config.cwd, None)
+                .await
         } else {
             channel
-                .agent_workspace(config.runtime, &format!("{}-{}", c.id, agent.id))
+                .agent_workspace(config.runtime.cli()?, &format!("{}-{}", c.id, agent.id))
                 .await
         };
         let probe = match probe {

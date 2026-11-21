@@ -1,9 +1,11 @@
 //! Private conversations; HTTP owns authorization, the scheduler owns execution.
+mod api;
 mod appearance;
 mod approval;
 mod files;
 mod groups;
 mod interactions;
+mod introductions;
 pub(crate) mod messages;
 mod placement;
 mod questions;
@@ -61,6 +63,7 @@ pub fn routes() -> Router<AppState> {
             axum::routing::put(approval::update),
         )
         .route("/{workspace}/conversations/{id}/turns", post(send))
+        .merge(introductions::routes())
         .route(
             "/{workspace}/conversations/{id}/turns/{turn}/question-answers",
             post(questions::answer),
@@ -195,11 +198,52 @@ pub(super) async fn usable(
     }
     Ok(row)
 }
+/// Conversation transport is local to the server; API never enters Runner protocol.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub(crate) enum Runtime {
+    Api,
+    Cli(ferry_protocol::agent::Runtime),
+}
+impl Runtime {
+    pub(crate) fn cli(self) -> Result<ferry_protocol::agent::Runtime> {
+        match self {
+            Self::Cli(runtime) => Ok(runtime),
+            Self::Api => Err(invalid()),
+        }
+    }
+}
+impl TryFrom<String> for Runtime {
+    type Error = String;
+    fn try_from(value: String) -> std::result::Result<Self, String> {
+        if value == "api" {
+            Ok(Self::Api)
+        } else {
+            ferry_protocol::agent::Runtime::parse(&value)
+                .map(Self::Cli)
+                .ok_or_else(|| "Invalid conversation runtime".into())
+        }
+    }
+}
+impl From<Runtime> for String {
+    fn from(runtime: Runtime) -> Self {
+        match runtime {
+            Runtime::Api => "api".into(),
+            Runtime::Cli(cli) => serde_json::to_value(cli)
+                .expect("runtime string")
+                .as_str()
+                .expect("runtime string")
+                .into(),
+        }
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Configuration {
+    #[serde(default, skip_serializing_if = "is_zero_id")]
+    pub introduction_turn_id: Id,
     #[serde(default = "approval::default_mode")]
     pub approval_mode: String,
-    pub runtime: ferry_protocol::agent::Runtime,
+    pub runtime: Runtime,
     pub cwd: String,
     pub host_id: Id,
     pub model: String,
@@ -231,7 +275,10 @@ impl Configuration {
             || (authentication == "unknown"
                 && !matches!(
                     self.runtime,
-                    ferry_protocol::agent::Runtime::Codex | ferry_protocol::agent::Runtime::Claude
+                    Runtime::Cli(
+                        ferry_protocol::agent::Runtime::Codex
+                            | ferry_protocol::agent::Runtime::Claude
+                    )
                 ))
     }
     fn for_conversation(a: &ai_agents::Model, body: &Create) -> Result<Self> {
@@ -242,11 +289,15 @@ impl Configuration {
         if let Some(permission) = body.permission {
             config.permission = permission;
         }
-        if (matches!(config.runtime, ferry_protocol::agent::Runtime::Pi)
-            && config.permission != ferry_protocol::agent::Permission::ReadOnly)
+        if (matches!(
+            config.runtime,
+            Runtime::Cli(ferry_protocol::agent::Runtime::Pi)
+        ) && config.permission != ferry_protocol::agent::Permission::ReadOnly)
             || (matches!(
                 config.runtime,
-                ferry_protocol::agent::Runtime::Kimi | ferry_protocol::agent::Runtime::Grok
+                Runtime::Cli(
+                    ferry_protocol::agent::Runtime::Kimi | ferry_protocol::agent::Runtime::Grok
+                )
             ) && config.permission == ferry_protocol::agent::Permission::ReadOnly)
         {
             return Err(error(
@@ -267,8 +318,9 @@ impl Configuration {
     }
     pub(crate) fn from_agent(a: &ai_agents::Model) -> Result<Self> {
         Ok(Self {
+            introduction_turn_id: Id::default(),
             approval_mode: approval::default_mode(),
-            runtime: ferry_protocol::agent::Runtime::parse(&a.runtime).ok_or_else(invalid)?,
+            runtime: Runtime::try_from(a.runtime.clone()).map_err(|_| invalid())?,
             cwd: a.cwd.clone(),
             host_id: a.host_id.into(),
             model: a.model.clone(),
@@ -290,6 +342,7 @@ fn view(c: &conversations::Model) -> Value {
     let mut config = serde_json::from_str::<Value>(&c.config).unwrap_or(Value::Null);
     if let Some(object) = config.as_object_mut() {
         object.remove("runner_key_hash");
+        object.remove("introduction_turn_id");
     }
     json!({"id":Id::from(c.id),"agent_id":Id::from(c.agent_id),"revision_id":Id::from(c.revision_id),"title":c.title,"state":c.state,
         "agent_name":serde_json::from_str::<Value>(&c.config).ok().and_then(|v|v["name"].as_str().map(str::to_owned)),
@@ -307,7 +360,7 @@ pub(super) fn view_turn(t: &turns::Model) -> Value {
     }
     // The message identity lets the page offer the matching action (e.g. another host).
     let error_key = crate::i18n::decode_stored(&t.error).map(|message| message.key);
-    json!({"id":Id::from(t.id),"state":t.state,"prompt":t.prompt,"attachments":serde_json::from_str::<Value>(&t.attachments).unwrap_or(json!([])),
+    json!({"id":Id::from(t.id),"state":t.state,"prompt":t.prompt,"purpose":t.purpose,"introduction_id":Id::from(t.introduction_id),"introduction_locale":t.introduction_locale,"attachments":serde_json::from_str::<Value>(&t.attachments).unwrap_or(json!([])),
         "error":crate::i18n::render_stored(crate::i18n::current_locale(),&t.error),"error_key":error_key,"usage":serde_json::from_str::<Value>(&t.usage).unwrap_or(Value::Null),"decisions":decisions,
         "owner_id":Id::from(t.owner_id),"created_at":t.created_at,"updated_at":t.updated_at})
 }
@@ -506,6 +559,7 @@ async fn create(
     .exec(&tx)
     .await?;
     groups::insert(&s, &tx, &scope, id, &body, extra).await?;
+    introductions::created(&s, &tx, &scope, id).await?;
     crate::hosts::activity_in(
         &s,
         &tx,
@@ -529,10 +583,15 @@ async fn prepare_execution(
     body: &Create,
 ) -> Result<Configuration> {
     let resolved = crate::agents::resolve_model(&s.db, agent).await?;
-    if resolved.runtime == "api" {
-        return Err(error(StatusCode::CONFLICT, "conversations.apiPending"));
-    }
     let mut config = Configuration::for_conversation(&resolved, body)?;
+    if config.runtime == Runtime::Api {
+        if body.host_id.is_some_and(|id| i64::from(id) != 0)
+            || body.cwd.as_ref().is_some_and(|v| !v.trim().is_empty())
+        {
+            return Err(invalid());
+        }
+        return Ok(config);
+    }
     if let Some(host) = body.host_id.filter(|id| i64::from(*id) != 0) {
         scope.require("hosts.update")?;
         crate::entities::hosts::Entity::find_by_id(host)
@@ -573,6 +632,7 @@ async fn detail(
     );
     groups::detail(&s.db, &c, &mut value).await?;
     interactions::decorate(&s.db, &scope, &c, &mut value).await?;
+    introductions::decorate(&s, &scope, &c, &mut value).await?;
     Ok(Json(value))
 }
 #[derive(Deserialize)]
@@ -662,6 +722,11 @@ async fn remove(
         return Err(error(StatusCode::CONFLICT, "conversations.busy"));
     }
     files::detach_all(&tx, id).await?;
+    crate::entities::ai_chat_api_sessions::Entity::delete_many()
+        .filter(crate::entities::ai_chat_api_sessions::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(crate::entities::ai_chat_api_sessions::Column::ConversationId.eq(id))
+        .exec(&tx)
+        .await?;
     groups::delete(&tx, id).await?;
     interactions::delete(&tx, id).await?;
     events::Entity::delete_many()
@@ -768,6 +833,9 @@ async fn send(
     let turn = s.next_id()?;
     let now = db::now();
     let row = turns::Model {
+        purpose: "message".into(),
+        introduction_id: 0,
+        introduction_locale: String::new(),
         id: turn.into(),
         workspace_id: scope.workspace_id.into(),
         conversation_id: id.into(),

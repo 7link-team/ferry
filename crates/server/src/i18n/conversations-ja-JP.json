@@ -17,7 +17,7 @@
   "conversations.outputLimit": "出力が上限を超えたため、実行を停止しました。",
   "conversations.fileTooLarge": "各ファイルは32 MiB以下にしてください。",
   "conversations.groupAgentPrivate": "グループにはワークスペース共有のエージェントが必要です。",
-  "conversations.apiPending": "このエージェントは API モデルを使用しており、まだ会話では使えません。CLI モデルのエージェントを選んでください。",
+  "conversations.apiPending": "API エージェントではホストの CLI 確認は不要です。モデルページで接続を確認してください。",
   "conversations.noRunner": "このモデルを実行できる Runner がありません。",
   "conversations.cliPermissionUnsupported": "このCLIは読み取り専用の会話にのみ対応しています。",
   "conversations.runnerUpgradeRequired": "プラットフォームツールを有効にするには、ホストの Runner を更新してください。",
@@ -45,5 +45,13 @@
   "conversations.questionInvalid": "質問または回答が無効です。明確な質問、一意の選択肢、4096 バイト以下の回答を指定してください。",
   "conversations.questionPending": "回答待ちの質問があるか、ターンを終了中です。操作を続けず、回答またはターン終了を待ってください。",
   "conversations.questionAnswered": "この質問には別の回答があります。更新して確認してください。",
-  "conversations.approvalModeInvalid": "承認モードは request、assisted、yolo から選択してください。"
+  "conversations.approvalModeInvalid": "承認モードは request、assisted、yolo から選択してください。",
+  "conversations.apiContextChanged": "この会話のモデル設定、プロバイダー、またはモデルが変更されました。元の設定に戻すか、新しい会話を開始してください。保存済みのコンテキストは保持されています。",
+  "conversations.apiOutputRequired": "この Anthropic モデルには、モデル設定で出力トークン数の上限を指定する必要があります。次のメッセージを送信する前に上限を設定してください。",
+  "conversations.introductionTask": "今、日本語で最初の自己紹介を生成してください。これは自動タスクであり、人間のメッセージではありません。設定された事実と有効な権限だけに基づき、短く挨拶して役割と提供できる支援を説明し、ユーザーの希望を尋ねてください。実行していない確認や操作を主張せず、機能を創作しないでください。",
+  "conversations.introductionPermission": "会話の実行または閲覧権限がないため、紹介を実行しませんでした。管理者に権限を付与してもらってから、紹介を明示的に再試行してください。",
+  "conversations.introductionDisabled": "自動紹介は無効です。再試行する前にプラットフォーム設定で有効にしてください。",
+  "conversations.introductionStale": "この紹介は以前の Agent メンバーシップに属しているため、再試行できません。",
+  "conversations.introductionCompleted": "この Agent は今回のメンバーシップの紹介を完了しています。",
+  "conversations.introductionRetryWarning": "以前の試行でモデルへの要求や操作が実行され、結果が不明な場合があります。結果を確認してから、新しい紹介を明示的に開始してください。新たなモデル呼び出しで使用量が発生する場合があります。"
 }

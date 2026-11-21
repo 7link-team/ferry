@@ -117,6 +117,7 @@ impl MigrationTrait for Migration {
                         provider_id: 0,
                         models: serde_json::to_string(&models).unwrap(),
                         default_model: agent.model.clone(),
+                        max_output_tokens: None,
                         tool_version: String::new(),
                         state: "enabled".into(),
                         cli_options: None,

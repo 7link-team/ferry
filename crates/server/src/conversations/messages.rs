@@ -73,6 +73,9 @@ pub(super) async fn reply_context(
     turn: &turns::Model,
     budget: usize,
 ) -> Result<String> {
+    if turn.purpose == "introduction" {
+        return Ok(String::new());
+    }
     let message = links::Entity::find_by_id(turn.id)
         .one(conn)
         .await?
@@ -164,7 +167,7 @@ fn assistant_message(
     c: &conversations::Model,
     id: i64,
     created_at: i64,
-    reply_to: i64,
+    reply_to: Option<i64>,
 ) -> chat::Model {
     chat::Model {
         id,
@@ -179,7 +182,7 @@ fn assistant_message(
         role: "assistant".into(),
         agent_id: c.agent_id,
         turn_id: Some(turn.id),
-        reply_to: Some(reply_to),
+        reply_to,
         sender_name: serde_json::from_str::<Value>(&c.config)
             .ok()
             .and_then(|v| v["name"].as_str().map(str::to_owned))
@@ -211,6 +214,7 @@ pub(super) async fn attach_files(
         .await?
         .map(|link| link.message_id)
         .unwrap_or(turn.id);
+    let parent = (turn.purpose != "introduction").then_some(parent);
     let mut row = old.unwrap_or_else(|| assistant_message(turn, c, id, db::now(), parent));
     let mut list: Vec<Attachment> =
         serde_json::from_str(&row.attachments).map_err(|_| invalid())?;
@@ -247,6 +251,7 @@ pub(super) async fn append_text(
         .await?
         .map(|link| link.message_id)
         .unwrap_or(turn.id);
+    let parent = (turn.purpose != "introduction").then_some(parent);
     let mut row = old.unwrap_or_else(|| assistant_message(turn, c, event_id, db::now(), parent));
     let mut parts: Vec<TextPart> =
         serde_json::from_str(row.text_items.as_deref().unwrap_or("[]")).map_err(|_| invalid())?;
@@ -281,7 +286,11 @@ pub(crate) async fn backfill(conn: &impl ConnectionTrait) -> std::result::Result
             after = turn.id;
             let link = links::Entity::find_by_id(turn.id).one(conn).await?;
             let parent = link.as_ref().map(|link| link.message_id).unwrap_or(turn.id);
-            if link.is_none() && chat::Entity::find_by_id(turn.id).one(conn).await?.is_none() {
+            let parent = (turn.purpose != "introduction").then_some(parent);
+            if turn.purpose != "introduction"
+                && link.is_none()
+                && chat::Entity::find_by_id(turn.id).one(conn).await?.is_none()
+            {
                 chat::Entity::insert(private_message(&turn).into_active_model())
                     .exec(conn)
                     .await?;

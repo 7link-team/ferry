@@ -469,6 +469,16 @@ pub(super) async fn members(
             old.binding = super::placement::UNBOUND.into();
             old.revision_id = a.revision_id;
             old.native_session_id.clear();
+            // Explicit re-add starts a fresh context, matching the CLI snapshot lifecycle.
+            crate::entities::ai_chat_api_sessions::Entity::delete_many()
+                .filter(
+                    crate::entities::ai_chat_api_sessions::Column::WorkspaceId
+                        .eq(scope.workspace_id),
+                )
+                .filter(crate::entities::ai_chat_api_sessions::Column::ConversationId.eq(id))
+                .filter(crate::entities::ai_chat_api_sessions::Column::AgentId.eq(a.id))
+                .exec(&tx)
+                .await?;
             old.into_active_model().reset_all().update(&tx).await?;
         } else {
             agents::Entity::insert(
@@ -488,6 +498,7 @@ pub(super) async fn members(
             .exec(&tx)
             .await?;
         }
+        super::introductions::added(&s, &tx, &scope, id, a.id).await?;
     }
     c.version += 1;
     c.updated_at = db::now();

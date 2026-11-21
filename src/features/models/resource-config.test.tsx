@@ -39,6 +39,56 @@ afterEach(async () => {
 const config = () => modelsForms({ workspace: "ops", permissions } as never)["ai-models"]!;
 const submit = () => act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
 
+it.each([null, 65536])("saves optional API conversation output tokens as %s without adding a default cap", async value => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-models/11/edit");
+  stored = {
+    id: "11", name: "API", kind: "api", runtime: "", provider_id: "8", models: ["m"], default_model: "m",
+    tool_version: "", state: "enabled", version: 1, max_output_tokens: 2048,
+    connection: { name: "API", protocol: "openai", base_url: "https://api.example.invalid/v1", credential_id: "3", qps: 1, concurrency: 1, version: 1 },
+  };
+  await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
+  const input = host.querySelector<HTMLInputElement>('input[name="max_output_tokens"]');
+  expect(input).not.toBeNull();
+  await act(async () => type(input!, value === null ? "" : String(value)));
+  await submit();
+  const saved = requests.find(request => request.method === "PATCH" || request.method === "PUT");
+  expect(saved).toBeDefined();
+  expect(JSON.parse(saved!.body!).max_output_tokens).toBe(value);
+});
+
+it("clears API output parameters when switching model kind", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-models/11/edit");
+  stored = {
+    id: "11", name: "API", kind: "api", runtime: "", provider_id: "8", models: ["m"], default_model: "m",
+    tool_version: "", state: "enabled", version: 1, max_output_tokens: 65536,
+    connection: { name: "API", protocol: "openai", base_url: "https://api.example.invalid/v1", credential_id: "3", qps: 1, concurrency: 1, version: 1 },
+  };
+  await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
+  expect(host.querySelector<HTMLInputElement>('input[name="max_output_tokens"]')?.value).toBe("65536");
+  await choose("kind", "cli");
+  expect(host.querySelector('input[name="max_output_tokens"]')).toBeNull();
+  await choose("kind", "api");
+  expect(host.querySelector<HTMLInputElement>('input[name="max_output_tokens"]')?.value).toBe("");
+});
+
+it.each([0, 1.5, 10000000000000000])("rejects invalid output tokens %s and can recover by clearing the value", async value => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/ai-models/11/edit");
+  stored = {
+    id: "11", name: "API", kind: "api", runtime: "", provider_id: "8", models: ["m"], default_model: "m",
+    tool_version: "", state: "enabled", version: 1, max_output_tokens: null,
+    connection: { name: "API", protocol: "openai", base_url: "https://api.example.invalid/v1", credential_id: "3", qps: 1, concurrency: 1, version: 1 },
+  };
+  await act(async () => root.render(<ResourceForm config={config()} workspace="ops" permissions={permissions} />));
+  const input = host.querySelector<HTMLInputElement>('input[name="max_output_tokens"]')!;
+  await act(async () => type(input, String(value)));
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(i18n.t("models:maxOutputInvalid"));
+  await submit();
+  expect(requests.some(request => request.method === "PATCH" || request.method === "PUT")).toBe(false);
+  await act(async () => type(input, ""));
+  await submit();
+  expect(JSON.parse(requests.find(request => request.method === "PATCH" || request.method === "PUT")!.body!).max_output_tokens).toBeNull();
+});
+
 it("ships CC Switch presets with clean, unique endpoints", () => {
   expect(providerPresets.length).toBeGreaterThan(50);
   expect(new Set(providerPresets.map((p) => p.name)).size).toBe(providerPresets.length);

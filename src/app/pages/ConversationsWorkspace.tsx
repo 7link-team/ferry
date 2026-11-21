@@ -295,7 +295,7 @@ export function ConversationsWorkspace({
   );
   const mobileButton = (
     <Button
-      className="sm:hidden"
+      className="size-11 md:hidden"
       variant="ghost"
       size="icon"
       aria-label={t("conversationList")}
@@ -305,12 +305,12 @@ export function ConversationsWorkspace({
     </Button>
   );
   return (
-    <div className="grid min-h-0 min-w-0 grid-cols-1 sm:grid-cols-[260px_minmax(0,1fr)]">
-      <aside className="hidden min-h-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground sm:flex">
+    <div className="grid min-h-0 min-w-0 grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)]">
+      <aside className="hidden min-h-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex">
         {sidebar}
       </aside>
       <main className="relative flex min-h-0 min-w-0 flex-col">
-        <div className="absolute left-2 top-3 z-10 sm:hidden">
+        <div className="absolute left-2 top-3 z-10 md:hidden">
           {mobileButton}
         </div>
         {!readable ? (
@@ -367,10 +367,10 @@ export function ConversationsWorkspace({
       </main>
       <Dialog.Root open={mobile} onOpenChange={setMobile}>
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40 sm:hidden" />
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40 md:hidden" />
           <Dialog.Content
             aria-describedby={undefined}
-            className="fixed inset-y-0 left-0 z-50 flex w-[min(20rem,85vw)] flex-col border-r bg-sidebar text-sidebar-foreground shadow-lg sm:hidden"
+            className="fixed inset-y-0 left-0 z-50 flex w-[min(20rem,85vw)] flex-col border-r bg-sidebar text-sidebar-foreground shadow-lg md:hidden"
           >
             <div className="flex items-center justify-between px-4 pt-3">
               <Dialog.Title className="font-medium">

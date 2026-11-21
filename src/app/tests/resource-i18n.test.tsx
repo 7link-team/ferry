@@ -120,3 +120,24 @@ Write-Output 'PASS all six languages'`;
     expect(execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true })).toContain("PASS all six languages");
   } finally { rmSync(folder, { recursive: true, force: true }); }
 });
+
+it('maintains editable model introduction policy and restores its default instructions', async () => {
+  history.replaceState({}, '', '/en-US/platform/settings/1/edit');
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ id: '1', version: 1, conversation_introduction_enabled: true, conversation_introduction_instructions: 'Custom intro', conversation_introduction_instructions_default: 'Default intro' }) })));
+  await act(async () => root.render(<Platform identity={{ user: { id: '1', name: 'Operator', email: 'operator@example.invalid', is_superadmin: true }, workspaces: [] }} reload={() => {}} onSignedOut={() => {}} />));
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === commonText('resource-domain:platform.conversationPolicy'))!.click());
+  expect(host.textContent).toContain(commonText('resource-domain:platform.conversationIntroduction'));
+  const instructions = host.querySelector<HTMLTextAreaElement>('[name="conversation_introduction_instructions"]')!;
+  expect(instructions?.value).toBe('Custom intro');
+  const control = host.querySelector<HTMLButtonElement>('[name="conversation_introduction_enabled"]')!;
+  expect(control?.getAttribute('aria-checked')).toBe('true');
+  await act(async () => control.click());
+  for (const locale of locales) {
+    await language(locale);
+    expect(host.textContent).toContain(commonText('resource-domain:platform.conversationIntroductionHelp'));
+    expect(control.getAttribute('aria-checked')).toBe('false');
+    expect(instructions.value).toBe('Custom intro');
+  }
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === commonText('resource-domain:platform.restoreIntroductionInstructions'))!.click());
+  expect(instructions.value).toBe('Default intro');
+});

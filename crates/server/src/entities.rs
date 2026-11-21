@@ -66,6 +66,7 @@ pub mod ai_model_profiles {
         pub provider_id: i64,
         pub models: String,
         pub default_model: String,
+        pub max_output_tokens: Option<i64>,
         pub tool_version: String,
         pub state: String,
         #[sea_orm(column_type = "Text", nullable)]
@@ -268,6 +269,9 @@ pub mod ai_turns {
         pub error: String,
         pub usage: String,
         pub decisions: String,
+        pub purpose: String,
+        pub introduction_id: i64,
+        pub introduction_locale: String,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}
@@ -2223,6 +2227,9 @@ pub mod ai_calls {
         pub credential_id: i64,
         pub execution_id: i64,
         pub node_run_id: i64,
+        /// Non-workflow provenance; workflow rows retain zero.
+        pub conversation_id: i64,
+        pub conversation_turn_id: i64,
         pub operation_key: String,
         pub currency: String,
         pub period_key: String,
@@ -2400,6 +2407,33 @@ pub mod notification_deliveries {
         pub subject: String,
         pub body: String,
         pub result: String,
+        pub version: i64,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub updated_at: i64,
+        pub updated_by: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+/// Canonical provider history. Never serialized into a public resource view.
+pub mod ai_chat_api_sessions {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_chat_api_sessions")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub conversation_id: i64,
+        pub agent_id: i64,
+        pub model_profile_id: i64,
+        pub provider_id: i64,
+        pub model: String,
+        pub encrypted_history: String,
+        pub last_turn_id: i64,
         pub version: i64,
         pub created_at: i64,
         pub created_by: i64,

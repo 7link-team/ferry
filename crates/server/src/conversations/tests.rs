@@ -4,6 +4,43 @@ use ferry_protocol::agent::{Event, Outcome};
 use sea_orm::TransactionTrait;
 
 #[tokio::test]
+async fn introduction_is_a_real_turn_without_a_fabricated_human_message() {
+    let (_dir, s, old) = seeded().await;
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ConversationConfig,
+            sea_orm::sea_query::Expr::value(Option::<String>::None),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let agent = find(&s.db, &admin(1), old).await.unwrap().agent_id;
+    let (_, Json(created)) = create(
+        State(s.clone()),
+        admin(1),
+        Json(serde_json::from_value(json!({"agent_id":Id::from(agent)})).unwrap()),
+    )
+    .await
+    .unwrap();
+    let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+    let Json(value) = detail(State(s.clone()), admin(1), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert_eq!(value["turns"].as_array().unwrap().len(), 1);
+    assert_eq!(value["turns"][0]["purpose"], "introduction");
+    assert_eq!(value["turns"][0]["prompt"], "");
+    assert!(value["messages"].as_array().unwrap().is_empty());
+    assert!(
+        serde_json::from_str::<Configuration>(&find(&s.db, &admin(1), old).await.unwrap().config)
+            .is_ok()
+    );
+    let Json(reopened) = detail(State(s.clone()), admin(1), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert_eq!(reopened["turns"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn approval_mode_updates_require_the_human_owner_current_version_and_an_idle_conversation() {
     let (_dir, s, id) = seeded().await;
     let c = find(&s.db, &admin(1), id).await.unwrap();
@@ -1856,4 +1893,19 @@ async fn dismissing_an_ended_approval_clears_pending_without_executing_or_replay
         .await
         .unwrap();
     assert_eq!(listed["items"][0]["pending"], 0);
+}
+#[tokio::test]
+async fn api_context_schema_is_private_and_downgrade_guards_history() {
+    use sea_orm_migration::{MigrationTrait, SchemaManager};
+    let (_dir, s) = setup().await;
+    let m = SchemaManager::new(&s.db);
+    assert!(m.has_table("ai_chat_api_sessions").await.unwrap());
+    assert!(m.has_column("ai_calls", "conversation_id").await.unwrap());
+    s.db.execute_unprepared("INSERT INTO ai_chat_api_sessions (id,workspace_id,conversation_id,agent_id,model_profile_id,provider_id,model,encrypted_history) VALUES (1,1,2,3,4,5,'model','sealed')").await.unwrap();
+    let err = crate::migration::chat_api::Migration
+        .down(&m)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("history"));
+    assert!(m.has_table("ai_chat_api_sessions").await.unwrap());
 }

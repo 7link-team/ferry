@@ -17,7 +17,7 @@
   "conversations.outputLimit": "출력 한도를 초과하여 실행을 중지했습니다.",
   "conversations.fileTooLarge": "각 파일은 32 MiB 이하여야 합니다.",
   "conversations.groupAgentPrivate": "그룹에는 작업 공간 공유 에이전트가 필요합니다.",
-  "conversations.apiPending": "이 에이전트는 API 모델을 사용하므로 아직 대화에 사용할 수 없습니다. CLI 모델 에이전트를 선택하세요.",
+  "conversations.apiPending": "API 에이전트는 호스트 CLI 점검이 필요하지 않습니다. 모델 페이지에서 연결을 확인하세요.",
   "conversations.noRunner": "이 모델을 실행할 수 있는 Runner가 없습니다.",
   "conversations.cliPermissionUnsupported": "이 CLI는 읽기 전용 대화만 지원합니다.",
   "conversations.runnerUpgradeRequired": "플랫폼 도구를 사용하려면 먼저 호스트 Runner를 업그레이드하세요.",
@@ -45,5 +45,13 @@
   "conversations.questionInvalid": "질문 또는 답변이 유효하지 않습니다. 명확한 질문, 고유한 선택지 또는 최대 4096 UTF-8 바이트의 답변을 입력하세요.",
   "conversations.questionPending": "답변 대기 중인 질문이 있거나 턴이 마무리 중입니다. 작업을 계속하지 말고 사용자 답변 또는 턴 종료를 기다리세요.",
   "conversations.questionAnswered": "이 질문에는 이미 다른 답변이 있습니다. 새로 고침하여 확인하세요.",
-  "conversations.approvalModeInvalid": "승인 모드는 request, assisted 또는 yolo를 선택하세요."
+  "conversations.approvalModeInvalid": "승인 모드는 request, assisted 또는 yolo를 선택하세요.",
+  "conversations.apiContextChanged": "이 대화의 모델 설정, 공급자 또는 모델이 변경되었습니다. 원래 설정을 복원하거나 새 대화를 시작하세요. 저장된 컨텍스트는 유지됩니다.",
+  "conversations.apiOutputRequired": "이 Anthropic 모델은 모델 설정에서 출력 토큰 한도를 지정해야 합니다. 다음 메시지를 보내기 전에 한도를 설정하세요.",
+  "conversations.introductionTask": "지금 한국어로 첫 자기소개를 생성하세요. 이 작업은 자동 작업이며 사람의 메시지가 아닙니다. 설정된 사실과 유효한 권한만 바탕으로 짧게 인사하고 역할과 제공할 수 있는 도움을 설명한 뒤 사용자의 요구를 물어보세요. 실행하지 않은 확인이나 작업을 했다고 주장하거나 기능을 지어내지 마세요.",
+  "conversations.introductionPermission": "대화 실행 또는 읽기 권한이 없어 소개를 실행하지 않았습니다. 관리자에게 권한을 요청한 후 소개를 명시적으로 다시 시도하세요.",
+  "conversations.introductionDisabled": "자동 소개가 꺼져 있습니다. 다시 시도하기 전에 플랫폼 설정에서 켜세요.",
+  "conversations.introductionStale": "이 소개는 이전 Agent 멤버십에 속하므로 다시 시도할 수 없습니다.",
+  "conversations.introductionCompleted": "이 Agent는 현재 멤버십의 소개를 이미 완료했습니다.",
+  "conversations.introductionRetryWarning": "이전 시도에서 모델 요청이나 작업이 실행되었으나 결과를 알 수 없을 수 있습니다. 결과를 확인한 뒤 새 소개를 명시적으로 시작하세요. 새 모델 호출에 사용량이 발생할 수 있습니다."
 }

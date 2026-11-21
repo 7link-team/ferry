@@ -27,8 +27,10 @@ function CallLedger() {
       state: string;
       currency: string;
       reserved_micros: number;
-      actual_micros: number;
+      actual_micros: number | null;
+      cost_known?: boolean;
       execution_id: string;
+      conversation_id?: string;
     }[]
   >();
   const [error, setError] = useState("");
@@ -54,11 +56,11 @@ function CallLedger() {
       {rows?.map((row) => (
         <div key={row.id} className="space-y-2 border-b py-3 text-xs">
           <p className="break-all">
-            {row.execution_id} · {row.state} · {row.currency}
+            {row.conversation_id && row.conversation_id !== "0" ? `${commonText("conversations:title")} ${row.conversation_id}` : row.execution_id} · {row.state} · {row.currency}
           </p>
           <p>
             {t("aiActualCost")}:{" "}
-            {row.actual_micros}
+            {row.cost_known === false || row.actual_micros === null ? t("aiCostUnknown") : row.actual_micros}
           </p>
           {row.state === "unknown" && (
             <AutoForm

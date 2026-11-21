@@ -1,4 +1,5 @@
 import { AutoField } from "../../shared/forms/auto-form";
+import { randomUUID } from "../../shared/uuid";
 import { api } from "../../shared/api/api";
 import { FlaskConical, Send } from "lucide-react";
 import { base, deleteResource } from "../../shared/api/resource";
@@ -46,7 +47,7 @@ function sendAction(workspace: string, navigate: ResourceConfigContext["navigate
   return {
     label: "发送", labelKey: key("send"), icon: <Send className="size-4" />, permission: "notifications.send", when: row => row.enabled,
     parameters: row => messageFields(workspace, row), dialogWidth: "wide", descriptionKey: key("sendHelp"),
-    initialValues: () => ({ client_id: crypto.randomUUID(), subject: "", body: "", format: "text", variables: {} }),
+    initialValues: () => ({ client_id: randomUUID(), subject: "", body: "", format: "text", variables: {} }),
     action: async (row, values = {}) => {
       const result = await api<{ id: string; state: string }>(`${base(workspace, "notification-channels")}/${encodeURIComponent(row.id)}/deliveries`, {
         method: "POST", body: JSON.stringify({ client_id: values.client_id, subject: values.subject ?? "", body: values.body ?? "", format: values.format ?? "text", template_id: values.template_id || null, to: recipients(values.to_text), variables: values.variables ?? {} }),
