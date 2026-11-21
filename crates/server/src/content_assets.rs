@@ -274,6 +274,9 @@ impl Store<'_> {
             .asset
             .strip_prefix("sha256:")
             .ok_or_else(|| fault())?;
+        // Reserve the writer before reading metadata, as reserve_asset does.
+        // SQLite cannot safely upgrade a deferred read past a competing writer.
+        lock(tx, &format!("content-quota:{workspace}")).await?;
         let asset = assets::Entity::find()
             .filter(assets::Column::WorkspaceId.eq(workspace))
             .filter(assets::Column::Sha256.eq(hash))

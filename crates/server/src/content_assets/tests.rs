@@ -155,6 +155,92 @@ async fn binary_pin_references_validate_tenant_metadata_and_block_gc_transaction
 }
 
 #[tokio::test]
+async fn binary_reference_lookup_reserves_sqlite_writer_before_reading_metadata() {
+    // This SQLite-specific probe must not inherit the optional MySQL fixture URL.
+    let dir = tempfile::tempdir().unwrap();
+    let url = format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("assets.sqlite").display()
+    );
+    let mut options = ConnectOptions::new(&url);
+    options.max_connections(4).sqlx_logging(false);
+    let db = Database::connect(options).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    let backend = ArtifactStore::local(&dir.path().join("objects")).unwrap();
+    let vault = Vault::open(dir.path(), false).unwrap();
+    let ids = Generator::new(1, Instant::now()).unwrap();
+    let store = Store {
+        db: &db,
+        backend: &backend,
+        vault: &vault,
+        ids: &ids,
+        quota: DEFAULT_QUOTA,
+    };
+    // Seed a valid legacy object directly, without any upload lease Drop task
+    // that could independently own the writer during the probe.
+    let plain = b"{\"pinned\":true}";
+    let asset = store
+        .reserve_asset(
+            11,
+            hex::encode(Sha256::digest(plain)),
+            plain.len() as i64,
+            "application/json",
+            8,
+            "node",
+            0,
+        )
+        .await
+        .unwrap();
+    let ciphertext = vault.seal_bytes(plain, &aad(&asset)).unwrap();
+    assert!(
+        backend
+            .create(&key(&asset), ciphertext.into())
+            .await
+            .unwrap()
+    );
+    let mut reference = ferry_protocol::sandbox::Asset {
+        asset: format!("sha256:{}", asset.sha256),
+        mime: asset.mime.clone(),
+        size: asset.size as u64 + 1,
+        name: "sample.json".into(),
+    };
+    let mut options = ConnectOptions::new(&url);
+    options.max_connections(1).sqlx_logging(false);
+    let probe = Database::connect(options).await.unwrap();
+    probe
+        .execute_unprepared("PRAGMA busy_timeout=0")
+        .await
+        .unwrap();
+    let tx = db.begin().await.unwrap();
+    // A rejected reference still reads metadata. The caller may then attach a valid
+    // reference in this same TX; another writer must not invalidate its snapshot.
+    assert!(
+        store
+            .attach_binary(&tx, 11, &reference, "pin", 15)
+            .await
+            .is_err()
+    );
+    let contender = probe.execute_unprepared("BEGIN IMMEDIATE").await;
+    if contender.is_ok() {
+        probe.execute_unprepared("ROLLBACK").await.unwrap();
+    }
+    assert!(
+        contender.is_err_and(|error| error.to_string().contains("database is locked")),
+        "binary reference lookup allowed another SQLite writer after reading metadata"
+    );
+    reference.size = asset.size as u64;
+    store
+        .attach_binary(&tx, 11, &reference, "pin", 15)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    probe.execute_unprepared("BEGIN IMMEDIATE").await.unwrap();
+    probe.execute_unprepared("ROLLBACK").await.unwrap();
+    assert_eq!(refs::Entity::find().count(&db).await.unwrap(), 1);
+    assert_eq!(jobs::Entity::find().count(&db).await.unwrap(), 0);
+}
+
+#[tokio::test]
 async fn content_deduplicates_isolates_workspace_and_survives_restart() {
     let f = Fixture::new().await;
     let store = f.store();
