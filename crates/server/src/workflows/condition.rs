@@ -129,6 +129,15 @@ pub(super) fn ports(node: &Value) -> Result<Vec<Port>> {
 }
 
 pub(super) async fn execute(node: &Value, items: &[Item], params: &[Value]) -> Result<Output> {
+    execute_with_policy(node, items, params, &Default::default()).await
+}
+
+pub(super) async fn execute_with_policy(
+    node: &Value,
+    items: &[Item],
+    params: &[Value],
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> Result<Output> {
     if items.len() != params.len() {
         return Err(invalid());
     }
@@ -162,9 +171,10 @@ pub(super) async fn execute(node: &Value, items: &[Item], params: &[Value]) -> R
     } else {
         match super::expression::exchange(Batch {
             program: None,
+            resource_policy: policy.clone(),
             version: VERSION,
-            timeout_ms: 1000,
-            memory_bytes: 64 * 1024 * 1024,
+            timeout_ms: None,
+            memory_bytes: None,
             deterministic: true,
             syntax_only: false,
             data: None,

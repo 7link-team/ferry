@@ -115,9 +115,6 @@ export function Composer({
   });
   const recorder = useRef<MediaRecorder | null>(null);
   const disposed = useRef(false);
-  const recordingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
   const resizing = useRef<{ y: number; height: number } | null>(null);
   const latest = useRef(draft);
   latest.current = draft;
@@ -128,7 +125,6 @@ export function Composer({
     disposed.current = false;
     return () => {
       disposed.current = true;
-      clearTimeout(recordingTimer.current);
       const r = recorder.current;
       if (r?.state === "recording") r.stop();
       r?.stream.getTracks().forEach((track) => track.stop());
@@ -144,11 +140,6 @@ export function Composer({
     setUploading(true);
     const uploaded: Attachment[] = [];
     try {
-      if (
-        files.length + latest.current.attachments.length > 10 ||
-        files.some((f) => f.size > 32 * 1024 * 1024)
-      )
-        throw Error(t("attachmentLimit"));
       for (const file of files) {
         const body = new FormData();
         body.append("file", file);
@@ -218,28 +209,17 @@ export function Composer({
       );
       recorder.current = r;
       const chunks: Blob[] = [];
-      let size = 0,
-        tooLarge = false,
-        failed = false;
+      let failed = false;
       r.ondataavailable = (e) => {
-        size += e.data.size;
-        if (size > 32 * 1024 * 1024) {
-          tooLarge = true;
-          if (r.state === "recording") r.stop();
-        } else chunks.push(e.data);
+        chunks.push(e.data);
       };
       r.onstop = () => {
-        clearTimeout(recordingTimer.current);
-        stream.getTracks().forEach((t) => t.stop());
+          stream.getTracks().forEach((t) => t.stop());
         recorder.current = null;
         if (disposed.current) return;
         setRecording(false);
         if (failed) {
           setError(t("recordingFailed"));
-          return;
-        }
-        if (tooLarge) {
-          setError(t("attachmentLimit"));
           return;
         }
         const type = r.mimeType.split(";")[0] || "audio/webm",
@@ -249,7 +229,7 @@ export function Composer({
               ? "ogg"
               : "webm";
         const file = new File(chunks, `voice-${Date.now()}.${ext}`, { type });
-        // Recording has stopped; upload through the same bounded file endpoint.
+        // Recording has stopped; upload through the same policy-controlled file endpoint.
         const body = new FormData();
         body.append("file", file);
         setUploading(true);
@@ -276,12 +256,7 @@ export function Composer({
       r.start(1000);
       setRecording(true);
       setError("");
-      recordingTimer.current = setTimeout(
-        () => {
-          if (r.state === "recording") r.stop();
-        },
-        5 * 60 * 1000,
-      );
+
     } catch {
       acquired?.getTracks().forEach((track) => track.stop());
       recorder.current = null;
@@ -749,7 +724,7 @@ export function Composer({
             size="icon"
             type="button"
             variant="ghost"
-            disabled={(locked && !recording) || draft.attachments.length >= 10}
+            disabled={locked && !recording}
             aria-label={t(recording ? "stopRecording" : "recordVoice")}
             title={t(recording ? "stopRecording" : "recordVoice")}
             onClick={() => void toggleRecording()}

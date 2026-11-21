@@ -5,8 +5,6 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
-pub(crate) const MAX_INDEX_BYTES: usize = 8 * 1024 * 1024;
-
 pub struct PackageVersion {
     pub key: String,
     pub kind: String,
@@ -28,12 +26,6 @@ pub struct PackageFile {
     pub parameters: Value,
 }
 
-const MAX_PACKAGES: usize = 500;
-const MAX_VERSIONS: usize = 20;
-const MAX_FILES: usize = 20;
-const MAX_FILE_BYTES: usize = 256 * 1024;
-const MAX_ICON_BYTES: usize = 64 * 1024;
-const MAX_README_BYTES: usize = 64 * 1024;
 /// Config template names are at most 60 characters; keep room for the "-20" conflict suffix.
 const MAX_FILE_NAME: usize = 57;
 const CATEGORIES: &[&str] = &[
@@ -78,7 +70,7 @@ fn valid_key(key: &str) -> bool {
 pub(crate) fn parse_index(text: &str) -> Result<Index> {
     let index: Index =
         serde_json::from_str(text).map_err(|_| bad("marketplace.indexObjectRequired"))?;
-    if index.version != 1 || index.templates.len() > MAX_PACKAGES {
+    if index.version != 1 {
         return Err(bad("marketplace.indexVersionInvalid"));
     }
     let mut keys = HashSet::new();
@@ -288,7 +280,7 @@ pub fn parse_bundle(
     }
     let bundle: Bundle =
         serde_json::from_value(document).map_err(|_| bad("marketplace.indexObjectRequired"))?;
-    if bundle.schema_version != 2 || bundle.packages.len() > MAX_PACKAGES {
+    if bundle.schema_version != 2 {
         return Err(bad("marketplace.indexVersionInvalid"));
     }
     let mut keys = HashSet::new();
@@ -297,8 +289,6 @@ pub fn parse_bundle(
         if !valid_key(&package.key)
             || !keys.insert(package.key.clone())
             || package.versions.is_empty()
-            || package.versions.len() > MAX_VERSIONS
-            || package.icon.len() > MAX_ICON_BYTES
         {
             return Err(bad("marketplace.templateInvalid"));
         }
@@ -310,11 +300,7 @@ pub fn parse_bundle(
         for v in package.versions {
             let parsed = semver::Version::parse(&v.version)
                 .map_err(|_| bad("marketplace.packageVersionInvalid"))?;
-            if !versions.insert(parsed)
-                || v.files.len() > MAX_FILES
-                || v.readme.len() > MAX_README_BYTES
-                || !v.verified.is_array()
-            {
+            if !versions.insert(parsed) || !v.verified.is_array() {
                 return Err(bad("marketplace.templateInvalid"));
             }
             let mut names = HashSet::new();
@@ -323,7 +309,6 @@ pub fn parse_bundle(
                 if !valid_key(&f.name)
                     || f.name.len() > MAX_FILE_NAME
                     || !names.insert(f.name.clone())
-                    || f.content.len() > MAX_FILE_BYTES
                 {
                     return Err(bad("marketplace.packageFileInvalid"));
                 }
@@ -487,19 +472,22 @@ mod tests {
     #[test]
     fn v2_limits_enforced() {
         let many: Vec<Value> = (0..21).map(|i| version(&format!("1.0.{i}"))).collect();
-        assert!(parse_bundle(&bundle(json!([package(json!(many))])), &ferry(), "en-US").is_err());
+        assert_eq!(
+            parse_bundle(&bundle(json!([package(json!(many))])), &ferry(), "en-US")
+                .unwrap()
+                .len(),
+            21
+        );
         let mut files = version("1.0.0");
         files["files"] = json!(
             (0..21)
                 .map(|i| json!({"name":format!("f{i}"),"content":"x"}))
                 .collect::<Vec<_>>()
         );
-        assert!(
-            parse_bundle(&bundle(json!([package(json!([files]))])), &ferry(), "en-US").is_err()
-        );
+        assert!(parse_bundle(&bundle(json!([package(json!([files]))])), &ferry(), "en-US").is_ok());
         let mut big = version("1.0.0");
         big["files"] = json!([{"name":"big","content":"x".repeat(256 * 1024 + 1)}]);
-        assert!(parse_bundle(&bundle(json!([package(json!([big]))])), &ferry(), "en-US").is_err());
+        assert!(parse_bundle(&bundle(json!([package(json!([big]))])), &ferry(), "en-US").is_ok());
         let mut bad_key = package(json!([version("1.0.0")]));
         bad_key["key"] = json!("a b");
         assert!(parse_bundle(&bundle(json!([bad_key])), &ferry(), "en-US").is_err());

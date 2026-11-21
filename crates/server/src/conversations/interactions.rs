@@ -204,7 +204,14 @@ async fn edit(
     Path((_, id, msg)): Path<(String, Id, Id)>,
     Json(body): Json<Edit>,
 ) -> Result<Json<Value>> {
-    if body.prompt.trim().is_empty() || body.prompt.len() > 48 * 1024 || body.prompt.contains('\0')
+    if body.prompt.trim().is_empty()
+        || !ferry_protocol::resources::allows(
+            crate::accounts::resource_policy::load(&s.db)
+                .await?
+                .agent_prompt_bytes,
+            body.prompt.len(),
+        )
+        || body.prompt.contains('\0')
     {
         return Err(invalid());
     }

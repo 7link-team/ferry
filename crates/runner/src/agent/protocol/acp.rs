@@ -15,10 +15,6 @@ impl Protocol {
                     .filter(|id| !id.is_empty() && id.len() <= 256)
                     .context("missing DSH policy session")?;
                 if !self.ready {
-                    ensure!(
-                        self.dsh_policy_sessions.len() < 256,
-                        "too many DSH policy sessions"
-                    );
                     self.dsh_policy_sessions.insert(id.to_owned());
                 }
                 return Ok(step);
@@ -131,8 +127,13 @@ impl Protocol {
                                         self.acp_tools.remove(id);
                                     } else if let Some(title) = update["title"].as_str() {
                                         ensure!(
-                                            self.acp_tools.len() < 256
-                                                || self.acp_tools.contains_key(id),
+                                            self.acp_tools.contains_key(id)
+                                                || ferry_protocol::resources::allows(
+                                                    self.request.resource_policy.as_ref().and_then(
+                                                        |policy| policy.agent_tool_concurrency
+                                                    ),
+                                                    self.acp_tools.len().saturating_add(1)
+                                                ),
                                             "too many active ACP tools"
                                         );
                                         self.acp_tools.insert(id.to_owned(), title.to_owned());

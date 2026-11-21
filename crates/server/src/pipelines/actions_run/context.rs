@@ -206,18 +206,27 @@ pub(crate) fn runtime_path(input: &str, run: &runs::Model) -> String {
     output
 }
 
-pub(super) fn workflow_timeout(workflow: &str, job: &str) -> u64 {
-    serde_json::from_str::<Value>(workflow)
-        .ok()
-        .and_then(|workflow| workflow["jobs"][job]["timeout-minutes"].as_u64())
-        .and_then(|minutes| minutes.checked_mul(60))
-        .map(|seconds| seconds.saturating_add(60).max(WORKER_SECONDS))
-        .unwrap_or(WORKER_SECONDS)
+/// Platform execution ceiling and transport cleanup allowance. Authored YAML
+/// job/step timeouts remain enforced by the worker, without a hidden default.
+pub(super) fn workflow_timeout(configured: Option<u64>) -> (u64, u64) {
+    match configured {
+        Some(seconds) if seconds > 0 => (seconds, seconds.saturating_add(75)),
+        _ => (0, 0),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn worker_timeout_has_no_fallback_and_preserves_explicit_limits_with_cleanup() {
+        assert_eq!(workflow_timeout(None), (0, 0));
+        assert_eq!(workflow_timeout(Some(0)), (0, 0));
+        assert_eq!(workflow_timeout(Some(1)), (1, 76));
+        assert_eq!(workflow_timeout(Some(600_000)), (600_000, 600_075));
+        assert_eq!(workflow_timeout(Some(u64::MAX)), (u64::MAX, u64::MAX));
+    }
+
     #[test]
     fn github_repository_comes_from_the_url_without_credentials() {
         use super::repository_parts;

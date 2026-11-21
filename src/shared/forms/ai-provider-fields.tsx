@@ -44,8 +44,6 @@ export function ProviderFields({
           [
             ["aiProtocol", draft.protocol],
             ["aiBaseURL", draft.base_url],
-            ["aiQPS", draft.qps],
-            ["aiConcurrency", draft.concurrency],
           ] as const
         ).map(([key, value]) => (
           <div
@@ -92,8 +90,6 @@ export function ProviderFields({
           ["name", "name"],
           ["base_url", "aiBaseURL"],
           ["api_key", "API Key"],
-          ["qps", "aiQPS"],
-          ["concurrency", "aiConcurrency"],
         ] as const
       )
         .filter(([key]) => !hideName || key !== "name")
@@ -110,9 +106,7 @@ export function ProviderFields({
               <FieldCaption
                 required={key !== "api_key" || !draft.id}
                 help={
-                  key === "api_key" ? commonText("resource-domain:credential.secretHelp")
-                    : key === "qps" ? commonText("models:qpsHelp")
-                    : key === "concurrency" ? commonText("models:concurrencyHelp") : undefined
+                  key === "api_key" ? commonText("resource-domain:credential.secretHelp") : undefined
                 }
                 label={
                   <>{key === "name" ? commonText("common.name") : key === "api_key" ? "API Key" : t(label)}</>
@@ -125,20 +119,14 @@ export function ProviderFields({
                   key === "name" ? commonText("common.name") : key === "api_key" ? "API Key" : t(label)
                 }
                 disabled={readOnly}
-                type={key === "api_key" ? "password" : typeof draft[key] === "number" ? "number" : "text"}
+                type={key === "api_key" ? "password" : "text"}
                 autoComplete={key === "api_key" ? "new-password" : undefined}
                 required={key !== "api_key" || !draft.id}
-                min={key === "qps" || key === "concurrency" ? 1 : typeof draft[key] === "number" ? 0 : undefined}
-                max={key === "qps" ? 1000 : key === "concurrency" ? 100 : undefined}
-                step={typeof draft[key] === "number" ? 1 : undefined}
                 value={draft[key] ?? ""}
                 onChange={(e) =>
                   onChange({
                     ...draft,
-                    [key]:
-                      typeof draft[key] === "number"
-                        ? Number(e.target.value)
-                        : e.target.value,
+                    [key]: e.target.value,
                   })
                 }
               />

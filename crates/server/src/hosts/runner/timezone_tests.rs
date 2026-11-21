@@ -69,6 +69,7 @@ async fn connect_runner(
         supports_agent_probe: false,
         supports_forward: false,
         supports_timezone: supports,
+        supports_resource_policy: false,
         timezone: "Asia/Tokyo".into(),
     };
     socket
@@ -109,7 +110,7 @@ async fn next_settings(socket: &mut Client) -> Option<String> {
             .unwrap()
             .unwrap();
         if let WsMessage::Text(text) = message {
-            if let Ok(wire::Control::Settings { timezone }) = serde_json::from_str(&text) {
+            if let Ok(wire::Control::Settings { timezone, .. }) = serde_json::from_str(&text) {
                 return timezone;
             }
         }
@@ -134,7 +135,7 @@ async fn settings_reach_only_runners_that_understand_them() {
     assert!(matches!(frames[0], wire::Control::Welcome { .. }));
     assert!(frames.iter().any(|frame| matches!(
         frame,
-        wire::Control::Settings { timezone: Some(zone) } if zone == "Europe/Berlin"
+        wire::Control::Settings { timezone: Some(zone), .. } if zone == "Europe/Berlin"
     )));
     let row = hosts::Entity::find_by_id(9101_i64)
         .one(&s.db)

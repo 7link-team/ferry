@@ -1145,6 +1145,14 @@ async fn messages_are_idempotent_frozen_and_serialized_without_duplicate_runs() 
         client_id: "request-4".into(),
         attachments: vec![],
     };
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            sea_orm::sea_query::Expr::value(json!({"agent_prompt_bytes":48 * 1024}).to_string()),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
     assert_eq!(
         send(State(s), admin(1), Path(("1".into(), id)), Json(bad))
             .await
@@ -1478,6 +1486,11 @@ async fn recovered_context_contains_only_completed_same_room_messages_and_is_bou
     assert!(context.len() <= 1024);
     assert!(context.contains("COMPLETED_CONTEXT"));
     assert!(!context.contains("UNCERTAIN_DO_NOT_REPLAY"));
+    let unlimited = messages::recovery_context(&s.db, &next, usize::MAX)
+        .await
+        .unwrap();
+    assert!(unlimited.len() > 16 * 1024);
+    assert!(!unlimited.contains("UNCERTAIN_DO_NOT_REPLAY"));
     assert!(
         messages::recovery_context(&s.db, &next, 10)
             .await
@@ -1634,7 +1647,14 @@ fn message_limits_are_each_named() {
         "conversations.clientInvalid"
     );
     assert_eq!(
-        key(check_message("hi", "c", &vec![attachment("a.txt", ""); 11])),
+        key(check_message_resources(
+            "hi",
+            &vec![attachment("a.txt", ""); 11],
+            &ferry_protocol::resources::ResourcePolicy {
+                file_count: Some(10),
+                ..Default::default()
+            }
+        )),
         "conversations.tooManyAttachments"
     );
     assert_eq!(
@@ -1642,7 +1662,14 @@ fn message_limits_are_each_named() {
         "conversations.attachmentNameInvalid"
     );
     assert_eq!(
-        key(check_message(&"x".repeat(48 * 1024 + 1), "c", &[])),
+        key(check_message_resources(
+            &"x".repeat(48 * 1024 + 1),
+            &[],
+            &ferry_protocol::resources::ResourcePolicy {
+                agent_prompt_bytes: Some(48 * 1024),
+                ..Default::default()
+            }
+        )),
         "conversations.messageTooLong"
     );
     assert_eq!(
@@ -1650,6 +1677,12 @@ fn message_limits_are_each_named() {
         "conversations.messageText"
     );
     check_message("hello", "c", &[attachment("a.txt", "text")]).unwrap();
+    check_message_resources(
+        &"x".repeat(48 * 1024 + 1),
+        &vec![attachment("a.txt", ""); 11],
+        &Default::default(),
+    )
+    .unwrap();
 }
 
 #[tokio::test]
@@ -1908,4 +1941,44 @@ async fn api_context_schema_is_private_and_downgrade_guards_history() {
         .unwrap_err();
     assert!(err.to_string().contains("history"));
     assert!(m.has_table("ai_chat_api_sessions").await.unwrap());
+}
+
+#[tokio::test]
+async fn message_admission_has_no_hidden_63kib_ceiling_and_honors_resource_policy() {
+    let (_dir, s, id) = seeded().await;
+    let request = |prompt: String, client_id: &str| Send {
+        reply_to: None,
+        prompt,
+        client_id: client_id.into(),
+        attachments: vec![],
+    };
+    let accepted = send(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id)),
+        Json(request("x".repeat(128 * 1024), "large-default")),
+    )
+    .await;
+    assert!(
+        accepted.is_ok(),
+        "default-unlimited message was rejected: {:?}",
+        accepted.err()
+    );
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            sea_orm::sea_query::Expr::value(Some(json!({"agent_prompt_bytes":1024}).to_string())),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let rejected = send(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), id)),
+        Json(request("x".repeat(2048), "configured-small")),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(rejected.0, StatusCode::BAD_REQUEST);
 }

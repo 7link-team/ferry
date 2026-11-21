@@ -52,10 +52,10 @@ pub async fn execute_command(
     Json(body): Json<CommandRequest>,
 ) -> Result<Json<Value>> {
     scope.require("hosts.terminal")?;
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     if body.command.trim().is_empty()
-        || body.command.len() > 64 * 1024
+        || !ferry_protocol::resources::allows(policy.command_bytes, body.command.len())
         || body.command.contains('\0')
-        || !(1..=300).contains(&body.timeout_seconds)
     {
         return Err(ApiError::localized(
             StatusCode::BAD_REQUEST,
@@ -84,7 +84,7 @@ pub async fn execute_command(
     let guard = Cancel(cancel);
     let execution = channel.exec_stream(
         &body.command,
-        Duration::from_secs(body.timeout_seconds),
+        Duration::from_secs(policy.task_timeout_seconds.unwrap_or(0)),
         output,
         cancelled,
     );
@@ -96,7 +96,7 @@ pub async fn execute_command(
         tokio::select! {
             result=&mut execution=>break result?,
             Some((stream,bytes))=receiver.recv()=>{
-                let remaining=(128*1024usize).saturating_sub(stdout.len()+stderr.len());
+                let remaining=ferry_protocol::resources::byte_limit(policy.command_output_bytes).saturating_sub(stdout.len().saturating_add(stderr.len()));
                 let count=remaining.min(bytes.len());
                 if stream=="stderr" {stderr.extend_from_slice(&bytes[..count]);} else {stdout.extend_from_slice(&bytes[..count]);}
                 if count<bytes.len() {truncated=true;guard.0.send_replace(true);}
@@ -104,7 +104,8 @@ pub async fn execute_command(
         }
     };
     while let Ok((stream, bytes)) = receiver.try_recv() {
-        let remaining = (128 * 1024usize).saturating_sub(stdout.len() + stderr.len());
+        let remaining = ferry_protocol::resources::byte_limit(policy.command_output_bytes)
+            .saturating_sub(stdout.len().saturating_add(stderr.len()));
         let count = remaining.min(bytes.len());
         if stream == "stderr" {
             stderr.extend_from_slice(&bytes[..count]);
@@ -245,29 +246,37 @@ pub async fn terminal(
     let (state, who, host) = (s.clone(), scope.user.clone(), id.clone());
     let permissions = scope.permissions.clone();
     let locale = crate::i18n::current_locale();
-    Ok(upgrade.on_upgrade(move |socket| {
-        crate::i18n::with_locale(locale, async move {
-            let opened = db::now();
-            pump(socket, pty, channel).await;
-            // The close is audited too: how long a session lasted is the part an
-            // operator actually asks about afterwards.
-            let seconds = (db::now() - opened) / 1000;
-            let scope = Scope {
-                workspace_id: state_workspace(&state, &host).await.unwrap_or_default(),
-                user: who,
-                permissions,
-            };
-            let _ = crate::hosts::activity(
-                &state,
-                &scope,
-                "terminal-close",
-                "hosts",
-                &host,
-                json!({ "seconds": seconds }),
-            )
-            .await;
-        })
-    }))
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    Ok(upgrade
+        .max_message_size(ferry_protocol::resources::byte_limit(
+            policy.websocket_message_bytes,
+        ))
+        .max_frame_size(ferry_protocol::resources::byte_limit(
+            policy.websocket_message_bytes,
+        ))
+        .on_upgrade(move |socket| {
+            crate::i18n::with_locale(locale, async move {
+                let opened = db::now();
+                pump(socket, pty, channel).await;
+                // The close is audited too: how long a session lasted is the part an
+                // operator actually asks about afterwards.
+                let seconds = (db::now() - opened) / 1000;
+                let scope = Scope {
+                    workspace_id: state_workspace(&state, &host).await.unwrap_or_default(),
+                    user: who,
+                    permissions,
+                };
+                let _ = crate::hosts::activity(
+                    &state,
+                    &scope,
+                    "terminal-close",
+                    "hosts",
+                    &host,
+                    json!({ "seconds": seconds }),
+                )
+                .await;
+            })
+        }))
 }
 
 /// The scope is gone by the time the socket closes, so the workspace is looked

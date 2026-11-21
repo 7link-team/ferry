@@ -148,7 +148,6 @@ impl Call {
         if !["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&self.method.as_str())
             || !self.path.starts_with('/')
             || self.path.starts_with("//")
-            || self.path.len() > 4096
             || self.path.contains(['#', '\\'])
             || self
                 .path
@@ -173,16 +172,11 @@ impl Call {
                 .contains("%5c")
             || self.path.starts_with("/api/")
             || self.path.chars().any(char::is_control)
-            || serde_json::to_vec(&self.body)
-                .map_err(|_| ApiError::forbidden())?
-                .len()
-                > 1024 * 1024
         {
             return Err(ApiError::forbidden());
         }
         if let Some(transfer) = &self.transfer {
             if !self.body.is_null()
-                || transfer.data_base64.len() > 1024 * 1024
                 || transfer
                     .filename
                     .iter()
@@ -280,7 +274,7 @@ pub(crate) async fn dispatch_as_agent(
 
 pub(crate) async fn dispatch(s: &AppState, scope: Scope, mut call: Call) -> Result<Value> {
     call.validate()?;
-    let policy = crate::accounts::conversation_policy::Configuration::load(&s.db).await?;
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     // The editor consumes the full catalog, but MCP must stay below its bounded
     // response size. Preserve explicit pagination while making an unfiltered
     // discovery call safe as well.
@@ -332,6 +326,11 @@ pub(crate) async fn dispatch(s: &AppState, scope: Scope, mut call: Call) -> Resu
             },
         )
     };
+    if !ferry_protocol::resources::allows(policy.tool_request_bytes, body.len()) {
+        return Ok(
+            json!({"status":413,"ok":false,"error":"The request exceeds the administrator-configured tool request limit."}),
+        );
+    }
     let request = Request::builder()
         .method(
             call.method
@@ -361,7 +360,12 @@ pub(crate) async fn dispatch(s: &AppState, scope: Scope, mut call: Call) -> Resu
         .and_then(|v| v.to_str().ok())
         .unwrap_or("application/octet-stream")
         .to_owned();
-    let bytes = match to_bytes(response.into_body(), policy.tool_response_limit_kib * 1024).await {
+    let bytes = match to_bytes(
+        response.into_body(),
+        ferry_protocol::resources::byte_limit(policy.tool_response_bytes),
+    )
+    .await
+    {
         Ok(bytes) => bytes,
         Err(_) => {
             let reason = if call.read_only() {
@@ -370,8 +374,8 @@ pub(crate) async fn dispatch(s: &AppState, scope: Scope, mut call: Call) -> Resu
                 "A write may already have completed; read its state before retrying. Request a smaller response."
             };
             let error = format!(
-                "The response exceeds the configured tool limit of {} KiB. {reason}",
-                policy.tool_response_limit_kib
+                "The response exceeds the configured tool limit of {} bytes. {reason}",
+                policy.tool_response_bytes.unwrap_or_default()
             );
             return Ok(
                 json!({"status":413,"ok":false,"error":error,"guidance":call_guidance(&call,413)}),

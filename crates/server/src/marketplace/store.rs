@@ -33,8 +33,9 @@ pub(crate) async fn replace_entries(
     source_id: i64,
     actor: i64,
     packages: Vec<PackageVersion>,
-    deadline: std::time::Instant,
+    deadline: impl Into<Option<std::time::Instant>>,
 ) -> Result<usize> {
+    let deadline = deadline.into();
     entries::Entity::delete_many()
         .filter(entries::Column::WorkspaceId.eq(workspace_id))
         .filter(entries::Column::SourceId.eq(source_id))
@@ -43,7 +44,7 @@ pub(crate) async fn replace_entries(
     let now = db::now();
     let total = packages.len();
     for p in packages {
-        if std::time::Instant::now() >= deadline {
+        if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
             return Err(timeout());
         }
         let mut meta = p.meta;
@@ -81,7 +82,7 @@ pub(crate) async fn replace_entries(
         .exec(tx)
         .await?;
     }
-    if std::time::Instant::now() >= deadline {
+    if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
         return Err(timeout());
     }
     Ok(total)

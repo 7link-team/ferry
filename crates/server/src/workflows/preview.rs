@@ -31,8 +31,6 @@ use std::{
 };
 use tokio::sync::{mpsc, watch};
 
-/// Longer than any preview lives (24 h), so the preview ends first.
-const SERVICE_LIMIT: Duration = Duration::from_secs(25 * 3600);
 /// Startup output goes to the node log while the node waits for the port.
 const LOG_WINDOW: Duration = Duration::from_secs(600 + 30);
 const CLEANUP: Duration = Duration::from_secs(30);
@@ -128,6 +126,12 @@ pub(super) async fn execute(
 ) -> Result<Step> {
     super::host::active(s, run).await?;
     let request = Request::parse(params)?;
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    if request.command.as_ref().is_some_and(|command| {
+        !ferry_protocol::resources::allows(policy.command_bytes, command.len())
+    }) {
+        return Err(super::host::invalid());
+    }
     // A resumed attempt (review wake-up or recovery) never starts a second service.
     if let Some(hole) = latest(&s.db, run.id, node).await? {
         return settle(s, hole.id, request.human).await;
@@ -399,7 +403,7 @@ async fn serve(
     Ok(())
 }
 
-/// Runs the service without host.command's 120 s limit until it exits, the
+/// Runs the service until it exits, the
 /// execution's services are stopped, or the execution is seen to have ended.
 fn spawn(
     s: AppState,
@@ -413,9 +417,22 @@ fn spawn(
     let key = register(execution, cancel.clone());
     tokio::spawn(async move {
         let (sender, mut output) = mpsc::channel(16);
-        let task = ch.exec_stream(&command, SERVICE_LIMIT, sender, receiver);
+        let policy = match crate::accounts::resource_policy::load(&s.db).await {
+            Ok(policy) => policy,
+            Err(error) => {
+                tracing::warn!(execution, %error, "preview resource policy unavailable");
+                forget(execution, key);
+                return;
+            }
+        };
+        let task = ch.exec_stream(
+            &command,
+            Duration::from_secs(policy.task_timeout_seconds.unwrap_or(0)),
+            sender,
+            receiver,
+        );
         tokio::pin!(task);
-        let mut node_log = super::host::NodeLog::default();
+        let mut node_log = super::host::NodeLog::with_limit(policy.log_output_bytes);
         let logging_until = tokio::time::Instant::now() + LOG_WINDOW;
         let mut flush = tokio::time::interval(Duration::from_millis(250));
         let mut check =

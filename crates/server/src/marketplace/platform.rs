@@ -11,7 +11,8 @@ use crate::{
 };
 use axum::{extract::State, http::StatusCode};
 use sea_orm::{
-    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set, TransactionTrait, sea_query::Expr,
+    ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Set, TransactionTrait,
+    sea_query::Expr,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -218,7 +219,10 @@ pub async fn update(
         .filter(sources::Column::Id.eq(id))
         .filter(sources::Column::WorkspaceId.eq(PLATFORM))
         .filter(sources::Column::Version.eq(b.version))
-        .filter(sources::Column::SyncLeaseUntil.lte(now))
+        .filter(sea_orm::ExprTrait::lte(
+            Expr::col(sources::Column::SyncLeaseUntil),
+            db::now_expr(tx.get_database_backend()),
+        ))
         .exec(&tx)
         .await?
         .rows_affected;
@@ -258,7 +262,10 @@ pub async fn delete(
     let removed = sources::Entity::delete_many()
         .filter(sources::Column::Id.eq(id))
         .filter(sources::Column::WorkspaceId.eq(PLATFORM))
-        .filter(sources::Column::SyncLeaseUntil.lte(db::now()))
+        .filter(sea_orm::ExprTrait::lte(
+            Expr::col(sources::Column::SyncLeaseUntil),
+            db::now_expr(tx.get_database_backend()),
+        ))
         .exec(&tx)
         .await?
         .rows_affected;
@@ -290,22 +297,70 @@ pub async fn delete(
 const LEASE_MS: i64 = 60_000;
 
 /// Takes the sync lease for one platform source; true only for the single winner.
-pub(crate) async fn claim(s: &AppState, id: i64) -> Result<bool> {
-    let now = db::now();
+pub(crate) async fn claim(s: &AppState, id: i64, owner: &str) -> Result<bool> {
+    let now = db::now_expr(s.db.get_database_backend());
     Ok(sources::Entity::update_many()
+        .col_expr(sources::Column::SyncOwner, Expr::value(owner))
         .col_expr(
-            sources::Column::SyncOwner,
-            Expr::value(s.instance_id.clone()),
+            sources::Column::SyncLeaseUntil,
+            sea_orm::ExprTrait::add(now.clone(), LEASE_MS),
         )
-        .col_expr(sources::Column::SyncLeaseUntil, Expr::value(now + LEASE_MS))
         .col_expr(sources::Column::State, Expr::value("syncing"))
         .filter(sources::Column::Id.eq(id))
         .filter(sources::Column::WorkspaceId.eq(PLATFORM))
-        .filter(sources::Column::SyncLeaseUntil.lte(now))
+        .filter(sea_orm::ExprTrait::lte(
+            Expr::col(sources::Column::SyncLeaseUntil),
+            now,
+        ))
         .exec(&s.db)
         .await?
         .rows_affected
         == 1)
+}
+
+async fn renew_sync_lease(s: &AppState, id: i64, owner: &str) -> Result<bool> {
+    let now = db::now_expr(s.db.get_database_backend());
+    Ok(sources::Entity::update_many()
+        .col_expr(
+            sources::Column::SyncLeaseUntil,
+            sea_orm::ExprTrait::add(now.clone(), LEASE_MS),
+        )
+        .filter(sources::Column::Id.eq(id))
+        .filter(sources::Column::WorkspaceId.eq(PLATFORM))
+        .filter(sources::Column::State.eq("syncing"))
+        .filter(sources::Column::SyncOwner.eq(owner))
+        .filter(sea_orm::ExprTrait::gt(
+            Expr::col(sources::Column::SyncLeaseUntil),
+            now,
+        ))
+        .exec(&s.db)
+        .await?
+        .rows_affected
+        == 1)
+}
+
+async fn fetch_with_lease(
+    s: &AppState,
+    id: i64,
+    owner: &str,
+    config: &Source,
+    timeout: std::time::Duration,
+) -> Result<String> {
+    let work = super::fetch(config, None, false, timeout);
+    tokio::pin!(work);
+    let mut renew = tokio::time::interval(std::time::Duration::from_secs(10));
+    renew.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            result = &mut work => return result,
+            _ = renew.tick() => {
+                if !renew_sync_lease(s, id, owner).await? {
+                    return Err(ApiError::localized(StatusCode::CONFLICT,
+                        crate::i18n::Message::new("marketplace.syncing")));
+                }
+            }
+        }
+    }
 }
 
 /// Reads a public bundle without credentials and replaces this source's catalog; failure keeps it.
@@ -313,6 +368,7 @@ pub(crate) async fn claim(s: &AppState, id: i64) -> Result<bool> {
 pub(crate) async fn commit_sync(
     s: &AppState,
     id: i64,
+    owner: &str,
     actor: i64,
     packages: Vec<super::index::PackageVersion>,
     interval: i64,
@@ -331,7 +387,11 @@ pub(crate) async fn commit_sync(
         .col_expr(sources::Column::SyncOwner, Expr::value(""))
         .col_expr(sources::Column::SyncLeaseUntil, Expr::value(0))
         .filter(sources::Column::Id.eq(id))
-        .filter(sources::Column::SyncOwner.eq(s.instance_id.clone()))
+        .filter(sources::Column::SyncOwner.eq(owner))
+        .filter(sea_orm::ExprTrait::gt(
+            Expr::col(sources::Column::SyncLeaseUntil),
+            db::now_expr(tx.get_database_backend()),
+        ))
         .exec(&tx)
         .await?
         .rows_affected;
@@ -347,7 +407,8 @@ pub(crate) async fn commit_sync(
 }
 
 pub(crate) async fn synchronize_platform(s: &AppState, id: i64, actor: i64) -> Result<usize> {
-    if !claim(s, id).await? {
+    let owner = uuid::Uuid::new_v4().to_string();
+    if !claim(s, id, &owner).await? {
         return Err(ApiError::localized(
             StatusCode::CONFLICT,
             crate::i18n::Message::new("marketplace.syncing"),
@@ -359,11 +420,16 @@ pub(crate) async fn synchronize_platform(s: &AppState, id: i64, actor: i64) -> R
     let result: Result<usize> = async {
         let config: Source =
             serde_json::from_str(&row.config).map_err(|_| bad("marketplace.configCorrupt"))?;
-        let text = super::fetch(&config, None, false, timeout).await?;
+        let policy = crate::accounts::resource_policy::load(&s.db).await?;
+        let transfer_timeout = policy
+            .task_timeout_seconds
+            .map(std::time::Duration::from_secs)
+            .unwrap_or_default();
+        let text = fetch_with_lease(s, id, &owner, &config, transfer_timeout).await?;
         let packages = super::index::parse_bundle(&text, &super::ferry_version(), "en-US")?;
         // The write budget starts after the fetch: a Git fetch may take minutes.
         let deadline = std::time::Instant::now() + timeout;
-        commit_sync(s, id, actor, packages, interval, deadline).await
+        commit_sync(s, id, &owner, actor, packages, interval, deadline).await
     }
     .await;
     if let Err(error) = &result {
@@ -377,7 +443,7 @@ pub(crate) async fn synchronize_platform(s: &AppState, id: i64, actor: i64) -> R
             .col_expr(sources::Column::SyncOwner, Expr::value(""))
             .col_expr(sources::Column::SyncLeaseUntil, Expr::value(0))
             .filter(sources::Column::Id.eq(id))
-            .filter(sources::Column::SyncOwner.eq(s.instance_id.clone()))
+            .filter(sources::Column::SyncOwner.eq(owner))
             .exec(&s.db)
             .await;
         if let Err(write) = recorded {
@@ -423,7 +489,10 @@ pub(crate) async fn release_expired(s: &AppState) -> Result<()> {
         .col_expr(sources::Column::SyncLeaseUntil, Expr::value(0))
         .filter(sources::Column::WorkspaceId.eq(PLATFORM))
         .filter(sources::Column::State.eq("syncing"))
-        .filter(sources::Column::SyncLeaseUntil.lte(db::now()))
+        .filter(sea_orm::ExprTrait::lte(
+            Expr::col(sources::Column::SyncLeaseUntil),
+            db::now_expr(s.db.get_database_backend()),
+        ))
         .exec(&s.db)
         .await?;
     Ok(())
@@ -443,7 +512,10 @@ pub async fn scheduler(s: AppState, mut drain: tokio::sync::watch::Receiver<bool
             .filter(sources::Column::WorkspaceId.eq(PLATFORM))
             .filter(sources::Column::Enabled.eq(1))
             .filter(sources::Column::NextSyncAt.lte(now))
-            .filter(sources::Column::SyncLeaseUntil.lte(now))
+            .filter(sea_orm::ExprTrait::lte(
+                Expr::col(sources::Column::SyncLeaseUntil),
+                db::now_expr(s.db.get_database_backend()),
+            ))
             .all(&s.db)
             .await
         {
@@ -523,15 +595,191 @@ mod sync_tests {
     async fn lease_claim_is_exclusive() {
         let (_dir, s) = crate::agents::tests::setup().await;
         let id = platform_source(&s, "http://127.0.0.1:9").await;
-        assert!(claim(&s, id).await.unwrap());
-        assert!(!claim(&s, id).await.unwrap());
+        assert!(claim(&s, id, &s.instance_id).await.unwrap());
+        assert!(!claim(&s, id, &s.instance_id).await.unwrap());
         sources::Entity::update_many()
             .col_expr(sources::Column::SyncLeaseUntil, Expr::value(db::now() - 1))
             .filter(sources::Column::Id.eq(id))
             .exec(&s.db)
             .await
             .unwrap();
-        assert!(claim(&s, id).await.unwrap());
+        assert!(claim(&s, id, &s.instance_id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn lease_renewal_never_revives_expired_or_stolen_sources() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let id = platform_source(&s, "http://127.0.0.1:9").await;
+        assert!(claim(&s, id, &s.instance_id).await.unwrap());
+        assert!(renew_sync_lease(&s, id, &s.instance_id).await.unwrap());
+        sources::Entity::update_many()
+            .col_expr(sources::Column::SyncLeaseUntil, Expr::value(1))
+            .filter(sources::Column::Id.eq(id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        assert!(!renew_sync_lease(&s, id, &s.instance_id).await.unwrap());
+        assert_eq!(scoped(&s.db, id.into()).await.unwrap().sync_lease_until, 1);
+        assert!(claim(&s, id, &s.instance_id).await.unwrap());
+        sources::Entity::update_many()
+            .col_expr(sources::Column::SyncOwner, Expr::value("other-owner"))
+            .filter(sources::Column::Id.eq(id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        assert!(!renew_sync_lease(&s, id, &s.instance_id).await.unwrap());
+        assert_eq!(
+            scoped(&s.db, id.into()).await.unwrap().sync_owner,
+            "other-owner"
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_same_instance_attempt_cannot_renew_a_new_claim() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let id = platform_source(&s, "http://127.0.0.1:9").await;
+        assert!(claim(&s, id, "attempt-a").await.unwrap());
+        sources::Entity::update_many()
+            .col_expr(sources::Column::SyncLeaseUntil, Expr::value(1))
+            .filter(sources::Column::Id.eq(id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        assert!(claim(&s, id, "attempt-b").await.unwrap());
+        assert!(
+            !renew_sync_lease(&s, id, "attempt-a").await.unwrap(),
+            "the expired attempt must not adopt the same instance's new claim"
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_same_instance_attempt_cannot_commit_a_new_claim() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let id = platform_source(&s, "http://127.0.0.1:9").await;
+        assert!(claim(&s, id, "attempt-a").await.unwrap());
+        sources::Entity::update_many()
+            .col_expr(sources::Column::SyncLeaseUntil, Expr::value(1))
+            .filter(sources::Column::Id.eq(id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        assert!(claim(&s, id, "attempt-b").await.unwrap());
+        let packages = super::super::index::parse_bundle(
+            &bundle().to_string(),
+            &semver::Version::new(0, 3, 0),
+            "en-US",
+        )
+        .unwrap();
+        assert!(
+            commit_sync(
+                &s,
+                id,
+                "attempt-a",
+                1,
+                packages,
+                3_600_000,
+                std::time::Instant::now() + std::time::Duration::from_secs(20)
+            )
+            .await
+            .is_err(),
+            "the expired attempt must not commit under the new claim"
+        );
+        assert_eq!(
+            entries::Entity::find()
+                .filter(entries::Column::SourceId.eq(id))
+                .count(&s.db)
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_marketplace_fetch_renews_its_lease() {
+        pending_leased_fetch(false).await;
+    }
+
+    #[tokio::test]
+    async fn pending_marketplace_fetch_stops_when_ownership_is_lost() {
+        pending_leased_fetch(true).await;
+    }
+
+    async fn pending_leased_fetch(steal: bool) {
+        use std::sync::Arc;
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let arrived = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let requested = arrived.clone();
+        let resume = release.clone();
+        let router = axum::Router::new().route(
+            "/{*path}",
+            axum::routing::get(move || {
+                let arrived = requested.clone();
+                let release = resume.clone();
+                async move {
+                    arrived.notify_one();
+                    release.notified().await;
+                    axum::Json(json!({"schemaVersion":2,"packages":[]}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        struct Server(tokio::task::JoinHandle<()>);
+        impl Drop for Server {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+        let _server = Server(tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        }));
+        let id = platform_source(&s, &endpoint).await;
+        assert!(claim(&s, id, &s.instance_id).await.unwrap());
+        let config: Source =
+            serde_json::from_str(&scoped(&s.db, id.into()).await.unwrap().config).unwrap();
+        let state = s.clone();
+        let fetch = tokio::spawn(async move {
+            fetch_with_lease(
+                &state,
+                id,
+                &state.instance_id,
+                &config,
+                std::time::Duration::ZERO,
+            )
+            .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(3), arrived.notified())
+            .await
+            .unwrap();
+        let expiry = scoped(&s.db, id.into()).await.unwrap().sync_lease_until;
+        if steal {
+            sources::Entity::update_many()
+                .col_expr(sources::Column::SyncOwner, Expr::value("other-owner"))
+                .filter(sources::Column::Id.eq(id))
+                .exec(&s.db)
+                .await
+                .unwrap();
+            let error = tokio::time::timeout(std::time::Duration::from_secs(12), fetch)
+                .await
+                .unwrap()
+                .unwrap()
+                .err()
+                .unwrap();
+            assert_eq!(error.0, StatusCode::CONFLICT);
+            let row = scoped(&s.db, id.into()).await.unwrap();
+            assert_eq!(row.sync_owner, "other-owner");
+            assert_eq!(row.sync_lease_until, expiry);
+        } else {
+            tokio::time::sleep(std::time::Duration::from_secs(11)).await;
+            let row = scoped(&s.db, id.into()).await.unwrap();
+            assert!(
+                row.sync_lease_until >= expiry + 9_000,
+                "pending fetch must renew at the ten-second cadence"
+            );
+            release.notify_one();
+            assert!(fetch.await.unwrap().is_ok());
+        }
     }
 
     #[tokio::test]
@@ -567,7 +815,7 @@ mod sync_tests {
     async fn manual_sync_rejected_while_leased() {
         let (_dir, s) = crate::agents::tests::setup().await;
         let id = platform_source(&s, "http://127.0.0.1:9").await;
-        assert!(claim(&s, id).await.unwrap());
+        assert!(claim(&s, id, &s.instance_id).await.unwrap());
         assert_eq!(
             synchronize_platform(&s, id, 1).await.err().unwrap().0,
             StatusCode::CONFLICT
@@ -578,7 +826,7 @@ mod sync_tests {
     async fn recover_ignores_platform_rows() {
         let (_dir, s) = crate::agents::tests::setup().await;
         let id = platform_source(&s, "http://127.0.0.1:9").await;
-        assert!(claim(&s, id).await.unwrap());
+        assert!(claim(&s, id, &s.instance_id).await.unwrap());
         super::super::recover(&s).await.unwrap();
         assert_eq!(scoped(&s.db, id.into()).await.unwrap().state, "syncing");
     }
@@ -606,6 +854,7 @@ mod sync_tests {
         let error = commit_sync(
             &s,
             id,
+            &s.instance_id,
             1,
             packages,
             3_600_000,
@@ -630,7 +879,7 @@ mod sync_tests {
     async fn delete_and_edit_wait_for_running_sync() {
         let (_dir, s) = crate::agents::tests::setup().await;
         let id = platform_source(&s, "http://127.0.0.1:9").await;
-        assert!(claim(&s, id).await.unwrap());
+        assert!(claim(&s, id, &s.instance_id).await.unwrap());
         let deleted = delete(State(s.clone()), account(1, true), Path(id.into()))
             .await
             .err()
@@ -658,7 +907,7 @@ mod sync_tests {
     async fn expired_lease_releases_stuck_syncing_source() {
         let (_dir, s) = crate::agents::tests::setup().await;
         let id = platform_source(&s, "http://127.0.0.1:9").await;
-        assert!(claim(&s, id).await.unwrap());
+        assert!(claim(&s, id, &s.instance_id).await.unwrap());
         sources::Entity::update_many()
             .col_expr(sources::Column::SyncLeaseUntil, Expr::value(db::now() - 1))
             .filter(sources::Column::Id.eq(id))

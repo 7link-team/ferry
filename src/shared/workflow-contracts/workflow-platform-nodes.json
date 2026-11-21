@@ -59,7 +59,6 @@
           },
           "query": {
             "type": "object",
-            "maxProperties": 64,
             "propertyNames": {
               "minLength": 1,
               "maxLength": 128
@@ -80,8 +79,7 @@
           },
           "max_pages": {
             "type": "integer",
-            "minimum": 1,
-            "maximum": 50
+            "minimum": 1
           }
         },
         "required": [
@@ -89,8 +87,7 @@
           "path_params",
           "query",
           "split_items",
-          "all_pages",
-          "max_pages"
+          "all_pages"
         ],
         "additionalProperties": false
       },
@@ -106,8 +103,7 @@
           "page_size": 20
         },
         "split_items": true,
-        "all_pages": false,
-        "max_pages": 50
+        "all_pages": false
       }
     },
     {
@@ -174,8 +170,7 @@
           },
           "prompt": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 32768
+            "minLength": 1
           },
           "output_schema": {
             "type": "object",
@@ -190,13 +185,11 @@
           },
           "timeout_s": {
             "type": "integer",
-            "minimum": 30,
-            "maximum": 1800
+            "minimum": 1
           },
           "max_tool_calls": {
             "type": "integer",
-            "minimum": 1,
-            "maximum": 128
+            "minimum": 1
           },
           "files": {
             "type": "object",
@@ -211,7 +204,6 @@
                   },
                   {
                     "type": "array",
-                    "maxItems": 30,
                     "items": {
                       "type": "string",
                       "pattern": "^\\.?[A-Za-z0-9]{1,10}$"
@@ -221,17 +213,14 @@
               },
               "max_files": {
                 "type": "integer",
-                "minimum": 1,
-                "maximum": 50
+                "minimum": 1
               },
               "max_total_mb": {
                 "type": "integer",
-                "minimum": 1,
-                "maximum": 500
+                "minimum": 1
               },
               "instructions": {
-                "type": "string",
-                "maxLength": 4096
+                "type": "string"
               }
             },
             "required": [
@@ -242,23 +231,19 @@
           "max_tokens": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 32768,
-            "default": 1024,
             "description": "API model output token limit per request. Ignored for CLI models."
           }
         },
         "required": [
           "agent_id",
-          "prompt",
-          "timeout_s",
-          "max_tool_calls"
+          "prompt"
         ],
         "additionalProperties": false
       },
       "expression_fields": [
         "/prompt"
       ],
-      "semantic_rule": "agent_id names an enabled Agent the saving user may use using an API model profile or a read-only capable CLI (not Kimi or Grok). prompt is at most 32 KiB; output_schema is a JSON Schema of at most 64 KiB whose root type is object. The node runs once per execution over all input items at the execution location resolved independently for that node: API models call their configured provider on the server without a Runner (host settings are ignored); CLI models use the explicit node target, otherwise a compatible workflow default, otherwise the model candidate Runner hosts (legacy Agent pins remain compatible), with platform tools limited to catalogue GETs under the execution identity intersected with the Agent role. output_schema is required unless files.enabled is true. With files.enabled the Agent's CLI (Codex or Claude only) runs in a fresh Runner-managed working directory where it may write only inside that directory, without network; every regular file it leaves under ./output/ (at most files.max_files, each at most 32 MiB, files.max_total_mb in total, optionally limited to files.formats extensions, content checked against the extension) becomes a workflow file: the single output item gets json.files [{artifact_id,name,mime,size,sha256,download_url,meta}] and binary file_1..file_n, plus the validated JSON object when output_schema is set, otherwise json.summary with the final message. Claude can only write text formats in this mode; Codex can run programs that already exist on the host (python-docx/openpyxl/python-pptx, matplotlib, ffmpeg, LibreOffice...). API Agents use the same GET-only platform tools and schema validation, with one output correction, node timeout and cancellation. API Agents cannot use files.enabled: use report.render after structured output instead. max_tokens optionally controls API output tokens per request (default 1024). Costs and usage are recorded without monetary admission limits; provider concurrency and request rate still apply.",
+      "semantic_rule": "agent_id names an enabled Agent the saving user may use using an API model profile or a read-only capable CLI (not Kimi or Grok). Resource ceilings are unlimited unless configured in platform resource_limits. Legacy timeout_s/max_tool_calls/files.max_files/files.max_total_mb are retained but ignored as quota sources. output_schema is a JSON Schema whose root type is object. The node runs once per execution over all input items at the execution location resolved independently for that node: API models call their configured provider on the server without a Runner (host settings are ignored); CLI models use the explicit node target, otherwise a compatible workflow default, otherwise the model candidate Runner hosts (legacy Agent pins remain compatible), with platform tools limited to catalogue GETs under the execution identity intersected with the Agent role. output_schema is required unless files.enabled is true. With files.enabled the Agent's CLI (Codex or Claude only) runs in a fresh Runner-managed working directory where it may write only inside that directory, without network; every regular file it leaves under ./output/ (optionally limited to files.formats extensions, content checked against the extension) becomes a workflow file: the single output item gets json.files [{artifact_id,name,mime,size,sha256,download_url,meta}] and binary file_1..file_n, plus the validated JSON object when output_schema is set, otherwise json.summary with the final message. Claude can only write text formats in this mode; Codex can run programs that already exist on the host (python-docx/openpyxl/python-pptx, matplotlib, ffmpeg, LibreOffice...). API Agents use the same GET-only platform tools and schema validation, with one output correction, node timeout and cancellation. API Agents cannot use files.enabled: use report.render after structured output instead. max_tokens optionally controls API output tokens per request (default 1024). Costs and usage are recorded without monetary admission limits; provider concurrency and request rate still apply.",
       "example_params": {
         "agent_id": "1",
         "prompt": "Summarize the input items.",
@@ -272,9 +257,7 @@
           "required": [
             "summary"
           ]
-        },
-        "timeout_s": 600,
-        "max_tool_calls": 64
+        }
       }
     }
   ]

@@ -191,7 +191,13 @@ impl Configuration {
         }
         Ok(Some(config.seal(s)?))
     }
-    async fn send(&self, to: &str, subject: String, body: String) -> Result<()> {
+    async fn send(
+        &self,
+        to: &str,
+        subject: String,
+        body: String,
+        policy: &ferry_protocol::resources::ResourcePolicy,
+    ) -> Result<()> {
         let from = self
             .from
             .parse::<Mailbox>()
@@ -221,7 +227,11 @@ impl Configuration {
             _ => return Err(error("mail.securityInvalid")),
         }
         .port(self.port)
-        .timeout(Some(std::time::Duration::from_secs(15)));
+        .timeout(
+            policy
+                .task_timeout_seconds
+                .map(std::time::Duration::from_secs),
+        );
         let builder = if self.username.is_empty() {
             builder
         } else {
@@ -230,13 +240,10 @@ impl Configuration {
                 self.password.clone(),
             ))
         };
-        tokio::time::timeout(
-            std::time::Duration::from_secs(20),
-            builder.build().send(message),
-        )
-        .await
-        .map_err(|_| error("mail.sendFailed"))?
-        .map_err(|_| error("mail.sendFailed"))?;
+        super::resource_policy::task_timeout(policy, builder.build().send(message))
+            .await
+            .map_err(|_| error("mail.sendFailed"))?
+            .map_err(|_| error("mail.sendFailed"))?;
         Ok(())
     }
 }
@@ -433,6 +440,7 @@ pub async fn test(
         .await?
         .ok_or_else(ApiError::missing)?;
     let mut config = Configuration::read(&s, row.mail_config.as_deref())?;
+    let policy = super::resource_policy::read(row.resource_config.as_deref())?;
     let to = auth::email(&body.email)?;
     let locale = match body.locale {
         Some(tag) => crate::i18n::Locale::ALL
@@ -446,7 +454,7 @@ pub async fn test(
     }
     // A sample never creates a usable registration challenge or a template type.
     let (subject, body) = config.message_in(&to, Some("123456"), locale, body.template.as_ref());
-    config.send(&to, subject, body).await?;
+    config.send(&to, subject, body, &policy).await?;
     let tx = s.db.begin().await?;
     let latest = platform::lock(&tx).await?;
     platform::check_admin(&tx, &admin).await?;
@@ -522,6 +530,7 @@ pub async fn request_code(
     let tx = s.db.begin().await?;
     let row = platform::lock(&tx).await?;
     let config = Configuration::read(&s, row.mail_config.as_deref())?;
+    let policy = super::resource_policy::read(row.resource_config.as_deref())?;
     if row.initialized == 0 || row.registration_enabled == 0 || !config.required() {
         return Err(ApiError::forbidden());
     }
@@ -565,7 +574,7 @@ pub async fn request_code(
     .await?;
     tx.commit().await?;
     let (subject, body) = config.message(&email, Some(&code));
-    if let Err(e) = config.send(&email, subject, body).await {
+    if let Err(e) = config.send(&email, subject, body, &policy).await {
         email_codes::Entity::delete_many()
             .filter(email_codes::Column::Id.eq(id))
             .filter(email_codes::Column::CodeHash.eq(hash))

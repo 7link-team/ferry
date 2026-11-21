@@ -380,13 +380,37 @@ fn generic_message_preview_keeps_body_without_an_empty_label() {
 
 #[tokio::test]
 async fn smtp_delivers_html_and_plain_text_through_the_shared_service() {
+    delayed_smtp_delivery(None, 0, "succeeded").await;
+}
+
+#[tokio::test]
+async fn smtp_delivery_obeys_the_configured_task_deadline() {
+    delayed_smtp_delivery(Some(1), 2, "unknown").await;
+}
+
+#[tokio::test]
+async fn smtp_delivery_without_a_deadline_allows_slow_greetings() {
+    // Exceeds the old fixed 20-second overall SMTP timeout.
+    delayed_smtp_delivery(None, 22, "succeeded").await;
+}
+
+async fn delayed_smtp_delivery(timeout: Option<u64>, delay: u64, expected: &str) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let (_dir, s) = setup().await;
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            sea_orm::sea_query::Expr::value(json!({"task_timeout_seconds":timeout}).to_string()),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let (captured, message) = tokio::sync::oneshot::channel();
     let receiver = tokio::spawn(async move {
         let (socket, _) = listener.accept().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(delay)).await;
         let (read, mut write) = socket.into_split();
         let mut read = BufReader::new(read);
         write
@@ -435,7 +459,12 @@ async fn smtp_delivers_html_and_plain_text_through_the_shared_service() {
     let sent = send_message(&s, &admin(1), id, body, "manual", "")
         .await
         .unwrap();
-    assert_eq!(sent["state"], "succeeded", "{sent}");
+    if sent["state"] != "succeeded" || expected != "succeeded" {
+        receiver.abort();
+        assert_eq!(sent["state"], expected, "{sent}");
+        return;
+    }
+    assert_eq!(sent["state"], expected, "{sent}");
     let data = tokio::time::timeout(Duration::from_secs(3), message)
         .await
         .unwrap()

@@ -33,7 +33,7 @@
   "conversations.tooManyAttachments": "一則訊息最多 10 個附件。",
   "conversations.attachmentNameInvalid": "附件名稱「{name}」無效：需為 1–255 位元組且不含控制字元；請重新命名檔案後重新加入。",
   "conversations.messageTooLong": "訊息與文字附件合計超過 48 KB；請縮短內容，或改用檔案傳送。",
-  "conversations.messageTooLongWithInstructions": "加上智慧體指令後，本則訊息超過 63 KB；請縮短訊息或智慧體指令。",
+  "conversations.messageTooLongWithInstructions": "訊息與智慧體指示合計超過已設定的提示詞限制。請縮短訊息或調整資源策略。",
   "conversations.tooManyTargets": "一則訊息最多同時指定 8 個智慧體。",
   "conversations.kindInvalid": "請選擇會話類型：單獨會話或群聊。",
   "conversations.tooManyMembers": "群聊最多 100 名成員。",

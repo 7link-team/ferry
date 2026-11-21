@@ -33,7 +33,7 @@
   "conversations.tooManyAttachments": "1 件のメッセージに添付できるファイルは最大 10 個です。",
   "conversations.attachmentNameInvalid": "添付ファイル名「{name}」が無効です。1～255 バイトで制御文字を含めないでください。名前を変更して添付し直してください。",
   "conversations.messageTooLong": "メッセージとテキスト添付の合計が 48 KB を超えています。短くするか、ファイルとして送信してください。",
-  "conversations.messageTooLongWithInstructions": "エージェントの指示と合わせると、このメッセージは 63 KB を超えます。メッセージか指示を短くしてください。",
+  "conversations.messageTooLongWithInstructions": "メッセージとエージェントの指示の合計が、設定されたプロンプト上限を超えています。メッセージを短くするか、リソースポリシーを変更してください。",
   "conversations.tooManyTargets": "1 件のメッセージで同時に指定できるエージェントは最大 8 つです。",
   "conversations.kindInvalid": "会話の種類（個別またはグループ）を選択してください。",
   "conversations.tooManyMembers": "グループのメンバーは最大 100 人です。",

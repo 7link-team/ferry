@@ -131,7 +131,12 @@ pub(crate) async fn run(
         protected
             .then(|| Message::new("deployment.output.exitCode").with("code", out.code.to_string())),
     ));
-    output.truncate_raw(8 * 1024);
+    if let Some(limit) = crate::accounts::resource_policy::load(&s.db)
+        .await?
+        .log_output_bytes
+    {
+        output.truncate_raw(ferry_protocol::resources::byte_limit(Some(limit)));
+    }
     events::record(s, &s.db, NewEvent {
         workspace: app.workspace_id.into(), deployment: app.id.into(), kind: Kind::HookOutput,
         instance: instance.into(), host, revision: app.current_revision.into(),

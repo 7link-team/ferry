@@ -57,6 +57,7 @@ pub struct Body {
     pub inputs: serde_json::Map<String, Value>,
     #[serde(default)]
     pub command: String,
+    #[serde(default)]
     pub timeout_seconds: u64,
     #[serde(default)]
     pub max_retries: u32,
@@ -132,7 +133,6 @@ async fn validate(
 ) -> Result<()> {
     if b.name.trim().is_empty()
         || b.name.chars().count() > 60
-        || !(1..=86400).contains(&b.timeout_seconds)
         || b.max_retries > 10
         || !(1..=3600).contains(&b.retry_delay_seconds)
     {
@@ -219,8 +219,11 @@ async fn validate(
             Message::new("cron.targetMismatch"),
         ));
     }
+    let policy = crate::accounts::resource_policy::load(conn).await?;
     if b.scope == "host"
-        && (b.command.trim().is_empty() || b.command.len() > 65536 || b.command.contains('\0'))
+        && (b.command.trim().is_empty()
+            || !ferry_protocol::resources::allows(policy.command_bytes, b.command.len())
+            || b.command.contains('\0'))
     {
         return Err(ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
@@ -729,7 +732,10 @@ async fn due(s: &AppState, recovery: bool) -> Result<()> {
 }
 async fn finish(s: &AppState, id: i64, state: &str, output: &StoredText) -> Result<()> {
     let mut text = output.clone();
-    text.truncate_raw(1_048_576);
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    if let Some(limit) = policy.log_output_bytes {
+        text.truncate_raw(ferry_protocol::resources::byte_limit(Some(limit)));
+    }
     runs::Entity::update_many()
         .col_expr(runs::Column::State, Expr::value(state))
         .col_expr(runs::Column::Output, Expr::value(text.stored()))
@@ -769,13 +775,14 @@ impl Outcome {
 async fn downstream(
     s: &AppState,
     run: &runs::Model,
-    b: &Body,
+    _b: &Body,
     id: i64,
     kind: &str,
     stop: &mut watch::Receiver<bool>,
     drain: &mut watch::Receiver<bool>,
 ) -> Result<Outcome> {
     let started = std::time::Instant::now();
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     loop {
         let (state, detail) = if kind == "pipeline-runs" {
             let r = pipeline_runs::Entity::find_by_id(id)
@@ -839,7 +846,11 @@ async fn downstream(
             }
             _ => {}
         }
-        if *stop.borrow() || started.elapsed() >= Duration::from_secs(b.timeout_seconds) {
+        if *stop.borrow()
+            || policy
+                .task_timeout_seconds
+                .is_some_and(|seconds| started.elapsed() >= Duration::from_secs(seconds))
+        {
             return Ok(Outcome::message(
                 "needs-review",
                 Message::new("cron.downstreamTimeout").with_message("detail", detail),
@@ -856,6 +867,7 @@ async fn once(
     stop: &mut watch::Receiver<bool>,
     drain: &mut watch::Receiver<bool>,
 ) -> Result<Outcome> {
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     let scope = match Scope::for_actor(s, run.workspace_id.into(), run.triggered_by.into()).await {
         Ok(scope) => scope,
         Err(_) => {
@@ -922,7 +934,7 @@ async fn once(
                     return Ok(Outcome::new("failed", output, true));
                 }
             };
-            let result = tokio::select! { result=channel.exec(&b.command,Duration::from_secs(b.timeout_seconds))=>result, _=stop.changed()=>return Ok(Outcome::message("needs-review",Message::new("cron.remoteInterrupted"),false)) };
+            let result = tokio::select! { result=channel.exec(&b.command,Duration::from_secs(policy.task_timeout_seconds.unwrap_or(0)))=>result, _=stop.changed()=>return Ok(Outcome::message("needs-review",Message::new("cron.remoteInterrupted"),false)) };
             let out = match result {
                 Ok(out) => out,
                 Err(_) => {
@@ -959,7 +971,7 @@ async fn once(
             s,
             scope,
             Id::reference(&b.target_ref)?,
-            Duration::from_secs(b.timeout_seconds),
+            Duration::from_secs(policy.task_timeout_seconds.unwrap_or(0)),
         )
         .await
         {
@@ -1161,14 +1173,25 @@ pub async fn scheduler(
         if let Err(error) = due(&s, false).await {
             tracing::error!(%error,"定时任务领取失败");
         }
-        if active.len() < 32 {
-            match runs::Entity::find()
+        let policy = match crate::accounts::resource_policy::load(&s.db).await {
+            Ok(policy) => policy,
+            Err(error) => {
+                tracing::error!(%error, "cron resource policy unavailable");
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                continue;
+            }
+        };
+        if policy
+            .cron_concurrent_runs
+            .is_none_or(|limit| (active.len() as u64) < limit)
+        {
+            let mut queued = runs::Entity::find()
                 .filter(runs::Column::State.eq("queued"))
-                .order_by_asc(runs::Column::CreatedAt)
-                .limit((32 - active.len()) as u64)
-                .all(&s.db)
-                .await
-            {
+                .order_by_asc(runs::Column::CreatedAt);
+            if let Some(limit) = policy.cron_concurrent_runs {
+                queued = queued.limit(limit.saturating_sub(active.len() as u64));
+            }
+            match queued.all(&s.db).await {
                 Ok(rows) => {
                     for row in rows {
                         let claimed = runs::Entity::update_many()
@@ -1348,6 +1371,49 @@ pub async fn ensure_unreferenced(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cron_legacy_quotas_are_ignored_and_platform_command_limit_is_optional() {
+        use sea_orm::IntoActiveModel;
+        let (_dir, s) = crate::platform_tools::tests::setup().await;
+        hosts::Entity::insert(
+            crate::hosts::fake::host_row(1, 900, "cron-test", "online").into_active_model(),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+        let mut b = body("* * * * *", "UTC");
+        b.target_ref = "900".into();
+        b.command = "x".repeat(65537);
+        b.timeout_seconds = 86401;
+        validate(&s.db, &crate::agents::tests::admin(1), &b, true)
+            .await
+            .unwrap();
+        let mut value = serde_json::to_value(&b).unwrap();
+        value.as_object_mut().unwrap().remove("timeout_seconds");
+        let without_timeout: Body = serde_json::from_value(value).unwrap();
+        validate(
+            &s.db,
+            &crate::agents::tests::admin(1),
+            &without_timeout,
+            true,
+        )
+        .await
+        .unwrap();
+        crate::entities::platform_state::Entity::update_many()
+            .col_expr(
+                crate::entities::platform_state::Column::ResourceConfig,
+                Expr::value(Some(json!({"command_bytes":65536}).to_string())),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
+        assert!(
+            validate(&s.db, &crate::agents::tests::admin(1), &b, true)
+                .await
+                .is_err()
+        );
+    }
 
     #[tokio::test]
     async fn workflow_schedules_validate_authority_and_run_published_revisions() {
@@ -1614,6 +1680,14 @@ mod tests {
             );
             assert_eq!(view["job_name"], user_text);
         }
+        crate::entities::platform_state::Entity::update_many()
+            .col_expr(
+                crate::entities::platform_state::Column::ResourceConfig,
+                Expr::value(Some(json!({"log_output_bytes":1048576}).to_string())),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
         let header = Message::new("cron.hostExit")
             .with("host", "3")
             .with("code", "0");
@@ -1653,6 +1727,29 @@ mod tests {
                 .unwrap(),
             before
         );
+        crate::entities::platform_state::Entity::update_many()
+            .col_expr(
+                crate::entities::platform_state::Column::ResourceConfig,
+                Expr::value(None::<String>),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
+        finish(&s, i64::from(id), "needs-review", &output)
+            .await
+            .unwrap();
+        let unlimited = runs::Entity::find_by_id(i64::from(id))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            run_json(unlimited.clone(), true)["output"]
+                .as_str()
+                .unwrap()
+                .ends_with("\u{754c}")
+        );
+        let before = unlimited;
         let scope = Scope {
             workspace_id: 1.into(),
             user: crate::accounts::auth::User {

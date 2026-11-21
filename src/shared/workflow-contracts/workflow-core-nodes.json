@@ -1191,8 +1191,7 @@
           },
           "max_iterations": {
             "type": "integer",
-            "minimum": 1,
-            "maximum": 1000
+            "minimum": 1
           },
           "condition": {
             "type": "string"
@@ -3181,8 +3180,7 @@
           },
           "timeout_seconds": {
             "type": "integer",
-            "minimum": 1,
-            "maximum": 300
+            "minimum": 1
           },
           "deterministic": {
             "type": "boolean"
@@ -4249,8 +4247,7 @@
             "pattern": "^[1-9][0-9]*$"
           },
           "command": {
-            "type": "string",
-            "maxLength": 4000
+            "type": "string"
           },
           "input_env": {
             "type": "object",
@@ -4628,8 +4625,7 @@
             "maxLength": 256
           },
           "body": {
-            "type": "string",
-            "maxLength": 48000
+            "type": "string"
           },
           "format": {
             "type": "string",
@@ -4640,7 +4636,6 @@
           },
           "to": {
             "type": "array",
-            "maxItems": 20,
             "items": {
               "type": "string",
               "maxLength": 320
@@ -4653,13 +4648,11 @@
             "type": "object",
             "maxProperties": 100,
             "additionalProperties": {
-              "type": "string",
-              "maxLength": 48000
+              "type": "string"
             }
           },
           "attachments": {
             "type": "array",
-            "maxItems": 10,
             "uniqueItems": true,
             "items": {
               "type": "string",
@@ -5546,7 +5539,7 @@
       "generic error output manifest",
       "typed json/gpu runtime adapters"
     ],
-    "limits": "Existing 500 total nodes/3 loop layers/2MiB graph and 1MiB pin_data; no new numeric defaults",
+    "limits": "Resource ceilings are unlimited unless configured in platform resource_limits; semantic loop nesting constraints remain",
     "nonclaims": [
       "not a production publisher",
       "not a trigger scheduler",

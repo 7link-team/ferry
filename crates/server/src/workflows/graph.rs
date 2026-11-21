@@ -5,15 +5,17 @@ use crate::{
     i18n::Message,
 };
 use axum::http::StatusCode;
+use ferry_protocol::resources::{ResourcePolicy, allows};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::OnceLock,
 };
 
+#[cfg(test)]
 pub(crate) const MAX_DEFINITION_BYTES: usize = 2 * 1024 * 1024;
+#[cfg(test)]
 const MAX_PIN_BYTES: usize = 1024 * 1024;
-const MAX_NODES: usize = 500;
 
 struct NodeContract {
     spec: Value,
@@ -229,7 +231,11 @@ pub(super) fn port_index(value: &Value) -> Option<u64> {
 }
 
 pub(crate) fn validate(input: &str) -> Result<String> {
-    if input.len() > MAX_DEFINITION_BYTES {
+    validate_with_policy(input, &ResourcePolicy::default())
+}
+
+pub(crate) fn validate_with_policy(input: &str, policy: &ResourcePolicy) -> Result<String> {
+    if !allows(policy.workflow_definition_bytes, input.len()) {
         return Err(invalid("/", "workflow.graphLimit"));
     }
     let graph: Value =
@@ -237,10 +243,10 @@ pub(crate) fn validate(input: &str) -> Result<String> {
     let pin_bytes = serde_json::to_vec(graph.get("pin_data").unwrap_or(&json!({})))
         .map_err(|_| invalid("/pin_data", "workflow.graphSchema"))?
         .len();
-    if pin_bytes > MAX_PIN_BYTES {
+    if !allows(policy.workflow_pinned_bytes, pin_bytes) {
         return Err(invalid("/pin_data", "workflow.graphLimit"));
     }
-    validate_layer(&graph, "", 0, &mut 0)?;
+    validate_layer(&graph, "", 0, &mut 0, policy)?;
     crate::definitions::canonical(input)
 }
 
@@ -341,12 +347,12 @@ fn collect_graph(graph: &Value, base: &str, out: &mut Vec<(String, String)>) {
     }
 }
 
-pub(crate) async fn checked(input: &str) -> Result<String> {
-    let canonical = validate(input)?;
+pub(crate) async fn checked_with_policy(input: &str, policy: &ResourcePolicy) -> Result<String> {
+    let canonical = validate_with_policy(input, policy)?;
     let graph: Value = serde_json::from_str(&canonical).expect("validated JSON");
     let mut expressions = Vec::new();
     collect_graph(&graph, "", &mut expressions);
-    super::expression::syntax(expressions).await?;
+    super::expression::syntax(expressions, policy).await?;
     Ok(canonical)
 }
 
@@ -472,7 +478,17 @@ pub(crate) async fn resolve(
     context: Value,
     deterministic: bool,
 ) -> Result<Vec<Value>> {
-    resolve_mode(node, base, data, selections, context, deterministic, false).await
+    resolve_mode(
+        node,
+        base,
+        data,
+        selections,
+        context,
+        deterministic,
+        false,
+        &ResourcePolicy::default(),
+    )
+    .await
 }
 
 /// Runtime-only operands retain existence metadata in the encrypted snapshot.
@@ -485,7 +501,61 @@ pub(super) async fn resolve_attempt(
     context: Value,
     deterministic: bool,
 ) -> Result<Vec<Value>> {
-    resolve_mode(node, base, data, selections, context, deterministic, true).await
+    resolve_mode(
+        node,
+        base,
+        data,
+        selections,
+        context,
+        deterministic,
+        true,
+        &ResourcePolicy::default(),
+    )
+    .await
+}
+
+pub(crate) async fn resolve_with_policy(
+    node: &Value,
+    base: &str,
+    data: ferry_protocol::sandbox::InputData,
+    selections: &[Option<usize>],
+    context: Value,
+    deterministic: bool,
+    policy: &ResourcePolicy,
+) -> Result<Vec<Value>> {
+    resolve_mode(
+        node,
+        base,
+        data,
+        selections,
+        context,
+        deterministic,
+        false,
+        policy,
+    )
+    .await
+}
+
+pub(super) async fn resolve_attempt_with_policy(
+    node: &Value,
+    base: &str,
+    data: ferry_protocol::sandbox::InputData,
+    selections: &[Option<usize>],
+    context: Value,
+    deterministic: bool,
+    policy: &ResourcePolicy,
+) -> Result<Vec<Value>> {
+    resolve_mode(
+        node,
+        base,
+        data,
+        selections,
+        context,
+        deterministic,
+        true,
+        policy,
+    )
+    .await
 }
 
 async fn resolve_mode(
@@ -496,11 +566,9 @@ async fn resolve_mode(
     context: Value,
     deterministic: bool,
     capture_operands: bool,
+    policy: &ResourcePolicy,
 ) -> Result<Vec<Value>> {
-    use ferry_protocol::sandbox::{
-        Batch, ErrorCode, Evaluation, MAX_EVALUATIONS, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES,
-        Reply, VERSION,
-    };
+    use ferry_protocol::sandbox::{Batch, ErrorCode, Evaluation, Reply, VERSION};
     let path = format!("{base}/params");
     let kind = node["type"].as_str().unwrap_or_default();
     let contract = contracts()
@@ -528,14 +596,14 @@ async fn resolve_mode(
         .iter()
         .map(|(_, source)| source.len())
         .sum::<usize>();
-    if selections.len() > MAX_EVALUATIONS
-        || count > MAX_EVALUATIONS
+    if !allows(policy.workflow_items, selections.len())
+        || !allows(policy.workflow_evaluations, count)
         || source_bytes
             .checked_mul(selections.len())
-            .is_none_or(|bytes| bytes > MAX_REQUEST_BYTES)
+            .is_none_or(|bytes| !allows(policy.workflow_packet_bytes, bytes))
         || expressions
             .iter()
-            .any(|(_, source)| source.len() > 64 * 1024)
+            .any(|(_, source)| !allows(policy.workflow_code_bytes, source.len()))
         || selections
             .iter()
             .flatten()
@@ -563,9 +631,10 @@ async fn resolve_mode(
         .collect();
     let batch = Batch {
         program: None,
+        resource_policy: policy.clone(),
         version: VERSION,
-        timeout_ms: 1000,
-        memory_bytes: 64 * 1024 * 1024,
+        timeout_ms: None,
+        memory_bytes: None,
         deterministic,
         syntax_only: false,
         data: Some(data),
@@ -611,7 +680,7 @@ async fn resolve_mode(
         validate_resolved(node, base, &params)?;
         bytes = bytes
             .checked_add(serde_json::to_vec(&params).map_err(|_| limit())?.len() + 1)
-            .filter(|bytes| *bytes <= MAX_RESPONSE_BYTES)
+            .filter(|bytes| allows(policy.workflow_packet_bytes, *bytes))
             .ok_or_else(limit)?;
         resolved.push(params);
     }
@@ -677,7 +746,13 @@ fn validate_semantics(kind: &str, params: &Value, base: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_layer(graph: &Value, base: &str, nesting: usize, total: &mut usize) -> Result<()> {
+fn validate_layer(
+    graph: &Value,
+    base: &str,
+    nesting: usize,
+    total: &mut usize,
+    policy: &ResourcePolicy,
+) -> Result<()> {
     let registry = contracts();
     if let Err(error) = registry.graph.validate(graph) {
         return Err(schema_error(base, &error));
@@ -686,7 +761,7 @@ fn validate_layer(graph: &Value, base: &str, nesting: usize, total: &mut usize) 
     let nodes = graph["nodes"].as_array().unwrap();
     super::expression::timezone(&graph["settings"], &format!("{base}/settings/timezone"))?;
     *total += nodes.len();
-    if *total > MAX_NODES {
+    if !allows(policy.workflow_nodes, *total) {
         return Err(invalid(format!("{base}/nodes"), "workflow.graphLimit"));
     }
     let mut lookup = BTreeMap::new();
@@ -706,6 +781,19 @@ fn validate_layer(graph: &Value, base: &str, nesting: usize, total: &mut usize) 
             .ok_or_else(|| invalid(&path, "workflow.graphUnknownNode"))?;
         if let Err(error) = contract.params.validate(&node["params"]) {
             return Err(schema_error(&format!("{path}/params"), &error));
+        }
+        if kind == "ai.agent.run" {
+            super::agent::validate_with_policy(&node["params"], &path, policy)?;
+        }
+        if matches!(kind, "host.command" | "host.preview")
+            && node["params"]["command"]
+                .as_str()
+                .is_some_and(|command| !allows(policy.command_bytes, command.len()))
+        {
+            return Err(invalid(
+                format!("{path}/params/command"),
+                "workflow.graphLimit",
+            ));
         }
         let settings = &node["settings"];
         let runtime = settings
@@ -762,7 +850,13 @@ fn validate_layer(graph: &Value, base: &str, nesting: usize, total: &mut usize) 
             }
             let nested = json!({"engine":"ferry-graph", "schema":1,
                 "nodes":params["body"]["nodes"], "connections":params["body"]["connections"]});
-            validate_layer(&nested, &format!("{path}/params/body"), nesting + 1, total)?;
+            validate_layer(
+                &nested,
+                &format!("{path}/params/body"),
+                nesting + 1,
+                total,
+                policy,
+            )?;
         }
     }
     let mut edges = BTreeSet::new();
@@ -863,6 +957,27 @@ fn validate_layer(graph: &Value, base: &str, nesting: usize, total: &mut usize) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn platform_command_budget_is_applied_to_workflow_source() {
+        let mut definition = graph();
+        let mut command = node("command", "host.command");
+        command["params"]["command"] = json!("x".repeat(65537));
+        definition["nodes"].as_array_mut().unwrap().push(command);
+        assert!(validate(&definition.to_string()).is_ok());
+        let policy = ResourcePolicy {
+            command_bytes: Some(65536),
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_with_policy(&definition.to_string(), &policy)
+                .unwrap_err()
+                .2
+                .unwrap()
+                .key,
+            "workflow.graphLimit"
+        );
+    }
 
     #[test]
     fn definition_schema_errors_identify_the_field_and_reason() {
@@ -1044,11 +1159,29 @@ mod tests {
         let mut stop = node("stop", "core.stop");
         stop["params"]["message"] = json!("x".repeat(512 * 1024));
         resolved_error(
-            resolve(&stop, "/nodes/0", inputs(&[]), &[None; 20], json!({}), true)
-                .await
-                .unwrap_err(),
+            resolve_with_policy(
+                &stop,
+                "/nodes/0",
+                inputs(&[]),
+                &[None; 20],
+                json!({}),
+                true,
+                &ResourcePolicy {
+                    workflow_packet_bytes: Some(8 * 1024 * 1024),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err(),
             "workflow.expressionLimit",
             "/nodes/0/params",
+        );
+        assert_eq!(
+            resolve(&stop, "/nodes/0", inputs(&[]), &[None; 20], json!({}), true)
+                .await
+                .unwrap()
+                .len(),
+            20
         );
         let mut command = node("command", "host.command");
         command["params"]["command"] = json!("echo {{ $json.secret }}");
@@ -1084,13 +1217,17 @@ mod tests {
         let mut wait = node("wait", "core.wait");
         wait["params"]["duration_ms"] = json!("={{$json.value}}");
         resolved_error(
-            resolve(
+            resolve_with_policy(
                 &wait,
                 "/nodes/0",
                 inputs(&[json!(1)]),
                 &vec![Some(0); 20001],
                 json!({}),
                 true,
+                &ResourcePolicy {
+                    workflow_evaluations: Some(20000),
+                    ..Default::default()
+                },
             )
             .await
             .unwrap_err(),
@@ -1219,13 +1356,17 @@ mod tests {
         ] {
             set["params"]["fields"][0]["value"] = json!(source);
             resolved_error(
-                resolve(
+                resolve_with_policy(
                     &set,
                     "/nodes/1",
                     inputs(&[json!(1)]),
                     &[Some(0)],
                     json!({}),
                     true,
+                    &ResourcePolicy {
+                        sandbox_timeout_ms: Some(100),
+                        ..Default::default()
+                    },
                 )
                 .await
                 .unwrap_err(),
@@ -1479,12 +1620,18 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .push(node("overflow", "data.set"));
-        rejects(&graph, "workflow.graphSchema");
+        accepts(&graph);
+        let policy = ResourcePolicy {
+            workflow_nodes: Some(500),
+            ..Default::default()
+        };
+        assert!(validate_with_policy(&graph.to_string(), &policy).is_err());
         graph["nodes"].as_array_mut().unwrap().pop();
         let mut extra = node("container", "core.loop");
         extra["params"]["body"]["nodes"] = json!([node("nested", "data.set")]);
         graph["nodes"][0] = extra;
-        rejects(&graph, "workflow.graphLimit");
+        accepts(&graph);
+        assert!(validate_with_policy(&graph.to_string(), &policy).is_err());
     }
 
     #[test]
@@ -1503,7 +1650,13 @@ mod tests {
             .to_owned()
             + "x";
         graph["pin_data"]["set"][0]["json"]["value"] = json!(text);
-        rejects(&graph, "workflow.graphLimit");
+        accepts(&graph);
+        let policy = ResourcePolicy {
+            workflow_pinned_bytes: Some(MAX_PIN_BYTES as u64),
+            workflow_definition_bytes: Some(MAX_DEFINITION_BYTES as u64),
+            ..Default::default()
+        };
+        assert!(validate_with_policy(&graph.to_string(), &policy).is_err());
         graph.as_object_mut().unwrap().remove("pin_data");
         graph["nodes"][0]["settings"] = json!({"notes":""});
         let overhead = graph.to_string().len();
@@ -1512,6 +1665,12 @@ mod tests {
         accepts(&graph);
         graph["nodes"][0]["settings"]["notes"] =
             json!("x".repeat(MAX_DEFINITION_BYTES - overhead + 1));
-        rejects(&graph, "workflow.graphLimit");
+        accepts(&graph);
+        let policy = ResourcePolicy {
+            workflow_pinned_bytes: Some(MAX_PIN_BYTES as u64),
+            workflow_definition_bytes: Some(MAX_DEFINITION_BYTES as u64),
+            ..Default::default()
+        };
+        assert!(validate_with_policy(&graph.to_string(), &policy).is_err());
     }
 }

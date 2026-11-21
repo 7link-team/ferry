@@ -91,8 +91,6 @@ struct Body {
     #[serde(default, skip_serializing)]
     skip_check: bool,
 }
-/// At most this many preferred hosts on one CLI model.
-const MAX_HOSTS: usize = 20;
 /// Connections an Agent's CLI can run on (tests also use in-memory hosts).
 pub(crate) fn runner_connections() -> &'static [&'static str] {
     if cfg!(test) {
@@ -129,9 +127,6 @@ fn cli_options(runtime: &str, provider: bool, options: &mut Value) -> Result<()>
     let map = options
         .as_object()
         .ok_or_else(|| bad("models.cliOptionsInvalid"))?;
-    if map.len() > 40 || options.to_string().len() > 16 * 1024 {
-        return Err(bad("models.cliOptionsInvalid"));
-    }
     for (key, value) in map {
         let ok = key.len() <= 64
             && match value {
@@ -222,9 +217,6 @@ impl Body {
                 Message::new("models.hostsCliOnly"),
             ));
         }
-        if self.hosts.len() > MAX_HOSTS {
-            return Err(bad("models.tooManyHosts"));
-        }
         if self.name.is_empty() {
             return Err(bad("models.nameRequired"));
         }
@@ -236,9 +228,6 @@ impl Body {
         }
         if !["enabled", "disabled"].contains(&self.state.as_str()) {
             return Err(bad("models.stateInvalid"));
-        }
-        if self.models.len() > 2000 {
-            return Err(bad("models.tooManyModels"));
         }
         if let Some(model) = self
             .models
@@ -638,7 +627,13 @@ async fn discover(
         json!({"provider_id":body.provider_id}),
     )
     .await?;
-    let (models, has_more) = fetch_models(base_url, protocol, &secret).await?;
+    let (models, has_more) = fetch_models(
+        base_url,
+        protocol,
+        &secret,
+        &crate::accounts::resource_policy::load(&s.db).await?,
+    )
+    .await?;
     let current = Scope::for_actor(&s, scope.workspace_id, scope.user.id).await?;
     if !current.permissions.contains("ai-models.create") {
         current.require("ai-models.update")?;
@@ -796,6 +791,7 @@ pub(crate) async fn fetch_models(
     base_url: &str,
     protocol: &str,
     secret: &str,
+    policy: &ferry_protocol::resources::ResourcePolicy,
 ) -> Result<(Vec<String>, bool)> {
     if base_url.len() > 512 {
         return Err(bad("models.baseUrlInvalid"));
@@ -806,9 +802,8 @@ pub(crate) async fn fetch_models(
             Message::new("models.discoveryFailed"),
         )
     };
-    let client = reqwest::Client::builder()
+    let client = crate::accounts::resource_policy::http(policy)
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|_| unavailable())?;
     let url = reqwest::Url::parse(base_url).map_err(|_| bad("models.baseUrlInvalid"))?;
@@ -849,7 +844,10 @@ pub(crate) async fn fetch_models(
     };
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|_| unavailable())? {
-        if bytes.len() + chunk.len() > 1024 * 1024 {
+        if !ferry_protocol::resources::allows(
+            policy.tool_response_bytes,
+            bytes.len().saturating_add(chunk.len()),
+        ) {
             return Err(format());
         }
         bytes.extend_from_slice(&chunk);
@@ -874,9 +872,6 @@ pub(crate) async fn fetch_models(
             StatusCode::BAD_GATEWAY,
             Message::new("models.catalogEmpty").with("host", host.clone()),
         ));
-    }
-    if models.len() > 2000 {
-        return Err(format());
     }
     Ok((models, data["has_more"].as_bool().unwrap_or(false)))
 }
@@ -915,12 +910,13 @@ async fn check_connection(s: &AppState, scope: &Scope, body: &Body) -> Result<()
         // No key to check with: saving reports the missing key itself.
         _ => return Ok(()),
     };
-    match tokio::time::timeout(
-        CHECK_TIMEOUT,
-        fetch_models(&connection.base_url, &connection.protocol, &secret),
-    )
-    .await
-    {
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let work = fetch_models(&connection.base_url, &connection.protocol, &secret, &policy);
+    let result = match policy.task_timeout_seconds {
+        Some(seconds) => tokio::time::timeout(std::time::Duration::from_secs(seconds), work).await,
+        None => Ok(work.await),
+    };
+    match result {
         Ok(Ok(_)) => Ok(()),
         Ok(Err(cause)) => Err(check_failed(cause)),
         Err(_) => Err(check_failed(ApiError::localized(
@@ -930,7 +926,6 @@ async fn check_connection(s: &AppState, scope: &Scope, body: &Body) -> Result<()
         ))),
     }
 }
-const CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[derive(Deserialize)]
 struct CliCheck {
@@ -939,8 +934,6 @@ struct CliCheck {
     #[serde(default)]
     hosts: Vec<Id>,
 }
-/// Hosts one check may probe when the model names none.
-const CHECK_HOSTS: u64 = 20;
 /// Checks, without saving anything, whether each execution host can run the
 /// CLI: where it was found and for which user, or why it was not.
 async fn check_cli(
@@ -955,9 +948,6 @@ async fn check_cli(
     scope.require("ai-agents.probe")?;
     let runtime = ferry_protocol::agent::Runtime::parse(&body.runtime)
         .ok_or_else(|| bad("models.cliToolUnknown"))?;
-    if body.hosts.len() > MAX_HOSTS {
-        return Err(bad("models.tooManyHosts"));
-    }
     let runners = || {
         crate::entities::hosts::Entity::find()
             .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
@@ -970,7 +960,6 @@ async fn check_cli(
         runners()
             .filter(crate::entities::hosts::Column::State.eq("online"))
             .order_by_asc(crate::entities::hosts::Column::Id)
-            .limit(CHECK_HOSTS)
             .all(&s.db)
             .await?
     } else {

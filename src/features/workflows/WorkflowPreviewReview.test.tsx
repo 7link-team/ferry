@@ -88,5 +88,7 @@ it("edits the preview parameters in a form and asks for a review timeout only fo
   });
   expect(current.review).toBe("human");
   expect(host.querySelector('[aria-label="Review timeout (minutes, 1–1440)"]')).not.toBeNull();
-  expect(host.querySelector('textarea[aria-label="Service start command (optional)"]')?.getAttribute("maxlength")).toBe("4000");
+  const command=host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Service start command (optional)"]')!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value")!.set!.call(command,"x".repeat(5000));command.dispatchEvent(new Event("input",{bubbles:true}));});
+  expect(current.command).toBe("x".repeat(5000));
 });

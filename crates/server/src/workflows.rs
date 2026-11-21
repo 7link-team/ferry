@@ -180,13 +180,15 @@ pub async fn preview(
     let context = json!({"$vars":vars,"$node":{"id":node["id"],"name":node["name"],"type":node["type"]},
         "$workflow":{"id":id,"name":row.name},"$execution":{"mode":"preview"},"$now":now,"$today":today});
     tx.commit().await?;
-    let items = graph::resolve(
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let items = graph::resolve_with_policy(
         &node,
         &body.node_path,
         body.data,
         &body.selections,
         context,
         true,
+        &policy,
     )
     .await?;
     Ok(Json(
@@ -237,14 +239,12 @@ fn settings(definition: &str) -> String {
     serde_json::to_string(value.get("settings").unwrap_or(&json!({}))).expect("graph settings JSON")
 }
 
-async fn retain_pins(
+async fn prepare_pins(
     s: &AppState,
-    tx: &sea_orm::DatabaseTransaction,
     workspace: Id,
-    revision: &definition_revisions::Model,
-) -> Result<()> {
-    let definition: Value =
-        serde_json::from_str(&revision.definition).map_err(|_| ApiError::missing())?;
+    definition: &str,
+) -> Result<Vec<crate::content_assets::PreparedAsset>> {
+    let definition: Value = serde_json::from_str(definition).map_err(|_| ApiError::missing())?;
     let mut references = Vec::new();
     let mut scopes = vec![&definition];
     while let Some(scope) = scopes.pop() {
@@ -262,9 +262,33 @@ async fn retain_pins(
         }
     }
     if references.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     references.sort_by(|a, b| a.asset.cmp(&b.asset));
+    let backend = crate::artifact_store::ArtifactStore::for_state(s).await?;
+    let store = crate::content_assets::Store {
+        db: &s.db,
+        backend: &backend,
+        vault: &s.vault,
+        ids: &s.ids,
+        quota: crate::content_assets::DEFAULT_QUOTA,
+    };
+    let mut ids = Vec::with_capacity(references.len());
+    for reference in references {
+        ids.push(store.binary_id(workspace.into(), &reference).await?);
+    }
+    store.prepare_ids(workspace.into(), ids).await
+}
+
+async fn retain_pins(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    revision: &definition_revisions::Model,
+    prepared: &[crate::content_assets::PreparedAsset],
+) -> Result<()> {
+    if prepared.is_empty() {
+        return Ok(());
+    }
     let backend = crate::artifact_store::ArtifactStore::for_connection(s, tx).await?;
     let store = crate::content_assets::Store {
         db: &s.db,
@@ -273,10 +297,8 @@ async fn retain_pins(
         ids: &s.ids,
         quota: crate::content_assets::DEFAULT_QUOTA,
     };
-    for reference in references {
-        store
-            .attach_binary(tx, workspace.into(), &reference, "pin", revision.id)
-            .await?;
+    for asset in prepared {
+        asset.attach(&store, tx, "pin", revision.id).await?;
     }
     Ok(())
 }
@@ -329,7 +351,11 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("workflows.create")?;
     let name = name(body.name.as_deref().unwrap_or_default())?;
-    let definition = graph::checked(body.definition.as_deref().unwrap_or_default()).await?;
+    let definition = graph::checked_with_policy(
+        body.definition.as_deref().unwrap_or_default(),
+        &crate::accounts::resource_policy::load(&s.db).await?,
+    )
+    .await?;
     graph::repository_auth_policy(&definition, None)?;
     if body
         .lifecycle
@@ -339,6 +365,7 @@ pub async fn create(
         return Err(conflict("workflow.archived"));
     }
     let group = Id::reference(body.group_id.as_deref().unwrap_or_default())?;
+    let prepared = prepare_pins(&s, scope.workspace_id, &definition).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let scope = workspace_admin::authorize(&tx, &scope, "workflows.create").await?;
     integration::validate_connections(&tx, &scope, &definition).await?;
@@ -357,7 +384,7 @@ pub async fn create(
         body.message.as_deref(),
     )
     .await?;
-    retain_pins(&s, &tx, scope.workspace_id, &revision).await?;
+    retain_pins(&s, &tx, &revision, &prepared).await?;
     let now = db::now();
     let row = rows::Model {
         id: id.into(),
@@ -407,6 +434,19 @@ pub async fn update(
     Json(body): Json<Body>,
 ) -> Result<Json<Value>> {
     scope.require("workflows.update")?;
+    let preview = scoped(&s.db, scope.workspace_id, id).await?;
+    access::require(&s.db, &scope, &preview, Operation::Edit).await?;
+    if preview.version != body.version {
+        return Err(conflict("execution.versionConflict"));
+    }
+    let proposed = match body.definition.as_deref() {
+        Some(value) => {
+            graph::checked_with_policy(value, &crate::accounts::resource_policy::load(&s.db).await?)
+                .await?
+        }
+        None => preview.definition.clone(),
+    };
+    let prepared = prepare_pins(&s, scope.workspace_id, &proposed).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let scope = workspace_admin::authorize(&tx, &scope, "workflows.update").await?;
     let current = scoped(&tx, scope.workspace_id, id).await?;
@@ -440,7 +480,11 @@ pub async fn update(
         row.group_id = group.into();
     }
     if let Some(value) = body.definition {
-        row.definition = graph::checked(&value).await?;
+        row.definition = graph::checked_with_policy(
+            &value,
+            &crate::accounts::resource_policy::load(&s.db).await?,
+        )
+        .await?;
         graph::repository_auth_policy(&row.definition, Some(&current.definition))?;
         integration::validate_connections(&tx, &scope, &row.definition).await?;
         agent::validate_agents(&tx, &scope, &row.definition).await?;
@@ -456,7 +500,7 @@ pub async fn update(
         body.message.as_deref(),
     )
     .await?;
-    retain_pins(&s, &tx, scope.workspace_id, &revision).await?;
+    retain_pins(&s, &tx, &revision, &prepared).await?;
     row.draft_revision_id = revision.id;
     row.settings = settings(&row.definition);
     row.updated_at = db::now();

@@ -90,10 +90,6 @@ impl Outcome {
     }
 }
 
-/// GitHub's execution limit for a job on a self-hosted runner (5 days); the
-/// job's own timeout-minutes (default 360) applies inside the worker.
-const WORKER_SECONDS: u64 = 5 * 24 * 3600;
-
 pub async fn execute(
     s: &AppState,
     run: &runs::Model,

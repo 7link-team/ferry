@@ -552,13 +552,7 @@ async fn abnormal(s: &AppState, r: &rules::Model) -> Result<Option<(bool, Messag
         _ => None,
     }))
 }
-async fn deliver(
-    s: &AppState,
-    client: &reqwest::Client,
-    r: &rules::Model,
-    id: Id,
-    recovered: bool,
-) -> Result<()> {
+async fn deliver(s: &AppState, r: &rules::Model, id: Id, recovered: bool) -> Result<()> {
     let column = if recovered {
         events::Column::RecoveryDelivery
     } else {
@@ -617,7 +611,14 @@ async fn deliver(
             .vault
             .open_secret(&r.webhook, &aad(r.workspace_id.into(), r.id.into()))
         {
-            Ok(url) => crate::notifications::webhook::deliver(client, &url, &notice).await,
+            Ok(url) => {
+                let policy = crate::accounts::resource_policy::load(&s.db).await?;
+                let client = crate::accounts::resource_policy::http(&policy)
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .map_err(crate::error::internal_fault)?;
+                crate::notifications::webhook::deliver(&client, &url, &notice).await
+            }
             Err(_) => i18n::store_message(&Message::new("alerts.webhookDecryptFailed")),
         }
     };
@@ -628,7 +629,7 @@ async fn deliver(
         .await?;
     Ok(())
 }
-async fn evaluate(s: &AppState, client: &reqwest::Client, r: rules::Model) -> Result<()> {
+async fn evaluate(s: &AppState, r: rules::Model) -> Result<()> {
     let observed = abnormal(s, &r).await;
     let error = if observed.is_err() {
         i18n::store_message(&Message::new("alerts.targetUnavailable"))
@@ -725,7 +726,7 @@ async fn evaluate(s: &AppState, client: &reqwest::Client, r: rules::Model) -> Re
     tx.commit().await?;
     if let Some((id, recovered)) = transition {
         if !current.webhook.is_empty() || current.notification_channel_id != 0 {
-            deliver(s, client, &current, id, recovered).await?;
+            deliver(s, &current, id, recovered).await?;
         }
     }
     Ok(())
@@ -798,17 +799,6 @@ async fn recover_deliveries(conn: &impl ConnectionTrait) -> Result<()> {
 }
 
 pub async fn scheduler(s: AppState, mut drain: watch::Receiver<bool>) {
-    let client = match reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(10))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(%e,"告警HTTP客户端初始化失败");
-            return;
-        }
-    };
     if let Err(error) = recover_deliveries(&s.db).await {
         tracing::error!(%error,"告警投递恢复失败");
         return;
@@ -834,7 +824,7 @@ pub async fn scheduler(s: AppState, mut drain: watch::Receiver<bool>) {
                     if *drain.borrow() {
                         break;
                     }
-                    if let Err(error) = evaluate(&s, &client, row).await {
+                    if let Err(error) = evaluate(&s, row).await {
                         tracing::error!(%error,"告警检查失败");
                     }
                 }
@@ -893,7 +883,6 @@ mod locale_tests {
             .await
             .unwrap()
             .unwrap();
-        let client = reqwest::Client::new();
         assert!(!abnormal(&s, &rule).await.unwrap().unwrap().0);
         for kind in [failover::Kind::NeedsAttention, failover::Kind::Acknowledged] {
             failover::record(
@@ -912,7 +901,7 @@ mod locale_tests {
             )
             .await
             .unwrap();
-            evaluate(&s, &client, rule.clone()).await.unwrap();
+            evaluate(&s, rule.clone()).await.unwrap();
             let rows = events::Entity::find()
                 .filter(events::Column::RuleId.eq(id))
                 .all(&s.db)

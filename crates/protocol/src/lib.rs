@@ -20,6 +20,7 @@
 pub mod agent;
 pub mod contribution;
 pub mod release;
+pub mod resources;
 pub mod sandbox;
 
 use serde::{Deserialize, Serialize};
@@ -86,6 +87,8 @@ pub struct Hello {
     /// Understands `Control::Settings` and `agent::Request::timezone`.
     #[serde(default)]
     pub supports_timezone: bool,
+    #[serde(default)]
+    pub supports_resource_policy: bool,
     /// The host's own IANA time zone as detected by the runner; empty if unknown.
     #[serde(default)]
     pub timezone: String,
@@ -114,7 +117,12 @@ pub enum Control {
         metrics_seconds: u64,
     },
     /// Open a dedicated session connection back to the server.
-    OpenSession { session: String, kind: SessionKind },
+    OpenSession {
+        session: String,
+        kind: SessionKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resource_policy: Option<resources::ResourcePolicy>,
+    },
     /// Signed catalog; only sent after complete host tasks have drained.
     Update {
         request: String,
@@ -127,7 +135,11 @@ pub enum Control {
     /// Host settings for processes the runner starts. Sent only to runners that
     /// announced `supports_timezone`: older runners reject unknown frames.
     /// `timezone: None` keeps the host's own time zone.
-    Settings { timezone: Option<String> },
+    Settings {
+        timezone: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resource_policy: Option<resources::ResourcePolicy>,
+    },
     /// Refused for good: wrong protocol version, bad token, unknown key. The
     /// runner reports this and stops rather than retrying forever.
     Rejected { reason: String },
@@ -455,6 +467,7 @@ mod tests {
             supports_agent_probe: false,
             supports_forward: true,
             supports_timezone: true,
+            supports_resource_policy: true,
             timezone: "Asia/Shanghai".into(),
         };
         let text = serde_json::to_string(&hello).unwrap();
@@ -513,18 +526,24 @@ mod tests {
                 metrics_seconds: 30,
             },
             Control::OpenSession {
+                resource_policy: None,
                 session: "a1b2".into(),
                 kind: SessionKind::Terminal,
             },
             Control::OpenSession {
+                resource_policy: None,
                 session: "a1b3".into(),
                 kind: SessionKind::Forward,
             },
             Control::Ping,
             Control::Settings {
+                resource_policy: None,
                 timezone: Some("Asia/Shanghai".into()),
             },
-            Control::Settings { timezone: None },
+            Control::Settings {
+                timezone: None,
+                resource_policy: None,
+            },
             Control::Rejected {
                 reason: "版本不匹配".into(),
             },
@@ -622,6 +641,7 @@ mod tests {
             Session::Failed { error: "no".into() },
             Session::AgentStart {
                 request: agent::Request {
+                    resource_policy: None,
                     binding: None,
                     runtime: agent::Runtime::Codex,
                     cwd: "/tmp/agent".into(),
@@ -723,6 +743,7 @@ mod tests {
     #[test]
     fn agent_request_time_zone_is_optional_on_the_wire() {
         let request = agent::Request {
+            resource_policy: None,
             binding: None,
             runtime: agent::Runtime::Codex,
             cwd: "/tmp".into(),

@@ -94,6 +94,7 @@ struct Live {
     supports_forward: bool,
     /// Understands `Control::Settings`; older runners reject unknown frames.
     supports_timezone: bool,
+    supports_resource_policy: bool,
     version: String,
     ready: std::sync::atomic::AtomicBool,
     failed_version: Mutex<Option<String>>,
@@ -139,6 +140,7 @@ pub(crate) fn push_timezone(host_id: Id, zone: &str) {
     };
     if registration.supports_timezone {
         let _ = registration.control.try_send(wire::Control::Settings {
+            resource_policy: None,
             timezone: timezone_setting(zone),
         });
     }

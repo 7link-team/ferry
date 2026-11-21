@@ -274,7 +274,21 @@ fn execution_deduplication_retains_selected_original_items_and_distinguishes_nul
 #[test]
 fn expansion_checks_the_journal_output_budget_while_building_overlapping_chunks() {
     let params = json!({"value":"x".repeat(12000),"mode":"length","length":8000,"overlap":7999});
-    assert!(apply("data.text_split", &[json!({})], params).is_err());
+    let expanded = apply("data.text_split", &[json!({})], params.clone()).unwrap();
+    assert!(serde_json::to_vec(&expanded).unwrap().len() > 16 * 1024 * 1024);
+    let input = [item(json!({}))];
+    assert!(
+        execute_with_policy(
+            &json!({"type":"data.text_split"}),
+            &input,
+            &[params],
+            &ferry_protocol::resources::ResourcePolicy {
+                workflow_packet_bytes: Some(16 * 1024 * 1024),
+                ..Default::default()
+            }
+        )
+        .is_err()
+    );
     let params = json!({"value":"x".repeat(20001),"mode":"length","length":1});
     assert_eq!(
         apply("data.text_split", &[json!({})], params)

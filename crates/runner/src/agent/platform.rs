@@ -6,7 +6,10 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::post,
 };
-use ferry_protocol::agent::Event;
+use ferry_protocol::{
+    agent::Event,
+    resources::{ResourcePolicy, allows, byte_limit},
+};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -33,6 +36,7 @@ impl Drop for PendingCall {
 #[derive(Clone)]
 struct Context {
     token: String,
+    policy: ResourcePolicy,
     events: mpsc::Sender<Event>,
     pending: Pending,
     active: Arc<AtomicBool>,
@@ -45,7 +49,15 @@ pub(super) struct Bridge {
     task: tokio::task::JoinHandle<()>,
 }
 impl Bridge {
+    #[cfg(test)]
     pub async fn start(events: mpsc::Sender<Event>) -> Result<Self> {
+        Self::start_with_policy(events, ResourcePolicy::default()).await
+    }
+    pub async fn start_with_policy(
+        events: mpsc::Sender<Event>,
+        policy: ResourcePolicy,
+    ) -> Result<Self> {
+        let body_limit = policy.tool_request_bytes;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let url = format!("http://{}/call", listener.local_addr()?);
         let token = uuid::Uuid::new_v4().to_string();
@@ -53,15 +65,17 @@ impl Bridge {
         let active = Arc::new(AtomicBool::new(true));
         let context = Context {
             token: token.clone(),
+            policy,
             events,
             pending: pending.clone(),
             active: active.clone(),
         };
         let app = Router::new()
             .route("/call", post(call))
-            .layer(axum::extract::DefaultBodyLimit::max(
-                ferry_protocol::agent::MAX_PLATFORM_CALL_BYTES,
-            ))
+            .layer(match body_limit {
+                Some(limit) => axum::extract::DefaultBodyLimit::max(byte_limit(Some(limit))),
+                None => axum::extract::DefaultBodyLimit::disable(),
+            })
             .with_state(context);
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
@@ -106,7 +120,10 @@ async fn call(
     let (tx, rx) = oneshot::channel();
     {
         let mut pending = context.pending.lock().unwrap();
-        if pending.len() >= 16 {
+        if !allows(
+            context.policy.agent_tool_concurrency,
+            pending.len().saturating_add(1),
+        ) {
             return Err(StatusCode::TOO_MANY_REQUESTS);
         }
         pending.insert(id.clone(), tx);
@@ -126,11 +143,14 @@ async fn call(
             .send(event)
             .await
             .map_err(|_| StatusCode::GONE)?;
-        tokio::time::timeout(std::time::Duration::from_secs(3600), rx)
-            .await
-            .map_err(|_| StatusCode::GATEWAY_TIMEOUT)?
-            .map(Json)
-            .map_err(|_| StatusCode::GONE)
+        let value = tokio::select! {
+            value = rx => value.map_err(|_| StatusCode::GONE)?,
+            _ = crate::transport::deadline(context.policy.task_timeout_seconds) => return Err(StatusCode::GATEWAY_TIMEOUT),
+        };
+        if !allows(context.policy.tool_response_bytes, serde_json::to_vec(&value).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.len()) {
+            return Err(StatusCode::PAYLOAD_TOO_LARGE);
+        }
+        Ok(Json(value))
     }
     .await;
     context.pending.lock().unwrap().remove(&id);
@@ -164,16 +184,45 @@ pub(crate) async fn stdio() -> Result<()> {
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
-    serve(tokio::io::stdin(), tokio::io::stdout(), client, url, token).await
+    let policy = std::env::var("FERRY_RESOURCE_POLICY")
+        .ok()
+        .map(|value| serde_json::from_str(&value))
+        .transpose()?
+        .unwrap_or_default();
+    serve_with_policy(
+        tokio::io::stdin(),
+        tokio::io::stdout(),
+        client,
+        url,
+        token,
+        policy,
+    )
+    .await
 }
 
 /// One MCP session over a byte stream; generic so tests can drive it in memory.
+#[cfg(test)]
 pub(super) async fn serve<R, W>(
+    input: R,
+    output: W,
+    client: reqwest::Client,
+    url: String,
+    token: String,
+) -> Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    serve_with_policy(input, output, client, url, token, ResourcePolicy::default()).await
+}
+
+async fn serve_with_policy<R, W>(
     input: R,
     mut output: W,
     client: reqwest::Client,
     url: String,
     token: String,
+    policy: ResourcePolicy,
 ) -> Result<()>
 where
     R: tokio::io::AsyncRead + Unpin,
@@ -202,15 +251,14 @@ where
     loop {
         let mut buffer = Vec::new();
         let size = (&mut input)
-            .take((ferry_protocol::agent::MAX_PLATFORM_CALL_BYTES + 1) as u64)
+            .take(byte_limit(policy.tool_request_bytes).saturating_add(1) as u64)
             .read_until(b'\n', &mut buffer)
             .await?;
         if size == 0 {
             break;
         }
         ensure!(
-            buffer.len() <= ferry_protocol::agent::MAX_PLATFORM_CALL_BYTES
-                && buffer.last() == Some(&b'\n'),
+            allows(policy.tool_request_bytes, buffer.len()) && buffer.last() == Some(&b'\n'),
             "MCP input exceeds limit"
         );
         let request: Value = serde_json::from_slice(&buffer)?;
@@ -234,11 +282,12 @@ where
                 responses.clone(),
                 calls.clone(),
             );
+            let policy = policy.clone();
             let key = id.to_string();
             let params = request["params"].clone();
             let mut pending_calls = calls.lock().unwrap();
             let task = tasks.spawn(async move {
-                let result = tool_call(&client, &url, &token, &params).await;
+                let result = tool_call(&client, &url, &token, &params, &policy).await;
                 calls_done.lock().unwrap().remove(&id.to_string());
                 let _ = responses.send(reply(&id, result)).await;
             });
@@ -289,13 +338,21 @@ async fn tool_call(
     url: &str,
     token: &str,
     params: &Value,
+    policy: &ResourcePolicy,
 ) -> std::result::Result<Value, String> {
     match client.post(url).bearer_auth(token).json(params).send().await {
-        Ok(response) if response.status().is_success() => match response.json::<Value>().await {
+        Ok(mut response) if response.status().is_success() => {
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response.chunk().await.map_err(|_| "The platform returned an invalid result.".to_owned())? {
+                if !allows(policy.tool_response_bytes, bytes.len().saturating_add(chunk.len())) { return Err("The platform result exceeds the configured limit.".into()); }
+                bytes.extend_from_slice(&chunk);
+            }
+            match serde_json::from_slice::<Value>(&bytes) {
             Ok(value) => Ok(
                 json!({"content":[{"type":"text","text":value.to_string()}],"isError":value["ok"]==false}),
             ),
             Err(_) => Err("The platform returned an invalid result.".into()),
+            }
         },
         Ok(response) => {
             let status = response.status();
@@ -330,6 +387,48 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn bridge_defaults_allow_large_calls_and_explicit_body_limits_apply() {
+        for limited in [false, true] {
+            let (events, mut receiver) = mpsc::channel(1);
+            let policy = ResourcePolicy {
+                tool_request_bytes: limited.then_some(1024),
+                ..Default::default()
+            };
+            let bridge = Bridge::start_with_policy(events, policy).await.unwrap();
+            let client = reqwest::Client::builder().no_proxy().build().unwrap();
+            let (url, token) = (bridge.url.clone(), bridge.token.clone());
+            let request = tokio::spawn(async move {
+                client.post(url).bearer_auth(token).json(&json!({"name":"ferry_request", "arguments":{"data":"x".repeat(if limited { 2048 } else { 2 * 1024 * 1024 + 1 })}})).send().await.unwrap()
+            });
+            if limited {
+                assert_eq!(
+                    request.await.unwrap().status(),
+                    StatusCode::PAYLOAD_TOO_LARGE
+                );
+                assert!(receiver.try_recv().is_err());
+            } else {
+                let Some(Event::PlatformCall {
+                    request_id,
+                    arguments,
+                    ..
+                }) = tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv())
+                    .await
+                    .unwrap()
+                else {
+                    panic!("large call must reach platform")
+                };
+                assert!(arguments["data"].as_str().unwrap().len() > 2 * 1024 * 1024);
+                bridge.resolve(
+                    &request_id,
+                    json!({"ok":true,"data":"x".repeat(2 * 1024 * 1024 + 1)}),
+                );
+                let response = request.await.unwrap().json::<Value>().await.unwrap();
+                assert!(response["data"].as_str().unwrap().len() > 2 * 1024 * 1024);
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn platform_validation_errors_reach_the_cli_verbatim() {
         let (events, mut platform) = mpsc::channel(8);
         let bridge = Bridge::start(events).await.unwrap();
@@ -342,6 +441,7 @@ mod tests {
                 &url,
                 &token,
                 &json!({"name":"ferry_request","arguments":{"method":"POST","path":"/workflows"}}),
+                &ResourcePolicy::default(),
             )
             .await
             .unwrap()

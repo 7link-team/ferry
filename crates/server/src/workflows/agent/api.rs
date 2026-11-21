@@ -17,6 +17,7 @@ pub(super) async fn execute(
     max_calls: usize,
     timeout: Duration,
 ) -> Result<Map<String, Value>> {
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     let profile = crate::agents::model_profile(
         &s.db,
         run.workspace_id.into(),
@@ -29,9 +30,20 @@ pub(super) async fn execute(
         .await?
         .ok_or_else(ApiError::missing)?;
     let anthropic = provider.protocol == "anthropic";
+    if anthropic
+        && params
+            .get("max_tokens")
+            .and_then(Value::as_u64)
+            .is_none_or(|value| value == 0)
+    {
+        return Err(invalid(
+            "workflow.agentMaxTokensRequired",
+            "/params/max_tokens".into(),
+        ));
+    }
     let mut messages = vec![json!({"role":"user","content":compose(&agent.system_prompt,
         params["prompt"].as_str().unwrap_or_default(), items, Some(&params["output_schema"]), false)?})];
-    let mut log = NodeLog::default();
+    let mut log = NodeLog::with_limit(policy.log_output_bytes);
     let node_log = (node_run > 0).then_some(node_run);
     let mut active_round = None;
     let result = {
@@ -49,7 +61,7 @@ pub(super) async fn execute(
             let mut corrected = false;
             // At least one tool is consumed in each nonfinal iteration. One
             // schema correction is allowed, matching the native Agent path.
-            for round in 0..max_calls + 2 {
+            for round in 0..max_calls.saturating_add(2) {
                 let scope = super::super::integration::execution_scope(s, run).await?;
                 let current =
                     crate::conversations::available(&s.db, &scope, agent.id.into()).await?;
@@ -63,16 +75,17 @@ pub(super) async fn execute(
                         "/params/agent_id".into(),
                     ));
                 }
-                let p = json!({"provider_id":profile.provider_id.to_string(),"model":agent.model,
-                    "prompt":"","output_field":"response","max_tokens":params.get("max_tokens").cloned().unwrap_or(json!(1024)),
+                let mut p = json!({"provider_id":profile.provider_id.to_string(),"model":agent.model,
+                    "prompt":"","output_field":"response",
                     "agent_messages":messages,"agent_tools":agent_tools(anthropic, false)});
-                if serde_json::to_vec(&p)
-                    .map_err(|_| ApiError::missing())?
-                    .len()
-                    > MAX_RECEIVED_BYTES
+                if let Some(max_tokens) = params.get("max_tokens").filter(|value| !value.is_null())
                 {
-                    return Err(failed("workflow.agentOutputTooLarge"));
+                    p["max_tokens"] = max_tokens.clone();
                 }
+                within_policy(
+                    serde_json::to_string(&p).map_err(|_| ApiError::missing())?,
+                    &policy,
+                )?;
                 active_round = Some(round);
                 let output = loop {
                     let result = super::super::ai::execute_indexed(
@@ -112,13 +125,13 @@ pub(super) async fn execute(
                         .map_err(|_| ApiError::missing())?
                         .len(),
                 );
-                if received > MAX_RECEIVED_BYTES {
+                if !allows(policy.agent_turn_output_bytes, received) {
                     return Err(failed("workflow.agentOutputTooLarge"));
                 }
                 let (message, text, calls) = agent_response(body, anthropic)?;
                 messages.push(message);
                 if calls.is_empty() {
-                    match accept(&text, validator) {
+                    match accept_with_policy(&text, validator, &policy) {
                         Ok(object) => return Ok(object),
                         Err(error) if !corrected => {
                             corrected = true;
@@ -166,7 +179,13 @@ pub(super) async fn execute(
         tokio::pin!(work);
         let (_idle, idle) = watch::channel(false);
         let mut stop = crate::executions::stop_signal().unwrap_or(idle);
-        let deadline = tokio::time::sleep(timeout);
+        let deadline = async {
+            if timeout.is_zero() {
+                std::future::pending().await
+            } else {
+                tokio::time::sleep(timeout).await
+            }
+        };
         tokio::pin!(deadline);
         // Keep database checks polled alongside the request. Awaiting a check
         // inside a select branch can deadlock a one-connection pool while the

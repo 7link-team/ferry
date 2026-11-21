@@ -3,7 +3,7 @@ use super::*;
 use crate::{entities::locks, lock, repositories::auth::MonitorAccess};
 use futures::{StreamExt, stream};
 use sea_orm::QuerySelect;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 use tokio::sync::watch;
 
 const LEASE_MS: i64 = 60_000;
@@ -13,6 +13,158 @@ pub(super) type Snapshot = BTreeMap<String, Repository>;
 mod tests {
     use super::*;
     use sea_orm::IntoActiveModel;
+
+    #[tokio::test]
+    async fn webhook_enrichment_uses_optional_task_deadline() {
+        delayed_enrichment(true, None).await;
+        delayed_enrichment(true, Some(1)).await;
+    }
+
+    #[tokio::test]
+    async fn polling_enrichment_uses_optional_task_deadline() {
+        delayed_enrichment(false, None).await;
+        delayed_enrichment(false, Some(1)).await;
+    }
+
+    async fn delayed_enrichment(webhook: bool, timeout: Option<u64>) {
+        use std::sync::Arc;
+        let (_dir, s) = crate::agents::tests::setup().await;
+        crate::entities::users::Entity::update_many()
+            .col_expr(crate::entities::users::Column::IsSuperadmin, Expr::value(1))
+            .filter(crate::entities::users::Column::Id.eq(1))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        crate::entities::platform_state::Entity::update_many()
+            .col_expr(
+                crate::entities::platform_state::Column::ResourceConfig,
+                Expr::value(json!({"task_timeout_seconds":timeout}).to_string()),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let before = "a".repeat(40);
+        let after = "b".repeat(40);
+        let compare_before = before.clone();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let requested = calls.clone();
+        let router = axum::Router::new().route("/{*path}", axum::routing::get(move |uri: axum::http::Uri| {
+            let before = compare_before.clone();
+            let calls = requested.clone();
+            async move {
+                if uri.path().contains("/compare/") {
+                    calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_secs(6)).await;
+                    axum::Json(json!({"merge_base_commit":{"sha":before},"files":[{"additions":7,"deletions":2}]}))
+                } else if uri.path() == "/user" {
+                    axum::Json(json!({"login":"fixture"}))
+                } else {
+                    axum::Json(json!([]))
+                }
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        struct Server(tokio::task::JoinHandle<()>);
+        impl Drop for Server {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+        let _server = Server(tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        }));
+        let admin = crate::agents::tests::admin(1);
+        let (_, Json(credential)) = crate::credentials::create(
+            State(s.clone()),
+            admin.clone(),
+            Json(
+                serde_json::from_value(json!({
+                    "name":"Comparison fixture", "scope":"build", "kind":"token", "secret":"fixture"
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let (_, Json(connection)) = crate::repositories::auth::create_connection(State(s.clone()), admin, Json(serde_json::from_value(json!({
+            "name":"Comparison fixture", "provider":"github", "credential_id":credential["id"], "base_url":endpoint, "api_url":endpoint
+        })).unwrap())).await.unwrap();
+        let id: Id = serde_json::from_value(connection["id"].clone()).unwrap();
+        let connection = connections::Entity::find_by_id(i64::from(id))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-github-event", "push".parse().unwrap());
+        let payload = json!({"ref":"refs/heads/main","before":before,"after":after,"commits":[],"repository":{"full_name":"owner/repo","html_url":format!("{endpoint}/owner/repo")}});
+        let detail = if webhook {
+            let config = Config {
+                enabled: true,
+                provider: "github".into(),
+                all_repositories: true,
+                events: vec!["push".into()],
+                secret: "fixture".into(),
+                notification_channel_ids: Some(vec![]),
+                ..Default::default()
+            };
+            monitors::Entity::insert(
+                monitors::Model {
+                    id: id.into(),
+                    workspace_id: 1,
+                    config: s
+                        .vault
+                        .seal(&serde_json::to_string(&config).unwrap(), &aad(1, id.into()))
+                        .unwrap(),
+                    version: 1,
+                    created_at: 0,
+                    updated_at: 0,
+                }
+                .into_active_model(),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
+            let bytes = Bytes::from(payload.to_string());
+            let mut signature = Hmac::<Sha256>::new_from_slice(b"fixture").unwrap();
+            signature.update(&bytes);
+            headers.insert(
+                "x-hub-signature-256",
+                format!("sha256={}", hex::encode(signature.finalize().into_bytes()))
+                    .parse()
+                    .unwrap(),
+            );
+            assert_eq!(
+                super::super::receive(State(s.clone()), Path(id), headers, bytes)
+                    .await
+                    .unwrap(),
+                StatusCode::NO_CONTENT
+            );
+            let row = events::Entity::find()
+                .filter(events::Column::ConnectionId.eq(id))
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            serde_json::from_str::<Value>(row.detail.as_deref().unwrap()).unwrap()
+        } else {
+            let access = MonitorAccess::load(&s, &connection).await.unwrap();
+            let mut events = vec![normalize("github", &headers, &payload).unwrap()];
+            enrich(&access, &mut events).await;
+            events.remove(0).detail
+        };
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        if timeout.is_none() {
+            assert_eq!(
+                detail["line_stats"],
+                json!({"additions":7,"deletions":2}),
+                "unlimited comparison must survive the former five-second wrapper"
+            );
+        } else {
+            assert!(detail.get("line_stats").is_none());
+        }
+    }
 
     /// An isolated database-backed state with workspace 1.
     async fn test_state() -> (tempfile::TempDir, AppState) {
@@ -1279,7 +1431,7 @@ async fn enrich(access: &MonitorAccess, events: &mut [Event]) {
             }
         }
     }
-    let _ = tokio::time::timeout(Duration::from_secs(5), async {
+    let _ = crate::accounts::resource_policy::task_timeout(&access.policy, async {
         for event in events.iter_mut().filter(|e| e.event == "push").take(20) {
             enrich_stats(access, event).await;
         }

@@ -117,6 +117,7 @@ fn request(runtime: Runtime) -> Request {
         native_session_id: None,
         permission: Permission::OnRequest,
         timeout_seconds: 10,
+        resource_policy: None,
         platform_tools: false,
         provider: None,
         timezone: None,
@@ -752,25 +753,37 @@ fn read_only_does_not_accept_runtime_tool_approvals() {
 #[tokio::test]
 async fn bounded_json_reader_rejects_oversize_and_truncated_output() {
     for bytes in [
-        vec![b'x'; LINE_LIMIT + 2],
+        vec![b'x'; ferry_protocol::agent::MAX_NATIVE_LINE_BYTES + 2],
         b"{\"incomplete\":true}".to_vec(),
     ] {
         let mut reader = BufReader::new(bytes.as_slice());
         let mut buffer = Vec::new();
-        assert!(read(&mut reader, &mut buffer).await.is_err());
-        assert!(buffer.len() <= LINE_LIMIT + 1);
+        assert!(
+            read(
+                &mut reader,
+                &mut buffer,
+                Some(ferry_protocol::agent::MAX_NATIVE_LINE_BYTES as u64)
+            )
+            .await
+            .is_err()
+        );
+        assert!(buffer.len() <= ferry_protocol::agent::MAX_NATIVE_LINE_BYTES + 1);
     }
 }
 
 #[tokio::test]
 async fn native_multi_megabyte_events_are_not_truncated() {
-    for size in [1024 * 1024, 2 * 1024 * 1024, 6 * 1024 * 1024] {
+    for size in [
+        1024 * 1024,
+        2 * 1024 * 1024,
+        ferry_protocol::agent::MAX_NATIVE_LINE_BYTES + 1,
+    ] {
         let text = "x".repeat(size);
         let mut wire = serde_json::to_vec(&json!({"text":text})).unwrap();
         wire.push(b'\n');
         let mut reader = BufReader::new(wire.as_slice());
         let mut buffer = Vec::new();
-        let result = read(&mut reader, &mut buffer).await.unwrap().unwrap();
+        let result = read(&mut reader, &mut buffer, None).await.unwrap().unwrap();
         assert_eq!(result["text"].as_str().unwrap(), text);
     }
     // A tool's bounded JSON result is itself text inside MCP content. Native
@@ -785,7 +798,7 @@ async fn native_multi_megabyte_events_are_not_truncated() {
     let mut reader = BufReader::new(wire.as_slice());
     let mut buffer = Vec::new();
     assert_eq!(
-        read(&mut reader, &mut buffer).await.unwrap().unwrap(),
+        read(&mut reader, &mut buffer, None).await.unwrap().unwrap(),
         event
     );
 }
@@ -797,13 +810,16 @@ async fn partial_json_is_preserved_across_input_selection() {
     let mut buffer = Vec::new();
     writer.write_all(b"{\"id\":").await.unwrap();
     assert!(
-        tokio::time::timeout(Duration::from_millis(20), read(&mut reader, &mut buffer))
-            .await
-            .is_err()
+        tokio::time::timeout(
+            Duration::from_millis(20),
+            read(&mut reader, &mut buffer, None)
+        )
+        .await
+        .is_err()
     );
     writer.write_all(b"1}\n").await.unwrap();
     assert_eq!(
-        read(&mut reader, &mut buffer).await.unwrap(),
+        read(&mut reader, &mut buffer, None).await.unwrap(),
         Some(json!({"id":1}))
     );
 }
@@ -854,6 +870,10 @@ async fn timeout_and_consumer_disconnect_stop_the_runtime() {
     for disconnect in [false, true] {
         let mut req = request(Runtime::Codex);
         req.timeout_seconds = 2;
+        req.resource_policy = Some(ResourcePolicy {
+            task_timeout_seconds: Some(2),
+            ..Default::default()
+        });
         let (events, mut received) = mpsc::channel(8);
         let (_input, inputs) = mpsc::channel(2);
         let (_stop, cancel) = watch::channel(false);
@@ -1285,4 +1305,66 @@ fn working_directory_writes_are_confined_and_refused_where_they_cannot_be() {
     let mut mixed = files(Runtime::Claude);
     mixed.permission = Permission::OnRequest;
     assert!(validate(&mixed).is_err());
+}
+
+#[tokio::test]
+async fn default_policy_ignores_legacy_timeout_and_optional_limits_enforce_boundaries() {
+    let mut req = request(Runtime::Codex);
+    req.timeout_seconds = 0;
+    req.prompt = "x".repeat(64 * 1024 + 1);
+    assert!(validate(&req).is_ok());
+    req.resource_policy = Some(ResourcePolicy {
+        agent_prompt_bytes: Some(req.prompt.len() as u64),
+        ..Default::default()
+    });
+    assert!(validate(&req).is_ok());
+    req.resource_policy.as_mut().unwrap().agent_prompt_bytes = Some(req.prompt.len() as u64 - 1);
+    assert!(validate(&req).is_err());
+    let bytes = b"{\"x\":1}\n";
+    for (limit, allowed) in [
+        (None, true),
+        (Some(bytes.len() as u64), true),
+        (Some(bytes.len() as u64 - 1), false),
+    ] {
+        let mut reader = BufReader::new(bytes.as_slice());
+        assert_eq!(
+            read(&mut reader, &mut Vec::new(), limit).await.is_ok(),
+            allowed
+        );
+    }
+    let mut req = request(Runtime::Codex);
+    req.timeout_seconds = 0;
+    let (events, mut received) = mpsc::channel(8);
+    let (_input, inputs) = mpsc::channel(2);
+    let (stop, cancel) = watch::channel(false);
+    let task = tokio::spawn(run_command(req, fixture("hang"), events, inputs, cancel));
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(10), received.recv())
+            .await
+            .unwrap(),
+        Some(Event::Session { .. })
+    ));
+    tokio::task::yield_now().await;
+    assert!(
+        !task.is_finished(),
+        "legacy zero timeout must not terminate the turn"
+    );
+    stop.send(true).unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        Outcome::Cancelled
+    );
+}
+
+#[test]
+fn native_approval_count_has_no_legacy_sixteen_call_ceiling() {
+    let mut p = codex();
+    for id in 0..17 {
+        let step = p.receive(json!({"id":id+100,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-a","turnId":"turn-a"}})).unwrap();
+        assert!(matches!(&step.events[0], Event::Approval { .. }));
+    }
 }

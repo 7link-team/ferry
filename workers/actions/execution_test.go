@@ -414,3 +414,39 @@ func TestRepositoryContextInferenceAndRepositoryFreeDiagnostics(t *testing.T) {
 		})
 	}
 }
+
+func TestUnlimitedExecutionContextKeepsCancellationAndExplicitDeadlines(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	unlimited, cancelUnlimited := executionContext(parent, 0)
+	defer cancelUnlimited()
+	if _, ok := unlimited.Deadline(); ok {
+		t.Fatal("missing timeout scheduled a deadline")
+	}
+	huge, cancelHuge := executionContext(parent, 9007199254740991)
+	defer cancelHuge()
+	if _, ok := huge.Deadline(); ok {
+		t.Fatal("unrepresentable configured timeout scheduled an overflowed deadline")
+	}
+	limited, cancelLimited := executionContext(parent, 1)
+	defer cancelLimited()
+	if _, ok := limited.Deadline(); !ok {
+		t.Fatal("explicit timeout has no deadline")
+	}
+	cancelParent()
+	for _, ctx := range []context.Context{unlimited, limited, huge} {
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Second):
+			t.Fatal("context lost parent cancellation")
+		}
+	}
+}
+
+func TestHugeConfiguredTimeoutDoesNotRejectOrExpireAJob(t *testing.T) {
+	var logs bytes.Buffer
+	workflow := "on: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: echo ready\n"
+	value, err := execute(context.Background(), Request{Workflow: workflow, Job: "build", Workdir: repository(t), CacheDir: t.TempDir(), TimeoutSeconds: 9007199254740991, Platforms: map[string]string{"self-hosted": "-self-hosted"}}, &logs)
+	if err != nil || value.State != "success" {
+		t.Fatalf("huge configured timeout: %+v %v logs=%s", value, err, logs.String())
+	}
+}

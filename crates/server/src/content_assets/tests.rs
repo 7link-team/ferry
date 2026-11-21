@@ -4,7 +4,7 @@ use sea_orm::{ConnectOptions, Database};
 use sea_orm_migration::MigratorTrait;
 use std::time::Instant;
 
-struct Fixture {
+pub(super) struct Fixture {
     dir: tempfile::TempDir,
     db: DatabaseConnection,
     backend: ArtifactStore,
@@ -12,7 +12,11 @@ struct Fixture {
     ids: Generator,
 }
 impl Fixture {
-    async fn new() -> Self {
+    pub(super) async fn new() -> Self {
+        let _ = tracing_subscriber::fmt()
+            .with_test_writer()
+            .with_max_level(tracing::Level::ERROR)
+            .try_init();
         let dir = tempfile::tempdir().unwrap();
         let mut url = format!(
             "sqlite://{}?mode=rwc",
@@ -50,7 +54,7 @@ impl Fixture {
             ids,
         }
     }
-    fn store(&self) -> Store<'_> {
+    pub(super) fn store(&self) -> Store<'_> {
         Store {
             db: &self.db,
             backend: &self.backend,
@@ -225,6 +229,14 @@ async fn content_reference_rollback_grace_and_gc_generation() {
 #[tokio::test]
 async fn content_quota_counts_candidates_and_dedup_does_not_charge_twice() {
     let f = Fixture::new().await;
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            Expr::value(r#"{"file_total_bytes":7}"#),
+        )
+        .exec(&f.db)
+        .await
+        .unwrap();
     let store = Store {
         quota: 7,
         ..f.store()
@@ -375,6 +387,14 @@ async fn content_failed_object_delete_retains_metadata_and_retries_after_restart
 async fn content_failures_name_their_cause_and_never_show_internal_wording() {
     let f = Fixture::new().await;
     let key_of = |error: ApiError| error.2.map(|m| m.key).unwrap_or_default();
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            Expr::value(r#"{"file_total_bytes":7}"#),
+        )
+        .exec(&f.db)
+        .await
+        .unwrap();
     let small = Store {
         quota: 7,
         ..f.store()
@@ -384,7 +404,15 @@ async fn content_failures_name_their_cause_and_never_show_internal_wording() {
     assert_eq!(full.0, StatusCode::CONFLICT);
     assert_eq!(key_of(full), "storage.quotaExceeded");
     let store = f.store();
-    let big = vec![b'a'; PACKET_LIMIT + 1];
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            Expr::value(r#"{"file_upload_bytes":7}"#),
+        )
+        .exec(&f.db)
+        .await
+        .unwrap();
+    let big = vec![b'a'; 8];
     let too_large = store
         .stage_bytes(11, &big, "application/octet-stream", 0, "upload", 7)
         .await
@@ -416,5 +444,74 @@ async fn content_failures_name_their_cause_and_never_show_internal_wording() {
     assert_eq!(
         store.read(&f.db, 12, 999).await.unwrap_err().0,
         StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn resource_policy_ignores_legacy_storage_quota_and_enforces_explicit_ceilings() {
+    let f = Fixture::new().await;
+    let store = Store {
+        quota: 1,
+        ..f.store()
+    };
+    let asset = store
+        .stage_bytes(11, b"larger than legacy", "text/plain", 0, "policy", 7)
+        .await
+        .unwrap();
+    assert_eq!(
+        store.read_bytes(&f.db, 11, asset.id).await.unwrap(),
+        b"larger than legacy"
+    );
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            Expr::value(r#"{"file_upload_bytes":4,"file_total_bytes":7}"#),
+        )
+        .exec(&f.db)
+        .await
+        .unwrap();
+    assert!(
+        store
+            .stage_bytes(12, b"12345", "text/plain", 0, "policy", 7)
+            .await
+            .is_err()
+    );
+    let first = store
+        .stage_bytes(12, b"1234", "text/plain", 0, "policy", 7)
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .stage_bytes(12, b"1234", "text/plain", 0, "policy", 7)
+            .await
+            .unwrap()
+            .id,
+        first.id
+    );
+    assert!(
+        store
+            .stage_bytes(12, b"abcd", "text/plain", 0, "policy", 7)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        store.read_bytes(&f.db, 11, asset.id).await.unwrap(),
+        b"larger than legacy"
+    );
+}
+
+#[tokio::test]
+async fn resource_policy_default_storage_roundtrips_past_legacy_file_ceiling() {
+    let fixture = Fixture::new().await;
+    let bytes = vec![b'z'; 33 * 1024 * 1024];
+    let store = fixture.store();
+    let asset = store
+        .stage_bytes(11, &bytes, "application/octet-stream", 0, "unlimited", 7)
+        .await
+        .unwrap();
+    assert_eq!(asset.size, 33 * 1024 * 1024);
+    assert_eq!(
+        store.read_bytes(&fixture.db, 11, asset.id).await.unwrap(),
+        bytes
     );
 }

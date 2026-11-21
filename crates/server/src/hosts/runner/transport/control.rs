@@ -1,5 +1,6 @@
 //! Long-lived authenticated control connections and heartbeat metrics.
 use super::*;
+use axum::response::IntoResponse;
 
 /// How often the server probes a quiet control connection.
 const HEARTBEAT_SECONDS: u64 = 20;
@@ -23,8 +24,15 @@ async fn authentication_failure(socket: &mut Socket, error: &ApiError) {
 /// not behind the session cookie: a runner is not a browser, and it proves
 /// itself with the `Hello` frame instead.
 pub async fn connect(State(s): State<AppState>, upgrade: WebSocketUpgrade) -> Response {
+    let policy = match crate::accounts::resource_policy::load(&s.db).await {
+        Ok(policy) => policy,
+        Err(error) => return error.into_response(),
+    };
     let locale = crate::i18n::current_locale();
-    upgrade.on_upgrade(move |socket| crate::i18n::with_locale(locale, control(s, socket.into())))
+    upgrade
+        .max_message_size(wire::resources::byte_limit(policy.websocket_message_bytes))
+        .max_frame_size(wire::resources::byte_limit(policy.websocket_message_bytes))
+        .on_upgrade(move |socket| crate::i18n::with_locale(locale, control(s, socket.into())))
 }
 
 async fn control(s: AppState, mut socket: Socket) {
@@ -156,6 +164,45 @@ async fn control(s: AppState, mut socket: Socket) {
         }
         return;
     }
+    // Deliver quotas before publishing the live registration: an immediate session
+    // must never race the first heartbeat's settings refresh.
+    if hello.supports_resource_policy {
+        let policy = match crate::accounts::resource_policy::load(&s.db).await {
+            Ok(policy) => policy,
+            Err(error) => {
+                tracing::warn!(%host_id, %error, "resource policy unavailable during handshake");
+                let _ = socket.send(Message::Close(None)).await;
+                if let (Some(cluster), Some(owner)) = (&s.cluster, &owner) {
+                    cluster.release(&host_id, owner_revision).await;
+                    let _ = crate::lock::release(
+                        &s.db,
+                        &format!("runner-owner:{host_id}"),
+                        &owner.fence,
+                    )
+                    .await;
+                }
+                return;
+            }
+        };
+        if send_frame(
+            &mut socket,
+            &wire::Control::Settings {
+                timezone: crate::hosts::runner::timezone_setting(&row.timezone),
+                resource_policy: Some(policy),
+            },
+        )
+        .await
+        .is_err()
+        {
+            if let (Some(cluster), Some(owner)) = (&s.cluster, &owner) {
+                cluster.release(&host_id, owner_revision).await;
+                let _ =
+                    crate::lock::release(&s.db, &format!("runner-owner:{host_id}"), &owner.fence)
+                        .await;
+            }
+            return;
+        }
+    }
     let (control, inbox) = mpsc::channel(16);
     let (disconnect, disconnect_rx) = watch::channel(false);
     let registration = Arc::new(Live {
@@ -175,6 +222,7 @@ async fn control(s: AppState, mut socket: Socket) {
         supports_agent_probe: hello.supports_agent_probe,
         supports_forward: hello.supports_forward,
         supports_timezone: hello.supports_timezone,
+        supports_resource_policy: hello.supports_resource_policy,
         version: hello.agent_version.clone(),
         ready: std::sync::atomic::AtomicBool::new(!hello.managed_updates),
         failed_version: Mutex::new(None),
@@ -324,6 +372,7 @@ async fn pump_control(
     let mut unanswered = 0;
     // The host time zone last sent to this runner; None until the first send.
     let mut timezone_sent: Option<Option<String>> = None;
+    let mut policy_sent: Option<wire::resources::ResourcePolicy> = None;
     let mut renew = tokio::time::interval(Duration::from_secs(5));
     let mut revoked = if let Some(cluster) = &s.cluster {
         match cluster.subscribe_revoke(host_id).await {
@@ -340,7 +389,7 @@ async fn pump_control(
                 if !matches!(hosts::Entity::find_by_id(i64::from(row_id)).filter(hosts::Column::RunnerKeyHash.eq(&registration.key_hash)).one(&s.db).await,Ok(Some(_))) {break;}
                 let cluster=s.cluster.as_ref().unwrap();
                 let mut owner=registration.owner.as_ref().unwrap().clone();
-                owner.info=Some(crate::cluster::RunnerInfo {managed:registration.managed,installation_scope:registration.installation_scope.clone(),ready:registration.ready.load(std::sync::atomic::Ordering::Acquire), version:registration.version.clone(), failed_version:registration.failed_version.lock().unwrap_or_else(|error|error.into_inner()).clone(), failed_reason:registration.failed_reason.lock().unwrap_or_else(|error|error.into_inner()).clone()});
+                owner.info=Some(crate::cluster::RunnerInfo {supports_resource_policy:registration.supports_resource_policy,managed:registration.managed,installation_scope:registration.installation_scope.clone(),ready:registration.ready.load(std::sync::atomic::Ordering::Acquire), version:registration.version.clone(), failed_version:registration.failed_version.lock().unwrap_or_else(|error|error.into_inner()).clone(), failed_reason:registration.failed_reason.lock().unwrap_or_else(|error|error.into_inner()).clone()});
                 let revision=registration.owner_revision.load(std::sync::atomic::Ordering::Acquire);
                 match cluster.renew_owner(s,host_id,&owner,revision).await {
                     Ok(revision)=>registration.owner_revision.store(revision,std::sync::atomic::Ordering::Release),
@@ -353,7 +402,8 @@ async fn pump_control(
             },
             outgoing = inbox.recv() => match outgoing {
                 Some(frame) => {
-                    if let wire::Control::Settings { timezone } = &frame {
+                    if let wire::Control::Settings { timezone, resource_policy } = &frame {
+                        if let Some(policy) = resource_policy { policy_sent = Some(policy.clone()); }
                         timezone_sent = Some(timezone.clone());
                     }
                     if let Err(error) = send_frame(&mut socket, &frame).await {
@@ -433,15 +483,27 @@ async fn pump_control(
                 // setting right after Welcome; later ticks pick up a change made
                 // through another replica. Never sent to runners that would
                 // reject the frame.
-                if registration.supports_timezone {
+                if registration.supports_timezone || registration.supports_resource_policy {
                     if let Ok(Some(row)) = hosts::Entity::find_by_id(i64::from(row_id)).one(&s.db).await {
                         let wanted = crate::hosts::runner::timezone_setting(&row.timezone);
-                        if timezone_sent.as_ref() != Some(&wanted) {
-                            if let Err(error) = send_frame(&mut socket, &wire::Control::Settings { timezone: wanted.clone() }).await {
-                                tracing::info!(%host_id, %error, "runner 设置帧发送失败");
+                        let policy = if registration.supports_resource_policy {
+                            match crate::accounts::resource_policy::load(&s.db).await {
+                                Ok(policy) => Some(policy),
+                                Err(error) => {
+                                    tracing::warn!(%host_id, %error, "resource policy unavailable; closing connection for retry");
+                                    break;
+                                }
+                            }
+                        } else { None };
+                        if timezone_sent.as_ref() != Some(&wanted) || policy.as_ref() != policy_sent.as_ref() {
+                            if let Err(error) = send_frame(&mut socket, &wire::Control::Settings {
+                                timezone: wanted.clone(), resource_policy: policy.clone(),
+                            }).await {
+                                tracing::info!(%host_id, %error, "runner settings send failed");
                                 break;
                             }
                             timezone_sent = Some(wanted);
+                            policy_sent = policy;
                         }
                     }
                 }

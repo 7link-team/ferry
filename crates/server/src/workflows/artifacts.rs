@@ -22,7 +22,6 @@ use sea_orm::TransactionTrait;
 use serde_json::{Map, Value, json};
 
 /// Largest file a node may produce (the content store's packet limit).
-pub(crate) const MAX_FILE_BYTES: usize = 32 * 1024 * 1024;
 
 /// Where a produced file came from, for storage ownership.
 pub(crate) struct Origin<'a> {
@@ -72,7 +71,8 @@ pub(crate) fn file_name(requested: &str, fallback: &str, extension: &str) -> Str
 fn too_large(limit: usize) -> ApiError {
     ApiError::localized(
         StatusCode::PAYLOAD_TOO_LARGE,
-        Message::new("workflow.fileTooLarge").with("limit", format!("{} MiB", limit / 1024 / 1024)),
+        Message::new("workflow.fileTooLarge")
+            .with("limit", crate::content_assets::size_text(limit as i64)),
     )
 }
 
@@ -88,8 +88,11 @@ pub(crate) async fn store(
     meta: Value,
     link_ttl_days: i64,
 ) -> Result<FileArtifact> {
-    if bytes.len() > MAX_FILE_BYTES {
-        return Err(too_large(MAX_FILE_BYTES));
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    if !ferry_protocol::resources::allows(policy.file_upload_bytes, bytes.len()) {
+        return Err(too_large(ferry_protocol::resources::byte_limit(
+            policy.file_upload_bytes,
+        )));
     }
     let asset = storage
         .stage_bytes(
@@ -101,9 +104,48 @@ pub(crate) async fn store(
             0,
         )
         .await?;
+    describe(s, storage, origin, asset, mime, name, meta, link_ttl_days).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn store_file(
+    s: &AppState,
+    storage: &Store<'_>,
+    origin: &Origin<'_>,
+    path: &std::path::Path,
+    mime: &str,
+    name: &str,
+    meta: Value,
+    link_ttl_days: i64,
+) -> Result<FileArtifact> {
+    let asset = storage
+        .stage_file(
+            origin.workspace,
+            path,
+            mime,
+            origin.execution,
+            origin.node,
+            0,
+        )
+        .await?;
+    describe(s, storage, origin, asset, mime, name, meta, link_ttl_days).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn describe(
+    s: &AppState,
+    storage: &Store<'_>,
+    origin: &Origin<'_>,
+    asset: crate::entities::content_assets::Model,
+    _mime: &str,
+    name: &str,
+    meta: Value,
+    link_ttl_days: i64,
+) -> Result<FileArtifact> {
+    let prepared = storage.prepare(origin.workspace, asset.id).await?;
     let tx = s.db.begin().await?;
-    storage
-        .attach(&tx, origin.workspace, asset.id, "workflow", origin.workflow)
+    prepared
+        .attach(storage, &tx, "workflow", origin.workflow)
         .await?;
     tx.commit().await?;
     let link = crate::file_links::sign(

@@ -1337,17 +1337,17 @@ async fn claim(
             tx.rollback().await?;
             continue;
         }
-        let limit =
-            crate::maintenance::setting(&tx, r.workspace_id.into(), "pipeline_concurrent_runs")
-                .await?;
+        let limit = crate::accounts::resource_policy::load(&tx)
+            .await?
+            .pipeline_concurrent_runs;
         if !interrupted
-            && limit > 0
+            && limit.is_some()
             && runs::Entity::find()
                 .filter(runs::Column::WorkspaceId.eq(r.workspace_id))
                 .filter(runs::Column::State.is_in(["running", "cancelling"]))
                 .count(&tx)
                 .await?
-                >= limit as u64
+                >= limit.unwrap_or(u64::MAX)
         {
             tx.rollback().await?;
             continue;

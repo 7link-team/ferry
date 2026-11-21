@@ -2,6 +2,51 @@ use super::*;
 use crate::agents::tests::{admin, setup};
 use sea_orm::PaginatorTrait;
 
+#[tokio::test]
+async fn model_discovery_obeys_the_configured_task_deadline() {
+    delayed_model_discovery(Some(1), 2, false).await;
+}
+
+#[tokio::test]
+async fn model_discovery_without_a_deadline_allows_slow_responses() {
+    // Exceeds the old fixed 15-second read timeout.
+    delayed_model_discovery(None, 16, true).await;
+}
+
+async fn delayed_model_discovery(timeout: Option<u64>, delay: u64, succeeds: bool) {
+    let router = axum::Router::new().route(
+        "/models",
+        axum::routing::get(move || async move {
+            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+            axum::Json(json!({"data":[{"id":"local-fixture"}]}))
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    struct Server(tokio::task::JoinHandle<()>);
+    impl Drop for Server {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    let _server = Server(tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    }));
+    let policy = ferry_protocol::resources::ResourcePolicy {
+        task_timeout_seconds: timeout,
+        ..Default::default()
+    };
+    let result = fetch_models(&endpoint, "openai", "local-fixture-key", &policy).await;
+    if succeeds {
+        assert_eq!(result.unwrap(), (vec!["local-fixture".to_owned()], false));
+    } else {
+        assert!(
+            result.is_err(),
+            "configured deadline must stop model discovery"
+        );
+    }
+}
+
 fn body() -> Body {
     serde_json::from_value(json!({"name":"Local CLI","kind":"cli","runtime":"claude","models":[],"default_model":"","tool_version":"","state":"enabled"})).unwrap()
 }

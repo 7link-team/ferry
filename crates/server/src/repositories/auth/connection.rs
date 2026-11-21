@@ -1,3 +1,4 @@
+use super::provider::data_http;
 use super::*;
 
 fn validate_anonymous_git_address(address: &str) -> Result<()> {
@@ -226,6 +227,7 @@ pub async fn browse_repositories(
             .map(|c| c.organization.as_str())
             .unwrap_or(""),
         page.page,
+        &crate::accounts::resource_policy::load(&s.db).await?,
     )
     .await?;
     result["credential_id"] = json!(Id::from(row.credential_id));
@@ -509,6 +511,7 @@ async fn check_connection(
         true,
         &settings.organization,
         1,
+        &crate::accounts::resource_policy::load(&s.db).await?,
     )
     .await?;
     Ok((
@@ -802,6 +805,7 @@ pub async fn connection_repositories(
             .map(|v| v.organization.as_str())
             .unwrap_or(""),
         page.page,
+        &crate::accounts::resource_policy::load(&s.db).await?,
     )
     .await?;
     result["connection_id"] = json!(Id::from(row.id));
@@ -1065,10 +1069,16 @@ pub async fn connection_branches(
     ensure_fresh(&s, scope.workspace_id, row.credential_id.into()).await?;
     let (_, _, secret) =
         crate::credentials::unseal(&s, &scope.workspace_id, &row.credential_id.into()).await?;
-    let response = authorize_request(http()?.get(url), &row.provider, &secret, token.is_some())
-        .send()
-        .await
-        .map_err(|error| request_failed(&error, "repository.auth.branchesRead"))?;
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let response = authorize_request(
+        data_http(&policy)?.get(url),
+        &row.provider,
+        &secret,
+        token.is_some(),
+    )
+    .send()
+    .await
+    .map_err(|error| request_failed(&error, "repository.auth.branchesRead"))?;
     let has_more = (row.provider == "codeup")
         .then(|| codeup_has_more(&response, query.page))
         .flatten();

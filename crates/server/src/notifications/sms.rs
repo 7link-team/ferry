@@ -340,9 +340,9 @@ pub(crate) async fn send(
     config: &Config,
     to: &[String],
     parameters: &BTreeMap<String, String>,
+    policy: &ferry_protocol::resources::ResourcePolicy,
 ) -> (String, &'static str) {
-    let Ok(client) = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
+    let Ok(client) = crate::accounts::resource_policy::http(policy)
         .redirect(reqwest::redirect::Policy::none())
         .build()
     else {

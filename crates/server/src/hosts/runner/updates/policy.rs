@@ -151,7 +151,7 @@ pub(super) async fn automatic_update_cycle(
             }
         }
         if catalog.is_none() && discovery_error.is_none() {
-            match crate::hosts::runner::install::catalog().await {
+            match crate::hosts::runner::install::catalog(s).await {
                 Ok(value) => *catalog = Some(value),
                 Err(error) => discovery_error = Some(error),
             }

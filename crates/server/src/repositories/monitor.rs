@@ -26,7 +26,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
 use subtle::ConstantTimeEq;
 
 mod detail;
@@ -1174,14 +1174,16 @@ pub async fn receive(
     if let Some(event_id) = event_id {
         if event.event == "push" && event.detail.get("line_stats").is_none() {
             // Enrichment never holds the workspace transaction or fails delivery.
-            let _ = tokio::time::timeout(Duration::from_secs(5), async {
-                if let Ok(access) =
-                    crate::repositories::auth::MonitorAccess::load(&s, &connection).await
-                {
-                    polling::enrich_stats(&access, &mut event).await;
-                }
-            })
-            .await;
+            if let Ok(policy) = crate::accounts::resource_policy::load(&s.db).await {
+                let _ = crate::accounts::resource_policy::task_timeout(&policy, async {
+                    if let Ok(access) =
+                        crate::repositories::auth::MonitorAccess::load(&s, &connection).await
+                    {
+                        polling::enrich_stats(&access, &mut event).await;
+                    }
+                })
+                .await;
+            }
             events::Entity::update_many()
                 .col_expr(
                     events::Column::Detail,
@@ -1302,6 +1304,7 @@ async fn deliver(
             let result = crate::i18n::with_locale(
                 locale,
                 deliver_notice(
+                    s,
                     connection,
                     &channel.webhook,
                     &channel.options,
@@ -1382,6 +1385,7 @@ fn notice_action(event: &Event) -> String {
 }
 
 async fn deliver_notice(
+    s: &AppState,
     connection: &connections::Model,
     webhook: &str,
     options: &crate::notifications::channel::Options,
@@ -1389,8 +1393,8 @@ async fn deliver_notice(
     event: &Event,
 ) -> Result<String> {
     if !webhook.is_empty() || !options.bot_token.is_empty() {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
+        let policy = crate::accounts::resource_policy::load(&s.db).await?;
+        let client = crate::accounts::resource_policy::http(&policy)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(crate::error::internal_fault)?;
@@ -1556,8 +1560,8 @@ pub async fn notification_test(
     let connection = owned_connection(&s.db, &scope, id).await?;
     validate_channels(std::slice::from_ref(&body))?;
     let locale = notification_locale(&body.language)?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let client = crate::accounts::resource_policy::http(&policy)
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(crate::error::internal_fault)?;

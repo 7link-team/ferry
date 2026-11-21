@@ -9,13 +9,12 @@ use crate::{
     snowflake::Id,
     state::AppState,
 };
+use ferry_protocol::resources::ResourcePolicy;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::{collections::BTreeMap, time::Duration};
 use tokio::sync::{mpsc, watch};
 
 const SETUP: Duration = Duration::from_secs(15);
-const QUERY: Duration = Duration::from_secs(120);
-const MAX_OUTPUT: usize = 16 * 1024 * 1024;
 
 struct CancelOnDrop(watch::Sender<bool>);
 
@@ -107,6 +106,7 @@ pub(super) async fn snapshot(
         .await
         .map_err(|_| failed())?;
     let windows = host.os == "windows";
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     let addresses = config.repositories.clone();
     let (cancel, stopped) = watch::channel(false);
     let _cancel_on_drop = CancelOnDrop(cancel);
@@ -139,6 +139,7 @@ pub(super) async fn snapshot(
             credential.as_ref(),
             &addresses,
             stopped,
+            &policy,
         )
         .await;
         let cleaned = ch
@@ -160,6 +161,7 @@ async fn read_refs(
     credential: Option<&(String, String, String)>,
     addresses: &[String],
     stopped: watch::Receiver<bool>,
+    policy: &ResourcePolicy,
 ) -> Result<polling::Snapshot> {
     let mut snapshot = BTreeMap::new();
     for address in addresses {
@@ -170,7 +172,13 @@ async fn read_refs(
         if *stopped.borrow() {
             return Err(failed());
         }
-        let output = capture(ch, &script(private, &environment, address), stopped.clone()).await?;
+        let output = capture(
+            ch,
+            &script(private, &environment, address),
+            stopped.clone(),
+            policy,
+        )
+        .await?;
         snapshot.insert(address.clone(), parse(&output)?);
     }
     Ok(snapshot)
@@ -214,12 +222,18 @@ async fn capture(
     ch: &dyn HostChannel,
     script: &str,
     mut owner: watch::Receiver<bool>,
+    policy: &ResourcePolicy,
 ) -> Result<Vec<u8>> {
     let (output, mut receiver) = mpsc::channel(16);
     let (cancel, stop) = watch::channel(*owner.borrow());
-    let exec = ch.exec_stream(script, QUERY, output, stop);
+    let timeout = policy
+        .task_timeout_seconds
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::ZERO);
+    let exec = ch.exec_stream(script, timeout, output, stop);
     let collect = async {
         let mut bytes = Vec::new();
+        let mut received = 0usize;
         let mut oversized = false;
         let mut cancelled = *owner.borrow();
         loop {
@@ -232,12 +246,13 @@ async fn capture(
                 }
             };
             let Some((stream, chunk)) = next else { break };
-            if stream == "stdout" && !oversized {
-                if chunk.len() > MAX_OUTPUT.saturating_sub(bytes.len()) {
+            if !oversized {
+                received = received.checked_add(chunk.len()).ok_or_else(failed)?;
+                if !ferry_protocol::resources::allows(policy.command_output_bytes, received) {
                     oversized = true;
                     let _ = cancel.send(true);
                     bytes.clear();
-                } else {
+                } else if stream == "stdout" {
                     bytes.extend_from_slice(&chunk);
                 }
             }
@@ -297,6 +312,97 @@ fn valid_ref(name: &str) -> bool {
 mod tests {
     use super::*;
 
+    struct OutputFixture(Vec<(&'static str, Vec<u8>)>);
+    #[async_trait::async_trait]
+    impl HostChannel for OutputFixture {
+        async fn exec_stream(
+            &self,
+            _: &str,
+            _: Duration,
+            output: mpsc::Sender<(String, Vec<u8>)>,
+            _: watch::Receiver<bool>,
+        ) -> Result<i32> {
+            for (stream, bytes) in &self.0 {
+                output
+                    .send(((*stream).into(), bytes.clone()))
+                    .await
+                    .unwrap();
+            }
+            Ok(0)
+        }
+        async fn monitor(&self) -> Result<ferry_protocol::HostMonitor> {
+            panic!("unexpected monitor")
+        }
+        async fn exec(&self, _: &str, _: Duration) -> Result<crate::hosts::channel::Output> {
+            panic!("unexpected exec")
+        }
+        async fn open_pty(
+            &self,
+            _: crate::hosts::channel::PtySize,
+        ) -> Result<Box<dyn crate::hosts::channel::Pty>> {
+            panic!("unexpected pty")
+        }
+        async fn list_dir(&self, _: &str) -> Result<Vec<crate::hosts::channel::DirEntry>> {
+            panic!("unexpected directory")
+        }
+        async fn create_file(&self, _: &str) -> Result<()> {
+            panic!("unexpected create")
+        }
+        async fn create_dir(&self, _: &str) -> Result<()> {
+            panic!("unexpected create directory")
+        }
+        async fn read_file(
+            &self,
+            _: &str,
+        ) -> Result<(
+            crate::hosts::channel::FileMeta,
+            crate::hosts::channel::ByteStream,
+        )> {
+            panic!("unexpected read")
+        }
+        async fn write_file(
+            &self,
+            _: &str,
+            _: u32,
+            _: crate::hosts::channel::ByteStream,
+        ) -> Result<()> {
+            panic!("unexpected write")
+        }
+        async fn delete_file(&self, _: &str) -> Result<()> {
+            panic!("unexpected delete")
+        }
+    }
+    #[tokio::test]
+    async fn resource_policy_git_monitor_preserves_large_output_and_enforces_combined_stream_ceiling()
+     {
+        let (_owner, stop) = watch::channel(false);
+        let fixture = OutputFixture(vec![("stdout", vec![b'a'; 17 * 1024 * 1024])]);
+        let bytes = capture(
+            &fixture,
+            "fixture",
+            stop.clone(),
+            &ferry_protocol::resources::ResourcePolicy::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(bytes.len(), 17 * 1024 * 1024);
+        let policy = ferry_protocol::resources::ResourcePolicy {
+            command_output_bytes: Some(4),
+            ..Default::default()
+        };
+        let equal = OutputFixture(vec![("stdout", b"1234".to_vec())]);
+        assert_eq!(
+            capture(&equal, "fixture", stop.clone(), &policy)
+                .await
+                .unwrap(),
+            b"1234"
+        );
+        let combined = OutputFixture(vec![
+            ("stdout", b"1234".to_vec()),
+            ("stderr", b"5".to_vec()),
+        ]);
+        assert!(capture(&combined, "fixture", stop, &policy).await.is_err());
+    }
     #[test]
     fn dropping_the_snapshot_owner_signals_cleanup_task() {
         let (cancel, stopped) = watch::channel(false);

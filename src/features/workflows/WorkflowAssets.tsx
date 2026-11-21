@@ -152,10 +152,6 @@ export function WorkflowAssetUpload({
               const selected = event.target.files?.[0];
               event.target.value = "";
               if (!selected) return;
-              if (selected.size > 32 * 1024 * 1024) {
-                setError(t("fileTooLarge"));
-                return;
-              }
               setBusy(true);
               report.current?.(true);
               setError("");

@@ -9,12 +9,11 @@ use axum::{
     http::HeaderMap,
     response::Response,
 };
-const MAX_BYTES: usize = 32 * 1024 * 1024;
 pub(super) fn routes() -> Router<AppState> {
     Router::new()
         .route(
             "/{workspace}/conversations/{id}/files",
-            post(upload).layer(DefaultBodyLimit::max(MAX_BYTES + 1024 * 1024)),
+            post(upload).layer(DefaultBodyLimit::disable()),
         )
         .route(
             "/{workspace}/conversations/{id}/files/{file}",
@@ -44,7 +43,7 @@ async fn upload(
     if c.state != "active" {
         return Err(conflict());
     }
-    let mut field = data
+    let field = data
         .next_field()
         .await
         .map_err(|_| invalid())?
@@ -62,16 +61,6 @@ async fn upload(
     if name.is_empty() || name.len() > 255 || name.chars().any(char::is_control) {
         return Err(invalid());
     }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = field.chunk().await.map_err(|_| invalid())? {
-        if chunk.len() > MAX_BYTES.saturating_sub(bytes.len()) {
-            return Err(error(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "conversations.fileTooLarge",
-            ));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
     // MIME comes from a bounded extension mapping, never arbitrary browser headers.
     let guessed = mime_guess::from_path(&name)
         .first_or_octet_stream()
@@ -86,16 +75,19 @@ async fn upload(
     };
     let backend = ArtifactStore::for_state(&s).await?;
     let storage = store(&s, &backend);
+    use futures::TryStreamExt;
+    let reader = Box::pin(field.map_err(|_| invalid()));
     let asset = storage
-        .stage_bytes(
+        .stage_stream(
             scope.workspace_id.into(),
-            &bytes,
+            reader,
             &mime,
             0,
             "conversation-upload",
             scope.user.id.into(),
         )
         .await?;
+    let prepared = storage.prepare(scope.workspace_id.into(), asset.id).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let c = find(&tx, &scope, id).await?;
     if c.state != "active" {
@@ -112,14 +104,8 @@ async fn upload(
         mime,
         created_at: db::now(),
     };
-    storage
-        .attach(
-            &tx,
-            file.workspace_id,
-            file.asset_id,
-            "conversation_file",
-            file.id,
-        )
+    prepared
+        .attach(&storage, &tx, "conversation_file", file.id)
         .await?;
     files::Entity::insert(file.clone().into_active_model())
         .exec(&tx)
@@ -141,9 +127,9 @@ pub(super) async fn produced(
     let backend = ArtifactStore::for_state(s).await?;
     let storage = store(s, &backend);
     let asset = storage
-        .stage_bytes(
+        .stage_file(
             turn.workspace_id,
-            &file.bytes,
+            file.content.as_ref(),
             mime,
             0,
             "conversation-agent-file",
@@ -161,15 +147,10 @@ pub(super) async fn produced(
         mime: mime.to_owned(),
         created_at: db::now(),
     };
+    let prepared = storage.prepare(row.workspace_id, row.asset_id).await?;
     let tx = sea_orm::TransactionTrait::begin(&s.db).await?;
-    storage
-        .attach(
-            &tx,
-            row.workspace_id,
-            row.asset_id,
-            "conversation_file",
-            row.id,
-        )
+    prepared
+        .attach(&storage, &tx, "conversation_file", row.id)
         .await?;
     files::Entity::insert(row.clone().into_active_model())
         .exec(&tx)
@@ -222,15 +203,16 @@ async fn download(
         return Err(ApiError::missing());
     }
     let backend = ArtifactStore::for_state(&s).await?;
-    let bytes = store(&s, &backend)
-        .read_bytes(&s.db, f.workspace_id, f.asset_id)
+    let content = store(&s, &backend)
+        .read_file(&s.db, f.workspace_id, f.asset_id)
         .await?;
-    crate::workflows::media::media_response(
-        bytes,
+    crate::workflows::media::media_file_response(
+        content,
         &f.mime,
         &headers,
         query.download.then_some(f.name.as_str()),
     )
+    .await
 }
 async fn remove(
     State(s): State<AppState>,
@@ -296,7 +278,11 @@ pub(super) async fn canonicalize(
         return Ok(());
     }
     let backend = ArtifactStore::for_state(s).await?;
-    let mut text_budget = 24 * 1024;
+    let mut text_budget = ferry_protocol::resources::byte_limit(
+        crate::accounts::resource_policy::load(&s.db)
+            .await?
+            .agent_prompt_bytes,
+    );
     for a in attachments {
         if let Some(file) = a.file_id {
             let f = resolve(&s.db, scope.workspace_id, id, file).await?;
@@ -304,7 +290,7 @@ pub(super) async fn canonicalize(
             a.mime = f.mime;
             a.size = f.size as u64;
             a.text.clear();
-            if f.size <= text_budget as i64
+            if u64::try_from(f.size).is_ok_and(|size| size <= text_budget as u64)
                 && (a.mime.starts_with("text/")
                     || matches!(
                         a.mime.as_str(),

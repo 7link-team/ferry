@@ -13,8 +13,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
-use index::MAX_INDEX_BYTES;
-
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Source {
     pub provider: String,
@@ -201,170 +199,207 @@ async fn fetch(
     oauth: bool,
     timeout: Duration,
 ) -> Result<String> {
-    let mut url = source.url()?;
-    if source.provider == "git" {
-        return git::read_index(
-            url.as_str(),
-            &source.branch,
-            &source.index_path,
-            token,
-            MAX_INDEX_BYTES,
-        )
-        .await;
-    }
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(timeout.min(Duration::from_secs(20)))
-        .user_agent("workspace-template-index/1")
-        .build()
-        .map_err(|_| {
+    let work = async {
+        let mut url = source.url()?;
+        if source.provider == "git" {
+            return git::read_index_with_timeout(
+                url.as_str(),
+                &source.branch,
+                &source.index_path,
+                token,
+                usize::MAX,
+                timeout,
+            )
+            .await;
+        }
+        let mut client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent("workspace-template-index/1");
+        if !timeout.is_zero() {
+            client = client.timeout(timeout);
+        }
+        let client = client.build().map_err(|_| {
             ApiError::localized(
                 axum::http::StatusCode::BAD_REQUEST,
                 crate::i18n::Message::new("marketplace.clientInitFailed"),
             )
         })?;
-    if source.provider == "gitee" {
-        if let Some(token) = token {
-            url.query_pairs_mut().append_pair("access_token", token);
+        if source.provider == "gitee" {
+            if let Some(token) = token {
+                url.query_pairs_mut().append_pair("access_token", token);
+            }
         }
-    }
-    // GitHub's JSON wrapper carries no content above 1 MB; the raw media type serves files up to 100 MB.
-    let accept = if source.provider == "github" {
-        "application/vnd.github.raw"
-    } else {
-        "application/json"
-    };
-    let mut request = client.get(url).header("Accept", accept);
-    if let Some(token) = token {
-        request = match source.provider.as_str() {
-            "github" => request.bearer_auth(token),
-            "gitlab" if oauth => request.bearer_auth(token),
-            "gitlab" => request.header("PRIVATE-TOKEN", token),
-            "codeup" => request.header("x-yunxiao-token", token),
-            _ => request,
+        // GitHub's JSON wrapper carries no content above 1 MB; the raw media type serves files up to 100 MB.
+        let accept = if source.provider == "github" {
+            "application/vnd.github.raw"
+        } else {
+            "application/json"
         };
-    }
-    // Never expose reqwest errors: they may include Gitee's query credential.
-    let mut response = request
-        .send()
-        .await
-        .log_cause("marketplace index request")
-        .map_err(|error| {
-            let key = if error.is_timeout() {
-                "marketplace.requestTimeout"
-            } else if error.is_connect() {
-                "marketplace.requestUnreachable"
-            } else {
-                "marketplace.requestFailed"
+        let mut request = client.get(url).header("Accept", accept);
+        if let Some(token) = token {
+            request = match source.provider.as_str() {
+                "github" => request.bearer_auth(token),
+                "gitlab" if oauth => request.bearer_auth(token),
+                "gitlab" => request.header("PRIVATE-TOKEN", token),
+                "codeup" => request.header("x-yunxiao-token", token),
+                _ => request,
             };
-            ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new(key),
-            )
-        })?;
-    if !response.status().is_success() {
-        return Err(ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("marketplace.httpStatus")
-                .with("status", response.status().as_u16().to_string()),
-        ));
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .log_cause("marketplace index read")
-        .map_err(|_| {
-            ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("marketplace.fileReadFailed"),
-            )
-        })?
-    {
-        if bytes.len() + chunk.len() > MAX_INDEX_BYTES * 2 {
+        }
+        // Never expose reqwest errors: they may include Gitee's query credential.
+        let mut response = request
+            .send()
+            .await
+            .log_cause("marketplace index request")
+            .map_err(|error| {
+                let key = if error.is_timeout() {
+                    "marketplace.requestTimeout"
+                } else if error.is_connect() {
+                    "marketplace.requestUnreachable"
+                } else {
+                    "marketplace.requestFailed"
+                };
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new(key),
+                )
+            })?;
+        if !response.status().is_success() {
             return Err(ApiError::localized(
                 axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("marketplace.responseTooLarge"),
+                crate::i18n::Message::new("marketplace.httpStatus")
+                    .with("status", response.status().as_u16().to_string()),
             ));
         }
-        bytes.extend_from_slice(&chunk);
-    }
-    let document: Value = serde_json::from_slice(&bytes).map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("marketplace.responseJsonRequired"),
-        )
-    })?;
-    // A raw index body is itself the document: neither index format has a top-level "content".
-    if source.provider == "github" && document.get("content").is_none() {
-        let text = String::from_utf8(bytes).map_err(|_| {
-            ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("marketplace.utf8Required"),
-            )
-        })?;
-        if text.len() > MAX_INDEX_BYTES {
-            return Err(ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("marketplace.indexTooLarge"),
-            ));
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .log_cause("marketplace index read")
+            .map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("marketplace.fileReadFailed"),
+                )
+            })?
+        {
+            bytes.extend_from_slice(&chunk);
         }
-        return Ok(text);
-    }
-    let content = document
-        .get("content")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
+        let document: Value = serde_json::from_slice(&bytes).map_err(|_| {
             ApiError::localized(
                 axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("marketplace.contentMissing"),
+                crate::i18n::Message::new("marketplace.responseJsonRequired"),
             )
         })?;
-    let text = match document
-        .get("encoding")
-        .and_then(Value::as_str)
-        .unwrap_or("base64")
-    {
-        "base64" => {
-            let compact: String = content
-                .chars()
-                .filter(|c| !c.is_ascii_whitespace())
-                .collect();
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(compact)
-                .map_err(|_| {
-                    ApiError::localized(
-                        axum::http::StatusCode::BAD_REQUEST,
-                        crate::i18n::Message::new("marketplace.base64Invalid"),
-                    )
-                })?;
-            String::from_utf8(bytes).map_err(|_| {
+        // A raw index body is itself the document: neither index format has a top-level "content".
+        if source.provider == "github" && document.get("content").is_none() {
+            let text = String::from_utf8(bytes).map_err(|_| {
                 ApiError::localized(
                     axum::http::StatusCode::BAD_REQUEST,
                     crate::i18n::Message::new("marketplace.utf8Required"),
                 )
-            })?
+            })?;
+            return Ok(text);
         }
-        "text" => content.to_owned(),
-        _ => {
-            return Err(ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("marketplace.encodingUnsupported"),
-            ));
-        }
+        let content = document
+            .get("content")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("marketplace.contentMissing"),
+                )
+            })?;
+        let text = match document
+            .get("encoding")
+            .and_then(Value::as_str)
+            .unwrap_or("base64")
+        {
+            "base64" => {
+                let compact: String = content
+                    .chars()
+                    .filter(|c| !c.is_ascii_whitespace())
+                    .collect();
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(compact)
+                    .map_err(|_| {
+                        ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("marketplace.base64Invalid"),
+                        )
+                    })?;
+                String::from_utf8(bytes).map_err(|_| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("marketplace.utf8Required"),
+                    )
+                })?
+            }
+            "text" => content.to_owned(),
+            _ => {
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("marketplace.encodingUnsupported"),
+                ));
+            }
+        };
+        Ok(text)
     };
-    if text.len() > MAX_INDEX_BYTES {
-        return Err(ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("marketplace.indexTooLarge"),
-        ));
+    if timeout.is_zero() {
+        work.await
+    } else {
+        tokio::time::timeout(timeout, work).await.map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.requestTimeout"),
+            )
+        })?
     }
-    Ok(text)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn marketplace_fetch_uses_the_configured_task_deadline() {
+        delayed_index(Duration::from_secs(1), 2, false).await;
+    }
+
+    #[tokio::test]
+    async fn marketplace_fetch_without_a_deadline_allows_slow_responses() {
+        delayed_index(Duration::ZERO, 21, true).await;
+    }
+
+    async fn delayed_index(timeout: Duration, delay: u64, succeeds: bool) {
+        let router = axum::Router::new().route(
+            "/{*path}",
+            axum::routing::get(move || async move {
+                tokio::time::sleep(Duration::from_secs(delay)).await;
+                axum::Json(serde_json::json!({"schemaVersion":2,"packages":[]}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut config = source("github");
+        config.api_base = format!("http://{}", listener.local_addr().unwrap());
+        struct Server(tokio::task::JoinHandle<()>);
+        impl Drop for Server {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+        let _server = Server(tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        }));
+        let result = fetch(&config, None, false, timeout).await;
+        if succeeds {
+            assert_eq!(
+                serde_json::from_str::<Value>(&result.unwrap()).unwrap(),
+                serde_json::json!({"schemaVersion":2,"packages":[]})
+            );
+        } else {
+            assert!(result.is_err());
+        }
+    }
 
     #[test]
     fn an_unchanged_source_location_is_recognised_despite_formatting() {
@@ -957,11 +992,14 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
             &repository.url,
             repository.credential_id,
             &config,
-            timeout,
         )
         .await?;
         // The write budget starts after the fetch: a Git fetch may take minutes.
-        let deadline = std::time::Instant::now() + timeout;
+        let deadline = if timeout.is_zero() {
+            None
+        } else {
+            std::time::Instant::now().checked_add(timeout)
+        };
         let fresh = Scope::for_actor(s, scope.workspace_id, scope.user.id).await?;
         fresh.require("marketplace-sources.sync")?;
         fresh.require("repositories.read")?;
@@ -1043,7 +1081,6 @@ async fn load_index(
     repository_url: &str,
     credential_id: i64,
     config: &Source,
-    timeout: Duration,
 ) -> Result<Vec<index::PackageVersion>> {
     validate_origin(config, repository_url)?;
     let token = if credential_id != 0 {
@@ -1075,11 +1112,32 @@ async fn load_index(
         .one(&s.db)
         .await?
         .is_some();
-    index::parse_bundle(
-        &fetch(config, token.as_deref(), oauth, timeout).await?,
-        &ferry_version(),
-        "en-US",
-    )
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let timeout = policy
+        .task_timeout_seconds
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::ZERO);
+    let text = fetch(config, token.as_deref(), oauth, timeout).await?;
+    if !ferry_protocol::resources::allows(policy.tool_response_bytes, text.len()) {
+        return Err(ApiError::localized(
+            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+            crate::i18n::Message::new("request.resourceLimit"),
+        ));
+    }
+    let rows = index::parse_bundle(&text, &ferry_version(), "en-US")?;
+    for row in &rows {
+        if !ferry_protocol::resources::allows(policy.file_count, row.files.len())
+            || row.files.iter().any(|file| {
+                !ferry_protocol::resources::allows(policy.file_upload_bytes, file.content.len())
+            })
+        {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+                crate::i18n::Message::new("request.resourceLimit"),
+            ));
+        }
+    }
+    Ok(rows)
 }
 /// The repository a source body points at: a new selection through a saved
 /// connection, or an existing repository of the workspace.
@@ -1112,16 +1170,6 @@ async fn check_index(s: &AppState, scope: &Scope, b: &Body) -> Result<()> {
     scope.require("repositories.read")?;
     b.source.url()?;
     let (url, credential) = source_repository(s, scope, b).await?;
-    load_index(
-        s,
-        scope.workspace_id,
-        &url,
-        credential,
-        &b.source,
-        SAVE_CHECK_TIMEOUT,
-    )
-    .await?;
+    load_index(s, scope.workspace_id, &url, credential, &b.source).await?;
     Ok(())
 }
-/// How long saving a source may spend reading its index.
-const SAVE_CHECK_TIMEOUT: Duration = Duration::from_secs(20);

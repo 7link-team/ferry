@@ -12,7 +12,6 @@ use ferry_protocol::agent::{Binding, Probe, Runtime};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
 /// Online Runners considered when a CLI model names no hosts.
-const AUTOMATIC_LIMIT: u64 = 100;
 /// Hosts listed by name in one error; the rest are counted.
 const LISTED_REASONS: usize = 8;
 
@@ -49,7 +48,6 @@ pub(crate) async fn candidates(
         for row in runners(workspace)
             .filter(hosts::Column::State.eq("online"))
             .order_by_asc(hosts::Column::Id)
-            .limit(AUTOMATIC_LIMIT)
             .all(conn)
             .await?
         {

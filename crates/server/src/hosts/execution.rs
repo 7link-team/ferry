@@ -16,7 +16,7 @@ use std::collections::HashMap;
 pub struct Policy {
     pub enabled: bool,
     pub shared: bool,
-    pub capacity: u32,
+    pub capacity: u64,
 }
 impl Default for Policy {
     fn default() -> Self {
@@ -29,7 +29,7 @@ impl Default for Policy {
 }
 impl Policy {
     pub fn validate(&self) -> Result<()> {
-        if !(1..=64).contains(&self.capacity) {
+        if self.capacity == 0 || self.capacity > i64::MAX as u64 {
             return Err(ApiError::localized(
                 axum::http::StatusCode::BAD_REQUEST,
                 crate::i18n::Message::new("hosts.executionCapacityInvalid"),
@@ -50,7 +50,7 @@ pub async fn save(
         workspace_id: Set(workspace.into()),
         enabled: Set(value.enabled),
         shared: Set(value.shared),
-        capacity: Set(value.capacity.into()),
+        capacity: Set(i64::try_from(value.capacity).map_err(|_| ApiError::missing())?),
     })
     .on_conflict(
         sea_orm::sea_query::OnConflict::column(policies::Column::HostId)
@@ -73,6 +73,9 @@ pub async fn decorate_many(
     if rows.is_empty() {
         return Ok(());
     }
+    let effective = crate::accounts::resource_policy::load(conn)
+        .await?
+        .host_task_concurrency;
     let ids = rows.iter().map(|row| row.id).collect::<Vec<_>>();
     let policies = policies::Entity::find()
         .filter(policies::Column::HostId.is_in(ids.clone()))
@@ -85,7 +88,7 @@ pub async fn decorate_many(
                 Policy {
                     enabled: p.enabled,
                     shared: p.shared,
-                    capacity: p.capacity as u32,
+                    capacity: p.capacity as u64,
                 },
             )
         })
@@ -111,13 +114,13 @@ pub async fn decorate_many(
             } else {
                 "draining"
             }
-        } else if live.len() >= p.capacity as usize {
+        } else if effective.is_some_and(|limit| live.len() as u64 >= limit) {
             "busy"
         } else {
             "available"
         };
         value["execution"] = json!(p);
-        value["execution_status"] = json!({"active":live.len(),"capacity":p.capacity,"state":state,"running_jobs":live.iter().map(|l| json!({"run_id":Id::from(l.run_id),"job_key":l.job_key})).collect::<Vec<_>>()});
+        value["execution_status"] = json!({"active":live.len(),"capacity":effective,"state":state,"running_jobs":live.iter().map(|l| json!({"run_id":Id::from(l.run_id),"job_key":l.job_key})).collect::<Vec<_>>()});
     }
     Ok(())
 }
@@ -185,7 +188,7 @@ pub async fn candidates(
                 Policy {
                     enabled: p.enabled,
                     shared: p.shared,
-                    capacity: p.capacity as u32,
+                    capacity: p.capacity as u64,
                 },
             )
         })
@@ -221,6 +224,9 @@ pub async fn candidates(
             }
         }
     }
+    let effective = crate::accounts::resource_policy::load(conn)
+        .await?
+        .host_task_concurrency;
     let mut available = Vec::new();
     for row in rows {
         let p = policies.get(&row.id).cloned().unwrap_or_default();
@@ -233,6 +239,8 @@ pub async fn candidates(
             continue;
         }
         let occupied = *loads.get(&row.id).unwrap_or(&0);
+        let mut p = p;
+        p.capacity = effective.unwrap_or(u64::MAX);
         available.push((row, p, occupied));
     }
     available.sort_by_key(|(h, _, load)| (*load, h.id));
@@ -244,7 +252,7 @@ const TTL: i64 = 300_000;
 pub struct Lease {
     pub host: i64,
     pub slot: i64,
-    pub capacity: u32,
+    pub capacity: Option<u64>,
     owner: String,
 }
 impl Lease {
@@ -273,23 +281,22 @@ impl Lease {
 pub async fn try_acquire(
     conn: &impl ConnectionTrait,
     host: i64,
-    capacity: u32,
+    capacity: u64,
     run: i64,
     key: &str,
 ) -> Result<Option<Lease>> {
     // Includes slots above a newly reduced capacity: existing work drains before
     // any replacement enters the smaller budget. Call under the mutation lock.
-    if slots::Entity::find()
+    let occupied = slots::Entity::find()
         .filter(slots::Column::HostId.eq(host))
         .filter(slots::Column::ExpiresAt.gt(db::now()))
         .all(conn)
         .await?
-        .len()
-        >= capacity as usize
-    {
+        .len();
+    if occupied as u64 >= capacity {
         return Ok(None);
     }
-    for slot in 0..i64::from(capacity) {
+    for slot in 0..=i64::try_from(occupied).map_err(|_| ApiError::missing())? {
         let owner = uuid::Uuid::new_v4().to_string();
         slots::Entity::insert(slots::ActiveModel {
             host_id: Set(host),
@@ -322,7 +329,7 @@ pub async fn try_acquire(
             return Ok(Some(Lease {
                 host,
                 slot,
-                capacity,
+                capacity: (capacity != u64::MAX).then_some(capacity),
                 owner,
             }));
         }
@@ -521,10 +528,45 @@ mod tests {
         decorate(&db, &host, &mut json).await.unwrap();
         assert_eq!(json["execution_status"]["state"], "disabled");
     }
+    #[tokio::test]
+    async fn resource_policy_replaces_legacy_host_capacity_without_changing_access() {
+        let db = fixture().await;
+        save(
+            &db,
+            1.into(),
+            1.into(),
+            &Policy {
+                capacity: 1,
+                shared: true,
+                ..Policy::default()
+            },
+        )
+        .await
+        .unwrap();
+        let unlimited = candidates(&db, 1, 1, 0, false, &[]).await.unwrap();
+        assert_eq!(unlimited[0].1.capacity, u64::MAX);
+        crate::entities::platform_state::Entity::update_many()
+            .col_expr(
+                crate::entities::platform_state::Column::ResourceConfig,
+                Expr::value(r#"{"host_task_concurrency":2}"#),
+            )
+            .exec(&db)
+            .await
+            .unwrap();
+        let limited = candidates(&db, 1, 1, 0, false, &[]).await.unwrap();
+        assert_eq!(limited[0].1.capacity, 2);
+        assert!(limited[0].1.shared);
+        let saved = policies::Entity::find_by_id(1)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.capacity, 1);
+    }
     #[test]
     fn capacity_is_bounded_and_defaults_are_private() {
         assert!(!Policy::default().shared);
-        for capacity in [0, 65, u32::MAX] {
+        for capacity in [0, u64::MAX] {
             assert!(
                 Policy {
                     capacity,
@@ -534,7 +576,7 @@ mod tests {
                 .is_err()
             );
         }
-        for capacity in [1, 64] {
+        for capacity in [1, 64, 65, u32::MAX as u64] {
             assert!(
                 Policy {
                     capacity,

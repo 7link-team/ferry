@@ -124,8 +124,8 @@ pub(crate) async fn download(
         ids: &s.ids,
         quota: crate::content_assets::DEFAULT_QUOTA,
     };
-    let bytes = store.read_bytes(&s.db, claims.w, asset.id).await?;
-    crate::workflows::media::media_response(bytes, &claims.m, &headers, Some(&claims.n))
+    let file = store.read_file(&s.db, claims.w, asset.id).await?;
+    crate::workflows::media::media_file_response(file, &claims.m, &headers, Some(&claims.n)).await
 }
 
 #[cfg(test)]

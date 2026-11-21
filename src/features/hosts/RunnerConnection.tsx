@@ -363,6 +363,7 @@ type RunnerUpdate = {
   agent_version: string;
   target_version: string;
   supported: boolean;
+  supports_resource_policy?: boolean;
   ready: boolean;
   enabled: boolean;
   auto_update: "inherit" | "on" | "off";
@@ -436,6 +437,7 @@ export function RunnerUpdateStatus({ workspace, hostId, canUpdate = false }: { w
       <HostAgentVersion workspace={workspace} hostId={hostId} version={status.agent_version} available={status.available && status.supported} updateState={status.update?.state} online={status.ready} canUpdate={canUpdate} />
       <p className="text-xs text-muted-foreground">{commonText(offline ? "resource-domain:runner.versionsOffline" : "resource-domain:runner.versions", { current: status.agent_version || "—", server: status.target_version })}</p>
       <p>{commonText("resource-domain:runner.autoPolicy")}{status.enabled ? commonText("resource-domain:status.enabled") : commonText("resource-domain:status.off")}{status.auto_update === "inherit" ? commonText("resource-domain:runner.inherited") : commonText("resource-domain:runner.overridden")}</p>
+      {status.ready && status.supports_resource_policy === false && <p role="status" data-runner-resource-policy="unsupported" className="break-words text-amber-700 dark:text-amber-400">{commonText("resource-domain:runner.resourcePolicyUnsupported")}</p>}
       {offline ? <p role="status" className="text-amber-700 dark:text-amber-400">{commonText("resource-domain:runner.offlineNow", { version: status.agent_version || "—" })}</p>
         : <>
           {status.update && <div role="status" aria-live="polite"><p>{sentence(status.update)}</p>{status.update.message && status.update.state !== "rolled_back" && <p className="text-muted-foreground">{status.update.message}</p>}

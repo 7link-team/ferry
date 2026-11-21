@@ -124,6 +124,18 @@ pub(crate) async fn fixture(limit: i64) -> (tempfile::TempDir, AppState, AppStat
     .exec(&a)
     .await
     .unwrap();
+    if limit > 0 {
+        crate::entities::platform_state::Entity::update_many()
+            .col_expr(
+                crate::entities::platform_state::Column::ResourceConfig,
+                sea_orm::sea_query::Expr::value(
+                    serde_json::json!({"pipeline_concurrent_runs":limit}).to_string(),
+                ),
+            )
+            .exec(&a)
+            .await
+            .unwrap();
+    }
     for id in [7, 8] {
         runs::Entity::insert(run(id).into_active_model())
             .exec(&a)
@@ -494,4 +506,20 @@ async fn a_stale_artifact_upload_cannot_publish_or_remove_a_successor_file() {
             .unwrap(),
         b"artifact"
     );
+}
+
+#[tokio::test]
+async fn resource_policy_default_ignores_preserved_workspace_pipeline_ceiling() {
+    let (_dir, a, b) = fixture(1).await;
+    a.db.execute_unprepared("UPDATE platform_state SET resource_config=NULL")
+        .await
+        .unwrap();
+    assert!(claim(&a, "a:unlimited").await.unwrap().is_some());
+    assert!(claim(&b, "b:unlimited").await.unwrap().is_some());
+    let legacy = settings::Entity::find_by_id(1)
+        .one(&a.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(legacy.value, 1);
 }

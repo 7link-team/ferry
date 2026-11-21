@@ -5,9 +5,6 @@ use crate::repositories::analysis::{Authorization, git_command as command};
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 
-/// A clone or fetch can take far longer than one API request.
-pub(crate) const TIMEOUT: Duration = Duration::from_secs(120);
-
 fn failed(key: &'static str) -> ApiError {
     ApiError::localized(
         axum::http::StatusCode::BAD_REQUEST,
@@ -49,6 +46,7 @@ async fn git(
     auth: &Authorization,
     args: &[&str],
     limit: usize,
+    timeout: Duration,
 ) -> Result<Vec<u8>> {
     let mut cmd = command(dir, auth);
     // Tests read a local fixture repository; production allows only network transports.
@@ -71,15 +69,20 @@ async fn git(
         .ok_or_else(|| failed("marketplace.gitFailed"))?;
     let read = async {
         let mut out = Vec::new();
-        let mut err = Vec::new();
-        let mut out_reader = (&mut stdout).take(limit as u64 + 1);
-        let mut err_reader = (&mut stderr).take(64 * 1024);
+        let mut sink = tokio::io::sink();
         let (a, b, status) = tokio::join!(
-            out_reader.read_to_end(&mut out),
-            err_reader.read_to_end(&mut err),
+            async {
+                (&mut stdout)
+                    .take((limit as u64).saturating_add(1))
+                    .read_to_end(&mut out)
+                    .await?;
+                tokio::io::copy(&mut stdout, &mut tokio::io::sink()).await
+            },
+            tokio::io::copy(&mut stderr, &mut sink),
             child.wait()
         );
-        a.and(b).map_err(|_| failed("marketplace.gitFailed"))?;
+        a.map_err(|_| failed("marketplace.gitFailed"))?;
+        b.map_err(|_| failed("marketplace.gitFailed"))?;
         let status = status.map_err(|_| failed("marketplace.gitFailed"))?;
         if out.len() > limit {
             return Err(failed("marketplace.indexTooLarge"));
@@ -89,19 +92,35 @@ async fn git(
         }
         Ok(out)
     };
-    tokio::time::timeout(TIMEOUT, read)
-        .await
-        .map_err(|_| failed("marketplace.gitTimeout"))?
+    if timeout.is_zero() {
+        read.await
+    } else {
+        tokio::time::timeout(timeout, read)
+            .await
+            .map_err(|_| failed("marketplace.gitTimeout"))?
+    }
 }
 
 /// Fetches `branch` at depth 1 into a private temporary repository and reads
 /// `path` from it. Credentials travel only through the helper's environment.
-pub(crate) async fn read_index(
+#[cfg(test)]
+async fn read_index(
     url: &str,
     branch: &str,
     path: &str,
     token: Option<&str>,
     limit: usize,
+) -> Result<String> {
+    read_index_with_timeout(url, branch, path, token, limit, Duration::ZERO).await
+}
+
+pub(crate) async fn read_index_with_timeout(
+    url: &str,
+    branch: &str,
+    path: &str,
+    token: Option<&str>,
+    limit: usize,
+    timeout: Duration,
 ) -> Result<String> {
     if !valid_branch(branch) {
         return Err(failed("marketplace.sourceFieldsInvalid"));
@@ -118,7 +137,8 @@ pub(crate) async fn read_index(
         dir.path(),
         &auth,
         &["init", "--bare", "--quiet", "--template="],
-        4096,
+        usize::MAX,
+        timeout,
     )
     .await?;
     // A promisor remote lets `show` fetch just the index blob: commits and trees
@@ -127,7 +147,8 @@ pub(crate) async fn read_index(
         dir.path(),
         &auth,
         &["remote", "add", "origin", "--", url],
-        4096,
+        usize::MAX,
+        timeout,
     )
     .await?;
     // A branch, tag or commit; the remote resolves short names.
@@ -146,11 +167,12 @@ pub(crate) async fn read_index(
             "origin",
             &refspec,
         ],
-        64 * 1024,
+        usize::MAX,
+        timeout,
     )
     .await?;
     let object = format!("refs/ferry/source:{path}");
-    let bytes = git(dir.path(), &auth, &["show", &object], limit).await?;
+    let bytes = git(dir.path(), &auth, &["show", &object], limit, timeout).await?;
     String::from_utf8(bytes).map_err(|_| failed("marketplace.utf8Required"))
 }
 
@@ -216,6 +238,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(text, r#"{"v":"main"}"#);
+        let unlimited = read_index(&url, "main", "marketplace/index.json", None, usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(unlimited, text);
         let text = read_index(&url, "other", "marketplace/index.json", None, 1024)
             .await
             .unwrap();
@@ -247,15 +273,9 @@ mod tests {
     async fn live_public_repository_over_git() {
         let url = std::env::var("FERRY_GIT_LIVE_URL").expect("FERRY_GIT_LIVE_URL");
         let path = std::env::var("FERRY_GIT_LIVE_PATH").expect("FERRY_GIT_LIVE_PATH");
-        let text = read_index(
-            &url,
-            "main",
-            &path,
-            None,
-            crate::marketplace::index::MAX_INDEX_BYTES,
-        )
-        .await
-        .unwrap();
+        let text = read_index(&url, "main", &path, None, usize::MAX)
+            .await
+            .unwrap();
         let packages = crate::marketplace::index::parse_bundle(
             &text,
             &crate::marketplace::ferry_version(),

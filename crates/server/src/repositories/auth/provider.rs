@@ -395,6 +395,21 @@ pub(super) fn http() -> Result<reqwest::Client> {
         })
 }
 
+pub(super) fn data_http(
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> Result<reqwest::Client> {
+    crate::accounts::resource_policy::http(policy)
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent("workspace-repository-authorization/1")
+        .build()
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.authorizationClient"),
+            )
+        })
+}
+
 // Codeup may return fewer items than requested; the documented response headers
 // determine whether another page exists. Keep the row-count fallback for proxies
 // that omit them, and for the other providers' existing contracts.
@@ -625,6 +640,7 @@ pub(super) async fn remote_repositories(
     personal: bool,
     organization: &str,
     page: u32,
+    policy: &ferry_protocol::resources::ResourcePolicy,
 ) -> Result<Value> {
     let mut url = match kind {
         "gitlab" => endpoint(&config.api, "projects")?,
@@ -662,7 +678,7 @@ pub(super) async fn remote_repositories(
             query.append_pair("membership", "true");
         }
     }
-    let response = authorize_request(http()?.get(url), kind, access, personal)
+    let response = authorize_request(data_http(policy)?.get(url), kind, access, personal)
         .send()
         .await
         .map_err(|error| request_failed(&error, "repository.auth.repositoriesRead"))?;
@@ -920,6 +936,7 @@ pub(crate) struct MonitorAccess {
     access: String,
     personal: bool,
     organization: String,
+    pub(crate) policy: ferry_protocol::resources::ResourcePolicy,
 }
 /// Server-only connection material for authenticated API consumers. Never serialize.
 pub(crate) struct RepositoryApiAccess {
@@ -979,7 +996,7 @@ impl MonitorAccess {
             };
             comparison_stats(&self.provider, before, &value, more)
         };
-        tokio::time::timeout(Duration::from_secs(5), request)
+        crate::accounts::resource_policy::task_timeout(&self.policy, request)
             .await
             .ok()
             .flatten()
@@ -1022,7 +1039,7 @@ impl MonitorAccess {
         url.query_pairs_mut()
             .extend_pairs(query.iter().map(|(k, v)| (*k, v.as_str())));
         let response = authorize_request(
-            http()?.get(url),
+            data_http(&self.policy)?.get(url),
             &self.provider,
             &self.access,
             self.personal,
@@ -1072,6 +1089,7 @@ impl MonitorAccess {
             })?;
         Ok(Self {
             provider: row.provider.clone(),
+            policy: crate::accounts::resource_policy::load(&s.db).await?,
             config,
             access,
             personal: token.is_some(),
@@ -1086,6 +1104,7 @@ impl MonitorAccess {
             self.personal,
             &self.organization,
             page,
+            &self.policy,
         )
         .await
     }
@@ -1181,7 +1200,7 @@ impl MonitorAccess {
             }
         }
         let response = authorize_request(
-            http()?.get(url),
+            data_http(&self.policy)?.get(url),
             &self.provider,
             &self.access,
             self.personal,
@@ -1213,6 +1232,56 @@ impl MonitorAccess {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn repository_data_uses_the_configured_task_deadline() {
+        delayed_repositories(Some(1), 2, false).await;
+    }
+
+    #[tokio::test]
+    async fn repository_data_without_a_deadline_allows_slow_responses() {
+        delayed_repositories(None, 21, true).await;
+    }
+
+    async fn delayed_repositories(timeout: Option<u64>, delay: u64, succeeds: bool) {
+        let router = axum::Router::new().route(
+            "/user/repos",
+            axum::routing::get(move || async move {
+                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                axum::Json(serde_json::json!([]))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base: reqwest::Url = format!("http://{}", listener.local_addr().unwrap())
+            .parse()
+            .unwrap();
+        struct Server(tokio::task::JoinHandle<()>);
+        impl Drop for Server {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+        let _server = Server(tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        }));
+        let config = super::Provider {
+            client_id: String::new(),
+            client_secret: String::new(),
+            base: base.clone(),
+            api: base,
+        };
+        let policy = ferry_protocol::resources::ResourcePolicy {
+            task_timeout_seconds: timeout,
+            ..Default::default()
+        };
+        let result =
+            super::remote_repositories("github", &config, "fixture", true, "", 1, &policy).await;
+        if succeeds {
+            assert!(result.unwrap()["items"].as_array().unwrap().is_empty());
+        } else {
+            assert!(result.is_err());
+        }
+    }
+
     #[test]
     fn notification_comparison_requires_complete_direct_diff() {
         let before = "a".repeat(40);

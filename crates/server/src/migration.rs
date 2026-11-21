@@ -35,6 +35,7 @@ mod platform_conversation;
 mod platform_monitor;
 mod platform_storage;
 mod preview_ingress;
+mod resource_policy;
 mod runner_timezones;
 mod session_policy;
 mod workflow_node_logs;
@@ -205,6 +206,7 @@ impl MigratorTrait for Migrator {
             Box::new(platform_conversation::Migration),
             Box::new(session_policy::Migration),
             Box::new(chat_api::Migration),
+            Box::new(resource_policy::Migration),
         ]
     }
 }

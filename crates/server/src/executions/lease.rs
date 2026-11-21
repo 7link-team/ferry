@@ -234,16 +234,7 @@ impl Lease {
     /// Evaluate expiry when SQL executes, including time spent waiting for a
     /// pooled connection. PostgreSQL CURRENT_TIMESTAMP is transaction-start time.
     pub(super) fn database_now(&self) -> SimpleExpr {
-        Expr::cust(match self.backend {
-            DbBackend::Sqlite => {
-                "(CAST(strftime('%s','now') AS INTEGER) * 1000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER))"
-            }
-            DbBackend::Postgres => {
-                "CAST(FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000) AS BIGINT)"
-            }
-            DbBackend::MySql => "CAST(UNIX_TIMESTAMP(SYSDATE(3)) * 1000 AS SIGNED)",
-            _ => "NULL", // Unknown backends cannot authorize an execution write.
-        })
+        crate::db::now_expr(self.backend)
     }
 
     #[cfg(test)]

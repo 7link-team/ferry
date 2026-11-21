@@ -277,16 +277,33 @@ fn rename(item: &Item, params: &Value) -> Result<Item> {
 }
 
 pub(super) fn append(result: &mut Vec<Item>, bytes: &mut usize, item: Item) -> Result<()> {
+    append_with_policy(result, bytes, item, &Default::default())
+}
+
+pub(super) fn append_with_policy(
+    result: &mut Vec<Item>,
+    bytes: &mut usize,
+    item: Item,
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> Result<()> {
     let size = serde_json::to_vec(&item).map_err(|_| invalid())?.len();
     *bytes = bytes.checked_add(size).ok_or_else(invalid)?;
-    if size > super::journal::MAX_ITEM_BYTES || *bytes > super::journal::MAX_OUTPUT_BYTES {
+    if !ferry_protocol::resources::allows(policy.workflow_packet_bytes, *bytes)
+        || !ferry_protocol::resources::allows(policy.workflow_items, result.len().saturating_add(1))
+    {
         return Err(invalid());
     }
     result.push(item);
     Ok(())
 }
 
-fn split(item: &Item, params: &Value, result: &mut Vec<Item>, bytes: &mut usize) -> Result<()> {
+fn split(
+    item: &Item,
+    params: &Value,
+    result: &mut Vec<Item>,
+    bytes: &mut usize,
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> Result<()> {
     let parts = path(params["path"].as_str().ok_or_else(invalid)?)?;
     let array = read(&item.json, &parts)
         .and_then(Value::as_array)
@@ -307,7 +324,7 @@ fn split(item: &Item, params: &Value, result: &mut Vec<Item>, bytes: &mut usize)
     for value in array {
         let mut output = base.clone();
         write(&mut output.json, &parts, value.clone())?;
-        append(result, bytes, output)?;
+        append_with_policy(result, bytes, output, policy)?;
     }
     Ok(())
 }
@@ -317,12 +334,13 @@ fn text_split(
     params: &Value,
     result: &mut Vec<Item>,
     bytes: &mut usize,
+    policy: &ferry_protocol::resources::ResourcePolicy,
 ) -> Result<()> {
     let text = params["value"].as_str().ok_or_else(invalid)?;
     let mut emit = |text: String| -> Result<()> {
         let mut output = item.clone();
         output.json = json!({"text":text}).as_object().unwrap().clone();
-        append(result, bytes, output)
+        append_with_policy(result, bytes, output, policy)
     };
     if params["mode"] == "delimiter" {
         let delimiter = params["delimiter"]
@@ -359,6 +377,15 @@ fn text_split(
 }
 
 pub(super) fn execute(spec: &Value, items: &[Item], params: &[Value]) -> Result<Vec<Item>> {
+    execute_with_policy(spec, items, params, &Default::default())
+}
+
+pub(super) fn execute_with_policy(
+    spec: &Value,
+    items: &[Item],
+    params: &[Value],
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> Result<Vec<Item>> {
     let kind = spec["type"].as_str().ok_or_else(invalid)?;
     if per_item(spec) {
         if items.len() != params.len() {
@@ -368,9 +395,11 @@ pub(super) fn execute(spec: &Value, items: &[Item], params: &[Value]) -> Result<
         let mut bytes = 0;
         for (item, params) in items.iter().zip(params) {
             match kind {
-                "data.rename" => append(&mut result, &mut bytes, rename(item, params)?)?,
-                "core.split" => split(item, params, &mut result, &mut bytes)?,
-                "data.text_split" => text_split(item, params, &mut result, &mut bytes)?,
+                "data.rename" => {
+                    append_with_policy(&mut result, &mut bytes, rename(item, params)?, policy)?
+                }
+                "core.split" => split(item, params, &mut result, &mut bytes, policy)?,
+                "data.text_split" => text_split(item, params, &mut result, &mut bytes, policy)?,
                 _ => return Err(invalid()),
             }
         }

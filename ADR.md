@@ -1,3 +1,81 @@
+## APPROVED ? immutable segmented content transport correction (2026-11-21)
+- Decision/status: parent confirmed necessary correctness adjustment within user-approved, still UNRELEASED new content format. Content storage v2 uses manifest-FIRST, deterministic immutable segment objects, then immutable authenticated completion marker; no multipart-upload operation and no incomplete MPU ID/paid-parts state exists in the new content path. Legacy vault-v1 single-AEAD objects remain readable; no historical rewrite, schema/config/permission or rollout change.
+- Layout: keep64KiB dataAEAD frames with existing Vaultv1 encoding (84bytes fixed sealed-text overhead), asset/child/version/index/kind AAD and authenticated final plaintext chunk-count/length. Each segment contains up to31whole dataframes (less than4MiB ciphertext), first includes formatheader, final includes authenticated finalframe. Empty file has one header+final segment. Manifest authenticates plaintext SHA256/length/chunks plus segment_chunks31, exact segmentcount=max(1,ceil(chunks/31)), exact ciphertextlength, version2 and uniquechildidentity. Segment sizes/keys derive exactly from declared layout; checked arithmetic rejects overflow/invalidlimits/counts.
+- Commit/recovery: encode/hash-check locally before publishing manifest, then single atomic Create PUT of each bounded segment at child.part-<16hexindex>. Completion child object authenticates exact ciphertextlength/count/layout after assembled segments fully decrypt/hash-verify. Retry may fill only missing segments of staged/unreferenced/nonpinned asset; existing segments stay immutable and are authenticated together. Presentcorruption/publishedmissing completion failsclosed. GC derives all segmentkeys from authenticated manifest and deletes segments, completion, manifest; no S3LIST or bucket lifecycle requirement.
+- Fences/transactions: scoped content acquire_live and renew_live evaluate same databaseclock at atomic SQL execution; unrelated host-time lock API unchanged. Journal preloads immutable packet/source dependencies before writeTX and rechecks node metadata/versions/execution lease insideTX; no bulk packet I/O under SQL writeguard.
+- Scope limit: preexisting generic ArtifactStore.upload_file callers outside new content path still use object-store multipart behavior; Drop does not guarantee process-crash MPU cleanup. No new operational policy/permissions claimed. New content path resolves that risk by never creating an MPU.
+- Validation required: atomic-only backend rejects multipart/LIST and PUT>4MiB; empty/31frameboundary/multisegment roundtrip, crashpartial immutable retry/GC, tamper/truncation/layoutoverflow/finalauth; strict acquisition after databasewait, SQLheartbeat during slow journal source reads, stale dependency/lease prevention; final>=1GiB real upload/generated/RSS/runtime and independent rereview.
+
+## APPROVED — bounded streaming content assets (2026-11-21)
+- Decision/status: user explicitly approved new chunk-authenticated storage and old-server inability to read new objects/direct downgrade limitation. Implement manifest-FIRST design; compatibility gate cleared. Legacyv1reads remain, no historical rewrite/schema/migration.
+- Format: immutable authenticated manifest atcanonicalassetkey binds assetidentity/version, uniquechildidentity, plaintextsha256/length/chunkcount. Publishmanifest BEFOREchildmultipart; attachrefs onlyafter complete integrityverification. Child contains bounded64KiB AEADdataframes with asset/child/version/index/kind AAD, then authenticated finalcount+length; rejectorder/truncation/extra data. ReuseVaultAEAD.
+- Atomic/recovery: candidateDBmetadata beforeobjectwrites; assetfence serializesstage/GC. Validchildreused. Onlymissingchild ofunreferencedcandidate/nonpinnedasset mayregenerate withfreshnonces underimmutablemanifestidentity; presentcorruption/publishedmissing failsclosed. GC decryptsmanifest anddeletesknownchild thenmain idempotently; no newS3LISTpermission/businessbackendbranch.
+- Short transactions: bulk object I/O uses an existing-locks-table owner fence with 60s TTL/10s renewal; renewal rejects expired ownership. Prepared receipts fully verify before caller metadata TX, then renew/check owner and attach references with atomic logical fence release inside TX. GC uses the same asset lock; rollback restores fence until receipt cleanup. No schema or lock-wide policy changes.
+- Memory/lifecycle: ownedplaintext/ciphertempfiles, boundedframebuffers; sharedStore stage_reader/stage_file/read_file; multipartupload/generatedcollection/download usefilepaths/streamingresponses. Tempownersclean onerror/cancel. Existingwhole-value read APIs remain forcallers thatneedJSON/bytes, notfiletransport. Legacyv1usesexistingone-shotAEAD readfallback.
+- Verification required: legacyfixtures, tamper/reorder/truncate/finalcount/extra bytes, stagedmissingretry/publishedmissing/corruptfailclosed, dedupandGC/cancel; real>=1GiBupload/generatedoutput integrity+RSS; finaldefaultstackfullchecks. No commits/publication untilrootacceptance.
+
+## Resource source-review compatibility corrections (2026-11-21)
+- Decision: ordinaryAI provider monitoring/admission retry use sharedworkflowexecutionauthority, nothosts.terminal; actualhostoperationsretainterminalgrant. ExecandAgent require resource-policy-capableRunnerlocally/throughcluster; olderpeersget explicitlocalizedupgrade instead of hidden1secondclamp.
+- Decision: newRPCrequestEnvelope advertises reply_acknowledgements=true; absentdefaultsfalse forolderrequesters. NewreplyfragmentsandprogresspulsesrequireACK beforecontinuing, avoidingCoreNATS subscribertry_senddiscard. Legacyrequestersretainonefragmentresponses; largerresponsesreceiveexplicitlocalizedserver-upgradeerror inonefragment. This is protocolcompatibility, notnewquotaauthority.
+- Reason/evidence: pinnedasync-nats0.51.0 dropsfullsubscriberqueues; actualcapacity1stalledreceiver/integrity/legacynegotiation testsPASS, cluster7/recovery1 inTemp/resource-final-cluster-6hn3fuyq. Slowprovider/nohost, legacyRunnergate, defaultstackfile-output testsPASS; strengthenedtwo-calladmissiontest rerunpending.
+- Tradeoffs/scope: upgradingoldRunner/oldserver isrequired toapplynewresourcepolicy/largereplies. No timerrefactor: reviewerpinnedTokio panicfindingwithdrawn. No authweakening, signatures, businessvalidation, DBmigration orliveconfigchange.
+- Streaming candidate (NOTIMPLEMENTED; usercompatibilitygate): existingAEAD boundedorderedframes+authenticatedfinalcount/length; immutableauthenticatedmanifestpublished BEFORE uniquechildcontainerwrite, stagingmetadata/noassetrefs untilverified. Manifestbindsobjectidentity/version/plainhash/size/count, notrandomcipherhash; retryonlymissingchild ofunreferencedstagedasset underexistingassetfence. Validchildreused/corruptpresentorrefdmissingchildfailsclosed. GCreadsmanifestknownchild thenidempotentlydeleteschild/main, avoidingnewS3LISTpermission. Legacyv1readfallback; oldserverscannotreadnewformat, no historicalrewrite/migration. Awaituserformatcompatibilityanswer beforecoding.
+
+## Workflow cancellation guard stack boundary (2026-11-21)
+- Decision: while_active is a non-asyncfactory that heap-pins its work before constructing the returned asyncguard. Preserve lifecycle/live workflow authority/cancellation; actualhost operations separately retain hosts.terminal.
+- Reason/evidence: source-fresh default-stack Windows file-output regression exited0xc00000fd beforeboxing; same exacttestPASS after. Measured128KiBwork131073bytes, returnedguard3928bytes, Agentexecutionfuture36760bytes. Temp/resource-final-boxing-regression.log.
+- Alternatives considered: RUST_MIN_STACK16MiB was diagnostic only and rejected as deliveryfix because productionTokio/defaultCI stacks remainunchanged. No taskspawn or operationretry introduced.
+- Tradeoffs/scope: oneheapallocation per monitoredoperation to prevent embedding/copying its asyncstate across callers. No policy/auth/API/schema changes.
+- Status: default-stack focusedregressionsPASS; finaldefault-stackfullworkspace/rebuild/runtimegates running.
+
+## Resource policy integration and context budget completion (2026-11-21)
+- Decision: integrate unified storage9c916ad without replacing overlapping resource-policy changes; all file operations use the configured backend independent of execution coordination. ResourcePolicy48nullable ceilings remain sole quota authority.
+- Reason: optional limits must survive storage integration; fixed workflow input, Git total-deadline/diagnostic byte limits and conversation assembly byte budgets otherwise retain hidden defaults.
+- Alternatives considered: copying the entire other worktree or expanding conversation history selection; rejected to preserve dirty source and avoid unrelated continuity design.
+- Tradeoffs: missing ceilings permit unbounded totals while transfer chunks/diagnostic drains remain streaming. Existing semantic validation, authorization, per-room latest20context selection and liveness timers remain. Historical selection is pending the separate conversation-continuity review, not proof of unlimited history.
+- Scope: approved default-unlimited resources plus same-Agent/two-room regression. No service/data changes, version bumps, migration execution, commit or publication. Six-locale parity follows existing architecture.
+- Status: implementation integrated; full root tests and real runtime large-transfer acceptance still pending.
+
+## Default-unlimited resource policy (2026-11-21)
+- Decision: administrator-owned platform ResourcePolicy is the only resource ceiling source; null=unlimited, positive integers=configured ceilings. All fields default null, including upgraded installations. Legacy saved values/history remain untouched but do not impose runtime ceilings. User explicitly selected all resource families and clearing old effective limits; task/network duration are separate, preserve network failure detection.
+- Reason: users must not receive arbitrary 503s, truncated tool output or abandoned runs merely because normal work exceeds hidden constants. Increasing constants does not deliver unlimited semantics. Chunk sizes, pagination and bounded processing windows are throughput mechanisms, not total quotas; they must backpressure without dropping work.
+- Alternatives considered: fixed larger caps and retaining old configured caps rejected by user; unlimited threads/one-buffer whole-file handling rejected as unnecessary implementation of unlimited workload. Keep existing runtime/connection pooling and authenticated protocol validation.
+- Scope: Server/Runner/cluster/HTTP/MCP/native output, workflow/sandbox/report/files, platform settings, compatibility and real stress tests. No monetary rules, auth changes, live service restart, deployment identity change or external provider limit changes.
+- Compatibility: optional capability and policy snapshot shared contract; old Runner capabilities visibly distinct, no force interrupt. New nullable resource_config schema migration idempotent up/down; no rewrite of immutable definitions/executions. Old clients' legacy fields accepted, no runtime quota authority. Config lowering affects new work, existing tasks drain. Platform singleton lock/audit/version guard reused.
+- Design review dimensions (all applicable source-backed):
+| Dimension | Contract |
+|---|---|
+| Fact sources | protocol/agent.rs, protocol/sandbox.rs, server/main.rs, holes/proxy.rs, accounts/platform.rs, Runner/runtime.rs and existing workflow/report/files implementations |
+| In/out scope | resource enforcement and responsiveness only; permissions/signatures/business invariants unchanged |
+| Rollout | no flag; defaults null; explicit legacy Runner capability |
+| Flow/illegal states | null or positive ceiling; configuration saves atomic/version guarded; stop/cancel wakes pending work |
+| Exceptions/extremes | no truncation; exact configured boundary; late cancellation, close/reopen and slow consumers tested |
+| Audit | reuse platform update activity with before/after resource_limits, no secrets |
+| Deletion/retention | no business deletion or history rewrite; existing retention settings unchanged |
+| Permissions/isolation | platform Admin changes global policy; workspace scope and ownership unchanged |
+| Calculations | checked byte/count arithmetic; no currency calculations |
+| Modes | create defaults unlimited; edit/view current explicit values; legacy inputs compatibility-only |
+| Fields/defaults/linkage | resource_limits map, each optional positive integer; clear restores null; unit explicit |
+| Operations | save existing platform form; failure preserves edits; no in-flight task killed on lowering |
+| Validation | positive JS-safe integers or null; invalid type/zero/negative rejected; no arbitrary new ceiling |
+| Model | platform_state.resource_config nullable long text; JSON shared typed policy, all None default |
+| Time audit | no new xx_at field; existing platform version/actor activity reused |
+| Indexes | singleton PK lookup, no new index |
+| SQL | additive nullable column derived by existing SeaQuery migration; down protects configured policy |
+| Copy/i18n | zh-CN/en-US/ms-MY required, existing translated resources |
+| Config source | platform administrator only; no hidden per-module quota constants |
+| States | loading/empty/default unlimited/custom/saving/error/legacy Runner explicit |
+| Core impact | all listed execution and transport paths; regression gate required |
+| History impact | additive schema only; original caps/history retained, ignored as quota source |
+| Third parties | no new dependency; actual upstream/OS limits reported honestly |
+| Version | shared optional feature, older peers remain identifiable; full behavior requires updated peers |
+| Conflicts | new platform policy overrides legacy quotas; heartbeat and semantic validation remain |
+| Testability | default exceeds former threshold, configured enforcement, cancellation/stream integrity/heartbeat plus migration/API/UI |
+| Acceptance/Figma | Figma absent; three viewport browser screenshots + runtime evidence required, not claimed yet |
+| Responsive | Desktop >=1200 grouped form; Pad768..1199 wraps; Phone320..767 single column,44px controls, no page overflow; existing form scrolling/safe-area behavior reused |
+| Ambiguity | none; runtime/threadpool windows are implementation backpressure, no request rejection or total-work cap |
+- Status: approved design, implementation/test/review pending. No production migration/deployment performed.
+
 ## Preview connection bursts wait within the existing request deadline (2026-11-21)
 - Decision: retain the existing 32 connections per preview and 128 per host. A new upstream connection waits for capacity within the existing 60-second response deadline instead of immediately failing normal page-module bursts with 503. Notify waiters on connection release and preview close; validate the saved preview again after admission. Never replay a request or evict an existing stream.
 - Reason: user-reported ASPEED 8091 preview was reproduced against the real deployed entry. The HTTP/2 browser returned module 503s carrying the platform busy response headers/content length and rendered blank; the same entry over LAN and reduced-concurrency HTTP/1.1 had no module 503s. Local 8091 itself returns 200. This is distinct from the independently observed transient TLS/session setup failures.
@@ -1080,3 +1158,20 @@ Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-a
 - Settings: conversation_introduction_enabled bool defaulttrue; conversation_introduction_instructions string <=16KiB/control validation, blank allowed; readonly conversation_introduction_instructions_default. Existing platform admin versioned update, six locale UI. Compatibility: coordinated deployment MUST stop old servers/workers (old code cannot understand automatic turns); this release also has explicitly approved new storage-format downgrade limitation.
 - Scope/review: no per-Agent override/budget/retry policy/history backfill/new dependency. Error/empty/loading/active/cancelled/failed/retry states use existing turn UI with origin label. Desktop/Pad/Phone shared config/form, 44px action and wrapped long copy, Figma absent. Use existing operation audit/provenance; no new deletion or amount logic. Acceptance tests cover atomic once, group readd/dedupe, permissions/disable/cancel/stale membership, encrypted policy nonexposure, real mockHTTP intro then human continuation, fakeCLI resume, uncertain calls no replay, migration guards, six locales and browser320/768/1440.
 - Status: approved for implementation, tests pending; no live migration/deploy of this feature yet.
+
+
+## Integration ruling: instruction ceilings use resource policy (2026-11-21)
+- Decision: retain ROOT default-unlimited semantics for both global and introduction instruction text. Remove inherited frontend/backend 16KiB save caps; keep control-character validation. Configured agent_prompt_bytes governs assembled execution prompts. Reason: user explicitly requires default-unlimited, centrally maintainable resource ceilings. No new field or model; same platform settings and six locales. Previous introduction design length constraint is superseded by this confirmed resource-policy requirement. Tests: save/read both instruction texts beyond64KiB; execution cap tests remain in API/CLI policy integration.
+
+
+## Actual-I/O deadline integration contract (2026-11-21)
+- Decision: existing ResourcePolicy.task_timeout_seconds is the sole Ferry actual-I/O/task deadline; absent/null is unlimited. Remove residual fixed provider/integration/discovery/notification/repository/marketplace/Runner transfer deadlines, including S3/SMTP SDK defaults where disable APIs exist. Preserve health/heartbeat/protocol/process-cleanup/security bounds and explicit per-check observation settings; no new policy field or dependency.
+- Curl constraint: host HTTP integration retains the existing curl executable. Curl's non-disableable default connection-establishment bound is300s (connect-timeout0 meansdefault). With configured taskdeadline, set connect-timeout and max-time to thatsamevalue. Without one, omit both: Ferry adds no execution/body-transfer cutoff, while curl retains its inherent connect bound. No enormous finite workaround, retries, new Runner wire protocol or Python dependency.
+- Compatibility: removing short marketplace transfer cutoffs requires renewing its existing fenced sync lease whilefetchpending; use consistent expiry/renewal clock and stop on ownershiploss, without changing commit transaction budgets. Generic timed multipart uploads retain known handle through completion and abort on liveerror/timeout; no falseclaim of process-crash or ambiguous-initiation cleanup. Newcontentcodec remains atomic segmented PUT and unaffected.
+- Status: confirmed source audit/design, implementation/tests pending in feature integration. No deployment or user policy changes performed.
+
+## I/O integration review corrections (2026-11-21)
+- Decision: repository comparison callers must use the same optional task policy as their provider; remove the residual fixed five-second wrappers in webhook and polling enrichment. Best-effort failure handling remains, and no I/O holds a workspace write transaction.
+- Decision: marketplace sync ownership identifies an attempt, not a server process. Use a fresh UUID in the existing owner field through claim, renewal, commit and failure release. Reason: after expiry, another attempt in the same process must not let stale work renew or publish using its lease. No schema or public API change.
+- API input/output policy correction: complete serialized workflow API requests, including instructions, items and accumulated native history, are admitted by agent_prompt_bytes; cumulative responses use agent_turn_output_bytes independently. Three RED/GREEN regressions and forty workflow Agent tests passed; independent review resolved the finding.
+- Scope/status: both I/O corrections are technically necessary to the approved default-unlimited and fenced-lease contract. Both corrections passed focused RED/GREEN regressions and independent v2 review; the I/O unit has39 focused PASS. Combinedworkspacecheck passed at0.10.7-alpha, broadtests/nativeCI remain pending; no production deployment occurred.

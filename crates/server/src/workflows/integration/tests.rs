@@ -234,9 +234,17 @@ async fn http_failures_do_not_leak_provider_details_redirect_credentials_or_clai
         .send()
         .await
         .unwrap();
-        let error = response(&declaration, reply, "PRIVATE_TOKEN")
-            .await
-            .unwrap_err();
+        let error = response_with_policy(
+            &declaration,
+            reply,
+            "PRIVATE_TOKEN",
+            &ferry_protocol::resources::ResourcePolicy {
+                workflow_packet_bytes: Some(1024 * 1024),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error.2.as_ref().unwrap().key, key);
         assert!(!format!("{error:?}").contains("PRIVATE_TOKEN"));
         // Rejections name the status and host, never the provider's own text.
@@ -792,5 +800,23 @@ async fn durable_send_gate_blocks_concurrent_duplicates_and_crash_replay_but_reu
             .down(&manager)
             .await
             .is_err()
+    );
+}
+
+#[test]
+fn integration_json_has_no_default_byte_cap_but_accepts_optional_policy() {
+    let bytes = json!({"value":"x".repeat(1024 * 1024 + 1)}).to_string();
+    assert!(response_bytes(&json!({}), 200, bytes.as_bytes(), "").is_ok());
+    let policy = ferry_protocol::resources::ResourcePolicy {
+        workflow_packet_bytes: Some(1024 * 1024),
+        ..Default::default()
+    };
+    assert_eq!(
+        response_bytes_with_policy(&json!({}), 200, bytes.as_bytes(), "", &policy)
+            .unwrap_err()
+            .2
+            .unwrap()
+            .key,
+        "workflow.integrationTooLarge"
     );
 }

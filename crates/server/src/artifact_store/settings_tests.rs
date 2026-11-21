@@ -4,8 +4,187 @@ use crate::agents::tests::setup;
 use axum::http::StatusCode;
 
 #[tokio::test]
+async fn timed_multipart_completion_aborts_the_known_upload_without_panicking() {
+    use axum::response::IntoResponse;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let completed = Arc::new(AtomicUsize::new(0));
+    let aborted = Arc::new(AtomicUsize::new(0));
+    let completes = completed.clone();
+    let aborts = aborted.clone();
+    let router = axum::Router::new().route("/{*key}", axum::routing::any(
+        move |method: axum::http::Method, axum::extract::Query(query): axum::extract::Query<std::collections::HashMap<String, String>>, _body: Bytes| {
+            let completed = completes.clone();
+            let aborted = aborts.clone();
+            async move {
+                match method {
+                    axum::http::Method::POST if query.contains_key("uploads") =>
+                        (StatusCode::OK, "<InitiateMultipartUploadResult><Bucket>bucket</Bucket><Key>prefix/object</Key><UploadId>fixture-upload</UploadId></InitiateMultipartUploadResult>").into_response(),
+                    axum::http::Method::PUT =>
+                        ([("etag", "\"fixture-part\"")], "").into_response(),
+                    axum::http::Method::POST => {
+                        assert_eq!(query.get("uploadId").unwrap(), "fixture-upload");
+                        completed.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    },
+                    axum::http::Method::DELETE => {
+                        assert_eq!(query.get("uploadId").unwrap(), "fixture-upload");
+                        aborted.fetch_add(1, Ordering::SeqCst);
+                        StatusCode::NO_CONTENT.into_response()
+                    },
+                    _ => StatusCode::METHOD_NOT_ALLOWED.into_response(),
+                }
+            }
+        }
+    )).layer(axum::extract::DefaultBodyLimit::disable());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    struct Server(tokio::task::JoinHandle<()>);
+    impl Drop for Server {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    let _server = Server(tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    }));
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source");
+    std::fs::write(&source, vec![b'x'; 12 * 1024 * 1024]).unwrap();
+    let config = Configuration {
+        kind: "s3".into(),
+        endpoint,
+        bucket: "bucket".into(),
+        prefix: "prefix".into(),
+        region: "test".into(),
+        access_key: "fixture".into(),
+        secret_key: "fixture".into(),
+    };
+    let mut store = config.backend(dir.path()).unwrap();
+    store.1 = Some(std::time::Duration::from_secs(1));
+    let result = store.upload_file("object", &source).await;
+    assert!(result.is_err());
+    assert_eq!(
+        completed.load(Ordering::SeqCst),
+        1,
+        "deadline must expire during completion"
+    );
+    assert_eq!(
+        aborted.load(Ordering::SeqCst),
+        1,
+        "known multipart handle must be aborted"
+    );
+    assert_eq!(std::fs::metadata(&source).unwrap().len(), 12 * 1024 * 1024);
+}
+
+#[tokio::test]
+async fn configured_s3_reads_obey_the_task_deadline() {
+    delayed_s3_read(Some(1), 2, false).await;
+}
+
+#[tokio::test]
+async fn configured_s3_reads_without_a_deadline_allow_slow_bodies() {
+    // Exceeds the SDK's implicit 30-second total request timeout.
+    delayed_s3_read(None, 31, true).await;
+}
+
+async fn delayed_s3_read(timeout: Option<u64>, delay: u64, succeeds: bool) {
+    use futures::StreamExt;
+    let (_dir, state) = setup().await;
+    let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let served = requests.clone();
+    let router = axum::Router::new().route(
+        "/bucket/prefix/object",
+        axum::routing::get(move |headers: axum::http::HeaderMap| {
+            let requests = served.clone();
+            async move {
+                requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if let Some(range) = headers.get("range") {
+                    let range = range.to_str().unwrap().strip_prefix("bytes=").unwrap();
+                    let start: usize = range.split('-').next().unwrap().parse().unwrap();
+                    assert!(start < 7, "unexpected fixture range: {range}");
+                    return axum::response::Response::builder()
+                        .status(StatusCode::PARTIAL_CONTENT)
+                        .header("content-length", (7 - start).to_string())
+                        .header("content-range", format!("bytes {start}-6/7"))
+                        .header("last-modified", "Wed, 21 Oct 2015 07:28:00 GMT")
+                        .header("etag", "\"fixture\"")
+                        .body(axum::body::Body::from(Bytes::copy_from_slice(
+                            &b"fixture"[start..],
+                        )))
+                        .unwrap();
+                }
+                let chunks = futures::stream::once(async {
+                    Ok::<_, std::io::Error>(Bytes::from_static(b"fi"))
+                })
+                .chain(futures::stream::once(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                    Ok::<_, std::io::Error>(Bytes::from_static(b"xture"))
+                }));
+                axum::response::Response::builder()
+                    .header("content-length", "7")
+                    .header("last-modified", "Wed, 21 Oct 2015 07:28:00 GMT")
+                    .header("etag", "\"fixture\"")
+                    .body(axum::body::Body::from_stream(chunks))
+                    .unwrap()
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    struct Server(tokio::task::JoinHandle<()>);
+    impl Drop for Server {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    let _server = Server(tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    }));
+    let config = Configuration {
+        kind: "s3".into(),
+        endpoint,
+        bucket: "bucket".into(),
+        prefix: "prefix".into(),
+        region: "test".into(),
+        access_key: "fixture".into(),
+        secret_key: "fixture".into(),
+    };
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::FileStorage,
+            sea_orm::sea_query::Expr::value(sealed(&state, &config)),
+        )
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            sea_orm::sea_query::Expr::value(
+                serde_json::json!({"task_timeout_seconds":timeout}).to_string(),
+            ),
+        )
+        .exec(&state.db)
+        .await
+        .unwrap();
+    let store = ArtifactStore::for_state(&state).await.unwrap();
+    let result = store.get("object", 7).await;
+    if succeeds {
+        assert_eq!(result.unwrap(), Bytes::from_static(b"fixture"));
+        assert_eq!(
+            requests.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "an unlimited healthy body must not be restarted at the SDK deadline"
+        );
+    } else {
+        assert!(
+            result.is_err(),
+            "configured deadline must stop the S3 body read"
+        );
+    }
+}
+
+#[tokio::test]
 async fn configured_store_replaces_stale_cache_and_rejects_missing_objects() {
-    let store = ArtifactStore(Arc::new(object_store::memory::InMemory::new()));
+    let store =
+        ArtifactStore::from_backend_for_test(Arc::new(object_store::memory::InMemory::new()));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("cached");
     std::fs::write(&path, b"stale").unwrap();

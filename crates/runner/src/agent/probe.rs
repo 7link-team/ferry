@@ -84,7 +84,7 @@ pub(super) fn executable_in(
             for package in packages {
                 let base = directory.join("node_modules").join(package);
                 let metadata = base.join("package.json");
-                if std::fs::metadata(&metadata).is_ok_and(|m| m.len() <= 128 * 1024) {
+                if metadata.is_file() {
                     if let Ok(text) = std::fs::read_to_string(metadata) {
                         if let Ok(value) = serde_json::from_str::<Value>(&text) {
                             if let Some(bin) = value["bin"][name].as_str() {
@@ -158,8 +158,8 @@ pub(super) async fn capture_with(
     let result = tokio::time::timeout(Duration::from_secs(10), async {
         let read = |pipe: Box<dyn tokio::io::AsyncRead + Unpin + Send>| async move {
             let mut bytes = Vec::new();
-            pipe.take(64 * 1024 + 1).read_to_end(&mut bytes).await?;
-            ensure!(bytes.len() <= 64 * 1024, "CLI inspection output too large");
+            let mut pipe = pipe;
+            pipe.read_to_end(&mut bytes).await?;
             Ok::<_, anyhow::Error>(bytes)
         };
         let (mut out, err) = tokio::try_join!(read(Box::new(stdout)), read(Box::new(stderr)))?;
@@ -324,17 +324,11 @@ async fn native_models(runtime: Runtime, executable: &std::path::Path) -> Vec<St
         return Vec::new();
     };
     let path = std::path::PathBuf::from(home).join(".codex/models_cache.json");
-    let Ok(file) = tokio::fs::File::open(path).await else {
+    let Ok(mut file) = tokio::fs::File::open(path).await else {
         return rpc_models(runtime, executable).await.unwrap_or_default();
     };
     let mut bytes = Vec::new();
-    if file
-        .take(1024 * 1024 + 1)
-        .read_to_end(&mut bytes)
-        .await
-        .is_err()
-        || bytes.len() > 1024 * 1024
-    {
+    if file.read_to_end(&mut bytes).await.is_err() {
         return Vec::new();
     }
     let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
@@ -378,15 +372,14 @@ async fn rpc_models(runtime: Runtime, executable: &std::path::Path) -> Result<Ve
         write(&mut input, if runtime == Runtime::Pi { serde_json::json!({"id":1,"type":"get_available_models"}) }
             else { serde_json::json!({"id":0,"method":"initialize","params":{"clientInfo":{"name":"model_catalog","version":env!("CARGO_PKG_VERSION")}}}) }).await?;
         let mut buffer = Vec::new();
-        let mut total = 0;
-        while let Some(value) = read(&mut output, &mut buffer).await? {
+        let mut models = Vec::new();
+        let mut cursors = std::collections::HashSet::new();
+        while let Some(value) = read(&mut output, &mut buffer, None).await? {
             buffer.clear();
-            total += value.to_string().len();
-            ensure!(total <= 1024 * 1024, "catalog too large");
             if value["id"] == 0 {
                 ensure!(value.get("error").is_none(), "catalog initialization failed");
                 write(&mut input, serde_json::json!({"method":"initialized","params":{}})).await?;
-                write(&mut input, serde_json::json!({"id":1,"method":"model/list","params":{"limit":2000}})).await?;
+                write(&mut input, serde_json::json!({"id":1,"method":"model/list","params":{}})).await?;
             } else if value["id"] == 1 {
                 if runtime == Runtime::Pi {
                     ensure!(value["type"] == "response" && value["success"] == true, "Pi catalog failed");
@@ -399,7 +392,15 @@ async fn rpc_models(runtime: Runtime, executable: &std::path::Path) -> Result<Ve
                     return Ok(catalog_ids(&serde_json::json!({"models":rows})));
                 }
                 ensure!(value.get("error").is_none(), "catalog request failed");
-                return Ok(catalog_ids(&serde_json::json!({"models":value["result"]["data"]})));
+                models.extend(catalog_ids(&serde_json::json!({"models":value["result"]["data"]})));
+                if let Some(cursor) = value["result"]["nextCursor"].as_str() {
+                    ensure!(cursors.insert(cursor.to_owned()), "catalog repeated a page cursor");
+                    write(&mut input, serde_json::json!({"id":1,"method":"model/list","params":{"cursor":cursor}})).await?;
+                    continue;
+                }
+                models.sort();
+                models.dedup();
+                return Ok(models);
             }
         }
         anyhow::bail!("catalog closed")
@@ -425,7 +426,6 @@ fn catalog_ids(value: &Value) -> Vec<String> {
                 && !id.starts_with('-')
                 && !id.chars().any(char::is_control)
         })
-        .take(2000)
         .map(str::to_owned)
         .collect::<Vec<_>>();
     models.sort();
@@ -444,6 +444,14 @@ fn codex_authentication(success: bool, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn model_catalog_is_not_truncated_at_two_thousand_models() {
+        let rows = (0..2001)
+            .map(|id| serde_json::json!({"id":format!("model-{id}")}))
+            .collect::<Vec<_>>();
+        assert_eq!(catalog_ids(&serde_json::json!({"models":rows})).len(), 2001);
+    }
+
     #[test]
     fn a_failed_version_check_reports_one_bounded_line() {
         assert_eq!(

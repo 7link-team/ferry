@@ -266,7 +266,7 @@ func TestJobTimeBudgetHonorsExplicitTimeoutAndDefault(t *testing.T) {
 		limit   int
 		minutes string
 		want    int
-	}{{0, "", 21600}, {86400, "", 21600}, {86400, "60", 3600}, {1, "60", 1}, {86400, "1440", 86400}, {0, "1441", 86460}, {200000, "2000", 120000}} {
+	}{{0, "", 0}, {9007199254740991, "", 9007199254740991}, {86400, "", 86400}, {1, "", 1}, {0, "1", 60}, {86400, "60", 3600}, {1, "60", 1}, {86400, "1440", 86400}, {0, "1441", 86460}, {200000, "2000", 120000}} {
 		seconds, err := jobTimeBudget(test.limit, test.minutes)
 		if err != nil || seconds != test.want {
 			t.Fatalf("budget(%d,%q)=%d,%v want %d", test.limit, test.minutes, seconds, err, test.want)

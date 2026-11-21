@@ -62,8 +62,7 @@
           },
           "prompt": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 32768
+            "minLength": 1
           },
           "image_field": {
             "type": "string",
@@ -154,8 +153,7 @@
           },
           "prompt": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 32768
+            "minLength": 1
           },
           "size": {
             "type": "string",
@@ -244,8 +242,7 @@
           },
           "prompt": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 32768
+            "minLength": 1
           },
           "voice": {
             "type": "string",

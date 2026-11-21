@@ -44,6 +44,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const KEEPALIVE: Duration = Duration::from_secs(30);
 /// 一次性命令的输出要留在内存里，所以必须有上限：一条跑飞的命令
 /// （`cat /dev/urandom`）不该把服务撑爆。
+#[cfg(test)]
 const MAX_CAPTURE: usize = 1 << 20;
 /// 文件流每块的大小。SFTP 默认单包 256 KiB，取同一个量级，块太小会被
 /// 往返次数拖慢。
@@ -155,7 +156,7 @@ pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
-    let channel = if target.jump_host_id == 0 {
+    let mut channel = if target.jump_host_id == 0 {
         SshChannel::open(host, credential).await?
     } else {
         let jump = hosts::Entity::find_by_id(target.jump_host_id)
@@ -202,6 +203,7 @@ pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
         SshChannel::connect_stream(host, credential, stream, Some(jump_channel.session.clone()))
             .await?
     };
+    channel.resource_policy = crate::accounts::resource_policy::load(&s.db).await?;
     record_fingerprint(s, host, &channel).await?;
     Ok(Box::new(channel))
 }
@@ -221,6 +223,7 @@ async fn record_fingerprint(s: &AppState, host: &Host, channel: &SshChannel) -> 
 }
 
 pub struct SshChannel {
+    resource_policy: ferry_protocol::resources::ResourcePolicy,
     /// `Arc` 是为了让 `read_file` 返回的流能把连接一起带走。
     session: Arc<Handle<Tofu>>,
     jump: Option<Arc<Handle<Tofu>>>,
@@ -347,6 +350,7 @@ impl SshChannel {
         // 走到这里 `check_server_key` 一定跑过了，所以 `seen` 必有值。
         let fingerprint = seen.lock().expect("fingerprint lock").clone();
         Ok(Self {
+            resource_policy: Default::default(),
             session: Arc::new(session),
             jump,
             learned_host_key: host.host_key.is_empty().then_some(fingerprint).flatten(),
@@ -492,7 +496,15 @@ impl HostChannel for SshChannel {
                 crate::i18n::Message::new("ssh.commandSend").with("error", error.to_string()),
             )
         })?;
-        match tokio::time::timeout(timeout, capture(&mut channel)).await {
+        if timeout.is_zero() {
+            return capture(&mut channel, self.resource_policy.command_output_bytes).await;
+        }
+        match tokio::time::timeout(
+            timeout,
+            capture(&mut channel, self.resource_policy.command_output_bytes),
+        )
+        .await
+        {
             Ok(output) => output,
             Err(_) => {
                 // 远端进程还在跑，关掉 channel 让 sshd 回收它。
@@ -538,7 +550,7 @@ impl HostChannel for SshChannel {
                     stopping = Some(-130);
                     deadline.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(70));
                 }
-                _ = &mut deadline => {
+                _ = &mut deadline, if !timeout.is_zero() || stopping.is_some() => {
                     if let Some(reason) = stopping {
                         let _ = channel.signal(russh::Sig::KILL).await;
                         let _ = channel.close().await;
@@ -561,7 +573,7 @@ impl HostChannel for SshChannel {
                         let reason = tokio::select! {
                             sent = output.send(chunk) => if sent.is_err() {Some(-130)} else {None},
                             _ = cancel.changed() => Some(-130),
-                            _ = &mut deadline => Some(-124),
+                            _ = &mut deadline, if !timeout.is_zero() => Some(-124),
                         };
                         if let Some(reason) = reason {
                             let _ = channel.signal(russh::Sig::TERM).await;
@@ -632,6 +644,13 @@ impl HostChannel for SshChannel {
             (a.kind != "directory", a.name.to_lowercase())
                 .cmp(&(b.kind != "directory", b.name.to_lowercase()))
         });
+        if !ferry_protocol::resources::allows(self.resource_policy.directory_entries, entries.len())
+        {
+            return Err(ApiError::localized(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                crate::i18n::Message::new("request.resourceLimit"),
+            ));
+        }
         Ok(entries)
     }
 
@@ -798,13 +817,13 @@ impl Pty for SshPty {
 
 /// 收完一条命令的输出。读到 channel 关闭为止，而不是读到 ExitStatus 就停：
 /// 退出状态可能先到，后面还跟着最后一批输出。
-async fn capture(channel: &mut Channel<client::Msg>) -> Result<Output> {
+async fn capture(channel: &mut Channel<client::Msg>, limit: Option<u64>) -> Result<Output> {
     let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
     let mut code = None;
     while let Some(message) = channel.wait().await {
         match message {
-            ChannelMsg::Data { data } => append(&mut stdout, &data),
-            ChannelMsg::ExtendedData { data, .. } => append(&mut stderr, &data),
+            ChannelMsg::Data { data } => append(&mut stdout, &data, limit)?,
+            ChannelMsg::ExtendedData { data, .. } => append(&mut stderr, &data, limit)?,
             ChannelMsg::ExitStatus { exit_status } => code = Some(exit_status as i32),
             ChannelMsg::ExitSignal {
                 signal_name,
@@ -813,7 +832,8 @@ async fn capture(channel: &mut Channel<client::Msg>) -> Result<Output> {
             } => append(
                 &mut stderr,
                 format!("\n进程被信号 {signal_name:?} 终止。{error_message}").as_bytes(),
-            ),
+                limit,
+            )?,
             _ => {}
         }
     }
@@ -825,18 +845,19 @@ async fn capture(channel: &mut Channel<client::Msg>) -> Result<Output> {
     })
 }
 
-fn append(buffer: &mut Vec<u8>, data: &[u8]) {
-    let room = MAX_CAPTURE.saturating_sub(buffer.len());
-    buffer.extend_from_slice(&data[..room.min(data.len())]);
+fn append(buffer: &mut Vec<u8>, data: &[u8], limit: Option<u64>) -> Result<()> {
+    if !ferry_protocol::resources::allows(limit, buffer.len().saturating_add(data.len())) {
+        return Err(ApiError::localized(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            crate::i18n::Message::new("request.resourceLimit"),
+        ));
+    }
+    buffer.extend_from_slice(data);
+    Ok(())
 }
 
 fn text(buffer: Vec<u8>) -> String {
-    let truncated = buffer.len() >= MAX_CAPTURE;
-    let mut out = String::from_utf8_lossy(&buffer).into_owned();
-    if truncated {
-        out.push_str("\n……输出超过 1 MiB，其余已丢弃。");
-    }
-    out
+    String::from_utf8_lossy(&buffer).into_owned()
 }
 
 fn kind_of(file_type: FileType) -> String {
@@ -999,13 +1020,15 @@ mod tests {
     }
 
     #[test]
-    fn captured_output_is_capped() {
+    fn captured_output_is_complete_by_default_and_explicit_limits_refuse_without_truncation() {
         let mut buffer = Vec::new();
-        for _ in 0..40 {
-            append(&mut buffer, &vec![b'x'; 64 * 1024]);
-        }
-        assert_eq!(buffer.len(), MAX_CAPTURE);
-        assert!(text(buffer).ends_with("其余已丢弃。"));
+        append(&mut buffer, &vec![b'x'; MAX_CAPTURE + 1], None).unwrap();
+        assert_eq!(buffer.len(), MAX_CAPTURE + 1);
+        assert_eq!(text(buffer).len(), MAX_CAPTURE + 1);
+        let mut bounded = Vec::new();
+        append(&mut bounded, b"123", Some(3)).unwrap();
+        assert!(append(&mut bounded, b"4", Some(3)).is_err());
+        assert_eq!(bounded, b"123");
     }
 
     // ---------------------------------------------------------- 真机测试

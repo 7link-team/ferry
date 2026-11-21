@@ -3,7 +3,7 @@ import { api, errorText } from "../../shared/api/api";
 import { base } from "../../shared/api/resource";
 import { cliToolLabel } from "../../shared/forms/cli-tools";
 import { FieldCaption } from "../../shared/forms/FieldHelp";
-import { workflowText as t } from "../../shared/i18n/i18n";
+import { workflowText as t, commonText } from "../../shared/i18n/i18n";
 import { Input } from "../../shared/ui/input";
 import { WorkflowAssetContext } from "./WorkflowAssets";
 import type { GraphNode } from "./graph";
@@ -22,9 +22,6 @@ export type AgentOption = {
 const control = "w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm";
 /** CLIs that cannot run without write access (server: conversations.rs). */
 const READ_ONLY_UNSUPPORTED = new Set(["kimi", "grok"]);
-const MAX_PROMPT_BYTES = 32 * 1024;
-const MAX_SCHEMA_BYTES = 64 * 1024;
-const bytes = (text: string) => new TextEncoder().encode(text).length;
 
 /** The server's save-time rule for the output contract; "" when acceptable. */
 export function schemaProblem(source: string): "" | "agent.schemaJson" | "agent.schemaRoot" | "agent.schemaSize" {
@@ -35,7 +32,6 @@ export function schemaProblem(source: string): "" | "agent.schemaJson" | "agent.
     return "agent.schemaJson";
   }
   if (!value || typeof value !== "object" || Array.isArray(value) || (value as Params).type !== "object") return "agent.schemaRoot";
-  if (bytes(JSON.stringify(value)) > MAX_SCHEMA_BYTES) return "agent.schemaSize";
   return "";
 }
 
@@ -54,7 +50,7 @@ export function parseFormats(text: string): string[] {
   return seen;
 }
 export const formatsProblem = (formats: string[]) =>
-  formats.length > 30 || formats.some((format) => !/^[a-z0-9]{1,10}$/.test(format));
+  formats.some((format) => !/^[a-z0-9]{1,10}$/.test(format));
 
 export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
   node: GraphNode;
@@ -93,7 +89,7 @@ export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
     : t(agent ? "agent.locationAutomatic" : "agent.locationPending");
 
   const prompt = String(p.prompt ?? "");
-  const promptTooLong = !prompt.startsWith("=") && bytes(prompt) > MAX_PROMPT_BYTES;
+  const promptTooLong = false;
   const files = (p.files ?? {}) as Files;
   const filesOn = files.enabled === true;
   const [formatsText, setFormatsText] = useState(Array.isArray(files.formats) ? files.formats.join(", ") : "");
@@ -118,19 +114,11 @@ export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
   useEffect(() => { report.current("agentPrompt", promptTooLong); }, [promptTooLong]);
   useEffect(() => { report.current("agentFiles", badFormats || fileRuntimeProblem); }, [badFormats, fileRuntimeProblem]);
   useEffect(() => () => { report.current("agentSchema", false); report.current("agentPrompt", false); report.current("agentFiles", false); }, []);
-  const fileNumber = (key: "max_files" | "max_total_mb", label: Parameters<typeof t>[0], min: number, max: number, fallback: number) => (
+  const number = (key: "timeout_s" | "max_tool_calls" | "max_tokens", label: Parameters<typeof t>[0], min: number, max?: number) => (
     <label className="block min-w-0 space-y-2 text-sm">
       <span className="block font-medium"><FieldCaption label={<>{t(label)}</>} /></span>
       <Input aria-label={t(label)} type="number" min={min} max={max} step="1" readOnly={readOnly}
-        value={String(files[key] ?? fallback)} onChange={(event) => patchFiles({ [key]: Number(event.target.value) })} />
-    </label>
-  );
-
-  const number = (key: "timeout_s" | "max_tool_calls" | "max_tokens", label: Parameters<typeof t>[0], min: number, max: number) => (
-    <label className="block min-w-0 space-y-2 text-sm">
-      <span className="block font-medium"><FieldCaption label={<>{t(label)}</>} /></span>
-      <Input aria-label={t(label)} type="number" min={min} max={max} step="1" required readOnly={readOnly}
-        value={String(p[key] ?? (key === "max_tokens" ? 1024 : ""))} onChange={(event) => patch({ [key]: Number(event.target.value) })} />
+        value={String(p[key] ?? "")} onChange={(event) => patch({ [key]: event.target.value === "" ? undefined : Number(event.target.value) })} />
     </label>
   );
   return <>
@@ -177,11 +165,9 @@ export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
       </label>
       {badFormats && <p role="alert" className="text-sm text-destructive">{t("agent.filesFormatsInvalid")}</p>}
       <p className="text-xs leading-5 text-muted-foreground">{t("agent.filesFormatsHelp")}</p>
-      {fileNumber("max_files", "agent.filesMax", 1, 50, 10)}
-      {fileNumber("max_total_mb", "agent.filesTotal", 1, 500, 100)}
       <label className="block min-w-0 space-y-2 text-sm">
         <span className="block font-medium"><FieldCaption label={<>{t("agent.filesInstructions")}</>} /></span>
-        <textarea aria-label={t("agent.filesInstructions")} className={`${control} min-h-20 py-3`} readOnly={readOnly} maxLength={4096}
+        <textarea aria-label={t("agent.filesInstructions")} className={`${control} min-h-20 py-3`} readOnly={readOnly}
           value={String(files.instructions ?? "")} onChange={(event) => patchFiles({ instructions: event.target.value })} />
       </label>
     </>}
@@ -202,9 +188,8 @@ export function WorkflowAgentParameters({ node, readOnly, patch, invalid }: {
     </label>
     {problem && <p role="alert" className="text-sm text-destructive">{t(problem)}</p>}
     <p className="text-xs leading-5 text-muted-foreground">{t(filesOn ? "agent.schemaOptional" : "agent.schemaHelp")}</p>
-    {number("timeout_s", "agent.timeout", 30, 1800)}
-    {number("max_tool_calls", "agent.maxToolCalls", 1, 128)}
-    {agent?.runtime === "api" && number("max_tokens", "aiMaxTokens", 1, 32768)}
+    {agent?.runtime === "api" && number("max_tokens", "aiMaxTokens", 1)}
+    <p className="text-xs leading-5 text-muted-foreground">{commonText("resource-domain:platform.resourceLimits.help")}</p>
     <p className="text-xs leading-5 text-muted-foreground">{t("agent.help")}</p>
   </>;
 }

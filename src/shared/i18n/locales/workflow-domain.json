@@ -1,7 +1,20 @@
 {
-  "aiCostUnknown": ["Unknown", "未知", "未知", "不明", "알 수 없음", "Tidak diketahui"],
-  "agent.locationApi": ["Execution location: model API on the server; no Runner host is required. Host targets apply only to CLI models.","执行位置：由服务端调用模型 API，无需 Runner 主机；主机目标仅用于 CLI 模型。","執行位置：由伺服器呼叫模型 API，無需 Runner 主機；主機目標僅用於 CLI 模型。","実行場所：サーバーからモデル API を呼び出します。Runner は不要です。ホスト指定は CLI モデルにのみ適用されます。","실행 위치: 서버에서 모델 API를 호출하며 Runner 호스트가 필요하지 않습니다. 호스트 지정은 CLI 모델에만 적용됩니다.","Lokasi pelaksanaan: API model dipanggil oleh pelayan; hos Runner tidak diperlukan. Sasaran hos hanya untuk model CLI."],
-  "agent.locationAutomatic": ["Execution location: a compatible workflow default, otherwise an available Runner from the model's candidate hosts.","执行位置：优先使用兼容的工作流默认目标，否则从模型候选主机中选择可用 Runner。","執行位置：優先使用相容的工作流預設目標，否則從模型候選主機選擇可用 Runner。","実行場所：対応するワークフロー既定の実行先、またはモデルの候補から利用可能な Runner を選択します。","실행 위치: 호환되는 워크플로 기본 대상을 우선 사용하고, 없으면 모델 후보 호스트에서 사용 가능한 Runner를 선택합니다.","Lokasi pelaksanaan: gunakan sasaran lalai aliran kerja yang serasi, atau pilih Runner tersedia daripada hos calon model."],
+  "agent.locationApi": [
+    "Execution location: model API on the server; no Runner host is required. Host targets apply only to CLI models.",
+    "执行位置：由服务端调用模型 API，无需 Runner 主机；主机目标仅用于 CLI 模型。",
+    "執行位置：由伺服器呼叫模型 API，無需 Runner 主機；主機目標僅用於 CLI 模型。",
+    "実行場所：サーバーからモデル API を呼び出します。Runner は不要です。ホスト指定は CLI モデルにのみ適用されます。",
+    "실행 위치: 서버에서 모델 API를 호출하며 Runner 호스트가 필요하지 않습니다. 호스트 지정은 CLI 모델에만 적용됩니다.",
+    "Lokasi pelaksanaan: API model dipanggil oleh pelayan; hos Runner tidak diperlukan. Sasaran hos hanya untuk model CLI."
+  ],
+  "agent.locationAutomatic": [
+    "Execution location: a compatible workflow default, otherwise an available Runner from the model's candidate hosts.",
+    "执行位置：优先使用兼容的工作流默认目标，否则从模型候选主机中选择可用 Runner。",
+    "執行位置：優先使用相容的工作流預設目標，否則從模型候選主機選擇可用 Runner。",
+    "実行場所：対応するワークフロー既定の実行先、またはモデルの候補から利用可能な Runner を選択します。",
+    "실행 위치: 호환되는 워크플로 기본 대상을 우선 사용하고, 없으면 모델 후보 호스트에서 사용 가능한 Runner를 선택합니다.",
+    "Lokasi pelaksanaan: gunakan sasaran lalai aliran kerja yang serasi, atau pilih Runner tersedia daripada hos calon model."
+  ],
   "editorError.invalidGraph": [
     "The workflow definition is invalid and cannot be opened.",
     "工作流定义无效，无法打开。",
@@ -6115,12 +6128,12 @@
     "JSON Schema output"
   ],
   "agent.schemaHelp": [
-    "The final answer must be one JSON object matching this schema (root type object, at most 64 KiB). It becomes the node's single output item.",
-    "最终回答必须是符合此 Schema 的一个 JSON 对象（根类型 object，不超过 64 KiB），作为节点唯一的输出项。",
-    "最終回答必須是符合此 Schema 的一個 JSON 物件（根類型 object，不超過 64 KiB），作為節點唯一的輸出項。",
-    "最終回答はこのスキーマに一致する1つの JSON オブジェクト（ルート型 object、64 KiB 以内）で、ノードの唯一の出力項目になります。",
-    "최종 답변은 이 스키마에 맞는 JSON 객체 하나여야 하며(루트 타입 object, 64 KiB 이하) 노드의 유일한 출력 항목이 됩니다.",
-    "Jawapan akhir mestilah satu objek JSON yang sepadan dengan skema ini (jenis akar object, maksimum 64 KiB) dan menjadi satu-satunya item output nod."
+    "The final answer must be one JSON object matching this schema (root type object). Resource ceilings are controlled by platform settings and are unlimited by default. It becomes the node's single output item.",
+    "?????????? Schema ??? JSON ??????? object??????????????????????????????????",
+    "?????????? Schema ??? JSON ??????? object??????????????????????????????????",
+    "????????????????? JSON ??????????? object?????????????????????????????????????????????????????????????",
+    "?? ??? ? ???? ???? JSON ???? ???(?? ?? object). ??? ??? ??? ???? ???? ???? ??????. ??? ?? ?? ??? ???.",
+    "Jawapan akhir mestilah satu objek JSON yang sepadan dengan skema ini (jenis akar object). Had sumber dikawal oleh tetapan platform dan tidak terhad secara lalai. Objek ini menjadi satu-satunya item output nod."
   ],
   "agent.schemaJson": [
     "Enter valid JSON.",
@@ -6601,5 +6614,21 @@
     "ファイル生成時は省略できます。指定すると最終回答も一致する JSON オブジェクトである必要があります。省略すると出力は最終メッセージの要約（summary）とファイル一覧になります。",
     "파일을 만들 때는 비워 둘 수 있습니다. 입력하면 최종 답변도 이에 맞는 JSON 객체여야 하고, 비우면 출력에 최종 메시지 요약(summary)과 파일 목록이 담깁니다.",
     "Pilihan semasa menghasilkan fail. Dengan skema, jawapan akhir juga mesti satu objek JSON yang sepadan; tanpanya, output mengandungi mesej akhir sebagai ringkasan serta senarai fail."
+  ],
+  "aiCostUnknown": [
+    "Unknown",
+    "未知",
+    "未知",
+    "不明",
+    "알 수 없음",
+    "Tidak diketahui"
+  ],
+  "workflow.agentMaxTokensRequired": [
+    "{path}: This provider requires an explicit max_tokens value.",
+    "{path}: ?????????? max_tokens?",
+    "{path}: ?????????? max_tokens?",
+    "{path}: ?????????? max_tokens ?????????????",
+    "{path}: ? ???? max_tokens ?? ????? ???? ???.",
+    "{path}: Penyedia ini memerlukan nilai max_tokens yang ditetapkan secara jelas."
   ]
 }

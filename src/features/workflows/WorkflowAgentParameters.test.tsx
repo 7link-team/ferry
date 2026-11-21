@@ -89,7 +89,7 @@ it("hides host controls for API models and restores CLI controls after switching
 });
 
 it("starts unconfigured, lists usable agents and states the Runner and CLI it runs on", async () => {
-  expect(current).toMatchObject({ agent_id: "", prompt: "", timeout_s: 600, max_tool_calls: 64, output_schema: { type: "object" } });
+  expect(current).toMatchObject({ agent_id: "", prompt: "", output_schema: { type: "object" } });
   await render(<Harness />);
   expect(calls).toHaveBeenCalledWith("/workspaces/7/ai-agents?page_size=100");
   expect(location()).toBe("执行位置：选择智能体后显示");
@@ -105,9 +105,10 @@ it("starts unconfigured, lists usable agents and states the Runner and CLI it ru
   expect(location()).toBe("执行位置：Runner Build runner 上的 Codex");
   await change(t("agent.prompt"), "=分析 {{ $json.since }}");
   expect(current.prompt).toBe("=分析 {{ $json.since }}");
-  await change(t("agent.timeout"), "900");
-  await change(t("agent.maxToolCalls"), "16");
-  expect(current).toMatchObject({ timeout_s: 900, max_tool_calls: 16 });
+  expect(field(t("agent.timeout"))).toBeNull();
+  expect(field(t("agent.maxToolCalls"))).toBeNull();
+  expect(current.timeout_s).toBeUndefined();
+  expect(current.max_tool_calls).toBeUndefined();
   // An untargeted CLI uses model candidates, not an obligatory Agent binding.
   await change(t("agent.agent"), "14");
   expect(location()).toBe(t("agent.locationAutomatic"));
@@ -132,13 +133,13 @@ it("validates the output schema like the server before storing it", async () => 
   expect(current.output_schema).toEqual(schema);
   expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(reported("agentSchema")).toBe(false);
-  expect(schemaProblem(JSON.stringify({ type: "object", description: "x".repeat(64 * 1024) }))).toBe("agent.schemaSize");
+  expect(schemaProblem(JSON.stringify({ type: "object", description: "x".repeat(64 * 1024) }))).toBe("");
   expect(schemaProblem("{\"properties\":{}}")).toBe("agent.schemaRoot");
   expect(schemaProblem("{\"type\":\"object\"}")).toBe("");
-  // Over 32 KiB of UTF-8 is flagged before save.
+  // Legacy prompt byte ceilings no longer block default-unlimited drafts.
   await change(t("agent.prompt"), "数".repeat(12_000));
-  expect(host.querySelector('[role="alert"]')?.textContent).toBe(t("agent.promptTooLong"));
-  expect(reported("agentPrompt")).toBe(true);
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(reported("agentPrompt")).toBe(false);
 });
 
 it("is read-only in view mode and localizes the execution location in six languages", async () => {
@@ -161,7 +162,7 @@ it("is read-only in view mode and localizes the execution location in six langua
   }
 });
 
-it("configures file output: formats, limits, an optional schema and confinable CLIs only", async () => {
+it("configures file output with platform quotas: formats, an optional schema and confinable CLIs only", async () => {
   await render(<Harness />);
   await change(t("agent.agent"), "11");
   expect(field<HTMLInputElement>(t("agent.filesFormats"))).toBeNull();
@@ -169,10 +170,10 @@ it("configures file output: formats, limits, an optional schema and confinable C
   expect(current.files).toEqual({ enabled: true });
   await change(t("agent.filesFormats"), ".PDF, pptx，xlsx pdf");
   expect(current.files).toMatchObject({ enabled: true, formats: ["pdf", "pptx", "xlsx"] });
-  await change(t("agent.filesMax"), "3");
-  await change(t("agent.filesTotal"), "250");
+  expect(field(t("agent.filesMax"))).toBeNull();
+  expect(field(t("agent.filesTotal"))).toBeNull();
   await change(t("agent.filesInstructions"), "用公司配色");
-  expect(current.files).toEqual({ enabled: true, formats: ["pdf", "pptx", "xlsx"], max_files: 3, max_total_mb: 250, instructions: "用公司配色" });
+  expect(current.files).toEqual({ enabled: true, formats: ["pdf", "pptx", "xlsx"], instructions: "用公司配色" });
   // A bad extension is reported and not stored.
   await change(t("agent.filesFormats"), "pdf, ../x");
   expect(host.textContent).toContain(t("agent.filesFormatsInvalid"));

@@ -33,7 +33,7 @@
   "conversations.tooManyAttachments": "A message can carry at most 10 attachments.",
   "conversations.attachmentNameInvalid": "The attachment name \"{name}\" is invalid: it must be 1–255 bytes without control characters; rename the file and attach it again.",
   "conversations.messageTooLong": "The message and its text attachments together exceed 48 KB; shorten it or send the content as a file.",
-  "conversations.messageTooLongWithInstructions": "Together with the agent's instructions, this message exceeds 63 KB; shorten the message or the agent's instructions.",
+  "conversations.messageTooLongWithInstructions": "Together with the agent's instructions, this message exceeds the configured prompt limit. Shorten the message or update the resource policy.",
   "conversations.tooManyTargets": "A message can address at most 8 agents at once.",
   "conversations.kindInvalid": "Choose a conversation type: private or group.",
   "conversations.tooManyMembers": "A group can have at most 100 members.",

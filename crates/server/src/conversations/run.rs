@@ -85,7 +85,7 @@ pub(super) fn turn_prompt(
     prompt
 }
 
-pub(super) async fn platform_call(
+async fn platform_call_with_slots(
     s: AppState,
     row: turns::Model,
     owner: String,
@@ -93,7 +93,20 @@ pub(super) async fn platform_call(
     name: String,
     arguments: Value,
     mut approved: Option<bool>,
+    slots: Option<std::sync::Arc<tokio::sync::Semaphore>>,
 ) -> (String, Value) {
+    let _slot = match slots.as_ref() {
+        Some(slots) => match slots.acquire().await {
+            Ok(slot) => Some(slot),
+            Err(_) => {
+                return (
+                    request_id,
+                    json!({"ok":false,"error":"tool execution closed"}),
+                );
+            }
+        },
+        None => None,
+    };
     // What was asked, kept with the result for a readable history: never the
     // body, and the path without its query string.
     let summary = json!({
@@ -169,6 +182,18 @@ pub(super) async fn platform_call(
     (request_id, value)
 }
 
+pub(super) async fn platform_call(
+    s: AppState,
+    row: turns::Model,
+    owner: String,
+    request_id: String,
+    name: String,
+    arguments: Value,
+    approved: Option<bool>,
+) -> (String, Value) {
+    platform_call_with_slots(s, row, owner, request_id, name, arguments, approved, None).await
+}
+
 pub(super) async fn approved_platform_call(
     s: &AppState,
     row: &turns::Model,
@@ -200,11 +225,14 @@ pub async fn scheduler(s: AppState, mut stop: watch::Receiver<bool>) {
             Some(result)=tasks.join_next(),if !tasks.is_empty()=>if let Err(e)=result{tracing::error!(error=%e,"Conversation worker stopped");},
             _=tick.tick()=>{
                 if *stop.borrow(){break;}
-                if tasks.len()>=16 {continue;}
-                let rows=turns::Entity::find().filter(sea_orm::Condition::any()
+                let policy = match crate::accounts::resource_policy::load(&s.db).await { Ok(policy) => policy, Err(error) => {tracing::warn!(%error,"Cannot read conversation resource policy");continue;} };
+                if policy.conversation_concurrent_runs.is_some_and(|limit| tasks.len() as u64 >= limit) {continue;}
+                let mut query=turns::Entity::find().filter(sea_orm::Condition::any()
                     .add(turns::Column::State.eq("queued"))
                     .add(sea_orm::Condition::all().add(turns::Column::State.is_in(["running","stopping"])).add(turns::Column::ExpiresAt.lt(db::now()))))
-                    .order_by_asc(turns::Column::Id).limit((16-tasks.len()) as u64).all(&s.db).await;
+                    .order_by_asc(turns::Column::Id);
+                if let Some(limit)=policy.conversation_concurrent_runs { query=query.limit(limit.saturating_sub(tasks.len() as u64)); }
+                let rows=query.all(&s.db).await;
                 match rows {
                     Ok(rows)=>for row in rows {
                         let s=s.clone();let stop=stop.clone();
@@ -399,11 +427,6 @@ pub(super) async fn append(
         input.remove("_sealed");
     }
     let payload = serde_json::to_string(&public_event).map_err(|_| invalid())?;
-    // Leave framing headroom under the 16 MiB cluster message ceiling, while
-    // retaining complete multi-MiB native events and configured tool responses.
-    if payload.len() > ferry_protocol::agent::MAX_EVENT_BYTES {
-        return Err(invalid());
-    }
     let (tx, mut current, mut c) = leased(s, row, owner).await?;
     let event_id = s.next_id()?;
     match &event {
@@ -635,6 +658,24 @@ pub(super) async fn finish(
     tx.commit().await?;
     Ok(())
 }
+fn account_event(
+    policy: &ferry_protocol::resources::ResourcePolicy,
+    event: &Event,
+    received: &mut usize,
+    platform_calls: &mut usize,
+) -> Result<bool> {
+    let bytes = serde_json::to_vec(event).map_err(|_| invalid())?.len();
+    *received = received.checked_add(bytes).ok_or_else(invalid)?;
+    if matches!(event, Event::PlatformCall { .. }) {
+        *platform_calls = platform_calls.checked_add(1).ok_or_else(invalid)?;
+    }
+    Ok(
+        ferry_protocol::resources::allows(policy.agent_event_bytes, bytes)
+            && ferry_protocol::resources::allows(policy.agent_turn_output_bytes, *received)
+            && ferry_protocol::resources::allows(policy.agent_tool_calls, *platform_calls),
+    )
+}
+
 pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result<()> {
     let Some((row, c, owner)) = claim(&s, id).await? else {
         return Ok(());
@@ -681,24 +722,22 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
         let policy = crate::accounts::conversation_policy::Configuration::load(&s.db).await?;
         let mut prompt =
             super::introductions::prompt(&s, &row, &c, &scope, &policy, &config).await?;
-        if prompt.len() > 64 * 1024 {
+        let resources = crate::accounts::resource_policy::load(&s.db).await?;
+        let prompt_limit = ferry_protocol::resources::byte_limit(resources.agent_prompt_bytes);
+        if !ferry_protocol::resources::allows(resources.agent_prompt_bytes, prompt.len()) {
             return Err(invalid());
         }
         let quoted = messages::reply_context(
             &s.db,
             &row,
-            (64 * 1024usize)
-                .saturating_sub(prompt.len() + 128)
-                .min(8 * 1024),
+            prompt_limit.saturating_sub(prompt.len().saturating_add(128)),
         )
         .await?;
         prompt = format!("{quoted}{prompt}");
         let context = groups::context(
             &s.db,
             &row,
-            (64 * 1024usize)
-                .saturating_sub(prompt.len() + 128)
-                .min(16 * 1024),
+            prompt_limit.saturating_sub(prompt.len().saturating_add(128)),
         )
         .await?;
         if !context.is_empty() {
@@ -708,9 +747,7 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             let history = messages::recovery_context(
                 &s.db,
                 &row,
-                (64 * 1024usize)
-                    .saturating_sub(prompt.len() + 256)
-                    .min(16 * 1024),
+                prompt_limit.saturating_sub(prompt.len().saturating_add(256)),
             )
             .await?;
             prompt = format!("{history}{prompt}");
@@ -732,13 +769,15 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
                 "the Runner on this host is too old to deliver files; it must be upgraded"
             })
         };
-        if prompt.len() + contract.len() <= 64 * 1024 {
-            prompt = format!("{contract}{prompt}");
+        prompt = format!("{contract}{prompt}");
+        if !ferry_protocol::resources::allows(resources.agent_prompt_bytes, prompt.len()) {
+            return Err(invalid());
         }
         Ok((
             channel,
             files,
             Request {
+                resource_policy: Some(resources),
                 binding: Some(binding),
                 runtime: config.runtime.cli()?,
                 cwd: config.cwd,
@@ -746,7 +785,7 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
                 model: (!config.model.is_empty()).then_some(config.model),
                 native_session_id: (!native_session_id.is_empty()).then_some(native_session_id),
                 permission: config.permission,
-                timeout_seconds: 3600,
+                timeout_seconds: 0,
                 platform_tools: true,
                 provider,
                 timezone,
@@ -776,6 +815,14 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
             return Ok(());
         }
     };
+    let policy = request.resource_policy.clone().unwrap_or_default();
+    let tool_slots = policy.agent_tool_concurrency.map(|limit| {
+        std::sync::Arc::new(tokio::sync::Semaphore::new(
+            ferry_protocol::resources::byte_limit(Some(limit))
+                .min(tokio::sync::Semaphore::MAX_PERMITS),
+        ))
+    });
+    let mut pending_inputs = std::collections::VecDeque::new();
     let workdir = request.cwd.clone();
     let (cancel, cancelled) = watch::channel(false);
     let (events, mut receiver) = mpsc::channel(32);
@@ -789,6 +836,7 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
     let mut stopping = false;
     let mut received = 0usize;
     let mut platform_calls = 0usize;
+    let mut resource_limited = false;
     let mut tool_tasks: JoinSet<(String, Value)> = JoinSet::new();
     // Do a fresh fenced check immediately before the first dispatch poll.
     let (must_stop, _) = heartbeat(&s, &row, &owner).await?;
@@ -798,48 +846,56 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
     }
     loop {
         tokio::select! {
+            permit=inputs.reserve(),if !pending_inputs.is_empty() && !stopping => match permit {
+                Ok(permit) => { permit.send(pending_inputs.pop_front().unwrap()); },
+                Err(_) => { cancel.send_replace(true); stopping=true; }
+            },
             Some(result)=tool_tasks.join_next(),if !tool_tasks.is_empty()=> {
                 if let Ok((request_id,result))=result {
-                    if !result.is_null() && inputs.try_send(Input::PlatformResult{request_id,result}).is_err() { cancel.send_replace(true);stopping=true; }
+                    if !result.is_null() { pending_inputs.push_back(Input::PlatformResult{request_id,result}); }
                 } else { cancel.send_replace(true);stopping=true; }
             },
             result=&mut running=>{
                 while let Ok(event)=receiver.try_recv(){
+                    if resource_limited { continue; }
+                    if !account_event(&policy, &event, &mut received, &mut platform_calls)? {
+                        resource_limited = true;
+                        cancel.send_replace(true);
+                        failure = "conversations.outputLimit".into();
+                        outcome = Some(Outcome::Failed);
+                        stopping = true;
+                        continue;
+                    }
                     // Calls already emitted by the CLI still need a receipt. In particular,
                     // a queued write must persist its approval before finish marks it expired.
                     if let Event::PlatformCall { request_id, name, arguments } = event {
-                        platform_calls += 1;
-                        received += serde_json::to_vec(&arguments).map_err(|_| invalid())?.len();
-                        if platform_calls > 128 || received > ferry_protocol::agent::MAX_TURN_OUTPUT_BYTES {
-                            failure = "conversations.outputLimit".into();
-                            stopping = true;
-                            continue;
-                        }
-                        if !stopping && tool_tasks.len() < 16 {
-                            tool_tasks.spawn(platform_call(s.clone(), row.clone(), owner.clone(), request_id, name, arguments, None));
+                        if !stopping {
+                            tool_tasks.spawn(platform_call_with_slots(s.clone(), row.clone(), owner.clone(), request_id, name, arguments, None, tool_slots.clone()));
                         }
                         continue;
                     }
                     if let Event::Finished{outcome:value,..}=&event {outcome=Some(*value);}
                     append(&s,&row,&owner,event).await?;
                 }
-                if let Err(e)=result{failure=e.stored();}
+                if let Err(e)=result{if !resource_limited {failure=e.stored();}}
                 break;
             }
             event=receiver.recv()=>if let Some(event)=event {
+                if resource_limited { continue; }
+                if !account_event(&policy, &event, &mut received, &mut platform_calls)? {
+                    resource_limited = true;
+                    cancel.send_replace(true);
+                    failure = "conversations.outputLimit".into();
+                    outcome = Some(Outcome::Failed);
+                    stopping = true;
+                    continue;
+                }
                 if let Event::PlatformCall{request_id,name,arguments} = event {
-                    platform_calls+=1;
-                    received+=serde_json::to_vec(&arguments).map_err(|_|invalid())?.len();
-                    if platform_calls>128 || received>ferry_protocol::agent::MAX_TURN_OUTPUT_BYTES {
-                        cancel.send_replace(true);failure="conversations.outputLimit".into();stopping=true;continue;
-                    }
-                    if !stopping && tool_tasks.len()<16 {
-                        tool_tasks.spawn(platform_call(s.clone(),row.clone(),owner.clone(),request_id,name,arguments,None));
+                    if !stopping {
+                        tool_tasks.spawn(platform_call_with_slots(s.clone(),row.clone(),owner.clone(),request_id,name,arguments,None,tool_slots.clone()));
                     } else { cancel.send_replace(true);stopping=true; }
                     continue;
                 }
-                received+=serde_json::to_vec(&event).map_err(|_|invalid())?.len();
-                if received>ferry_protocol::agent::MAX_TURN_OUTPUT_BYTES {cancel.send_replace(true);failure="conversations.outputLimit".into();stopping=true;continue;}
                 if let Event::Finished{outcome:value,..}=&event {outcome=Some(*value);}
                 if append(&s,&row,&owner,event).await.is_err(){
                     cancel.send_replace(true);
@@ -854,11 +910,11 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
                     if !stopping {for input in decisions {
                         if let Input::Decision{ref request_id,allow} = input {
                             if let Some(arguments)=approved_platform_call(&s,&row,&owner,request_id).await? {
-                                tool_tasks.spawn(platform_call(s.clone(),row.clone(),owner.clone(),request_id.clone(),"ferry_request".into(),arguments,Some(allow)));
+                                tool_tasks.spawn(platform_call_with_slots(s.clone(),row.clone(),owner.clone(),request_id.clone(),"ferry_request".into(),arguments,Some(allow),tool_slots.clone()));
                                 continue;
                             }
                         }
-                        if inputs.try_send(input).is_err(){cancel.send_replace(true);stopping=true;}
+                        pending_inputs.push_back(input);
                     }}
                 }
                 Err(_)=>{
@@ -893,7 +949,11 @@ async fn deliver_files(
     workdir: &str,
 ) -> Result<()> {
     use crate::workflows::agent_files;
-    let mode = agent_files::FileMode::conversation();
+    let mut mode = agent_files::FileMode::conversation();
+    agent_files::apply_policy(
+        &mut mode,
+        &crate::accounts::resource_policy::load(&s.db).await?,
+    );
     let produced = match agent_files::collect_any(channel, workdir, &mode).await {
         Ok(produced) => produced,
         Err(error) => {

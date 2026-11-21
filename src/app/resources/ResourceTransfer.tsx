@@ -89,7 +89,6 @@ export function ResourceTransfer({ workspace, resource, params, columns, canImpo
             <Button variant="outline" disabled={busy} onClick={close}>{commonText("common.cancel")}</Button>
             {preview ? <Button variant="outline" disabled={busy} onClick={() => void run(discard)}>{commonText("transfer.chooseAgain")}</Button> : <Button disabled={busy || !file} onClick={() => void run(async () => {
               if (!file) return;
-              if (file.size > 8 * 1024 * 1024) throw new Error(commonText("transfer.tooLarge"));
               if (!/\.(csv|xlsx)$/i.test(file.name)) throw new Error(commonText("transfer.invalidFormat"));
               const form = new FormData(); form.append("file", file);
               setPreview(await api<Preview>(`${endpoint}/imports`, { method: "POST", body: form }));

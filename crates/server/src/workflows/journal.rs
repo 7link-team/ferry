@@ -11,7 +11,7 @@ use axum::http::StatusCode;
 use ferry_protocol::sandbox::{InputData, Item};
 use sea_orm::{
     ColumnTrait, Condition, DatabaseConnection, DatabaseTransaction, EntityTrait, IntoActiveModel,
-    PaginatorTrait, QueryFilter, TransactionTrait, sea_query::Expr,
+    PaginatorTrait, QueryFilter, QuerySelect, TransactionTrait, sea_query::Expr,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -19,9 +19,10 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
 const INLINE_BYTES: usize = 64 * 1024;
+#[cfg(test)]
 const MAX_NODE_EXECUTIONS: u64 = 5000;
+#[cfg(test)]
 pub(super) const MAX_ITEM_BYTES: usize = 1024 * 1024;
-pub(super) const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 
 #[cfg(test)]
 pub(super) mod tests;
@@ -41,7 +42,7 @@ fn fault() -> ApiError {
 fn too_large(key: &'static str, limit: usize) -> ApiError {
     ApiError::localized(
         StatusCode::PAYLOAD_TOO_LARGE,
-        Message::new(key).with("limit", format!("{} MiB", limit / (1024 * 1024))),
+        Message::new(key).with("limit", crate::content_assets::size_text(limit as i64)),
     )
 }
 fn invalid() -> ApiError {
@@ -142,12 +143,27 @@ pub(crate) struct Output {
 
 impl Output {
     pub(super) fn validate(&self, outputless: bool) -> Result<()> {
+        self.validate_with_policy(
+            outputless,
+            &ferry_protocol::resources::ResourcePolicy::default(),
+        )
+    }
+    pub(super) fn validate_with_policy(
+        &self,
+        outputless: bool,
+        policy: &ferry_protocol::resources::ResourcePolicy,
+    ) -> Result<()> {
         let mut ports = BTreeSet::new();
         if self.version != 1 || self.ports.is_empty() != outputless {
             return Err(fault());
         }
         let mut bytes = 0usize;
+        let mut count = 0usize;
         for port in &self.ports {
+            count = count.checked_add(port.items.len()).ok_or_else(invalid)?;
+            if !ferry_protocol::resources::allows(policy.workflow_items, count) {
+                return Err(invalid());
+            }
             if port.name.is_empty()
                 || !ports.insert((&port.name, port.index))
                 || (port.skipped && !port.items.is_empty())
@@ -161,14 +177,20 @@ impl Output {
             }
             for item in &port.items {
                 let size = serde_json::to_vec(item).map_err(|_| invalid())?.len();
-                if size > MAX_ITEM_BYTES {
-                    return Err(too_large("workflow.itemTooLarge", MAX_ITEM_BYTES));
+                if !ferry_protocol::resources::allows(policy.workflow_packet_bytes, size) {
+                    return Err(too_large(
+                        "workflow.itemTooLarge",
+                        ferry_protocol::resources::byte_limit(policy.workflow_packet_bytes),
+                    ));
                 }
                 bytes = bytes.checked_add(size).ok_or_else(|| fault())?;
             }
         }
-        if bytes > MAX_OUTPUT_BYTES {
-            return Err(too_large("workflow.outputTooLarge", MAX_OUTPUT_BYTES));
+        if !ferry_protocol::resources::allows(policy.workflow_packet_bytes, bytes) {
+            return Err(too_large(
+                "workflow.outputTooLarge",
+                ferry_protocol::resources::byte_limit(policy.workflow_packet_bytes),
+            ));
         }
         Ok(())
     }
@@ -209,6 +231,121 @@ struct Packet {
     value: String,
     asset: Option<i64>,
     bytes: i64,
+}
+
+/// Authenticated packets are opened before taking the execution write lock.
+/// Keep their SQL identities so that preloading never authorizes stale data.
+#[derive(Default)]
+struct ReadSet {
+    nodes: Vec<nodes::Model>,
+    assets: Vec<(
+        crate::entities::content_assets::Model,
+        crate::entities::asset_refs::Model,
+    )>,
+}
+impl ReadSet {
+    async fn node(
+        &mut self,
+        journal: &Journal<'_>,
+        run: &runs::Model,
+        node: &nodes::Model,
+        output: bool,
+    ) -> Result<()> {
+        use crate::entities::{asset_refs, content_assets};
+        self.nodes.push(node.clone());
+        for (field, value) in [
+            ("params", node.resolved_params.as_deref()),
+            ("output", output.then_some(node.output.as_str())),
+        ] {
+            let Some(value) = value.filter(|value| !value.is_empty()) else {
+                continue;
+            };
+            let plain = journal
+                .vault
+                .open_secret(value, &aad(run, Some(node.id), field))?;
+            let value: Value = serde_json::from_str(&plain).map_err(|_| fault())?;
+            if value.get("asset_packet").is_none() {
+                continue;
+            }
+            let locator: AssetPacket = serde_json::from_value(value).map_err(|_| fault())?;
+            let asset = content_assets::Entity::find_by_id(locator.id)
+                .filter(content_assets::Column::WorkspaceId.eq(run.workspace_id))
+                .one(journal.db)
+                .await?
+                .ok_or_else(fault)?;
+            let reference =
+                asset_refs::Entity::find_by_id((locator.id, "node_run".to_owned(), node.id))
+                    .one(journal.db)
+                    .await?
+                    .ok_or_else(fault)?;
+            self.assets.push((asset, reference));
+        }
+        Ok(())
+    }
+
+    async fn validate(
+        &self,
+        tx: &DatabaseTransaction,
+        run: &runs::Model,
+        preview: &runs::Model,
+    ) -> Result<()> {
+        use crate::entities::{asset_gc_jobs, asset_refs, content_assets};
+        if run.id != preview.id
+            || run.workspace_id != preview.workspace_id
+            || run.workflow_id != preview.workflow_id
+            || run.revision_id != preview.revision_id
+            || run.mode != preview.mode
+        {
+            return Err(conflict());
+        }
+        for node in &self.nodes {
+            let current = nodes::Entity::find()
+                .filter(node_condition(node))
+                .lock_exclusive()
+                .one(tx)
+                .await?
+                .ok_or_else(conflict)?;
+            // Logs have an independent write path; they do not change packets or versions.
+            if current.resolved_params != node.resolved_params
+                || current.output != node.output
+                || current.output_asset != node.output_asset
+                || current.iteration_path != node.iteration_path
+                || current.redo_round != node.redo_round
+                || current.error_policy != node.error_policy
+            {
+                return Err(conflict());
+            }
+        }
+        for (asset, reference) in &self.assets {
+            if content_assets::Entity::find_by_id(asset.id)
+                .lock_exclusive()
+                .one(tx)
+                .await?
+                .as_ref()
+                != Some(asset)
+                || asset_refs::Entity::find_by_id((
+                    reference.asset_id,
+                    reference.owner_kind.clone(),
+                    reference.owner_id,
+                ))
+                .lock_exclusive()
+                .one(tx)
+                .await?
+                .as_ref()
+                    != Some(reference)
+                || asset_gc_jobs::Entity::find()
+                    .filter(asset_gc_jobs::Column::WorkspaceId.eq(asset.workspace_id))
+                    .filter(asset_gc_jobs::Column::AssetId.eq(asset.id))
+                    .lock_exclusive()
+                    .one(tx)
+                    .await?
+                    .is_some_and(|job| job.state == "deleting")
+            {
+                return Err(conflict());
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Journal<'_> {
@@ -271,15 +408,8 @@ impl Journal<'_> {
         &self,
         tx: &DatabaseTransaction,
         run: &runs::Model,
-        node: i64,
         packet: &Packet,
     ) -> Result<()> {
-        if let Some(id) = packet.asset {
-            self.assets
-                .ok_or_else(|| fault())?
-                .attach(tx, run.workspace_id, id, "node_run", node)
-                .await?;
-        }
         runs::Entity::update_many()
             .col_expr(
                 runs::Column::DataBytes,
@@ -366,7 +496,7 @@ impl Journal<'_> {
     }
     async fn sources(
         &self,
-        tx: &DatabaseTransaction,
+        reads: &mut ReadSet,
         run: &runs::Model,
         sources: &[Source],
     ) -> Result<i64> {
@@ -374,7 +504,7 @@ impl Journal<'_> {
         for source in sources {
             let row = nodes::Entity::find_by_id(source.node_run)
                 .filter(nodes::Column::ExecutionId.eq(run.id))
-                .one(tx)
+                .one(self.db)
                 .await?
                 .ok_or_else(|| fault())?;
             if row.attempt != source.attempt
@@ -393,8 +523,9 @@ impl Journal<'_> {
             {
                 return Err(fault());
             }
-            self.snapshot(tx, run, &row).await?;
-            let output = self.output(tx, run, &row).await?;
+            reads.node(self, run, &row, true).await?;
+            self.snapshot(self.db, run, &row).await?;
+            let output = self.output(self.db, run, &row).await?;
             let port = output
                 .ports
                 .iter()
@@ -417,6 +548,7 @@ impl Journal<'_> {
         version: i64,
         activation: Activation,
     ) -> Result<Checkpoint> {
+        let policy = crate::accounts::resource_policy::load(self.db).await?;
         let preview_run = runs::Entity::find_by_id(self.lease.execution().id)
             .filter(runs::Column::WorkspaceId.eq(self.lease.execution().workspace))
             .one(self.db)
@@ -443,31 +575,31 @@ impl Journal<'_> {
         }
         let iteration_path = canonical(&activation.iteration)?;
         let iteration_hash = digest(&activation.iteration)?;
+        let mut reads = ReadSet::default();
+        if let Some(node) = nodes::Entity::find()
+            .filter(nodes::Column::ExecutionId.eq(run.id))
+            .filter(nodes::Column::NodeId.eq(node_id))
+            .filter(nodes::Column::IterationHash.eq(&iteration_hash))
+            .filter(nodes::Column::Attempt.eq(activation.attempt))
+            .one(self.db)
+            .await?
         {
-            let tx = self.db.begin().await?;
-            let run = self.guard(&tx, version).await?;
-            if let Some(node) = nodes::Entity::find()
-                .filter(nodes::Column::ExecutionId.eq(run.id))
-                .filter(nodes::Column::NodeId.eq(node_id))
-                .filter(nodes::Column::IterationHash.eq(&iteration_hash))
-                .filter(nodes::Column::Attempt.eq(activation.attempt))
-                .one(&tx)
-                .await?
-            {
-                if node.iteration_path != iteration_path || node.redo_round != activation.redo_round
-                {
-                    return Err(fault());
-                }
-                let snapshot = self.snapshot(&tx, &run, &node).await?;
-                self.sources(&tx, &run, &snapshot.sources).await?;
-                tx.rollback().await?;
-                return Ok(Checkpoint {
-                    execution_version: version,
-                    node,
-                    snapshot,
-                });
+            if node.iteration_path != iteration_path || node.redo_round != activation.redo_round {
+                return Err(fault());
             }
+            reads.node(self, &run, &node, false).await?;
+            let snapshot = self.snapshot(self.db, &run, &node).await?;
+            self.sources(&mut reads, &run, &snapshot.sources).await?;
+            let tx = self.db.begin().await?;
+            let guarded = self.guard(&tx, version).await?;
+            reads.validate(&tx, &guarded, &run).await?;
+            self.guard(&tx, guarded.version).await?;
             tx.rollback().await?;
+            return Ok(Checkpoint {
+                execution_version: version,
+                node,
+                snapshot,
+            });
         }
         for params in &activation.params {
             super::graph::validate_resolved(spec, &activation.node_path, params)?;
@@ -504,52 +636,65 @@ impl Journal<'_> {
             .and_then(Value::as_str)
             .unwrap_or("stop")
             .to_owned();
+        let items_in = self.sources(&mut reads, &run, &snapshot.sources).await?;
         let packet = self
             .packet(&run, activation.id, "params", &snapshot)
             .await?;
+        let prepared = match packet.asset {
+            Some(id) => Some(
+                self.assets
+                    .ok_or_else(fault)?
+                    .prepare(run.workspace_id, id)
+                    .await?,
+            ),
+            None => None,
+        };
         let tx = self.db.begin().await?;
+        let preview_run = run;
         let run = self.guard(&tx, version).await?;
+        reads.validate(&tx, &run, &preview_run).await?;
         if run.workspace_id != snapshot.identity.workspace
             || run.revision_id != snapshot.identity.revision
         {
             return Err(fault());
         }
-        if let Some(node) = nodes::Entity::find()
+        if nodes::Entity::find()
             .filter(nodes::Column::ExecutionId.eq(run.id))
             .filter(nodes::Column::NodeId.eq(node_id))
             .filter(nodes::Column::IterationHash.eq(&iteration_hash))
             .filter(nodes::Column::Attempt.eq(activation.attempt))
             .one(&tx)
             .await?
+            .is_some()
         {
-            if node.iteration_path != iteration_path || node.redo_round != activation.redo_round {
-                return Err(fault());
-            }
-            let snapshot = self.snapshot(&tx, &run, &node).await?;
-            self.sources(&tx, &run, &snapshot.sources).await?;
-            tx.rollback().await?;
-            return Ok(Checkpoint {
-                execution_version: version,
-                node,
-                snapshot,
-            });
+            return Err(conflict());
         }
         // guard holds the parent write lock: concurrent attempts share one
         // budget, while replaying a persisted attempt consumes nothing extra.
-        if nodes::Entity::find()
-            .filter(nodes::Column::ExecutionId.eq(run.id))
-            .count(&tx)
-            .await?
-            >= MAX_NODE_EXECUTIONS
-        {
-            return Err(ApiError::localized(
-                StatusCode::TOO_MANY_REQUESTS,
-                Message::new("workflow.nodeExecutionLimit")
-                    .with("limit", MAX_NODE_EXECUTIONS.to_string()),
-            ));
+        if let Some(limit) = policy.workflow_node_executions {
+            if nodes::Entity::find()
+                .filter(nodes::Column::ExecutionId.eq(run.id))
+                .count(&tx)
+                .await?
+                >= limit
+            {
+                return Err(ApiError::localized(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Message::new("workflow.nodeExecutionLimit").with("limit", limit.to_string()),
+                ));
+            }
         }
-        let items_in = self.sources(&tx, &run, &snapshot.sources).await?;
-        self.retain(&tx, &run, activation.id, &packet).await?;
+        if let Some(prepared) = &prepared {
+            prepared
+                .attach(
+                    self.assets.ok_or_else(fault)?,
+                    &tx,
+                    "node_run",
+                    activation.id,
+                )
+                .await?;
+        }
+        self.retain(&tx, &run, &packet).await?;
         let node = nodes::Model {
             id: activation.id,
             execution_id: run.id,
@@ -599,31 +744,68 @@ impl Journal<'_> {
         output: Output,
     ) -> Result<Checkpoint> {
         // The authenticated snapshot below decides whether empty ports are valid.
-        output.validate(output.ports.is_empty())?;
+        let policy = crate::accounts::resource_policy::load(self.db).await?;
+        output.validate_with_policy(output.ports.is_empty(), &policy)?;
         let preview_run = runs::Entity::find_by_id(self.lease.execution().id)
             .filter(runs::Column::WorkspaceId.eq(self.lease.execution().workspace))
             .one(self.db)
             .await?
             .ok_or_else(|| fault())?;
+        let node = nodes::Entity::find_by_id(node_id)
+            .filter(nodes::Column::ExecutionId.eq(preview_run.id))
+            .one(self.db)
+            .await?
+            .ok_or_else(fault)?;
+        let duplicate = matches!(
+            node.state.as_str(),
+            "succeeded" | "skipped" | "bypassed" | "pinned"
+        );
+        let mut reads = ReadSet::default();
+        reads.node(self, &preview_run, &node, duplicate).await?;
+        let snapshot = self.snapshot(self.db, &preview_run, &node).await?;
+        output.validate_with_policy(snapshot.outputless, &policy)?;
+        if duplicate {
+            if digest(&self.output(self.db, &preview_run, &node).await?)? != digest(&output)? {
+                return Err(conflict());
+            }
+        } else {
+            if node.state != "running" || node.version != node_version {
+                return Err(conflict());
+            }
+            // Missing frozen source data never becomes an empty input.
+            self.sources(&mut reads, &preview_run, &snapshot.sources)
+                .await?;
+        }
         let packet = self
             .packet(&preview_run, node_id, "output", &output)
             .await?;
+        let mut ids: Vec<_> = packet.asset.into_iter().collect();
+        for reference in output
+            .ports
+            .iter()
+            .flat_map(|port| &port.items)
+            .flat_map(|item| item.binary.values())
+        {
+            ids.push(
+                self.assets
+                    .ok_or_else(fault)?
+                    .binary_id(preview_run.workspace_id, reference)
+                    .await?,
+            );
+        }
+        let prepared = if ids.is_empty() {
+            Vec::new()
+        } else {
+            self.assets
+                .ok_or_else(fault)?
+                .prepare_ids(preview_run.workspace_id, ids)
+                .await?
+        };
         let tx = self.db.begin().await?;
         let run = self.guard(&tx, version).await?;
-        let node = nodes::Entity::find_by_id(node_id)
-            .filter(nodes::Column::ExecutionId.eq(run.id))
-            .one(&tx)
-            .await?
-            .ok_or_else(|| fault())?;
-        let snapshot = self.snapshot(&tx, &run, &node).await?;
-        output.validate(snapshot.outputless)?;
-        if matches!(
-            node.state.as_str(),
-            "succeeded" | "skipped" | "bypassed" | "pinned"
-        ) {
-            if digest(&self.output(&tx, &run, &node).await?)? != digest(&output)? {
-                return Err(conflict());
-            }
+        reads.validate(&tx, &run, &preview_run).await?;
+        if duplicate {
+            self.guard(&tx, run.version).await?;
             tx.rollback().await?;
             return Ok(Checkpoint {
                 execution_version: version,
@@ -631,21 +813,10 @@ impl Journal<'_> {
                 snapshot,
             });
         }
-        if node.state != "running" || node.version != node_version {
-            return Err(conflict());
-        }
-        // Frozen sources must still be readable. Missing data never becomes [].
-        self.sources(&tx, &run, &snapshot.sources).await?;
-        self.retain(&tx, &run, node_id, &packet).await?;
-        for reference in output
-            .ports
-            .iter()
-            .flat_map(|port| &port.items)
-            .flat_map(|item| item.binary.values())
-        {
-            self.assets
-                .ok_or_else(|| fault())?
-                .attach_binary(&tx, run.workspace_id, reference, "node_run", node_id)
+        self.retain(&tx, &run, &packet).await?;
+        for prepared in &prepared {
+            prepared
+                .attach(self.assets.ok_or_else(fault)?, &tx, "node_run", node_id)
                 .await?;
         }
         let items_out: usize = output.ports.iter().map(|port| port.items.len()).sum();
@@ -713,14 +884,22 @@ impl Journal<'_> {
         node_version: i64,
         wake_at: i64,
     ) -> Result<i64> {
+        let preview_run = runs::Entity::find_by_id(self.lease.execution().id)
+            .filter(runs::Column::WorkspaceId.eq(self.lease.execution().workspace))
+            .one(self.db)
+            .await?
+            .ok_or_else(fault)?;
+        let node = nodes::Entity::find_by_id(node_id)
+            .filter(nodes::Column::ExecutionId.eq(preview_run.id))
+            .one(self.db)
+            .await?
+            .ok_or_else(fault)?;
+        let mut reads = ReadSet::default();
+        reads.node(self, &preview_run, &node, false).await?;
+        self.snapshot(self.db, &preview_run, &node).await?;
         let tx = self.db.begin().await?;
         let run = self.guard(&tx, version).await?;
-        let node = nodes::Entity::find_by_id(node_id)
-            .filter(nodes::Column::ExecutionId.eq(run.id))
-            .one(&tx)
-            .await?
-            .ok_or_else(|| fault())?;
-        self.snapshot(&tx, &run, &node).await?;
+        reads.validate(&tx, &run, &preview_run).await?;
         let mut context = self.context(&run)?;
         let key = node_id.to_string();
         if node.state == "waiting"
@@ -820,8 +999,13 @@ impl Journal<'_> {
     /// `due` names waiting attempts that an outside event (a preview review)
     /// released before their deadline.
     pub(crate) async fn wake(&self, version: i64, due: &[i64]) -> Result<i64> {
-        let tx = self.db.begin().await?;
-        let run = self.guard(&tx, version).await?;
+        let preview_run = runs::Entity::find_by_id(self.lease.execution().id)
+            .filter(runs::Column::WorkspaceId.eq(self.lease.execution().workspace))
+            .one(self.db)
+            .await?
+            .ok_or_else(fault)?;
+        let run = &preview_run;
+        let mut reads = ReadSet::default();
         let mut context = self.context(&run)?;
         let now = crate::db::now();
         let waits = context
@@ -836,17 +1020,28 @@ impl Journal<'_> {
                     .map(|_| id.clone())
             })
             .collect();
+        let mut ready_nodes = Vec::new();
         for id in &ready {
             let node_id = id.parse::<i64>().map_err(|_| fault())?;
             let node = nodes::Entity::find_by_id(node_id)
                 .filter(nodes::Column::ExecutionId.eq(run.id))
-                .one(&tx)
+                .one(self.db)
                 .await?
-                .ok_or_else(|| fault())?;
+                .ok_or_else(fault)?;
             if node.state != "waiting" {
                 return Err(conflict());
             }
-            self.snapshot(&tx, &run, &node).await?;
+            reads.node(self, run, &node, false).await?;
+            self.snapshot(self.db, run, &node).await?;
+            ready_nodes.push(node);
+        }
+        let tx = self.db.begin().await?;
+        let run = self.guard(&tx, version).await?;
+        reads.validate(&tx, &run, &preview_run).await?;
+        if run.context != preview_run.context {
+            return Err(conflict());
+        }
+        for (id, node) in ready.iter().zip(&ready_nodes) {
             if nodes::Entity::update_many()
                 .col_expr(nodes::Column::State, Expr::value("running"))
                 .col_expr(

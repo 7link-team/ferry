@@ -799,7 +799,8 @@ async fn execute_private(
         0o600,
     )
     .await?;
-    let timeout_seconds = workflow_timeout(&workflow, &job.key);
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let (timeout_seconds, transport_seconds) = workflow_timeout(policy.task_timeout_seconds);
     // ferry/preview@v1: only this invocation's preview steps learn the nonce.
     let preview_nonce = uuid::Uuid::new_v4().simple().to_string();
     let preview_dir = format!("{private}/ferry-preview");
@@ -836,7 +837,7 @@ async fn execute_private(
         ch,
         &command,
         // The worker's cancellation cleanup grace (35 s) plus the runner's.
-        timeout_seconds + 75,
+        transport_seconds,
         true,
         !run_cancelled,
         Some(&events::Preview {

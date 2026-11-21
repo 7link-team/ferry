@@ -55,7 +55,7 @@ pub async fn update_status(
     }
     let global = global_auto_update(&s).await?;
     Ok(Json(
-        json!({"available":older_version(&host.agent_version, env!("CARGO_PKG_VERSION")),"agent_version":host.agent_version,"target_version":env!("CARGO_PKG_VERSION"),"global_auto_update":global,"auto_update":host.runner_auto_update,"enabled":policy_enabled(global,&host.runner_auto_update),"supported":registration.as_ref().is_some_and(|r|r.managed)||info.as_ref().is_some_and(|info|info.managed),"ready":registration.as_ref().is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire))||info.as_ref().is_some_and(|info|info.ready),"update":status}),
+        json!({"available":older_version(&host.agent_version, env!("CARGO_PKG_VERSION")),"agent_version":host.agent_version,"target_version":env!("CARGO_PKG_VERSION"),"supports_resource_policy":registration.as_ref().is_some_and(|r|r.supports_resource_policy)||info.as_ref().is_some_and(|info|info.supports_resource_policy),"global_auto_update":global,"auto_update":host.runner_auto_update,"enabled":policy_enabled(global,&host.runner_auto_update),"supported":registration.as_ref().is_some_and(|r|r.managed)||info.as_ref().is_some_and(|info|info.managed),"ready":registration.as_ref().is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire))||info.as_ref().is_some_and(|info|info.ready),"update":status}),
     ))
 }
 
@@ -85,7 +85,7 @@ pub async fn start_update(
                 crate::i18n::Message::new("runner.alreadyVersion"),
             ));
         }
-        let catalog = crate::hosts::runner::install::catalog().await?;
+        let catalog = crate::hosts::runner::install::catalog(&s).await?;
         ferry_protocol::release::verify_catalog(
             &catalog.bytes,
             &catalog.signature,

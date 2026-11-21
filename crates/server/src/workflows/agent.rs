@@ -16,6 +16,7 @@ use crate::{
     state::AppState,
 };
 use axum::http::StatusCode;
+use ferry_protocol::resources::{ResourcePolicy, allows, byte_limit};
 use ferry_protocol::{
     agent::{Binding, Event, Input, Outcome, Permission, Request, Runtime},
     sandbox::{Asset, Item, Paired},
@@ -29,14 +30,6 @@ use tokio::{
 };
 mod api;
 
-const MAX_PROMPT_BYTES: usize = 32 * 1024;
-const MAX_SCHEMA_BYTES: usize = 64 * 1024;
-const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
-/// The Runner refuses longer prompts (crates/runner agent request validation).
-const RUNNER_PROMPT_BYTES: usize = 64 * 1024;
-const MAX_TOOL_CALLS: usize = 128;
-const MAX_RECEIVED_BYTES: usize = 18 * 1024 * 1024;
-const MAX_CONCURRENT_CALLS: usize = 16;
 const PREVIEW_CHARS: usize = 500;
 /// Remote cancellation and cleanup normally finish well within this.
 const CANCEL_GRACE: Duration = Duration::from_secs(90);
@@ -69,8 +62,18 @@ fn preview(text: &str) -> String {
 /// Literal checks shared by save time and execution. A prompt expression is
 /// checked again once resolved.
 pub(super) fn validate(params: &Value, base: &str) -> Result<()> {
+    validate_with_policy(params, base, &ResourcePolicy::default())
+}
+
+pub(super) fn validate_with_policy(
+    params: &Value,
+    base: &str,
+    policy: &ResourcePolicy,
+) -> Result<()> {
     let prompt = params["prompt"].as_str().unwrap_or_default();
-    if !prompt.starts_with('=') && (prompt.trim().is_empty() || prompt.len() > MAX_PROMPT_BYTES) {
+    if !prompt.starts_with('=')
+        && (prompt.trim().is_empty() || !allows(policy.agent_prompt_bytes, prompt.len()))
+    {
         return Err(invalid(
             "workflow.agentPrompt",
             format!("{base}/params/prompt"),
@@ -79,13 +82,17 @@ pub(super) fn validate(params: &Value, base: &str) -> Result<()> {
     // With file output the JSON answer is optional; without it, it is the output.
     let files = super::agent_files::mode(params, base)?;
     if files.is_none() || !params["output_schema"].is_null() {
-        output_schema(&params["output_schema"], base)?;
+        output_schema_with_policy(&params["output_schema"], base, policy)?;
     }
     Ok(())
 }
 
 /// The user's output contract: a compilable JSON Schema whose root type is object.
-fn output_schema(schema: &Value, base: &str) -> Result<jsonschema::Validator> {
+fn output_schema_with_policy(
+    schema: &Value,
+    base: &str,
+    policy: &ResourcePolicy,
+) -> Result<jsonschema::Validator> {
     let error = || {
         invalid(
             "workflow.agentSchema",
@@ -93,7 +100,10 @@ fn output_schema(schema: &Value, base: &str) -> Result<jsonschema::Validator> {
         )
     };
     if schema["type"] != "object"
-        || serde_json::to_vec(schema).map_err(|_| error())?.len() > MAX_SCHEMA_BYTES
+        || !allows(
+            policy.agent_schema_bytes,
+            serde_json::to_vec(schema).map_err(|_| error())?.len(),
+        )
     {
         return Err(error());
     }
@@ -203,7 +213,7 @@ pub(super) async fn validate_agents(
 }
 
 /// Instructions, the user's task, the input items and the output contract in one
-/// prompt; the Runner's prompt limit applies to the whole text.
+/// prompt; administrator-configured prompt limits apply to the composed text.
 fn compose(
     system: &str,
     prompt: &str,
@@ -242,17 +252,16 @@ fn compose(
         None => text.push_str("Finish with a short summary of what you produced.\n"),
     }
     text.push_str("</output_contract>");
-    within_limit(text)
+    Ok(text)
 }
 
-/// The Runner refuses longer prompts.
-fn within_limit(text: String) -> Result<String> {
-    if text.len() > RUNNER_PROMPT_BYTES {
+fn within_policy(text: String, policy: &ResourcePolicy) -> Result<String> {
+    if !allows(policy.agent_prompt_bytes, text.len()) {
         return Err(ApiError::localized(
             StatusCode::PAYLOAD_TOO_LARGE,
             Message::new("workflow.agentInputTooLarge")
                 .with("bytes", text.len().to_string())
-                .with("limit", RUNNER_PROMPT_BYTES.to_string()),
+                .with("limit", byte_limit(policy.agent_prompt_bytes).to_string()),
         ));
     }
     Ok(text)
@@ -287,18 +296,23 @@ pub(super) fn extract(text: &str) -> Option<Map<String, Value>> {
 }
 
 /// Accept the answer or explain, in a localized error, why it was rejected.
-fn accept(text: &str, validator: &jsonschema::Validator) -> Result<Map<String, Value>> {
+fn accept_with_policy(
+    text: &str,
+    validator: &jsonschema::Validator,
+    policy: &ResourcePolicy,
+) -> Result<Map<String, Value>> {
     let Some(object) = extract(text) else {
         return Err(ApiError::localized(
             StatusCode::UNPROCESSABLE_ENTITY,
             Message::new("workflow.agentNoJson").with("text", preview(text)),
         ));
     };
-    if serde_json::to_vec(&object)
-        .map_err(|_| ApiError::missing())?
-        .len()
-        > MAX_OUTPUT_BYTES
-    {
+    if !allows(
+        policy.agent_turn_output_bytes,
+        serde_json::to_vec(&object)
+            .map_err(|_| ApiError::missing())?
+            .len(),
+    ) {
         return Err(ApiError::localized(
             StatusCode::PAYLOAD_TOO_LARGE,
             Message::new("workflow.agentOutputTooLarge"),
@@ -398,8 +412,9 @@ struct Session<'a> {
     calls: usize,
     max_calls: usize,
     received: usize,
-    deadline: Instant,
+    deadline: Option<Instant>,
     timeout: Duration,
+    policy: ResourcePolicy,
 }
 
 struct Answer {
@@ -420,6 +435,7 @@ impl Session<'_> {
         let (_idle, idle) = watch::channel(false);
         let mut stop = crate::executions::stop_signal().unwrap_or(idle);
         let mut tasks: JoinSet<(String, Value, String)> = JoinSet::new();
+        let mut pending_result = None;
         let mut texts: Vec<(String, String)> = Vec::new();
         let mut session = None;
         let mut outcome = None;
@@ -430,7 +446,13 @@ impl Session<'_> {
         for timer in [&mut check, &mut renewal, &mut flush] {
             timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         }
-        let deadline = tokio::time::sleep_until(self.deadline);
+        let deadline_at = self.deadline;
+        let deadline = async move {
+            match deadline_at {
+                Some(at) => tokio::time::sleep_until(at).await,
+                None => std::future::pending().await,
+            }
+        };
         tokio::pin!(deadline);
         // Armed once cancellation is requested: a CLI that never acknowledges is abandoned.
         let grace = tokio::time::sleep(Duration::from_secs(86_400));
@@ -446,13 +468,15 @@ impl Session<'_> {
         }
         loop {
             tokio::select! {
-                Some(joined) = tasks.join_next(), if !tasks.is_empty() => match joined {
+                Some(joined) = tasks.join_next(), if !tasks.is_empty() && pending_result.is_none() => match joined {
                     Ok((request_id, result, line)) => {
                         self.log.push("tool", line.as_bytes());
-                        if failure.is_none() && inputs.try_send(Input::PlatformResult { request_id, result }).is_err() {
-                            fail!(failed("workflow.agentFailed"));
-                        }
+                        if failure.is_none() { pending_result = Some(Input::PlatformResult { request_id, result }); }
                     }
+                    Err(_) => fail!(failed("workflow.agentFailed")),
+                },
+                permit = inputs.reserve(), if pending_result.is_some() && failure.is_none() => match permit {
+                    Ok(permit) => permit.send(pending_result.take().expect("pending result")),
                     Err(_) => fail!(failed("workflow.agentFailed")),
                 },
                 result = &mut running => {
@@ -464,14 +488,14 @@ impl Session<'_> {
                     }
                     break;
                 }
-                event = events.recv() => if let Some(event) = event {
+                event = events.recv(), if failure.is_some() || tasks.len() < byte_limit(self.policy.agent_tool_concurrency) => if let Some(event) = event {
                     if let Event::PlatformCall { request_id, name, arguments } = event {
                         self.calls += 1;
                         self.received += serde_json::to_vec(&arguments).map_or(usize::MAX, |bytes| bytes.len());
-                        if self.calls > self.max_calls || tasks.len() >= MAX_CONCURRENT_CALLS {
+                        if self.calls > self.max_calls {
                             fail!(ApiError::localized(StatusCode::TOO_MANY_REQUESTS,
                                 Message::new("workflow.agentToolLimit").with("max", self.max_calls.to_string())));
-                        } else if self.received > MAX_RECEIVED_BYTES {
+                        } else if !allows(self.policy.agent_turn_output_bytes, self.received) {
                             fail!(ApiError::localized(StatusCode::PAYLOAD_TOO_LARGE, Message::new("workflow.agentOutputLimit")));
                         } else if failure.is_none() {
                             tasks.spawn(platform_call(self.s.clone(), self.run.clone(), self.agent, request_id, name, arguments));
@@ -479,7 +503,7 @@ impl Session<'_> {
                         continue;
                     }
                     self.received += serde_json::to_vec(&event).map_or(usize::MAX, |bytes| bytes.len());
-                    if self.received > MAX_RECEIVED_BYTES {
+                    if !allows(self.policy.agent_turn_output_bytes, self.received) {
                         fail!(ApiError::localized(StatusCode::PAYLOAD_TOO_LARGE, Message::new("workflow.agentOutputLimit")));
                     }
                     if matches!(event, Event::Approval { .. }) {
@@ -578,11 +602,8 @@ pub(super) async fn execute(
     items: &[Item],
     params: &[Value],
 ) -> Result<Vec<Item>> {
-    let timeout = params
-        .first()
-        .and_then(|params| super::graph::port_index(&params["timeout_s"]))
-        .filter(|seconds| (30..=1800).contains(seconds))
-        .ok_or_else(|| invalid("workflow.graphSchema", "/params/timeout_s".into()))?;
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let timeout = policy.task_timeout_seconds.unwrap_or(0);
     execute_with(
         s,
         run,
@@ -606,6 +627,7 @@ pub(super) async fn execute_with(
     params: &[Value],
     limits: Limits,
 ) -> Result<Vec<Item>> {
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     // One run per node execution, over all input items.
     let [params] = params else {
         return Err(invalid("workflow.graphSchema", "/params".into()));
@@ -613,19 +635,23 @@ pub(super) async fn execute_with(
     if items.is_empty() {
         return Ok(vec![]);
     }
-    let files = super::agent_files::mode(params, "")?;
+    let mut files = super::agent_files::mode(params, "")?;
+    if let Some(mode) = &mut files {
+        super::agent_files::apply_policy(mode, &policy);
+    }
     // Without file output the JSON answer is the node's output and is required.
     let validator = if files.is_none() || !params["output_schema"].is_null() {
-        Some(output_schema(&params["output_schema"], "")?)
+        Some(output_schema_with_policy(
+            &params["output_schema"],
+            "",
+            &policy,
+        )?)
     } else {
         None
     };
-    let max_calls = super::graph::port_index(&params["max_tool_calls"])
-        .and_then(|calls| usize::try_from(calls).ok())
-        .filter(|calls| (1..=MAX_TOOL_CALLS).contains(calls))
-        .ok_or_else(|| invalid("workflow.graphSchema", "/params/max_tool_calls".into()))?;
+    let max_calls = byte_limit(policy.agent_tool_calls);
     let prompt = params["prompt"].as_str().unwrap_or_default();
-    if prompt.trim().is_empty() || prompt.len() > MAX_PROMPT_BYTES {
+    if prompt.trim().is_empty() || !allows(policy.agent_prompt_bytes, prompt.len()) {
         return Err(invalid("workflow.agentPrompt", "/params/prompt".into()));
     }
     let scope = super::integration::execution_scope(s, run).await?;
@@ -660,15 +686,20 @@ pub(super) async fn execute_with(
         }]);
     }
     let config = crate::conversations::Configuration::from_agent(&resolved)?;
-    let prompt = compose(
-        &config.system_prompt,
-        prompt,
-        items,
-        validator.as_ref().map(|_| &params["output_schema"]),
-        files.is_some(),
+    let prompt = within_policy(
+        compose(
+            &config.system_prompt,
+            prompt,
+            items,
+            validator.as_ref().map(|_| &params["output_schema"]),
+            files.is_some(),
+        )?,
+        &policy,
     )?;
     let node_name = node["name"].as_str().unwrap_or_default().to_owned();
-    let deadline = Instant::now() + limits.timeout;
+    let deadline = (!limits.timeout.is_zero())
+        .then(|| Instant::now().checked_add(limits.timeout))
+        .flatten();
     let node_run = (node_run > 0).then_some(node_run);
     let paired: Vec<Paired> = items
         .iter()
@@ -787,7 +818,7 @@ async fn on_runner(
     validator: Option<&jsonschema::Validator>,
     files: Option<(&super::agent_files::FileMode, &str)>,
     max_calls: usize,
-    deadline: Instant,
+    deadline: Option<Instant>,
     timeout: Duration,
 ) -> Result<OnHost> {
     let runtime = config.runtime.cli()?;
@@ -839,10 +870,10 @@ async fn on_runner(
         return unusable("workflow.agentFilesRunnerUpgrade");
     }
     let prompt = match files {
-        Some((mode, _)) => within_limit(format!(
+        Some((mode, _)) => format!(
             "{prompt}\n\n{}",
             super::agent_files::contract(mode, runtime, &probe.file_tools)
-        ))?,
+        ),
         None => prompt,
     };
     let provider =
@@ -861,19 +892,22 @@ async fn on_runner(
         canonical_directory: directory.clone(),
         executable,
     };
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let prompt = within_policy(prompt, &policy)?;
     let mut session = Session {
         s,
         run,
         agent: Id::from(agent.id),
         channel: channel.as_ref(),
         lease,
-        log: NodeLog::default(),
+        log: NodeLog::with_limit(policy.log_output_bytes),
         node_run,
         calls: 0,
         max_calls,
         received: 0,
         deadline,
         timeout,
+        policy: policy.clone(),
     };
     session.log.push(
         "agent",
@@ -909,9 +943,13 @@ async fn on_runner(
         native_session_id,
         permission: Permission::ReadOnly,
         timeout_seconds: deadline
-            .saturating_duration_since(Instant::now())
-            .as_secs()
-            .clamp(1, 3600),
+            .map(|at| {
+                at.saturating_duration_since(Instant::now())
+                    .as_secs()
+                    .max(1)
+            })
+            .unwrap_or(0),
+        resource_policy: Some(policy.clone()),
         platform_tools: true,
         provider: provider.clone(),
         timezone: timezone.clone(),
@@ -928,15 +966,15 @@ async fn on_runner(
             let mut object = Map::new();
             object.insert(
                 "summary".into(),
-                json!(answer.text.trim().chars().take(4000).collect::<String>()),
+                json!(answer.text.trim()),
             );
             return Ok(object);
         };
-        match accept(&answer.text, validator) {
+        match accept_with_policy(&answer.text, validator, &policy) {
             Ok(object) => Ok(object),
             // One correction in the same native session, within the same limits.
             Err(rejection) => {
-                let Some(native) = answer.session.filter(|_| Instant::now() < deadline) else {
+                let Some(native) = answer.session.filter(|_| deadline.is_none_or(|at| Instant::now() < at)) else {
                     return Err(rejection);
                 };
                 session.log.push("agent", format!("output rejected: {}", rejection.1).as_bytes());
@@ -945,7 +983,7 @@ async fn on_runner(
                     rejection.1.chars().take(2000).collect::<String>()
                 );
                 let answer = session.turn(request(correction, Some(native))).await?;
-                accept(&answer.text, validator)
+                accept_with_policy(&answer.text, validator, &policy)
             }
         }
     }
@@ -954,28 +992,18 @@ async fn on_runner(
     // is removed afterwards whether or not the node succeeded.
     let result = match (result, files) {
         (Ok(mut object), Some((mode, node_name))) => {
-            let collected = async {
-                let found = super::agent_files::collect(session.channel, &directory, mode).await?;
-                let mut listed = Vec::new();
-                let mut binary = BTreeMap::new();
-                for (index, file) in found.iter().enumerate() {
-                    let (reference, info) =
-                        super::agent_files::store(s, run, node_name, file).await?;
-                    session.log.push(
-                        "agent",
-                        format!(
-                            "file: {} ({} bytes, {})",
-                            file.name,
-                            file.bytes.len(),
-                            file.mime
-                        )
-                        .as_bytes(),
-                    );
-                    binary.insert(format!("file_{}", index + 1), reference);
-                    listed.push(info);
-                }
-                Ok::<_, ApiError>((listed, binary))
-            }
+            let collected = collect_files(
+                s,
+                run,
+                session.channel,
+                &session.lease,
+                deadline,
+                timeout,
+                &directory,
+                mode,
+                node_name,
+                &mut session.log,
+            )
             .await;
             super::agent_files::cleanup(session.channel, &directory).await;
             collected.map(|(listed, binary)| {
@@ -1005,6 +1033,62 @@ async fn on_runner(
     }
     let _ = session.log.flush(s, node_run).await;
     result.map(OnHost::Done)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn collect_files(
+    s: &AppState,
+    run: &workflow_executions::Model,
+    channel: &dyn HostChannel,
+    lease: &Arc<Lease>,
+    deadline: Option<Instant>,
+    timeout: Duration,
+    directory: &str,
+    mode: &super::agent_files::FileMode,
+    node_name: &str,
+    log: &mut NodeLog,
+) -> Result<(Vec<Value>, BTreeMap<String, Asset>)> {
+    let work = async {
+        let found = super::agent_files::collect(channel, directory, mode).await?;
+        let mut listed = Vec::new();
+        let mut binary = BTreeMap::new();
+        for (index, file) in found.iter().enumerate() {
+            host::active(s, run).await?;
+            let (reference, info) = super::agent_files::store(s, run, node_name, file).await?;
+            log.push(
+                "agent",
+                format!("file: {} ({} bytes, {})", file.name, file.size, file.mime).as_bytes(),
+            );
+            binary.insert(format!("file_{}", index + 1), reference);
+            listed.push(info);
+        }
+        Ok((listed, binary))
+    };
+    let renewal = async {
+        let mut tick = tokio::time::interval(Duration::from_secs(10));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            match lease.renew(&s.db).await {
+                Ok(true) => {}
+                Ok(false) => return crate::executions::ownership_lost(),
+                Err(error) => return error,
+            }
+        }
+    };
+    let deadline = async {
+        match deadline {
+            Some(at) => tokio::time::sleep_until(at).await,
+            None => std::future::pending().await,
+        }
+    };
+    host::while_active(s, run, async {
+        tokio::select! {
+            result = work => result,
+            error = renewal => Err(error),
+            _ = deadline => Err(ApiError::localized(StatusCode::GATEWAY_TIMEOUT, Message::new("workflow.agentTimeout").with("seconds", timeout.as_secs().to_string()))),
+        }
+    }).await
 }
 
 #[cfg(test)]

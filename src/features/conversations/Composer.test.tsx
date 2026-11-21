@@ -325,3 +325,13 @@ it("restores Ctrl+Enter mode in the send button and persists upper grip height w
   expect(localStorage.getItem("ui.chat.composerHeight")).toBe("136");
   expect(input.className).toContain("resize-none");
 });
+
+it("uploads beyond legacy attachment count and size ceilings through the authoritative server",async()=>{
+ const uploads=vi.fn(async()=>new Response(JSON.stringify({file_id:"new-file",name:"uploaded.txt",mime:"text/plain",size:33*1024*1024}),{headers:{"content-type":"application/json"}}));vi.stubGlobal("fetch",uploads);
+ let latest:ComposerDraft={prompt:"",attachments:Array.from({length:10},(_,i)=>({file_id:String(i),name:`file-${i}.txt`}))};
+ function Harness(){const[draft,setDraft]=useState(latest);return <Composer endpoint="/workspaces/1/conversations/2" draft={draft} onChange={next=>{latest=next;setDraft(next)}} onSend={async()=>{}} disabled={false} busy={false} onStop={()=>{}} group={false} agents={[]}/>;}
+ await act(async()=>root.render(<Harness/>));
+ const file=new File(["sample"],"large.txt",{type:"text/plain"});Object.defineProperty(file,"size",{value:33*1024*1024});const input=host.querySelector<HTMLInputElement>('input[type="file"]')!;Object.defineProperty(input,"files",{configurable:true,value:[file]});
+ await act(async()=>{input.dispatchEvent(new Event("change",{bubbles:true}));});
+ expect(uploads).toHaveBeenCalledTimes(1);expect(latest.attachments).toHaveLength(11);expect(host.querySelector('[role="alert"]')).toBeNull();
+});

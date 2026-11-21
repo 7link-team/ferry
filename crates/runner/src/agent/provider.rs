@@ -46,7 +46,6 @@ pub(super) fn validate(runtime: Runtime, provider: &Provider) -> Result<()> {
             && !provider.api_key.chars().any(char::is_control),
         "invalid provider key"
     );
-    ensure!(provider.models.len() <= 2000, "too many models");
     for model in &provider.models {
         text(model).context("invalid model")?;
     }

@@ -14,32 +14,39 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, sea_query::Expr
 use serde_json::{Value, json};
 use std::time::Duration;
 
+#[cfg(test)]
 const NODE_LOG_LIMIT: usize = 256 * 1024;
 #[derive(Default)]
 pub(super) struct NodeLog {
     text: String,
+    limit: Option<u64>,
     truncated: bool,
     pub(super) dirty: bool,
 }
 impl NodeLog {
+    pub(super) fn with_limit(limit: Option<u64>) -> Self {
+        Self {
+            limit,
+            ..Default::default()
+        }
+    }
     pub(super) fn push(&mut self, stream: &str, bytes: &[u8]) {
         if bytes.is_empty() || self.truncated {
             return;
         }
+        let limit = ferry_protocol::resources::byte_limit(self.limit);
         let entry = format!(
             "[{}] [{}] {}\n",
             chrono::Utc::now().to_rfc3339(),
             stream,
-            String::from_utf8_lossy(&bytes[..bytes.len().min(NODE_LOG_LIMIT)])
+            String::from_utf8_lossy(&bytes[..bytes.len().min(limit)])
         );
-        let mut end = entry
-            .len()
-            .min(NODE_LOG_LIMIT.saturating_sub(self.text.len()));
+        let mut end = entry.len().min(limit.saturating_sub(self.text.len()));
         while !entry.is_char_boundary(end) {
             end -= 1;
         }
         self.text.push_str(&entry[..end]);
-        self.truncated = end < entry.len() || bytes.len() > NODE_LOG_LIMIT;
+        self.truncated = end < entry.len() || bytes.len() > limit;
         self.dirty = true;
     }
     pub(super) async fn flush(&mut self, s: &AppState, node: Option<i64>) -> Result<()> {
@@ -111,12 +118,18 @@ pub(super) fn requested(node: &Value) -> bool {
 }
 
 pub(super) async fn active(s: &AppState, run: &workflow_executions::Model) -> Result<()> {
+    execution_scope(s, run).await?.require("hosts.terminal")
+}
+
+pub(super) async fn execution_scope(
+    s: &AppState,
+    run: &workflow_executions::Model,
+) -> Result<Scope> {
     if crate::executions::stop_requested() {
         return Err(crate::executions::ownership_lost());
     }
     let scope = Scope::for_actor(s, run.workspace_id.into(), run.triggered_by.into()).await?;
     scope.require("workflows.run")?;
-    scope.require("hosts.terminal")?;
     let workflow = super::scoped(&s.db, scope.workspace_id, run.workflow_id.into()).await?;
     crate::definitions::access::require(
         &s.db,
@@ -133,7 +146,37 @@ pub(super) async fn active(s: &AppState, run: &workflow_executions::Model) -> Re
     {
         return Err(ApiError::forbidden());
     }
-    Ok(())
+    Ok(scope)
+}
+
+/// Stop server-side work when its execution or authority is revoked. Native CLI
+/// sessions retain their own acknowledged cancellation and cleanup path.
+pub(super) fn while_active<'a, T: 'a>(
+    s: &'a AppState,
+    run: &'a workflow_executions::Model,
+    work: impl std::future::Future<Output = Result<T>> + 'a,
+) -> impl std::future::Future<Output = Result<T>> + 'a {
+    // Box before constructing the guard future: large operation state must not
+    // be embedded in every caller's async state or copied on its worker stack.
+    let work = Box::pin(work);
+    async move {
+        execution_scope(s, run).await?;
+        let (_idle, idle) = tokio::sync::watch::channel(false);
+        let mut stop = crate::executions::stop_signal().unwrap_or(idle);
+        let monitor = async {
+            loop {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                if let Err(error) = execution_scope(s, run).await {
+                    return error;
+                }
+            }
+        };
+        tokio::select! {
+            result = work => result,
+            error = monitor => Err(error),
+            _ = stop.changed() => Err(crate::executions::ownership_lost()),
+        }
+    }
 }
 
 /// Opens the host with a fresh private directory for scripts. Windows hosts run
@@ -182,6 +225,10 @@ pub(super) async fn execute_with_credential(
     log_output: bool,
     credential: Option<&(String, String, String)>,
 ) -> Result<Value> {
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    if !ferry_protocol::resources::allows(policy.command_bytes, script.len()) {
+        return Err(invalid());
+    }
     let log_node = if log_output {
         use crate::entities::workflow_node_runs as nodes;
         nodes::Entity::find()
@@ -206,10 +253,10 @@ pub(super) async fn execute_with_credential(
                 let (cancel, receiver) = tokio::sync::watch::channel(false);
                 let (sender, mut output) = tokio::sync::mpsc::channel(16);
                 let command = format!("sh {}", quote(&path));
-                let task = ch.exec_stream(&command, Duration::from_secs(120), sender, receiver);
+                let task = ch.exec_stream(&command, Duration::from_secs(policy.task_timeout_seconds.unwrap_or(0)), sender, receiver);
                 tokio::pin!(task);
                 let mut stdout = Vec::new();
-                let mut node_log = NodeLog::default();
+                let mut node_log = NodeLog::with_limit(policy.log_output_bytes);
                 let mut log_tick = tokio::time::interval(Duration::from_millis(250));
                 let mut stderr_len = 0usize;
                 let mut failure = None;
@@ -222,9 +269,9 @@ pub(super) async fn execute_with_credential(
                         chunk = output.recv(), if output_open => if let Some((kind, bytes)) = chunk {
                             if log_node.is_some() { node_log.push(&kind, &bytes); }
                             if kind == "stdout" {
-                                if stdout.len() + bytes.len() > 1024*1024 { failure.get_or_insert_with(invalid); let _ = cancel.send(true); }
+                                if !ferry_protocol::resources::allows(policy.command_output_bytes, stdout.len().saturating_add(stderr_len).saturating_add(bytes.len())) { failure.get_or_insert_with(invalid); let _ = cancel.send(true); }
                                 else { stdout.extend_from_slice(&bytes); }
-                            } else { stderr_len += bytes.len(); if stderr_len > 1024*1024 { failure.get_or_insert_with(invalid); let _=cancel.send(true); } }
+                            } else { stderr_len += bytes.len(); if !ferry_protocol::resources::allows(policy.command_output_bytes, stderr_len.saturating_add(stdout.len())) { failure.get_or_insert_with(invalid); let _=cancel.send(true); } }
                         } else { output_open = false; },
                         _ = log_tick.tick(), if log_node.is_some() && node_log.dirty => if let Err(error) = node_log.flush(s, log_node).await { failure.get_or_insert(error); let _ = cancel.send(true); },
                         _ = check.tick() => if let Err(error) = active(s, run).await { failure.get_or_insert(error); let _ = cancel.send(true); },
@@ -234,8 +281,8 @@ pub(super) async fn execute_with_credential(
                 // Drain chunks queued immediately before process completion.
                 while let Ok((kind, bytes)) = output.try_recv() {
                     if log_node.is_some() { node_log.push(&kind, &bytes); }
-                    if kind == "stdout" { if stdout.len()+bytes.len()>1024*1024 {code=-1;} else {stdout.extend_from_slice(&bytes);} }
-                    else { stderr_len += bytes.len(); if stderr_len > 1024*1024 { code = -1; } }
+                    if kind == "stdout" { if !ferry_protocol::resources::allows(policy.command_output_bytes, stdout.len().saturating_add(stderr_len).saturating_add(bytes.len())) {code=-1;} else {stdout.extend_from_slice(&bytes);} }
+                    else { stderr_len += bytes.len(); if !ferry_protocol::resources::allows(policy.command_output_bytes, stderr_len.saturating_add(stdout.len())) { code = -1; } }
                 }
                 node_log.flush(s, log_node).await?;
                 if let Some(error) = failure { return Err(error); }
@@ -751,8 +798,16 @@ mod tests {
     }
 
     #[test]
-    fn node_logs_bound_unicode_and_stop_growing_after_truncation() {
+    fn default_logs_keep_output_beyond_former_quota() {
         let mut log = NodeLog::default();
+        log.push("stdout", &vec![b'x'; 256 * 1024 + 1]);
+        assert!(log.text.len() > 256 * 1024);
+        assert!(!log.truncated);
+    }
+
+    #[test]
+    fn node_logs_bound_unicode_and_stop_growing_after_truncation() {
+        let mut log = NodeLog::with_limit(Some(NODE_LOG_LIMIT as u64));
         log.push("stderr", "failure 中文".repeat(NODE_LOG_LIMIT).as_bytes());
         assert!(log.truncated);
         assert!(log.text.len() <= NODE_LOG_LIMIT);

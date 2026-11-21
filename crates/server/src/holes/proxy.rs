@@ -36,10 +36,10 @@ use std::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::sync::{Notify, watch};
 
+#[cfg(test)]
 const MAX_PER_HOLE: usize = 32;
+#[cfg(test)]
 const MAX_PER_HOST: usize = 128;
-const BODY_LIMIT: usize = 64 * 1024 * 1024;
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 #[cfg(not(test))]
 const POOL_IDLE: Duration = Duration::from_secs(30);
 #[cfg(test)]
@@ -239,11 +239,20 @@ impl Drop for Held {
     }
 }
 
-fn hold(target: &Target) -> Option<(Held, watch::Receiver<bool>)> {
+fn hold_with_policy(
+    target: &Target,
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> Option<(Held, watch::Receiver<bool>)> {
     let mut registry = registry();
     let hole_count = registry.holes.get(&target.hole).map_or(0, |entry| entry.0);
     let host_count = registry.hosts.get(&target.host).copied().unwrap_or(0);
-    if hole_count >= MAX_PER_HOLE || host_count >= MAX_PER_HOST {
+    if !ferry_protocol::resources::allows(
+        policy.preview_connections_per_entry,
+        hole_count.saturating_add(1),
+    ) || !ferry_protocol::resources::allows(
+        policy.preview_connections_per_host,
+        host_count.saturating_add(1),
+    ) {
         return None;
     }
     let entry = registry
@@ -267,6 +276,7 @@ fn hold(target: &Target) -> Option<(Held, watch::Receiver<bool>)> {
 async fn wait_for_capacity(
     target: &Target,
     generation: &Arc<()>,
+    policy: &ferry_protocol::resources::ResourcePolicy,
 ) -> Result<(Held, watch::Receiver<bool>), Refused> {
     loop {
         let changed = CAPACITY_CHANGED.notified();
@@ -276,7 +286,7 @@ async fn wait_for_capacity(
         if !current_generation(target.hole, generation) {
             return Err(Refused::Unavailable);
         }
-        if let Some(held) = hold(target) {
+        if let Some(held) = hold_with_policy(target, policy) {
             return if current_generation(target.hole, generation) {
                 Ok(held)
             } else {
@@ -324,27 +334,87 @@ pub(super) fn tests_target_supported(version: &str) -> bool {
 
 #[cfg(test)]
 pub(super) fn tests_hold(hole: i64, host: i64) -> Option<impl Drop> {
-    hold(&Target {
-        hole,
-        workspace: 0,
-        host,
-        port: 1,
-        address: String::new(),
-        tls: Tls::Plain,
-    })
+    hold_with_policy(
+        &Target {
+            hole,
+            workspace: 0,
+            host,
+            port: 1,
+            address: String::new(),
+            tls: Tls::Plain,
+        },
+        &test_policy(),
+    )
     .map(|(held, _)| held)
 }
 
 // ------------------------------------------------------- probe & open
 
 #[cfg(test)]
+fn test_policy() -> ferry_protocol::resources::ResourcePolicy {
+    ferry_protocol::resources::ResourcePolicy {
+        preview_connections_per_entry: Some(MAX_PER_HOLE as u64),
+        preview_connections_per_host: Some(MAX_PER_HOST as u64),
+        task_timeout_seconds: Some(60),
+        ..Default::default()
+    }
+}
+#[cfg(test)]
+pub(super) async fn tests_configure_limits(s: &AppState) {
+    use sea_orm::sea_query::Expr;
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            Expr::value(serde_json::to_string(&test_policy()).unwrap()),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+}
+
+#[cfg(test)]
 mod capacity_tests {
     use super::*;
+
+    #[test]
+    fn default_preview_capacity_has_no_legacy_ceiling() {
+        let target = Target {
+            hole: 995_101,
+            workspace: 1,
+            host: 995_102,
+            port: 8091,
+            address: String::new(),
+            tls: Tls::Plain,
+        };
+        let held: Vec<_> = (0..129)
+            .map(|_| {
+                hold_with_policy(
+                    &target,
+                    &ferry_protocol::resources::ResourcePolicy::default(),
+                )
+                .expect("default resource policy must not reject a normal connection burst")
+            })
+            .collect();
+        assert_eq!(active(target.hole), 129);
+        drop(held);
+        assert_eq!(active(target.hole), 0);
+    }
 
     #[tokio::test]
     async fn cancelled_and_timed_out_waiters_never_reserve_capacity() {
         let (_dir, s) = crate::agents::tests::setup().await;
-        tokio::time::pause();
+        tests_configure_limits(&s).await;
+        let mut policy = test_policy();
+        policy.task_timeout_seconds = Some(1);
+        use sea_orm::{EntityTrait, sea_query::Expr};
+        crate::entities::platform_state::Entity::update_many()
+            .col_expr(
+                crate::entities::platform_state::Column::ResourceConfig,
+                Expr::value(serde_json::to_string(&policy).unwrap()),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
         let target = Target {
             hole: 995_091,
             workspace: 1,
@@ -355,8 +425,10 @@ mod capacity_tests {
         };
         remember_state(target.hole, &s);
         let generation = states().get(&target.hole).unwrap().generation.clone();
-        let held: Vec<_> = (0..MAX_PER_HOLE).map(|_| hold(&target).unwrap()).collect();
-        let mut cancelled = Box::pin(wait_for_capacity(&target, &generation));
+        let held: Vec<_> = (0..MAX_PER_HOLE)
+            .map(|_| hold_with_policy(&target, &policy).unwrap())
+            .collect();
+        let mut cancelled = Box::pin(wait_for_capacity(&target, &generation, &policy));
         assert!(
             tokio::time::timeout(Duration::from_millis(10), &mut cancelled)
                 .await
@@ -367,24 +439,18 @@ mod capacity_tests {
         let mut connection = Box::pin(connect(
             format!("http://{}/", target.authority()).parse().unwrap(),
         ));
-        assert!(futures::poll!(&mut connection).is_pending());
-        tokio::time::advance(RESPONSE_TIMEOUT - Duration::from_millis(1)).await;
+        let result = tokio::time::timeout(Duration::from_secs(3), &mut connection)
+            .await
+            .unwrap();
         assert!(
-            futures::poll!(&mut connection).is_pending(),
-            "the request deadline must not fire early"
-        );
-        // Tokio rounds deadlines to its millisecond timer-wheel resolution.
-        tokio::time::advance(Duration::from_millis(2)).await;
-        let result = futures::poll!(&mut connection);
-        assert!(
-            matches!(result, std::task::Poll::Ready(Err(Refused::Busy))),
+            matches!(result, Err(Refused::Busy)),
             "a background pool connector must have a bounded wait"
         );
         assert_eq!(active(target.hole), MAX_PER_HOLE);
         drop(held);
         assert_eq!(active(target.hole), 0);
         assert!(
-            hold(&target).is_some(),
+            hold_with_policy(&target, &policy).is_some(),
             "cancelled waiters must not consume a released slot"
         );
         close(target.hole);
@@ -393,6 +459,8 @@ mod capacity_tests {
     #[tokio::test]
     async fn closed_entry_waiter_cannot_join_a_new_generation() {
         let (_dir, s) = crate::agents::tests::setup().await;
+        tests_configure_limits(&s).await;
+        let policy = test_policy();
         let target = Target {
             hole: 995_093,
             workspace: 1,
@@ -403,8 +471,10 @@ mod capacity_tests {
         };
         remember_state(target.hole, &s);
         let generation = states().get(&target.hole).unwrap().generation.clone();
-        let mut held: Vec<_> = (0..MAX_PER_HOLE).map(|_| hold(&target).unwrap()).collect();
-        let mut waiting = Box::pin(wait_for_capacity(&target, &generation));
+        let mut held: Vec<_> = (0..MAX_PER_HOLE)
+            .map(|_| hold_with_policy(&target, &policy).unwrap())
+            .collect();
+        let mut waiting = Box::pin(wait_for_capacity(&target, &generation, &policy));
         assert!(futures::poll!(&mut waiting).is_pending());
         close(target.hole);
         remember_state(target.hole, &s);
@@ -416,7 +486,7 @@ mod capacity_tests {
         assert!(!current_generation(target.hole, &generation));
         let current = states().get(&target.hole).unwrap().generation.clone();
         assert!(
-            wait_for_capacity(&target, &current).await.is_ok(),
+            wait_for_capacity(&target, &current, &policy).await.is_ok(),
             "the new generation remains usable"
         );
         drop(held);
@@ -426,6 +496,8 @@ mod capacity_tests {
     #[tokio::test]
     async fn maintenance_keeps_a_queued_connector_until_it_is_cancelled() {
         let (_dir, s) = crate::agents::tests::setup().await;
+        tests_configure_limits(&s).await;
+        let policy = test_policy();
         tokio::time::pause();
         let target = Target {
             hole: 995_095,
@@ -442,7 +514,7 @@ mod capacity_tests {
                 hole,
                 ..target.clone()
             };
-            held.extend((0..MAX_PER_HOLE).map(|_| hold(&occupied).unwrap()));
+            held.extend((0..MAX_PER_HOLE).map(|_| hold_with_policy(&occupied, &policy).unwrap()));
         }
         let mut waiting = Box::pin(connect(
             format!("http://{}/", target.authority()).parse().unwrap(),
@@ -551,6 +623,7 @@ pub(super) async fn probe(s: &AppState, row: &holes::Model) {
 /// Opens and closes one forward: the local service accepts. An HTTPS target
 /// must also complete a TLS handshake under its certificate policy.
 pub(super) async fn reach(s: &AppState, row: &holes::Model) -> Result<(), ApiError> {
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     let target = Target::of(row).ok_or_else(ApiError::missing)?;
     let mut socket = open(s, &target).await?;
     if target.tls == Tls::Plain {
@@ -558,7 +631,7 @@ pub(super) async fn reach(s: &AppState, row: &holes::Model) -> Result<(), ApiErr
         return Ok(());
     }
     // A full preview already holds every slot: it is plainly reachable.
-    let Some((held, closing)) = hold(&target) else {
+    let Some((held, closing)) = hold_with_policy(&target, &policy) else {
         let _ = socket.send(Frame::Close(None)).await;
         return Ok(());
     };
@@ -657,10 +730,16 @@ async fn connect(uri: Uri) -> Result<Pipe, Refused> {
             handle.generation.clone(),
         )
     };
-    let (held, closing) =
-        tokio::time::timeout(RESPONSE_TIMEOUT, wait_for_capacity(&target, &generation))
+    let policy = crate::accounts::resource_policy::load(&s.db)
+        .await
+        .map_err(|_| Refused::Unavailable)?;
+    let wait = wait_for_capacity(&target, &generation, &policy);
+    let (held, closing) = match policy.task_timeout_seconds {
+        Some(seconds) => tokio::time::timeout(Duration::from_secs(seconds), wait)
             .await
-            .map_err(|_| Refused::Busy)??;
+            .map_err(|_| Refused::Busy)??,
+        None => wait.await?,
+    };
     let row = holes::Entity::find_by_id(target.hole)
         .one(&s.db)
         .await
@@ -905,12 +984,17 @@ pub(super) async fn serve_entry(
     {
         return preflight(request.headers());
     }
+    let policy = match crate::accounts::resource_policy::load(&s.db).await {
+        Ok(policy) => policy,
+        Err(_) => return refuse(StatusCode::SERVICE_UNAVAILABLE, "holes.unavailable"),
+    };
+    let body_limit = ferry_protocol::resources::byte_limit(policy.preview_body_bytes);
     let declared = request
         .headers()
         .get(header::CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<usize>().ok());
-    if declared.is_some_and(|length| length > BODY_LIMIT) {
+    if declared.is_some_and(|length| length > body_limit) {
         return refuse(StatusCode::PAYLOAD_TOO_LARGE, "holes.tooLarge");
     }
     remember_state(target.hole, &s);
@@ -950,15 +1034,19 @@ pub(super) async fn serve_entry(
     );
     parts.uri = uri;
     let upstream_request =
-        Request::from_parts(parts, http_body_util::Limited::new(body, BODY_LIMIT));
-    let mut response =
-        match tokio::time::timeout(RESPONSE_TIMEOUT, client().request(upstream_request)).await {
-            // 503, not 502/504: Cloudflare replaces origin 502/504 pages with
-            // its own, which would hide why the preview failed.
-            Err(_) => return refuse_with(StatusCode::SERVICE_UNAVAILABLE, "holes.timeout", &row),
-            Ok(Err(error)) => return failure(&error, &row),
-            Ok(Ok(response)) => response,
-        };
+        Request::from_parts(parts, http_body_util::Limited::new(body, body_limit));
+    let response = client().request(upstream_request);
+    let result = match policy.task_timeout_seconds {
+        Some(seconds) => tokio::time::timeout(Duration::from_secs(seconds), response).await,
+        None => Ok(response.await),
+    };
+    let mut response = match result {
+        // 503, not 502/504: Cloudflare replaces origin 502/504 pages with
+        // its own, which would hide why the preview failed.
+        Err(_) => return refuse_with(StatusCode::SERVICE_UNAVAILABLE, "holes.timeout", &row),
+        Ok(Err(error)) => return failure(&error, &row),
+        Ok(Ok(response)) => response,
+    };
     if response.status() == StatusCode::SWITCHING_PROTOCOLS {
         let upstream_upgrade = hyper::upgrade::on(&mut response);
         match client_upgrade {

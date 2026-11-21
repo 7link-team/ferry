@@ -50,12 +50,10 @@ impl Configuration {
         Self::read(row.conversation_config.as_deref())
     }
     fn validate(&self) -> Result<()> {
-        if self.introduction_instructions.len() > 16 * 1024
-            || self
-                .introduction_instructions
-                .chars()
-                .any(|c| c.is_control() && !['\n', '\r', '\t'].contains(&c))
-            || self.instructions.len() > 16 * 1024
+        if self
+            .introduction_instructions
+            .chars()
+            .any(|c| c.is_control() && !['\n', '\r', '\t'].contains(&c))
             || self
                 .instructions
                 .chars()
@@ -223,10 +221,20 @@ mod tests {
             Configuration::read(Some(&restored)).unwrap().instructions,
             original.instructions
         );
+        let long = "x".repeat(16385);
+        let large = Configuration::update(
+            None,
+            json!({"conversation_instructions":long})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            Configuration::read(Some(&large)).unwrap().instructions,
+            long
+        );
         for patch in [
-            json!({"conversation_instructions":"x".repeat(16385)}),
             json!({"conversation_instructions":"bad\u{0000}"}),
-            json!({"conversation_introduction_instructions":"x".repeat(16385)}),
             json!({"conversation_introduction_instructions":"bad\u{0000}"}),
             json!({"conversation_introduction_enabled":"true"}),
             json!({"conversation_tool_response_limit_kib":255}),
@@ -239,5 +247,19 @@ mod tests {
                 "{patch}"
             );
         }
+    }
+    #[test]
+    fn instruction_lengths_have_no_hidden_save_limit() {
+        let text = "x".repeat(64 * 1024);
+        let updated = Configuration::update(
+            None,
+            json!({"conversation_instructions":text,"conversation_introduction_instructions":text})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        let loaded = Configuration::read(Some(&updated)).unwrap();
+        assert_eq!(loaded.instructions.len(), 64 * 1024);
+        assert_eq!(loaded.introduction_instructions.len(), 64 * 1024);
     }
 }

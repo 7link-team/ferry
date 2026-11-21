@@ -65,7 +65,7 @@ pub fn verify_catalog(
     expected: &str,
 ) -> anyhow::Result<Artifact> {
     ensure!(
-        !bytes.is_empty() && bytes.len() <= MAX_CATALOG,
+        !bytes.is_empty(),
         ValidationError::new("manifestSize", "The update manifest size is invalid.")
     );
     let key = minisign_verify::PublicKey::decode(&decoded(public_key)?)?;
@@ -106,7 +106,7 @@ pub fn verify_catalog(
             "The update does not support this platform architecture.",
         ))?;
     ensure!(
-        artifact.size > 0 && artifact.size <= MAX_PAYLOAD,
+        artifact.size > 0,
         ValidationError::new("payloadSize", "The update file size is invalid.")
     );
     ensure!(

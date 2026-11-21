@@ -1,7 +1,7 @@
 //! No unrestricted fallback. The only tenant-code process is an AppContainer
 //! with no capabilities, a read-only executable directory and a one-process job.
 use anyhow::{Context, ensure};
-use ferry_protocol::sandbox::{ErrorCode, MAX_RESPONSE_BYTES, Reply};
+use ferry_protocol::sandbox::{ErrorCode, Reply};
 use std::{
     ffi::OsStr,
     fs::File,
@@ -219,15 +219,17 @@ fn pipe() -> anyhow::Result<(OwnedHandle, OwnedHandle)> {
     }
     Ok((handle(read)?, handle(write)?))
 }
-fn job() -> anyhow::Result<OwnedHandle> {
+fn job(memory_bytes: Option<usize>) -> anyhow::Result<OwnedHandle> {
     let job = handle(unsafe { CreateJobObjectW(null(), null()) })?;
     let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
-        | JOB_OBJECT_LIMIT_PROCESS_MEMORY
         | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
     limits.BasicLimitInformation.ActiveProcessLimit = 1;
-    limits.ProcessMemoryLimit = 256 * 1024 * 1024;
+    if let Some(bytes) = memory_bytes {
+        limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+        limits.ProcessMemoryLimit = bytes;
+    }
     unsafe {
         checked(
             SetInformationJobObject(
@@ -272,14 +274,20 @@ impl std::fmt::Display for Deadline {
 }
 impl std::error::Error for Deadline {}
 
-fn launch(bytes: &[u8], timeout_ms: u64, inner_flag: &str) -> anyhow::Result<Vec<u8>> {
+fn launch(
+    bytes: &[u8],
+    timeout_ms: Option<u64>,
+    memory_bytes: Option<usize>,
+    packet_bytes: Option<u64>,
+    inner_flag: &str,
+) -> anyhow::Result<Vec<u8>> {
     let profile = Profile::new()?;
     let directory = tempfile::tempdir()?;
     let executable = directory.path().join("sandbox.exe");
     std::fs::copy(std::env::current_exe()?, &executable)?;
     executable_acl(directory.path(), profile.sid)?;
     executable_acl(&executable, profile.sid)?;
-    let job = job()?;
+    let job = job(memory_bytes)?;
     let (child_input, parent_input) = pipe()?;
     let (parent_output, child_output) = pipe()?;
     unsafe {
@@ -420,11 +428,28 @@ fn launch(bytes: &[u8], timeout_ms: u64, inner_flag: &str) -> anyhow::Result<Vec
     let reader = std::thread::spawn(move || {
         let mut bytes = Vec::new();
         File::from(parent_output)
-            .take((MAX_RESPONSE_BYTES + 1) as u64)
+            .take(
+                packet_bytes
+                    .map(|limit| limit.saturating_add(1))
+                    .unwrap_or(u64::MAX),
+            )
             .read_to_end(&mut bytes)
             .map(|_| bytes)
     });
-    let wait = unsafe { WaitForSingleObject(raw(&process), (timeout_ms + 3_000) as u32) };
+    let wait = if let Some(ms) = timeout_ms {
+        let started = std::time::Instant::now();
+        let budget = std::time::Duration::from_millis(ms.saturating_add(3_000));
+        loop {
+            let remaining = budget.saturating_sub(started.elapsed());
+            let chunk = remaining.as_millis().min(u32::MAX as u128 - 1) as u32;
+            let status = unsafe { WaitForSingleObject(raw(&process), chunk) };
+            if status != WAIT_TIMEOUT || started.elapsed() >= budget {
+                break status;
+            }
+        }
+    } else {
+        unsafe { WaitForSingleObject(raw(&process), u32::MAX) }
+    };
     if wait != WAIT_OBJECT_0 {
         unsafe {
             TerminateJobObject(raw(&job), 1);
@@ -450,9 +475,14 @@ fn launch(bytes: &[u8], timeout_ms: u64, inner_flag: &str) -> anyhow::Result<Vec
     ensure!(exit == 0, "sandbox child exit: {exit:#x}");
     Ok(output)
 }
-pub(crate) fn evaluate(bytes: &[u8], timeout_ms: u64) -> Reply {
-    match launch(bytes, timeout_ms, "--inner") {
-        Ok(output) if output.len() > MAX_RESPONSE_BYTES => {
+pub(crate) fn evaluate(
+    bytes: &[u8],
+    timeout_ms: Option<u64>,
+    memory_bytes: Option<usize>,
+    packet_bytes: Option<u64>,
+) -> Reply {
+    match launch(bytes, timeout_ms, memory_bytes, packet_bytes, "--inner") {
+        Ok(output) if !ferry_protocol::resources::allows(packet_bytes, output.len()) => {
             Reply::error(ErrorCode::ResultLimit, None)
         }
         Ok(output) => serde_json::from_slice(&output)
@@ -482,7 +512,13 @@ pub(crate) fn diagnostic(args: &[String]) -> Option<serde_json::Value> {
         }
         let probe: Probe = serde_json::from_slice(&bytes)?;
         if !inner {
-            let output = launch(&bytes, 1000, "--inner-probe")?;
+            let output = launch(
+                &bytes,
+                Some(1000),
+                Some(256 * 1024 * 1024),
+                None,
+                "--inner-probe",
+            )?;
             return Ok(serde_json::from_slice(&output)?);
         }
         ensure!(confined(), "native probe requires confinement");

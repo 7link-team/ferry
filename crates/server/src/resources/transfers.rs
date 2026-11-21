@@ -24,8 +24,6 @@ use std::{
     io::{Cursor, Read, Seek, SeekFrom},
 };
 use tokio::io::AsyncReadExt;
-const MAX_UPLOAD: usize = 8 * 1024 * 1024;
-const MAX_ROWS: usize = 1000;
 
 #[cfg(test)]
 mod locale_tests {
@@ -62,7 +60,7 @@ mod locale_tests {
             .await
             .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
-            let bytes = axum::body::to_bytes(response.into_body(), MAX_UPLOAD)
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
                 .await
                 .unwrap();
             let mut book = Xlsx::new(Cursor::new(bytes)).unwrap();
@@ -173,9 +171,7 @@ pub fn routes() -> Router<AppState> {
                 .route(
                     &format!("{path}/imports"),
                     post(preview)
-                        .layer::<_, std::convert::Infallible>(DefaultBodyLimit::max(
-                            MAX_UPLOAD + 65536,
-                        ))
+                        .layer::<_, std::convert::Infallible>(DefaultBodyLimit::disable())
                         .layer(extension),
                 )
                 .route(
@@ -361,32 +357,29 @@ fn invalid_file() -> ApiError {
         crate::i18n::Message::new("transfers.fileInvalid"),
     )
 }
-fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>> {
+fn parse_rows(
+    bytes: Vec<u8>,
+    xlsx: bool,
+    r: &str,
+    file_count: Option<u64>,
+) -> Result<Vec<(usize, Value)>> {
     let fields = fields(r)?;
     let mut records: Vec<(usize, Vec<String>)> = Vec::new();
     if xlsx {
-        // Bound decompression and coordinates before calamine allocates its dense range.
+        // Validate XML/formulas and coordinate arithmetic before parsing cells.
         let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).map_err(|_| invalid_file())?;
-        if archive.len() > 200 {
-            return Err(invalid_file());
+        if !ferry_protocol::resources::allows(file_count, archive.len()) {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("request.resourceLimit"),
+            ));
         }
         let mut total = 0u64;
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).map_err(|_| invalid_file())?;
             total = total.checked_add(entry.size()).ok_or_else(invalid_file)?;
-            if total > 32 * 1024 * 1024 {
-                return Err(ApiError::localized(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("transfers.archiveTooLarge"),
-                ));
-            }
             let mut content = Vec::new();
-            (&mut entry)
-                .take(32 * 1024 * 1024 + 1)
-                .read_to_end(&mut content)?;
-            if content.len() > 32 * 1024 * 1024 {
-                return Err(invalid_file());
-            }
+            (&mut entry).read_to_end(&mut content)?;
             let entry_name = entry.name().map_err(|_| invalid_file())?;
             if entry_name.ends_with(".xml") {
                 let mut reader = quick_xml::Reader::from_reader(content.as_slice());
@@ -412,27 +405,19 @@ fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>
                                         let digits = coord.trim_start_matches(|c: char| {
                                             c.is_ascii_alphabetic() || c == '$'
                                         });
-                                        if let Ok(row) = digits.parse::<usize>() {
-                                            if row > MAX_ROWS + 1 {
-                                                return Err(ApiError::localized(
-                                                    axum::http::StatusCode::BAD_REQUEST,
-                                                    crate::i18n::Message::new(
-                                                        "transfers.distantCells",
-                                                    ),
-                                                ));
-                                            }
-                                        }
+                                        let _ =
+                                            digits.parse::<usize>().map_err(|_| invalid_file())?;
                                         let mut col = 0usize;
                                         for c in coord.bytes().take_while(u8::is_ascii_alphabetic) {
-                                            col = col.saturating_mul(26).saturating_add(
-                                                (c.to_ascii_uppercase() - b'A' + 1) as usize,
-                                            );
-                                        }
-                                        if col > 64 {
-                                            return Err(ApiError::localized(
-                                                axum::http::StatusCode::BAD_REQUEST,
-                                                crate::i18n::Message::new("transfers.columnsLimit"),
-                                            ));
+                                            col = col
+                                                .checked_mul(26)
+                                                .and_then(|value| {
+                                                    value.checked_add(
+                                                        (c.to_ascii_uppercase() - b'A' + 1)
+                                                            as usize,
+                                                    )
+                                                })
+                                                .ok_or_else(invalid_file)?;
                                         }
                                     }
                                 }
@@ -510,12 +495,6 @@ fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>
                 .count();
             previous_offset = offset;
             records.push((line, row.iter().map(str::to_owned).collect()));
-            if records.len() > MAX_ROWS + 1 {
-                return Err(ApiError::localized(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("transfers.rowsLimit"),
-                ));
-            }
         }
     }
     if records.is_empty() {
@@ -571,7 +550,7 @@ fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>
         }
         output.push((line, Value::Object(body)));
     }
-    if output.is_empty() || output.len() > MAX_ROWS {
+    if output.is_empty() {
         return Err(ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("transfers.rowsRequired"),
@@ -590,7 +569,7 @@ async fn preview(
         "{}.create",
         if r == "alert-rules" { "alerts" } else { r }
     ))?;
-    let field = upload
+    let mut field = upload
         .next_field()
         .await
         .map_err(|_| invalid_file())?
@@ -603,13 +582,19 @@ async fn preview(
     } else {
         return Err(invalid_file());
     };
-    let bytes = field.bytes().await.map_err(|_| invalid_file())?;
-    if bytes.len() > MAX_UPLOAD {
-        return Err(ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("transfers.uploadTooLarge"),
-        ));
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let limit = ferry_protocol::resources::byte_limit(policy.file_upload_bytes);
+    let mut bytes = Vec::new();
+    while let Some(chunk) = field.chunk().await.map_err(|_| invalid_file())? {
+        if chunk.len() > limit.saturating_sub(bytes.len()) {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("request.resourceLimit"),
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
     }
+    drop(field);
     if upload
         .next_field()
         .await
@@ -621,7 +606,7 @@ async fn preview(
             crate::i18n::Message::new("transfers.singleUpload"),
         ));
     }
-    let rows = tokio::task::spawn_blocking(move || parse_rows(bytes.to_vec(), xlsx, r))
+    let rows = tokio::task::spawn_blocking(move || parse_rows(bytes, xlsx, r, policy.file_count))
         .await
         .map_err(|_| invalid_file())??;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
@@ -1080,4 +1065,20 @@ async fn export(
     let file = writer.await.map_err(|_| invalid_file())??;
     produced?;
     download(file, r, xlsx)
+}
+
+#[cfg(test)]
+mod resource_policy_tests {
+    use super::*;
+    #[test]
+    fn resource_policy_default_import_accepts_more_than_legacy_thousand_rows() {
+        let input = format!(
+            "name,description\n{}",
+            (0..1001)
+                .map(|i| format!("group-{i},example\n"))
+                .collect::<String>()
+        );
+        let rows = parse_rows(input.into_bytes(), false, "host-groups", None).unwrap();
+        assert_eq!(rows.len(), 1001);
+    }
 }

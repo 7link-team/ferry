@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-const MAX_BYTES: usize = 50 * 1024 * 1024;
 #[derive(Deserialize)]
 pub struct UploadQuery {
     resource: String,
@@ -37,7 +36,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route(
             "/{workspace}/value-files",
-            post(upload).layer(DefaultBodyLimit::max(MAX_BYTES + 1024 * 1024)),
+            post(upload).layer(DefaultBodyLimit::disable()),
         )
         .route("/{workspace}/value-files/{id}", get(download))
 }
@@ -97,6 +96,7 @@ async fn upload(
     {
         scope.require(&format!("{}.update", query.resource))?;
     }
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     let mut field = multipart
         .next_field()
         .await
@@ -139,18 +139,23 @@ async fn upload(
         let mut file = tokio::fs::File::create(dir.join("content"))
             .await
             .map_err(io_error)?;
-        let mut size = 0;
+        let mut size = 0usize;
         while let Some(chunk) = field.chunk().await.map_err(|_| {
             ApiError::localized(
                 StatusCode::BAD_REQUEST,
                 crate::i18n::Message::new("files.dataInvalid"),
             )
         })? {
-            size += chunk.len();
-            if size > MAX_BYTES {
+            size = size.checked_add(chunk.len()).ok_or_else(|| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("request.resourceLimit"),
+                )
+            })?;
+            if !ferry_protocol::resources::allows(policy.file_upload_bytes, size) {
                 return Err(ApiError::localized(
                     StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("files.tooLarge"),
+                    crate::i18n::Message::new("request.resourceLimit"),
                 ));
             }
             file.write_all(&chunk).await.map_err(io_error)?;
@@ -250,7 +255,7 @@ pub async fn validate_references(
     workspace: Id,
     kind: &str,
     value: &Value,
-    schema: &Value,
+    _schema: &Value,
 ) -> Result<()> {
     for item in value.as_array().ok_or_else(|| {
         ApiError::localized(
@@ -277,17 +282,12 @@ pub async fn validate_references(
                 crate::i18n::Message::new("files.metadataMismatch"),
             ));
         }
-        if let Some(max) = schema
-            .get("maxSizeMb")
-            .and_then(Value::as_f64)
-            .filter(|n| *n > 0.0)
-        {
-            if meta.size as f64 > max * 1024.0 * 1024.0 {
-                return Err(ApiError::localized(
-                    StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("files.configuredSizeExceeded"),
-                ));
-            }
+        let policy = crate::accounts::resource_policy::load(conn).await?;
+        if !ferry_protocol::resources::allows(policy.file_upload_bytes, meta.size) {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("request.resourceLimit"),
+            ));
         }
     }
     Ok(())

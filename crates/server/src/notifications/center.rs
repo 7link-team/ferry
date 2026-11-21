@@ -1171,6 +1171,7 @@ async fn send_authorized(
     files: &[Attachment],
 ) -> Result<Value> {
     let id = Id::from(row.id);
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     let mut digest = Sha256::new();
     digest.update(
         serde_json::to_vec(&(scope.user.id, crate::platform_tools::current_agent(), &body))
@@ -1295,12 +1296,18 @@ async fn send_authorized(
         .await?;
     tx.commit().await?;
     let (result, state) = if row.provider == "SMTP" {
-        smtp(&transport, &body, files).await
+        smtp(&transport, &body, files, &policy).await
     } else if let Some(parameters) = sms_parameters {
-        super::sms::send(&row.provider, &transport.sms, &body.to, &parameters).await
+        super::sms::send(
+            &row.provider,
+            &transport.sms,
+            &body.to,
+            &parameters,
+            &policy,
+        )
+        .await
     } else {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
+        let client = crate::accounts::resource_policy::http(&policy)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| invalid())?;
@@ -1424,7 +1431,12 @@ fn human_size(bytes: usize) -> String {
     }
 }
 
-async fn smtp(config: &Transport, body: &SendBody, files: &[Attachment]) -> (String, &'static str) {
+async fn smtp(
+    config: &Transport,
+    body: &SendBody,
+    files: &[Attachment],
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> (String, &'static str) {
     use lettre::{
         AsyncSmtpTransport, AsyncTransport, Tokio1Executor, message::Message,
         transport::smtp::authentication::Credentials,
@@ -1458,14 +1470,16 @@ async fn smtp(config: &Transport, body: &SendBody, files: &[Attachment]) -> (Str
     };
     builder = builder
         .port(config.port)
-        .timeout(Some(Duration::from_secs(15)));
+        .timeout(policy.task_timeout_seconds.map(Duration::from_secs));
     if !config.username.is_empty() {
         builder = builder.credentials(Credentials::new(
             config.username.clone(),
             config.password.clone(),
         ))
     }
-    match tokio::time::timeout(Duration::from_secs(20), builder.build().send(message)).await {
+    match crate::accounts::resource_policy::task_timeout(policy, builder.build().send(message))
+        .await
+    {
         Ok(Ok(_)) => (
             crate::i18n::store_message(&crate::i18n::Message::new("notification.sent")),
             "succeeded",

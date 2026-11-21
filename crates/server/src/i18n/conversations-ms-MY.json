@@ -33,7 +33,7 @@
   "conversations.tooManyAttachments": "Satu mesej boleh membawa paling banyak 10 lampiran.",
   "conversations.attachmentNameInvalid": "Nama lampiran \"{name}\" tidak sah: mesti 1–255 bait tanpa aksara kawalan; namakan semula fail dan lampirkan semula.",
   "conversations.messageTooLong": "Mesej dan lampiran teksnya melebihi 48 KB; pendekkan atau hantar kandungan sebagai fail.",
-  "conversations.messageTooLongWithInstructions": "Bersama arahan ejen, mesej ini melebihi 63 KB; pendekkan mesej atau arahan ejen.",
+  "conversations.messageTooLongWithInstructions": "Mesej bersama arahan Ejen melebihi had prom yang dikonfigurasi. Pendekkan mesej atau kemas kini dasar sumber.",
   "conversations.tooManyTargets": "Satu mesej boleh ditujukan kepada paling banyak 8 ejen sekaligus.",
   "conversations.kindInvalid": "Pilih jenis perbualan: peribadi atau kumpulan.",
   "conversations.tooManyMembers": "Kumpulan boleh mempunyai paling banyak 100 ahli.",

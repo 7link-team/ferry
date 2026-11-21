@@ -144,7 +144,16 @@ impl Protocol {
             self.request.permission == Permission::OnRequest,
             "runtime requested tools in read-only mode"
         );
-        ensure!(self.pending.len() < 16, "too many pending approvals");
+        ensure!(
+            ferry_protocol::resources::allows(
+                self.request
+                    .resource_policy
+                    .as_ref()
+                    .and_then(|policy| policy.agent_tool_concurrency),
+                self.pending.len().saturating_add(1)
+            ),
+            "too many pending approvals"
+        );
         ensure!(
             !self.pending.values().any(|p| p.native_id == native_id),
             "duplicate native approval id"

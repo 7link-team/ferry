@@ -117,7 +117,7 @@ fn office_installed() -> bool {
     candidates.iter().any(|path| Path::new(path).is_file())
 }
 
-/// Skill directory names (each skill is a folder), sorted, at most 30.
+/// Skill directory names (each skill is a folder), sorted.
 pub(super) fn skills(directory: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(directory) else {
         return Vec::new();
@@ -126,10 +126,9 @@ pub(super) fn skills(directory: &Path) -> Vec<String> {
         .flatten()
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
         .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| !name.starts_with('.') && name.len() <= 64)
+        .filter(|name| !name.starts_with('.'))
         .collect();
     names.sort();
-    names.truncate(30);
     names
 }
 

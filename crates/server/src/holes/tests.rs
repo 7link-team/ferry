@@ -600,6 +600,7 @@ async fn state_handles_outlive_a_fresh_request_but_not_idleness() {
 #[tokio::test]
 async fn http_preview_burst_waits_for_capacity_instead_of_rejecting_modules() {
     let (_dir, s) = own_ids(setup().await);
+    proxy::tests_configure_limits(&s).await;
     let host = 41_091;
     add_host(&s, host, 1, KEY).await;
     let address = server(s.clone()).await;
@@ -641,6 +642,7 @@ async fn http_preview_burst_waits_for_capacity_instead_of_rejecting_modules() {
 #[tokio::test]
 async fn http_preview_waits_for_host_capacity_released_by_another_entry() {
     let (_dir, s) = own_ids(setup().await);
+    proxy::tests_configure_limits(&s).await;
     let host = 41_093;
     add_host(&s, host, 1, KEY).await;
     let address = server(s.clone()).await;
@@ -821,6 +823,7 @@ async fn fake_runner(s: &AppState, address: SocketAddr, host: i64, key: &str, fo
             supports_agent_probe: false,
             supports_forward: forward,
             supports_timezone: false,
+            supports_resource_policy: false,
             timezone: String::new(),
         },
     )
@@ -1113,7 +1116,17 @@ async fn proxy_isolates_the_console_and_releases_every_connection() {
         .unwrap();
     assert_eq!(kept["path"], "/assets/app.js");
 
-    // Oversized bodies are refused before anything is forwarded.
+    // An explicitly configured body ceiling rejects oversized requests before forwarding.
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            sea_orm::sea_query::Expr::value(
+                json!({"preview_body_bytes":64 * 1024 * 1024}).to_string(),
+            ),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
     let mut raw = tokio::net::TcpStream::connect(address).await.unwrap();
     raw.write_all(
         format!(

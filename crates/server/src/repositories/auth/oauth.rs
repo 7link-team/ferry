@@ -403,8 +403,16 @@ pub async fn connect_token(
             .to_owned()
     };
     // Do not save a credential or mark connected unless repository access also succeeds.
-    let mut result =
-        remote_repositories(&kind, &config, &body.token, true, &settings.organization, 1).await?;
+    let mut result = remote_repositories(
+        &kind,
+        &config,
+        &body.token,
+        true,
+        &settings.organization,
+        1,
+        &crate::accounts::resource_policy::load(&s.db).await?,
+    )
+    .await?;
     let stored = serde_json::to_string(&settings).map_err(crate::error::internal_fault)?;
     let (_, id) = save_connection(
         &s,

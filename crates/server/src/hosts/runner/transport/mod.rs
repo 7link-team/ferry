@@ -152,9 +152,16 @@ pub async fn session(
     upgrade: WebSocketUpgrade,
 ) -> Response {
     let locale = crate::i18n::current_locale();
-    upgrade.on_upgrade(move |socket| {
-        crate::i18n::with_locale(locale, hand_over(s, session, socket.into()))
-    })
+    let policy = match crate::accounts::resource_policy::load(&s.db).await {
+        Ok(policy) => policy,
+        Err(error) => return axum::response::IntoResponse::into_response(error),
+    };
+    upgrade
+        .max_message_size(wire::resources::byte_limit(policy.websocket_message_bytes))
+        .max_frame_size(wire::resources::byte_limit(policy.websocket_message_bytes))
+        .on_upgrade(move |socket| {
+            crate::i18n::with_locale(locale, hand_over(s, session, socket.into()))
+        })
 }
 
 async fn hand_over(s: AppState, session: String, mut socket: Socket) {
@@ -346,6 +353,16 @@ mod tests {
                 headers.push(socket.read_u8().await.unwrap());
                 assert!(headers.len() < 8192);
             }
+            if retryable {
+                // Resource policy is loaded before upgrading. A failed database
+                // read must remain a retryable HTTP failure, never Rejected.
+                assert!(
+                    headers.starts_with(b"HTTP/1.1 500"),
+                    "{}",
+                    String::from_utf8_lossy(&headers)
+                );
+                return String::new();
+            }
             assert!(
                 headers.starts_with(b"HTTP/1.1 101"),
                 "{}",
@@ -370,14 +387,6 @@ mod tests {
             );
             socket.write_all(&frame).await.unwrap();
             let opcode = socket.read_u8().await.unwrap();
-            if retryable {
-                assert_eq!(
-                    opcode & 0x0f,
-                    8,
-                    "database failure must close without permanently rejecting the agent"
-                );
-                return String::new();
-            }
             assert_eq!(opcode, 0x81);
             let length = socket.read_u8().await.unwrap();
             assert_eq!(length & 0x80, 0);
@@ -488,6 +497,7 @@ mod tests {
                 supports_agent_probe: false,
                 supports_forward: false,
                 supports_timezone: false,
+                supports_resource_policy: false,
                 timezone: String::new(),
             })
             .unwrap();
@@ -578,6 +588,7 @@ mod tests {
             supports_agent_probe: false,
             supports_forward: false,
             supports_timezone: false,
+            supports_resource_policy: false,
             timezone: String::new(),
         })
         .unwrap();

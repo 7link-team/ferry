@@ -337,7 +337,7 @@ const RAW_MESSAGE_PREFIX: &str = "\u{001e}system-message-raw:v1:";
 /// wrapper once returns the original string, even if it resembles another envelope.
 pub fn store_raw(value: &str) -> String {
     let collision = value.starts_with(RAW_MESSAGE_PREFIX)
-        || (value.len() <= MAX_STORED_TEXT_BYTES
+        || (value.starts_with('{')
             && serde_json::from_str::<serde_json::Value>(value)
                 .ok()
                 .is_some_and(|value| {
@@ -432,11 +432,10 @@ pub fn render_stored(locale: Locale, value: &str) -> String {
         .unwrap_or_else(|| value.to_owned())
 }
 
+#[cfg(test)]
 const MAX_TEXT_RAW_BYTES: usize = 1_048_576;
+#[cfg(test)]
 const MAX_TEXT_SEGMENTS: usize = 4096;
-// Raw control characters can expand sixfold when encoded as JSON. Metadata is
-// bounded independently so a large literal log does not consume its budget.
-const MAX_STORED_TEXT_BYTES: usize = 8 * 1_048_576;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -500,12 +499,12 @@ impl StoredText {
     }
 
     fn decode(value: &str) -> Option<Self> {
-        if value.len() > MAX_STORED_TEXT_BYTES || !value.starts_with('{') {
+        if !value.starts_with('{') {
             return None;
         }
         let envelope: StoredTextEnvelope = serde_json::from_str(value).ok()?;
         let content = envelope.text;
-        if content.version != 1 || content.segments.len() > MAX_TEXT_SEGMENTS {
+        if content.version != 1 {
             return None;
         }
         let mut raw_bytes = 0usize;
@@ -521,9 +520,6 @@ impl StoredText {
                         metadata_bytes.checked_add(serde_json::to_vec(message).ok()?.len())?;
                 }
             }
-            if raw_bytes > MAX_TEXT_RAW_BYTES || metadata_bytes > MAX_STORED_MESSAGE_BYTES {
-                return None;
-            }
         }
         Some(Self {
             segments: content.segments,
@@ -534,23 +530,16 @@ impl StoredText {
     }
 
     pub fn push_raw(&mut self, raw: impl Into<String>) {
-        let mut raw = raw.into();
-        let remaining = MAX_TEXT_RAW_BYTES.saturating_sub(self.raw_bytes);
-        if raw.len() > remaining {
-            truncate_utf8(&mut raw, remaining);
-            self.truncated = true;
-        }
+        let raw = raw.into();
         if raw.is_empty() {
             return;
         }
         if let Some(TextSegment::Raw(previous)) = self.segments.last_mut() {
             self.raw_bytes += raw.len();
             previous.push_str(&raw);
-        } else if self.segments.len() < MAX_TEXT_SEGMENTS {
+        } else {
             self.raw_bytes += raw.len();
             self.segments.push(TextSegment::Raw(raw));
-        } else {
-            self.truncated = true;
         }
     }
 
@@ -562,12 +551,6 @@ impl StoredText {
         let size = serde_json::to_vec(&message)
             .expect("message serializes")
             .len();
-        if size > MAX_STORED_MESSAGE_BYTES.saturating_sub(self.metadata_bytes)
-            || self.segments.len() >= MAX_TEXT_SEGMENTS
-        {
-            self.truncated = true;
-            return;
-        }
         self.metadata_bytes += size;
         self.segments.push(TextSegment::Message(message));
     }
@@ -587,7 +570,7 @@ impl StoredText {
     /// Messages are never truncated. A translated limit notice is added at
     /// render time; callers need not append a second notice.
     pub fn truncate_raw(&mut self, max_bytes: usize) -> bool {
-        let mut remaining = max_bytes.min(MAX_TEXT_RAW_BYTES);
+        let mut remaining = max_bytes;
         self.raw_bytes = 0;
         for segment in &mut self.segments {
             if let TextSegment::Raw(raw) = segment {
@@ -603,15 +586,20 @@ impl StoredText {
     }
 
     pub fn stored(&self) -> String {
-        let mut bounded = self.clone();
-        bounded.truncate_raw(MAX_TEXT_RAW_BYTES);
-        serde_json::to_string(&StoredTextEnvelope {
-            text: TextContent {
+        #[derive(Serialize)]
+        struct Content<'a> {
+            version: u32,
+            segments: &'a [TextSegment],
+            truncated: bool,
+        }
+        serde_json::to_string(&std::collections::BTreeMap::from([(
+            "$system_text",
+            Content {
                 version: 1,
-                segments: bounded.segments,
-                truncated: bounded.truncated,
+                segments: &self.segments,
+                truncated: self.truncated,
             },
-        })
+        )]))
         .expect("mixed output serializes")
     }
 
@@ -741,7 +729,7 @@ mod tests {
         text.extend(StoredText::from_message(Message::new("error.forbidden")));
         let stored = text.stored();
         assert!(stored.len() > MAX_STORED_MESSAGE_BYTES);
-        assert!(stored.len() < MAX_STORED_TEXT_BYTES);
+        assert!(stored.len() < 8 * 1_048_576);
         assert!(StoredText::decode(&stored).is_some());
         for locale in Locale::ALL {
             let expected = format!(
@@ -757,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn mixed_output_bounds_raw_bytes_metadata_and_segments_without_cutting_envelopes() {
+    fn mixed_output_is_unlimited_by_default_and_explicit_truncation_keeps_valid_envelopes() {
         let mut exact = StoredText::from_message(Message::new("error.forbidden"));
         exact.push_raw("a".repeat(MAX_TEXT_RAW_BYTES));
         assert!(!exact.truncate_raw(MAX_TEXT_RAW_BYTES));
@@ -767,6 +755,9 @@ mod tests {
             MAX_TEXT_RAW_BYTES
         );
         exact.push_raw("界");
+        assert_eq!(exact.raw_bytes, MAX_TEXT_RAW_BYTES + 3);
+        assert!(!exact.truncated);
+        assert!(exact.truncate_raw(MAX_TEXT_RAW_BYTES));
         let stored = exact.stored();
         for locale in Locale::ALL {
             assert_eq!(
@@ -781,8 +772,8 @@ mod tests {
         }
         let mut boundary = StoredText::new();
         boundary.push_raw("界".repeat(MAX_TEXT_RAW_BYTES / 3 + 1));
-        assert_eq!(boundary.raw_bytes, MAX_TEXT_RAW_BYTES / 3 * 3);
-        assert!(boundary.truncated);
+        assert_eq!(boundary.raw_bytes, (MAX_TEXT_RAW_BYTES / 3 + 1) * 3);
+        assert!(!boundary.truncated);
         assert!(boundary.truncate_raw(5));
         assert_eq!(boundary.raw_bytes, 3);
         assert!(boundary.render(Locale::EnUs).starts_with("界\n"));
@@ -794,20 +785,31 @@ mod tests {
             metadata
                 .push_message(Message::new("alerts.hostState").with("state", "x".repeat(40_000)));
         }
-        assert!(metadata.truncated);
-        assert!(metadata.metadata_bytes <= MAX_STORED_MESSAGE_BYTES);
+        assert!(!metadata.truncated);
+        assert!(metadata.metadata_bytes > MAX_STORED_MESSAGE_BYTES);
         assert_eq!(metadata.raw_bytes, "literal log".len());
         assert!(StoredText::decode(&metadata.stored()).is_some());
         let mut segments = StoredText::new();
         for _ in 0..MAX_TEXT_SEGMENTS + 1 {
             segments.push_message(Message::new("error.forbidden"));
         }
-        assert!(segments.truncated);
-        assert!(segments.segments.len() <= MAX_TEXT_SEGMENTS);
+        assert!(!segments.truncated);
+        assert_eq!(segments.segments.len(), MAX_TEXT_SEGMENTS + 1);
         assert!(StoredText::decode(&segments.stored()).is_some());
         // Legacy logs are fully readable even if larger than current write limits.
         let legacy = "a".repeat(MAX_TEXT_RAW_BYTES + 10);
         assert_eq!(render_text_stored(Locale::JaJp, &legacy), legacy);
+    }
+
+    #[test]
+    fn stored_output_roundtrips_beyond_legacy_raw_and_encoded_budgets() {
+        let raw = "\u{1}".repeat(2 * 1_048_576 + 1);
+        let mut output = StoredText::new();
+        output.push_raw(raw.clone());
+        let encoded = output.stored();
+        assert!(encoded.len() > 8 * 1_048_576);
+        assert_eq!(render_text_stored(Locale::EnUs, &encoded), raw);
+        assert!(!output.truncated);
     }
 
     #[test]
@@ -830,13 +832,13 @@ mod tests {
         let mut oversized_raw = valid.clone();
         oversized_raw["$system_text"]["segments"] =
             serde_json::json!([{"Raw":"x".repeat(MAX_TEXT_RAW_BYTES + 1)}]);
+        assert!(StoredText::decode(&too_many_segments.to_string()).is_some());
+        assert!(StoredText::decode(&oversized_raw.to_string()).is_some());
         for invalid in [
             unknown_version,
             unknown_message,
             invalid_params,
             unknown_field,
-            too_many_segments,
-            oversized_raw,
         ] {
             let invalid = invalid.to_string();
             assert!(StoredText::decode(&invalid).is_none());

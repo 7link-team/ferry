@@ -60,7 +60,9 @@ final class ClientAcceptanceTests: XCTestCase {
         XCTAssertFalse(app.buttons["Start service"].exists)
         address.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "Actual software keyboard must be shown")
+        dismissKeyboardIntroduction(app)
         address.typeText(firstURL)
+        assertTypedAddress(app, address: address, expected: firstURL)
         assertKeyboardReachability(app, address: address, open: open)
         attach(app, "first-address-keyboard")
         open.tap()
@@ -104,6 +106,7 @@ final class ClientAcceptanceTests: XCTestCase {
         let previous = address.value as? String ?? ""
         address.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        dismissKeyboardIntroduction(app)
         // Fixture URLs are short and fully visible; right-edge tap places the caret
         // after the existing value, then ordinary Delete key events clear the field.
         address.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
@@ -111,6 +114,34 @@ final class ClientAcceptanceTests: XCTestCase {
         let empty = address.value as? String ?? ""
         XCTAssertTrue(empty.isEmpty || empty == "https://", "Input did not clear through actual keyboard events")
         address.typeText(value)
+        assertTypedAddress(app, address: address, expected: value)
+    }
+
+    @MainActor
+    private func dismissKeyboardIntroduction(_ app: XCUIApplication) {
+        let introduction = app.otherElements["UIContinuousPathIntroductionView"].firstMatch
+        if introduction.exists {
+            let next = introduction.buttons["Continue"].firstMatch
+            XCTAssertTrue(next.waitForExistence(timeout: 5))
+            next.tap()
+            let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: introduction)
+            XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed)
+        }
+    }
+
+    @MainActor
+    private func assertTypedAddress(_ app: XCUIApplication, address: XCUIElement, expected: String) {
+        let committed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expected), object: address)
+        let result = XCTWaiter.wait(for: [committed], timeout: 10)
+        if result != .completed {
+            attach(app, "address-input-not-committed")
+            let actual = address.value as? String ?? ""
+            let diagnostics = XCTAttachment(string: "expected=\(expected)\nactual=\(actual)\nexpectedLength=\(expected.count) actualLength=\(actual.count)\nexpectedScalars=\(expected.unicodeScalars.map { $0.value })\nactualScalars=\(actual.unicodeScalars.map { $0.value })\n\(app.debugDescription)")
+            diagnostics.name = "full-address-input-diagnostics"
+            diagnostics.lifetime = .keepAlways
+            add(diagnostics)
+        }
+        XCTAssertEqual(result, .completed, "Actual keyboard input must commit the exact server address before Open")
     }
 
     @MainActor

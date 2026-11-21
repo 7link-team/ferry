@@ -7,6 +7,7 @@ pub(crate) mod otp;
 pub(crate) mod platform;
 pub(crate) mod platform_scripts;
 pub(crate) mod preferences;
+pub(crate) mod resource_policy;
 pub(crate) mod session_policy;
 pub(crate) mod site;
 pub(crate) mod workspace;

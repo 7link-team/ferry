@@ -22,8 +22,7 @@ use tokio::{
 
 // CLIs can place a complete multi-MiB tool result on one JSON line.
 // Transport buffers stay bounded independently of the model context window.
-const LINE_LIMIT: usize = ferry_protocol::agent::MAX_NATIVE_LINE_BYTES;
-const OUTPUT_LIMIT: usize = ferry_protocol::agent::MAX_TURN_OUTPUT_BYTES;
+use ferry_protocol::resources::{ResourcePolicy, allows, byte_limit};
 
 /// A stable, isolated directory under this Runner instance's private state.
 /// Keys are server-issued conversation/Agent IDs, never filesystem paths.
@@ -92,12 +91,15 @@ fn validate(request: &Request) -> Result<()> {
         "Agent workdir must be absolute"
     );
     ensure!(
-        !request.prompt.trim().is_empty() && request.prompt.len() <= 64 * 1024,
+        !request.prompt.trim().is_empty()
+            && allows(
+                request
+                    .resource_policy
+                    .as_ref()
+                    .and_then(|p| p.agent_prompt_bytes),
+                request.prompt.len()
+            ),
         "invalid Agent prompt"
-    );
-    ensure!(
-        (1..=3600).contains(&request.timeout_seconds),
-        "invalid Agent timeout"
     );
     for value in [&request.model, &request.native_session_id]
         .into_iter()
@@ -378,12 +380,14 @@ pub(super) async fn run_managed(
     cancel: watch::Receiver<bool>,
 ) -> Result<Outcome> {
     validate(&request)?;
-    let environment = provision::environment(
+    let policy = request.resource_policy.clone().unwrap_or_default();
+    let environment = provision::environment_with_policy(
         state_dir,
         request.runtime,
         &request.cwd,
         false,
         request.binding.as_ref(),
+        &policy,
     )
     .await?;
     // A kernel lock stays held until native process cleanup completes. Canonical
@@ -477,18 +481,21 @@ async fn write(stdin: &mut tokio::process::ChildStdin, value: Value) -> Result<(
 }
 
 // read_until is cancellation safe only if its buffer survives select! retries.
-// Take caps the read before allocation, including a malicious unterminated line.
+// Explicit platform limits cap allocation; absent limits preserve the full native line.
 async fn read(
     reader: &mut (impl AsyncBufRead + Unpin),
     buffer: &mut Vec<u8>,
+    limit: Option<u64>,
 ) -> Result<Option<Value>> {
-    let remaining = LINE_LIMIT + 1 - buffer.len();
+    let remaining = byte_limit(limit)
+        .saturating_add(1)
+        .saturating_sub(buffer.len());
     let size = reader
         .take(remaining as u64)
         .read_until(b'\n', buffer)
         .await?;
     ensure!(
-        buffer.len() <= LINE_LIMIT,
+        allows(limit, buffer.len()),
         "native event exceeds size limit"
     );
     if size == 0 {
@@ -507,17 +514,18 @@ async fn drive(
     events: &mpsc::Sender<Event>,
     mut inputs: mpsc::Receiver<Input>,
     bridge: Option<&platform::Bridge>,
+    policy: &ResourcePolicy,
 ) -> Result<Outcome> {
     write(stdin, driver.initial()).await?;
     let mut reader = BufReader::new(stdout);
     let mut buffer = Vec::new();
-    let mut total = 0;
+    let mut total = 0usize;
     loop {
         let step = tokio::select! {
-            value=read(&mut reader,&mut buffer)=>{
+            value=read(&mut reader,&mut buffer,policy.agent_native_line_bytes)=>{
                 let value=value?.context("native runtime ended without a completion event")?;
-                total+=buffer.len();buffer.clear();
-                ensure!(total<=OUTPUT_LIMIT,"native output exceeds size limit");
+                total = total.saturating_add(buffer.len());buffer.clear();
+                ensure!(allows(policy.agent_turn_output_bytes,total),"native output exceeds size limit");
                 driver.receive(value)?
             }
             input=inputs.recv()=>match input {
@@ -533,6 +541,12 @@ async fn drive(
             write(stdin, value).await?;
         }
         for event in step.events {
+            if policy.agent_event_bytes.is_some() {
+                ensure!(
+                    allows(policy.agent_event_bytes, serde_json::to_vec(&event)?.len()),
+                    "Agent event exceeds size limit"
+                );
+            }
             events
                 .send(event)
                 .await
@@ -559,8 +573,9 @@ async fn run_command(
     if *cancel.borrow() || events.is_closed() {
         return Ok(Outcome::Cancelled);
     }
+    let policy = request.resource_policy.clone().unwrap_or_default();
     let bridge = if request.platform_tools {
-        Some(platform::Bridge::start(events.clone()).await?)
+        Some(platform::Bridge::start_with_policy(events.clone(), policy.clone()).await?)
     } else {
         None
     };
@@ -592,7 +607,8 @@ async fn run_command(
     if let Some(bridge) = &bridge {
         command
             .env("FERRY_PLATFORM_BRIDGE_URL", &bridge.url)
-            .env("FERRY_PLATFORM_BRIDGE_TOKEN", &bridge.token);
+            .env("FERRY_PLATFORM_BRIDGE_TOKEN", &bridge.token)
+            .env("FERRY_RESOURCE_POLICY", serde_json::to_string(&policy)?);
         let executable = std::env::current_exe()?
             .to_string_lossy()
             .replace('\\', "/");
@@ -609,7 +625,8 @@ async fn run_command(
                         "env_vars",
                         serde_json::json!([
                             "FERRY_PLATFORM_BRIDGE_URL",
-                            "FERRY_PLATFORM_BRIDGE_TOKEN"
+                            "FERRY_PLATFORM_BRIDGE_TOKEN",
+                            "FERRY_RESOURCE_POLICY"
                         ]),
                     ),
                     ("required", serde_json::json!(true)),
@@ -627,7 +644,6 @@ async fn run_command(
                         "tools.ferry_ask_user.approval_mode",
                         serde_json::json!("approve"),
                     ),
-                    ("tool_timeout_sec", serde_json::json!(3600)),
                 ] {
                     command
                         .arg("-c")
@@ -684,13 +700,14 @@ async fn run_command(
             &events,
             inputs,
             bridge.as_ref(),
+            &policy,
         );
         tokio::pin!(execution);
         tokio::select! {
             result=&mut execution=>result,
             _=cancel.changed()=>Ok(Outcome::Cancelled),
             _=events.closed()=>Ok(Outcome::Cancelled),
-            _=tokio::time::sleep(Duration::from_secs(request.timeout_seconds))=>Ok(Outcome::TimedOut),
+            _=crate::transport::deadline(policy.task_timeout_seconds)=>Ok(Outcome::TimedOut),
         }
     };
     // Give a completed CLI a short EOF shutdown window to persist its history.

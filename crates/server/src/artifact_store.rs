@@ -7,6 +7,23 @@ use sea_orm::{EntityTrait, PaginatorTrait};
 use serde::{Deserialize, Serialize};
 use std::{path::Path as FsPath, sync::Arc};
 
+/// Preserve SDK proxy/security/environment options, overriding only I/O timers.
+#[derive(Debug)]
+struct TransferConnector;
+impl object_store::client::HttpConnector for TransferConnector {
+    fn connect(
+        &self,
+        options: &object_store::ClientOptions,
+    ) -> object_store::Result<object_store::client::HttpClient> {
+        object_store::client::ReqwestConnector::default().connect(
+            &options
+                .clone()
+                .with_timeout_disabled()
+                .with_connect_timeout_disabled(),
+        )
+    }
+}
+
 #[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct Configuration {
@@ -260,6 +277,7 @@ impl Configuration {
                     "S3 bucket and region required"
                 );
                 let mut builder = AmazonS3Builder::new()
+                    .with_http_connector(TransferConnector)
                     .with_endpoint(&self.endpoint)
                     .with_bucket_name(&self.bucket)
                     .with_region(&self.region)
@@ -400,9 +418,98 @@ impl Configuration {
 }
 
 #[derive(Clone)]
-pub(crate) struct ArtifactStore(Arc<dyn ObjectStore>);
+pub(crate) struct ArtifactStore(Arc<dyn ObjectStore>, Option<std::time::Duration>);
 
 impl ArtifactStore {
+    async fn transfer<T>(
+        &self,
+        work: impl std::future::Future<Output = anyhow::Result<T>>,
+    ) -> anyhow::Result<T> {
+        match self.1 {
+            Some(timeout) => tokio::time::timeout(timeout, work).await?,
+            None => work.await,
+        }
+    }
+
+    async fn upload_file_with_deadline(&self, key: &str, file: &FsPath) -> anyhow::Result<()> {
+        use futures::{StreamExt, TryStreamExt};
+        use tokio::io::AsyncReadExt;
+        const PART: usize = 10 * 1024 * 1024;
+        let mut upload: Option<Box<dyn object_store::MultipartUpload>> = None;
+        let result = self
+            .transfer(async {
+                let path = Self::path(key)?;
+                let mut input = tokio::fs::File::open(file).await?;
+                let mut bytes = Vec::with_capacity(PART);
+                (&mut input)
+                    .take(PART as u64)
+                    .read_to_end(&mut bytes)
+                    .await?;
+                if bytes.len() < PART {
+                    drop(input);
+                    self.0.put(&path, Bytes::from(bytes).into()).await?;
+                    return Ok(());
+                }
+                // Retain the known upload outside the cancellable future, including
+                // during complete(). BufWriter::abort panics after shutdown begins.
+                // Initiation before a handle is returned, caller cancellation, and
+                // process crashes retain the SDK's existing multipart cleanup gap.
+                upload = Some(self.0.put_multipart(&path).await?);
+                let handle = upload.as_mut().unwrap();
+                let mut parts = futures::stream::FuturesUnordered::new();
+                loop {
+                    parts.push(handle.put_part(Bytes::from(bytes).into()));
+                    if parts.len() >= 8 {
+                        parts.try_next().await?;
+                    }
+                    bytes = Vec::with_capacity(PART);
+                    (&mut input)
+                        .take(PART as u64)
+                        .read_to_end(&mut bytes)
+                        .await?;
+                    if bytes.is_empty() {
+                        break;
+                    }
+                }
+                drop(input);
+                while let Some(result) = parts.next().await {
+                    result?;
+                }
+                handle.complete().await?;
+                Ok(())
+            })
+            .await;
+        if result.is_err() {
+            if let Some(upload) = upload.as_mut() {
+                // Cleanup is finite independently of the actual transfer budget.
+                if !matches!(
+                    tokio::time::timeout(std::time::Duration::from_secs(5), upload.abort()).await,
+                    Ok(Ok(()))
+                ) {
+                    tracing::warn!("failed to abort timed or failed multipart upload");
+                }
+            }
+        }
+        result
+    }
+    #[cfg(test)]
+    pub(crate) fn from_backend_for_test(backend: Arc<dyn ObjectStore>) -> Self {
+        Self(backend, None)
+    }
+    #[cfg(test)]
+    pub(crate) fn throttled_for_test(delay: std::time::Duration) -> Self {
+        Self(
+            Arc::new(object_store::throttle::ThrottledStore::new(
+                object_store::memory::InMemory::new(),
+                object_store::throttle::ThrottleConfig {
+                    wait_get_per_call: delay,
+                    wait_put_per_call: delay,
+                    ..Default::default()
+                },
+            )),
+            None,
+        )
+    }
     fn normalize_prefix(prefix: &str) -> anyhow::Result<String> {
         let prefix = prefix.trim();
         anyhow::ensure!(!prefix.starts_with('/'), "S3 prefix must be relative");
@@ -416,14 +523,20 @@ impl ArtifactStore {
     fn prefixed(store: Arc<dyn ObjectStore>, prefix: &str) -> anyhow::Result<Self> {
         let prefix = Self::normalize_prefix(prefix)?;
         if prefix.is_empty() {
-            return Ok(Self(store));
+            return Ok(Self(store, None));
         }
-        Ok(Self(Arc::new(object_store::prefix::PrefixStore::new(
-            store,
-            Path::parse(prefix)?,
-        ))))
+        Ok(Self(
+            Arc::new(object_store::prefix::PrefixStore::new(
+                store,
+                Path::parse(prefix)?,
+            )),
+            None,
+        ))
     }
     pub(crate) async fn upload_file(&self, key: &str, file: &FsPath) -> anyhow::Result<()> {
+        if self.1.is_some() {
+            return self.upload_file_with_deadline(key, file).await;
+        }
         use tokio::io::AsyncWriteExt;
         let mut input = tokio::fs::File::open(file).await?;
         let mut output = object_store::buffered::BufWriter::new(self.0.clone(), Self::path(key)?);
@@ -433,24 +546,27 @@ impl ArtifactStore {
         Ok(())
     }
     pub(crate) async fn download_file(&self, key: &str, file: &FsPath) -> anyhow::Result<()> {
-        use futures::TryStreamExt;
-        use tokio::io::AsyncWriteExt;
-        tokio::fs::create_dir_all(
-            file.parent()
-                .ok_or_else(|| anyhow::anyhow!("missing parent"))?,
-        )
-        .await?;
-        let temp = tempfile::NamedTempFile::new_in(file.parent().unwrap())?;
-        let mut output = tokio::fs::File::from_std(temp.reopen()?);
-        let mut stream = self.0.get(&Self::path(key)?).await?.into_stream();
-        while let Some(bytes) = stream.try_next().await? {
-            output.write_all(&bytes).await?;
-        }
-        output.sync_all().await?;
-        drop(stream);
-        drop(output);
-        temp.persist(file).map_err(|error| error.error)?;
-        Ok(())
+        self.transfer(async {
+            use futures::TryStreamExt;
+            use tokio::io::AsyncWriteExt;
+            tokio::fs::create_dir_all(
+                file.parent()
+                    .ok_or_else(|| anyhow::anyhow!("missing parent"))?,
+            )
+            .await?;
+            let temp = tempfile::NamedTempFile::new_in(file.parent().unwrap())?;
+            let mut output = tokio::fs::File::from_std(temp.reopen()?);
+            let mut stream = self.0.get(&Self::path(key)?).await?.into_stream();
+            while let Some(bytes) = stream.try_next().await? {
+                output.write_all(&bytes).await?;
+            }
+            output.sync_all().await?;
+            drop(stream);
+            drop(output);
+            temp.persist(file).map_err(|error| error.error)?;
+            Ok(())
+        })
+        .await
     }
     pub(crate) async fn for_state(s: &crate::state::State) -> crate::error::Result<Self> {
         Self::for_connection(s, &s.db).await
@@ -460,8 +576,14 @@ impl ArtifactStore {
         s: &crate::state::State,
         conn: &impl sea_orm::ConnectionTrait,
     ) -> crate::error::Result<Self> {
+        let policy = crate::accounts::resource_policy::load(conn).await?;
         match Self::resolve(s, conn).await? {
-            Ok((store, _)) => Ok(store),
+            Ok((mut store, _)) => {
+                store.1 = policy
+                    .task_timeout_seconds
+                    .map(std::time::Duration::from_secs);
+                Ok(store)
+            }
             Err(problem) => {
                 // The reason can name configuration; it goes to the server log, not the client.
                 tracing::error!(detail = %problem.detail, "file storage unavailable");
@@ -528,7 +650,10 @@ impl ArtifactStore {
     }
     pub(crate) fn local(root: &FsPath) -> anyhow::Result<Self> {
         std::fs::create_dir_all(root)?;
-        Ok(Self(Arc::new(LocalFileSystem::new_with_prefix(root)?)))
+        Ok(Self(
+            Arc::new(LocalFileSystem::new_with_prefix(root)?),
+            None,
+        ))
     }
     pub(crate) fn configured(root: &FsPath) -> anyhow::Result<Self> {
         match std::env::var("FERRY_ARTIFACT_STORE")
@@ -541,6 +666,7 @@ impl ArtifactStore {
                     |name| std::env::var(name).map_err(|_| anyhow::anyhow!("missing {name}"));
                 let endpoint = setting("FERRY_ARTIFACT_S3_ENDPOINT")?;
                 let store = AmazonS3Builder::from_env()
+                    .with_http_connector(TransferConnector)
                     .with_endpoint(&endpoint)
                     .with_bucket_name(setting("FERRY_ARTIFACT_S3_BUCKET")?)
                     .with_region(setting("FERRY_ARTIFACT_S3_REGION")?)
@@ -571,46 +697,82 @@ impl ArtifactStore {
     }
     /// Atomic create: a concurrent writer must never replace the first ciphertext.
     pub(crate) async fn create(&self, key: &str, bytes: Bytes) -> anyhow::Result<bool> {
-        match self
-            .0
-            .put_opts(
-                &Self::path(key)?,
-                bytes.into(),
-                PutOptions {
-                    mode: PutMode::Create,
-                    ..Default::default()
-                },
-            )
-            .await
-        {
-            Ok(_) => Ok(true),
-            Err(object_store::Error::AlreadyExists { .. }) => Ok(false),
-            Err(error) => Err(error.into()),
-        }
+        self.transfer(async {
+            match self
+                .0
+                .put_opts(
+                    &Self::path(key)?,
+                    bytes.into(),
+                    PutOptions {
+                        mode: PutMode::Create,
+                        ..Default::default()
+                    },
+                )
+                .await
+            {
+                Ok(_) => Ok(true),
+                Err(object_store::Error::AlreadyExists { .. }) => Ok(false),
+                Err(error) => Err(error.into()),
+            }
+        })
+        .await
     }
     pub(crate) async fn get(&self, key: &str, limit: usize) -> anyhow::Result<Bytes> {
-        let result = self.0.get(&Self::path(key)?).await?;
-        anyhow::ensure!(
-            result.meta.size <= limit as u64,
-            "object exceeds read limit"
-        );
-        use futures::TryStreamExt;
-        let mut stream = result.into_stream();
-        let mut bytes = Vec::new();
-        while let Some(chunk) = stream.try_next().await? {
+        self.transfer(async {
+            let result = self.0.get(&Self::path(key)?).await?;
             anyhow::ensure!(
-                chunk.len() <= limit.saturating_sub(bytes.len()),
+                result.meta.size <= limit as u64,
                 "object exceeds read limit"
             );
-            bytes.extend_from_slice(&chunk);
-        }
-        Ok(bytes.into())
+            use futures::TryStreamExt;
+            let mut stream = result.into_stream();
+            let mut bytes = Vec::new();
+            while let Some(chunk) = stream.try_next().await? {
+                anyhow::ensure!(
+                    chunk.len() <= limit.saturating_sub(bytes.len()),
+                    "object exceeds read limit"
+                );
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok(bytes.into())
+        })
+        .await
+    }
+    /// Inspect a format header without materializing the object body.
+    pub(crate) async fn header(&self, key: &str, length: usize) -> anyhow::Result<Option<Bytes>> {
+        self.transfer(async {
+            let path = Self::path(key)?;
+            let metadata = match self.0.head(&path).await {
+                Ok(metadata) => metadata,
+                Err(object_store::Error::NotFound { .. }) => return Ok(None),
+                Err(error) => return Err(error.into()),
+            };
+            let end = metadata.size.min(length as u64);
+            if end == 0 {
+                return Ok(Some(Bytes::new()));
+            }
+            Ok(Some(self.0.get_range(&path, 0..end).await?))
+        })
+        .await
+    }
+    pub(crate) async fn exists(&self, key: &str) -> anyhow::Result<bool> {
+        self.transfer(async {
+            match self.0.head(&Self::path(key)?).await {
+                Ok(_) => Ok(true),
+                Err(object_store::Error::NotFound { .. }) => Ok(false),
+                Err(error) => Err(error.into()),
+            }
+        })
+        .await
     }
     pub(crate) async fn delete(&self, key: &str) -> anyhow::Result<()> {
-        match self.0.delete(&Self::path(key)?).await {
-            Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
-            Err(error) => Err(error.into()),
-        }
+        self.transfer(async {
+            match self.0.delete(&Self::path(key)?).await {
+                Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+                Err(error) => Err(error.into()),
+            }
+        })
+        .await
     }
 }
 

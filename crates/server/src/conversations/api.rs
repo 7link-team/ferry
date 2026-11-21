@@ -3,6 +3,7 @@
 use super::*;
 use crate::entities::{ai_chat_api_sessions as sessions, ai_providers as providers};
 use ferry_protocol::agent::{Event, Input, Outcome, Usage};
+use ferry_protocol::resources::{ResourcePolicy, allows};
 use tokio::sync::{mpsc, watch};
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -15,6 +16,10 @@ struct History {
     request_inflight: bool,
     usage: Option<Usage>,
     usage_known: bool,
+    #[serde(default)]
+    response_bytes: usize,
+    #[serde(default)]
+    tool_calls: usize,
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Pending {
@@ -326,6 +331,7 @@ async fn work(
     c: &conversations::Model,
     owner: &str,
     inputs: &mut mpsc::UnboundedReceiver<Input>,
+    resources: &ResourcePolicy,
 ) -> Result<()> {
     let scope = run::api_authorized(s, row, owner).await?;
     available(&s.db, &scope, c.agent_id.into()).await?;
@@ -396,6 +402,8 @@ async fn work(
         history.request_inflight = false;
         history.usage = None;
         history.usage_known = true;
+        history.response_bytes = 0;
+        history.tool_calls = 0;
         let config: Configuration = serde_json::from_str(&c.config).map_err(|_| invalid())?;
         let policy = crate::accounts::conversation_policy::Configuration::load(&s.db).await?;
         let mut prompt = super::introductions::prompt(s, row, c, &scope, &policy, &config).await?;
@@ -407,6 +415,9 @@ async fn work(
         if !context.is_empty() {
             prompt = format!("{context}{prompt}");
         }
+        if !allows(resources.agent_prompt_bytes, prompt.len()) {
+            return Err(invalid());
+        }
         history
             .messages
             .push(json!({"role":"user","content":prompt}));
@@ -416,6 +427,14 @@ async fn work(
         // Persist full native assistant/tool-call ids before any dispatch.
         while !history.pending.is_empty() {
             let pending = history.pending[0].clone();
+            if !allows(
+                resources.tool_request_bytes,
+                serde_json::to_vec(&pending.arguments)
+                    .map_err(|_| invalid())?
+                    .len(),
+            ) {
+                return Err(error(StatusCode::BAD_REQUEST, "conversations.outputLimit"));
+            }
             history.pending[0].dispatching = true;
             checkpoint(s, row, c, owner, &mut session, &history, None, None).await?;
             let (_, mut result) = run::platform_call(
@@ -456,6 +475,12 @@ async fn work(
                         _ => {}
                     }
                 }
+            }
+            if !allows(
+                resources.tool_response_bytes,
+                serde_json::to_vec(&result).map_err(|_| invalid())?.len(),
+            ) {
+                return Err(error(StatusCode::BAD_REQUEST, "conversations.outputLimit"));
             }
             tool_result(&mut history, anthropic, &pending.id, result.clone());
             history.pending.remove(0);
@@ -498,12 +523,51 @@ async fn work(
                 "conversations.apiOutputRequired",
             ));
         }
+        // The full native history is the actual provider prompt, including
+        // previous tool results; never silently truncate canonical context.
+        if !allows(
+            resources.agent_prompt_bytes,
+            serde_json::to_vec(&history.messages)
+                .map_err(|_| invalid())?
+                .len(),
+        ) {
+            return Err(invalid());
+        }
         history.request_inflight = true;
         checkpoint(s, row, c, owner, &mut session, &history, None, None).await?;
-        let response =
-            crate::workflows::ai::conversation_round(s, row, c, owner, history.round, &params)
-                .await?;
+        let response = loop {
+            match crate::workflows::ai::conversation_round(s, row, c, owner, history.round, &params)
+                .await
+            {
+                Err(error)
+                    if error
+                        .2
+                        .as_ref()
+                        .is_some_and(|message| message.key == "workflow.aiLimit") =>
+                {
+                    // This error is issued only by local reservation before a
+                    // provider request exists. Sent/unknown calls never retry.
+                    run::api_authorized(s, row, owner).await?;
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                other => break other?,
+            }
+        };
+        history.response_bytes = history
+            .response_bytes
+            .checked_add(serde_json::to_vec(&response).map_err(|_| invalid())?.len())
+            .ok_or_else(invalid)?;
+        if !allows(resources.agent_turn_output_bytes, history.response_bytes) {
+            return Err(error(StatusCode::BAD_REQUEST, "conversations.outputLimit"));
+        }
         let (message, text, calls) = crate::workflows::ai::agent_response(&response, anthropic)?;
+        history.tool_calls = history
+            .tool_calls
+            .checked_add(calls.len())
+            .ok_or_else(invalid)?;
+        if !allows(resources.agent_tool_calls, history.tool_calls) {
+            return Err(error(StatusCode::BAD_REQUEST, "conversations.outputLimit"));
+        }
         history.request_inflight = false;
         accumulate_usage(&mut history, response.get("usage"));
         history.round = history.round.checked_add(1).ok_or_else(invalid)?;
@@ -556,17 +620,35 @@ pub(super) async fn execute(
             }
         }
     };
-    let result = tokio::select! {
-        result = work(&s, &row, &c, &owner, &mut inputs) => result,
-        result = monitor => result,
-        _ = stop.changed() => Err(error(StatusCode::CONFLICT, "conversations.interrupted")),
-    };
+    let result = async {
+        let resources = crate::accounts::resource_policy::load(&s.db).await?;
+        let deadline = async {
+            match resources.task_timeout_seconds {
+                Some(seconds) => tokio::time::sleep(std::time::Duration::from_secs(seconds)).await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::pin!(deadline);
+        tokio::select! {
+            result = work(&s, &row, &c, &owner, &mut inputs, &resources) => result,
+            result = monitor => result,
+            _ = &mut deadline => Err(error(StatusCode::GATEWAY_TIMEOUT, "workflow.aiTimeout")),
+            _ = stop.changed() => Err(error(StatusCode::CONFLICT, "conversations.interrupted")),
+        }
+    }
+    .await;
     if let Err(error) = result {
         crate::workflows::ai::conversation_interrupted(&s, &row).await?;
         // API contexts survive failure/cancellation; only current-turn state changes.
         let (tx, mut current, mut room) = run::leased(&s, &row, &owner).await?;
         current.state = if current.state == "stopping" {
             "cancelled"
+        } else if error
+            .2
+            .as_ref()
+            .is_some_and(|message| message.key == "workflow.aiTimeout")
+        {
+            "timed_out"
         } else {
             "failed"
         }
@@ -623,6 +705,286 @@ mod tests {
     }
     fn answer(text: &str) -> Value {
         json!({"choices":[{"message":{"role":"assistant","content":text}}],"usage":{"prompt_tokens":7,"completion_tokens":5}})
+    }
+    async fn resource_policy(s: &AppState, policy: Value) {
+        crate::entities::platform_state::Entity::update_many()
+            .col_expr(
+                crate::entities::platform_state::Column::ResourceConfig,
+                Expr::value(policy.to_string()),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
+    }
+    fn calls(count: usize, write: bool) -> Value {
+        json!({"choices":[{"message":{"role":"assistant","content":null,"tool_calls":(0..count).map(|i|json!({"id":format!("native-{i}"),"type":"function","function":{"name":"ferry_request","arguments":if write {
+            json!({"method":"POST","path":"/node-groups","body":{"name":format!("must-not-write-{i}"),"parent_id":"0","position":0}}).to_string()
+        }else{json!({"method":"GET","path":"/node-groups"}).to_string()}}})).collect::<Vec<_>>()}}],"usage":{"prompt_tokens":1,"completion_tokens":1}})
+    }
+    #[tokio::test]
+    async fn api_resource_default_is_unlimited_and_ignores_legacy_provider_quotas() {
+        let (url, server, requests) =
+            upstream(vec![calls(160, false), answer(&"x".repeat(96 * 1024))]).await;
+        let (_dir, s, room) = fixture(&url).await;
+        crate::entities::ai_providers::Entity::update_many()
+            .col_expr(crate::entities::ai_providers::Column::Qps, Expr::value(1))
+            .col_expr(
+                crate::entities::ai_providers::Column::Concurrency,
+                Expr::value(1),
+            )
+            .col_expr(
+                crate::entities::ai_providers::Column::MonthlyLimitMicros,
+                Expr::value(1),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let row = execute_turn(&s, room, "unlimited-native-tools").await;
+        assert_eq!(row.state, "completed", "{}", row.error);
+        let seen = requests.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(
+            seen[1]["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m["role"] == "tool")
+                .count(),
+            160
+        );
+        assert!(seen.iter().all(|r| r.get("max_tokens").is_none()));
+        server.abort();
+    }
+    #[tokio::test]
+    async fn api_resource_configured_tool_and_output_caps_keep_known_responses_without_dispatch() {
+        let (url, server, requests) =
+            upstream(vec![calls(2, true), answer(&"x".repeat(1024))]).await;
+        let (_dir, s, room) = fixture(&url).await;
+        resource_policy(&s, json!({"agent_tool_calls":1})).await;
+        let first = execute_turn(&s, room, "limited-tools").await;
+        assert_eq!(first.state, "failed");
+        assert!(
+            first.decisions == "{}",
+            "no approval or write may be dispatched"
+        );
+        assert_eq!(
+            crate::entities::host_groups::Entity::find()
+                .filter(crate::entities::host_groups::Column::Name.like("must-not-write-%"))
+                .count(&s.db)
+                .await
+                .unwrap(),
+            0
+        );
+        resource_policy(&s, json!({"agent_turn_output_bytes":64})).await;
+        let second = execute_turn(&s, room, "limited-output").await;
+        assert_eq!(second.state, "failed");
+        let journal = crate::entities::ai_calls::Entity::find()
+            .all(&s.db)
+            .await
+            .unwrap();
+        assert_eq!(journal.len(), 2);
+        assert!(
+            journal
+                .iter()
+                .all(|c| c.state == "succeeded" && c.result.is_some())
+        );
+        assert_eq!(requests.lock().unwrap().len(), 2);
+        let (_stop, signal) = watch::channel(false);
+        run::execute(s.clone(), second.id.into(), signal)
+            .await
+            .unwrap();
+        assert_eq!(
+            requests.lock().unwrap().len(),
+            2,
+            "failed calls are never automatically resent"
+        );
+        server.abort();
+    }
+    #[tokio::test]
+    async fn api_resource_prompt_fails_before_send_and_transport_limit_never_replays_unknown_response()
+     {
+        let (url, server, requests) =
+            upstream(vec![answer("too large for the configured transport")]).await;
+        let (_dir, s, room) = fixture(&url).await;
+        // Queue under the original policy, then tighten it before execution.
+        let turn = sent(&s, room, "prompt-policy-change").await;
+        resource_policy(&s, json!({"agent_prompt_bytes":1})).await;
+        let (_stop, signal) = watch::channel(false);
+        run::execute(s.clone(), turn, signal).await.unwrap();
+        assert!(requests.lock().unwrap().is_empty());
+        assert_eq!(
+            crate::entities::ai_calls::Entity::find()
+                .count(&s.db)
+                .await
+                .unwrap(),
+            0
+        );
+        resource_policy(&s, json!({"file_upload_bytes":8})).await;
+        let failed = execute_turn(&s, room, "transport-ceiling").await;
+        assert_eq!(failed.state, "failed");
+        let journal = crate::entities::ai_calls::Entity::find()
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(journal.state, "unknown");
+        let (_stop, signal) = watch::channel(false);
+        run::execute(s.clone(), failed.id.into(), signal)
+            .await
+            .unwrap();
+        assert_eq!(requests.lock().unwrap().len(), 1);
+        server.abort();
+    }
+    #[tokio::test]
+    async fn api_resource_local_admission_wait_obeys_stop_without_provider_dispatch() {
+        let (url, server, requests) = upstream(vec![answer("first known result")]).await;
+        let (_dir, s, room) = fixture(&url).await;
+        assert_eq!(execute_turn(&s, room, "seed-call").await.state, "completed");
+        crate::entities::ai_calls::Entity::update_many()
+            .col_expr(
+                crate::entities::ai_calls::Column::State,
+                Expr::value("unknown"),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
+        resource_policy(&s, json!({"provider_concurrency":1})).await;
+        let turn = sent(&s, room, "wait-for-admission").await;
+        let (_stop, signal) = watch::channel(false);
+        let mut running = tokio::spawn(run::execute(s.clone(), turn, signal));
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(400), &mut running)
+                .await
+                .is_err(),
+            "local admission waits rather than failing"
+        );
+        cancel(State(s.clone()), admin(1), Path(("1".into(), room, turn)))
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), running)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            turns::Entity::find_by_id(turn)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            "cancelled"
+        );
+        assert_eq!(requests.lock().unwrap().len(), 1);
+        assert_eq!(
+            crate::entities::ai_calls::Entity::find()
+                .count(&s.db)
+                .await
+                .unwrap(),
+            1
+        );
+        server.abort();
+    }
+    #[tokio::test]
+    async fn api_resource_optional_deadline_stops_a_sent_call_and_never_resends_it() {
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let captured = count.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                axum::Router::new().route(
+                    "/chat/completions",
+                    axum::routing::post(move || {
+                        let captured = captured.clone();
+                        async move {
+                            captured.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            std::future::pending::<axum::Json<Value>>().await
+                        }
+                    }),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+        let (_dir, s, room) = fixture(&url).await;
+        resource_policy(&s, json!({"task_timeout_seconds":1})).await;
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            execute_turn(&s, room, "optional-deadline"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.state, "timed_out", "{}", result.error);
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let journal = crate::entities::ai_calls::Entity::find()
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(journal.state, "unknown");
+        let (_stop, signal) = watch::channel(false);
+        run::execute(s.clone(), result.id.into(), signal)
+            .await
+            .unwrap();
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        server.abort();
+    }
+    #[tokio::test]
+    async fn api_resource_cumulative_output_budget_is_persisted_and_resets_only_for_a_new_turn() {
+        let first = calls(1, false);
+        let final_response = answer("first final answer");
+        let next = answer("next turn is allowed");
+        let cap = serde_json::to_vec(&first).unwrap().len()
+            + serde_json::to_vec(&final_response).unwrap().len()
+            - 1;
+        let (url, server, requests) =
+            upstream(vec![first.clone(), final_response, next.clone()]).await;
+        let (_dir, s, room) = fixture(&url).await;
+        resource_policy(&s, json!({"agent_turn_output_bytes":cap})).await;
+        let failed = execute_turn(&s, room, "cumulative-output").await;
+        assert_eq!(failed.state, "failed");
+        let session = sessions::Entity::find()
+            .filter(sessions::Column::ConversationId.eq(room))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let history: History = serde_json::from_str(
+            &s.vault
+                .open_secret(&session.encrypted_history, &aad(&session))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            history.response_bytes,
+            serde_json::to_vec(&first).unwrap().len()
+        );
+        assert_eq!(history.tool_calls, 1);
+        assert_eq!(requests.lock().unwrap().len(), 2);
+        assert_eq!(
+            execute_turn(&s, room, "budget-new-turn").await.state,
+            "completed"
+        );
+        let session = sessions::Entity::find_by_id(session.id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let history: History = serde_json::from_str(
+            &s.vault
+                .open_secret(&session.encrypted_history, &aad(&session))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            history.response_bytes,
+            serde_json::to_vec(&next).unwrap().len()
+        );
+        assert_eq!(history.tool_calls, 0);
+        assert_eq!(requests.lock().unwrap().len(), 3);
+        server.abort();
     }
     #[tokio::test]
     async fn introduction_api_real_provider_result_continues_after_restart_without_public_instructions()
@@ -1055,6 +1417,7 @@ mod tests {
         let tool = json!({"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"native-write","type":"function","function":{"name":"ferry_request","arguments":json!({"method":"POST","path":"/node-groups","body":{"name":"API approved group","parent_id":"0","position":0}}).to_string()}}]}}],"usage":{"prompt_tokens":1,"completion_tokens":1}});
         let (url, server, requests) = upstream(vec![tool, answer("Created after approval")]).await;
         let (_dir, s, room) = fixture(&url).await;
+        resource_policy(&s, json!({"agent_tool_calls":1})).await;
         let turn = sent(&s, room, "approve").await;
         let (_stop, signal) = watch::channel(false);
         let running = tokio::spawn(run::execute(s.clone(), turn, signal));
@@ -1112,6 +1475,24 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        assert_eq!(
+            completed.state, "completed",
+            "approval must not count one tool twice: {}",
+            completed.error
+        );
+        let session = sessions::Entity::find()
+            .filter(sessions::Column::ConversationId.eq(room))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let history: History = serde_json::from_str(
+            &s.vault
+                .open_secret(&session.encrypted_history, &aad(&session))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(history.tool_calls, 1);
         assert_eq!(
             serde_json::from_str::<Value>(&completed.usage).unwrap(),
             json!({"input_tokens":8,"output_tokens":6})

@@ -156,12 +156,14 @@ func (r *runnerImpl) ferryMatrixExecutor(run *model.Run, matrices []map[string]i
                     rc.ExprEval=rc.NewExpressionEvaluator(ctx)
                     tolerated:=false
                     if raw:=isolated.Job().RawContinueOnError; raw!="" { tolerated,e=EvalBool(ctx,rc.ExprEval,raw,exprparser.DefaultStatusCheckNone) }
-                    minutes:=360
+                    minutes:=0
                     if raw:=isolated.Job().TimeoutMinutes; e==nil && raw!="" {
                         minutes,e=strconv.Atoi(rc.ExprEval.Interpolate(ctx,raw))
                         if e==nil && (minutes<1 || int64(minutes)>int64((1<<63-1)/time.Minute)) { e=fmt.Errorf("job timeout-minutes must resolve to a positive duration") }
                     }
-                    jobCtx,cancel:=context.WithTimeout(group,time.Duration(minutes)*time.Minute)
+                    var jobCtx context.Context
+                    var cancel context.CancelFunc
+                    if minutes>0 { jobCtx,cancel=context.WithTimeout(group,time.Duration(minutes)*time.Minute) } else { jobCtx,cancel=context.WithCancel(group) }
                     execCtx,finish:=ferryCleanupContext(ctx,jobCtx)
                     rc.Cancelled.Store(common.JobCancelContext(execCtx).Err()!=nil)
                     rc.ExprEval=rc.NewExpressionEvaluator(execCtx)
