@@ -324,7 +324,7 @@ try {
     if (failure === 'tls') assert.ok(events.slice(index).some((event) => event.type === 'tls-client-error'), 'No actual TLS handshake observed');
     const healthy = await fetch(`${base}/api/status`);
     assert.equal(healthy.status, 200); assert.deepEqual(await healthy.json(), { ok: true });
-    assert.equal(JSON.parse(readFileSync(prefs, 'utf8')).server_url, base);
+    assert.equal(new URL(JSON.parse(readFileSync(prefs, 'utf8')).server_url).href, new URL(base).href);
     record(`${failure}-real-navigation-recovery`, { elapsedMs: Date.now() - start, savedOriginHealthy: true, savedSelectionRetained: true });
   }
   await restartFixture();
@@ -348,7 +348,7 @@ try {
   launch();
   const offline = await waitText('offline-process-restart', (text) => isSettings(text) && /Cannot connect to the server/i.test(text));
   assert.ok(offline.replace(/\s/g, '').includes(`127.0.0.1:${new URL(base).port}`), 'Saved address not visible after offline restart');
-  assert.equal(JSON.parse(readFileSync(prefs, 'utf8')).server_url, base);
+  assert.equal(new URL(JSON.parse(readFileSync(prefs, 'utf8')).server_url).href, new URL(base).href);
   record('offline-process-restart-retains-address-and-settings', 'Real process restart with fixture stopped; localized error and retained address visible');
   if (!args['skip-ui']) {
     try { await testNativeUI(secondURL, 'offline'); }
