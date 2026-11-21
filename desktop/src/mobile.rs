@@ -41,12 +41,16 @@ async fn verify_server(target: &url::Url) -> Result<(), String> {
 }
 
 fn local_document(actual: &url::Url, bundled: &url::Url) -> bool {
+    // Custom-protocol root URLs retain an empty path in url::Url, while
+    // WebKit may expose that same root with a slash. Other paths stay exact.
+    let same_path = actual.path() == bundled.path()
+        || matches!((actual.path(), bundled.path()), ("", "/") | ("/", ""));
     actual.scheme() == bundled.scheme()
         && actual.host_str() == bundled.host_str()
         && actual.port_or_known_default() == bundled.port_or_known_default()
         && actual.username().is_empty()
         && actual.password().is_none()
-        && actual.path() == bundled.path()
+        && same_path
         && actual.query().is_none()
 }
 
@@ -174,7 +178,7 @@ mod native {
                 "http://tauri.localhost/"
             }
         } else {
-            "tauri://localhost/"
+            "tauri://localhost"
         };
         let base = url::Url::parse(origin).unwrap();
         if path.to_str() == Some("index.html") {
@@ -521,6 +525,21 @@ pub use native::run;
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    #[test]
+    fn ios_custom_protocol_empty_root_matches_the_bundled_root_only() {
+        let configured = url::Url::parse("tauri://localhost/").unwrap();
+        let native = url::Url::parse("tauri://localhost").unwrap();
+        assert!(local_document(&native, &configured));
+        assert!(local_document(&configured, &native));
+        assert!(capture_bundled_document(&mut None, &configured, Some(native)));
+        for rejected in [
+            "tauri://localhost/untrusted.html", "tauri://localhost/?query=1",
+            "tauri://other/", "https://localhost/", "tauri://user@localhost/",
+        ] {
+            assert!(!local_document(&url::Url::parse(rejected).unwrap(), &configured));
+        }
+    }
 
     #[test]
     fn deferred_bootstrap_capture_never_trusts_blank_or_remote_navigation() {
