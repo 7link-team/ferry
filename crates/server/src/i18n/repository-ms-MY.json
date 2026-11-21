@@ -864,5 +864,7 @@
   "marketplace.requestUnreachable": "Tidak dapat menyambung ke platform repositori (DNS, sambungan ditolak atau TLS); semak alamat API dan rangkaian pelayan.",
   "transfers.fieldsInvalidDetail": "Medan tiada atau jenisnya salah ({detail}); isi baris seperti dalam templat.",
   "transfers.csvInvalid": "Fail CSV tidak dapat dibaca pada baris {row}; semak tanda petikan dan bilangan lajur pada baris itu.",
-  "templates.documentInvalidAt": "Templat bukan JSON/YAML yang sah pada baris {line}, lajur {column}; semak inden di situ dan letakkan tanda petikan pada pemegang tempat rentetan."
+  "templates.documentInvalidAt": "Templat bukan JSON/YAML yang sah pada baris {line}, lajur {column}; semak inden di situ dan letakkan tanda petikan pada pemegang tempat rentetan.",
+  "maintenance.pipelineConcurrencyLegacyName": "Pelaksanaan saluran paip serentak (tetapan lama, tidak aktif)",
+  "maintenance.pipelineConcurrencyLegacyHelp": "Tetapan ruang kerja ini dikekalkan untuk keserasian dan tidak mengawal pelaksanaan saluran paip. Tetapkan bilangan saluran paip serentak dalam Tetapan platform → Had sumber. Hubungi pentadbir platform jika anda tidak dapat mengakses tetapan platform. Nilai tersimpan dan nilai lalai lama tidak digunakan."
 }

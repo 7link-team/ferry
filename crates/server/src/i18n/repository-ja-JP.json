@@ -864,5 +864,7 @@
   "marketplace.requestUnreachable": "リポジトリプラットフォームに接続できませんでした（DNS、接続拒否、または TLS）。API アドレスとサーバーのネットワークを確認してください。",
   "transfers.fieldsInvalidDetail": "項目が不足しているか型が正しくありません（{detail}）。テンプレートどおりに行を入力してください。",
   "transfers.csvInvalid": "CSV ファイルの {row} 行目を読み取れません。その行の引用符と列数を確認してください。",
-  "templates.documentInvalidAt": "テンプレートの {line} 行 {column} 列が有効な JSON/YAML ではありません。そこのインデントを確認し、文字列のプレースホルダーは引用符で囲んでください。"
+  "templates.documentInvalidAt": "テンプレートの {line} 行 {column} 列が有効な JSON/YAML ではありません。そこのインデントを確認し、文字列のプレースホルダーは引用符で囲んでください。",
+  "maintenance.pipelineConcurrencyLegacyName": "パイプライン同時実行数（旧設定・無効）",
+  "maintenance.pipelineConcurrencyLegacyHelp": "このワークスペース設定は互換性のために保持されており、パイプラインの実行を制御しません。「プラットフォーム設定 → リソース制限」でパイプラインの同時実行数を設定してください。アクセス権がない場合はプラットフォーム管理者に連絡してください。保存済みの値と以前の既定値は適用されません。"
 }

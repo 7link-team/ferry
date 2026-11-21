@@ -97,7 +97,84 @@ mod locale_tests {
             .unwrap()
             .unwrap();
         let id = Id::from(row.id);
+        let legacy = settings::Entity::find()
+            .filter(settings::Column::Key.eq("pipeline_concurrent_runs"))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
         for locale in Locale::ALL {
+            let legacy_before = settings::Entity::find_by_id(legacy.id)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            let legacy_view =
+                with_locale(locale, async { setting_json(legacy_before.clone()) }).await;
+            for (field, key) in [
+                ("name", "maintenance.pipelineConcurrencyLegacyName"),
+                ("description", "maintenance.pipelineConcurrencyLegacyHelp"),
+            ] {
+                let expected = crate::i18n::render(locale, &crate::i18n::Message::new(key));
+                assert_eq!(legacy_view[field], expected);
+                assert_ne!(expected, key, "missing localized legacy setting guidance");
+            }
+            assert_eq!(legacy_view["value"], legacy_before.value);
+            assert_eq!(legacy_view["value_json"], legacy_before.value.to_string());
+            assert_eq!(legacy_view["version"], legacy_before.version);
+            assert_eq!(legacy_view["default"], 10);
+            assert_eq!(legacy_view["min"], 0);
+            assert_eq!(legacy_view["max"], 10000);
+            let mut fields: Vec<_> = legacy_view
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            fields.sort_unstable();
+            let mut expected_fields = [
+                "id",
+                "key",
+                "name",
+                "description",
+                "category",
+                "value_type",
+                "value_json",
+                "schema_json",
+                "value_summary",
+                "builtin",
+                "type",
+                "value",
+                "default",
+                "min",
+                "max",
+                "version",
+                "created_at",
+                "updated_at",
+            ];
+            expected_fields.sort_unstable();
+            assert_eq!(fields, expected_fields);
+            // Existing API writers remain compatible; no value is migrated or applied to execution.
+            update_setting(
+                State(s.clone()),
+                scope(),
+                Path(("1".into(), legacy.id.into())),
+                Json(
+                    serde_json::from_value(json!({"value": 7, "version": legacy_before.version}))
+                        .unwrap(),
+                ),
+            )
+            .await
+            .unwrap();
+            let legacy_after = settings::Entity::find_by_id(legacy.id)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(legacy_after.value, 7);
+            assert_eq!(legacy_after.version, legacy_before.version + 1);
+            assert_eq!(legacy_after.name, legacy.name);
+            assert_eq!(legacy_after.description, legacy.description);
             let current = settings::Entity::find_by_id(row.id)
                 .one(&s.db)
                 .await
@@ -450,13 +527,21 @@ fn setting_json(r: settings::Model) -> Value {
     let schema = def
         .map(|d| json!({"min":d.3,"max":d.4,"decimals":0}).to_string())
         .unwrap_or_else(|| r.schema_json.unwrap_or_else(|| "{}".into()));
-    let name = if def.is_some() && is_default_setting_name(&r.key, &r.name) {
+    let obsolete_pipeline = def.is_some() && r.key == "pipeline_concurrent_runs";
+    let name = if obsolete_pipeline {
+        crate::i18n::message("maintenance.pipelineConcurrencyLegacyName")
+    } else if def.is_some() && is_default_setting_name(&r.key, &r.name) {
         setting_name(&r.key, crate::i18n::current_locale())
     } else {
         r.name
     };
+    let description = if obsolete_pipeline {
+        crate::i18n::message("maintenance.pipelineConcurrencyLegacyHelp")
+    } else {
+        r.description
+    };
     json!({"id":Id::from(r.id),"key":r.key,"name":name,
-        "description":r.description,"category":r.category,"value_type":r.value_type,
+        "description":description,"category":r.category,"value_type":r.value_type,
         "value_json":raw,"schema_json":schema,"value_summary":values::summary(&raw),
         "builtin":def.is_some(),"type":if r.value_type=="num" {"integer"} else {r.value_type.as_str()},
         "value":r.value,"default":def.map(|d|d.2),"min":def.map(|d|d.3),"max":def.map(|d|d.4),

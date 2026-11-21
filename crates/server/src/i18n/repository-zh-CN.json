@@ -864,5 +864,7 @@
   "marketplace.requestUnreachable": "无法连接仓库平台（域名解析、连接被拒绝或 TLS 失败）；请检查 API 地址和服务器网络。",
   "transfers.fieldsInvalidDetail": "字段缺失或类型不正确（{detail}）；请按模板填写该行。",
   "transfers.csvInvalid": "CSV 文件第 {row} 行无法解析；请检查该行的引号和列数。",
-  "templates.documentInvalidAt": "模板在第 {line} 行第 {column} 列不是有效的 JSON/YAML；请检查该处缩进，字符串占位符需加引号。"
+  "templates.documentInvalidAt": "模板在第 {line} 行第 {column} 列不是有效的 JSON/YAML；请检查该处缩进，字符串占位符需加引号。",
+  "maintenance.pipelineConcurrencyLegacyName": "流水线并发数（旧配置，已停用）",
+  "maintenance.pipelineConcurrencyLegacyHelp": "此工作空间配置仅为兼容保留，不再控制流水线执行。请在平台设置 → 容量与执行中配置并发流水线数；没有平台设置权限时请联系平台管理员。此处保存的值和旧默认值均不生效。"
 }

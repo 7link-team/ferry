@@ -165,3 +165,21 @@ it.each(["settings", "dictionaries"] as const)("puts identity and type before co
  expect(sections[2]!.fields[0]!.key).toBe("value_json");
  expect(sections[2]!.fields[0]!.type).toBe("custom");
 });
+
+it("keeps only the obsolete built-in pipeline setting read-only, including direct edit routes", () => {
+  const obsolete = { key: "pipeline_concurrent_runs", builtin: true } as TypedValueRow;
+  const settings = typedResourceForm("settings");
+  const edit = typedResourceList("ops", "settings").actions!.find(action => action.label === "编辑")!;
+  expect(settings.readOnly?.(obsolete)).toBe(true);
+  expect(edit.when?.(obsolete)).toBe(false);
+  for (const row of [
+    { key: "pipeline_concurrent_runs", builtin: false },
+    { key: "default_page_size", builtin: true },
+    { key: "custom_limit", builtin: false },
+  ]) {
+    expect(settings.readOnly?.(row)).toBe(false);
+    expect(edit.when?.(row as TypedValueRow)).toBe(true);
+  }
+  expect(typedResourceForm("dictionaries").readOnly?.(obsolete)).toBe(false);
+  expect(typedResourceList("ops", "dictionaries").actions!.find(action => action.label === "编辑")!.when?.(obsolete)).toBe(true);
+});

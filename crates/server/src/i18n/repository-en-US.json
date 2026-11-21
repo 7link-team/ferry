@@ -864,5 +864,7 @@
   "marketplace.requestUnreachable": "Could not connect to the repository platform (DNS, refused connection or TLS); check the API address and the server's network.",
   "transfers.fieldsInvalidDetail": "A field is missing or has the wrong type ({detail}); fill the row as in the template.",
   "transfers.csvInvalid": "The CSV file cannot be read at line {row}; check quotes and the number of columns on that line.",
-  "templates.documentInvalidAt": "The template is not valid JSON/YAML at line {line}, column {column}; check indentation there and quote string placeholders."
+  "templates.documentInvalidAt": "The template is not valid JSON/YAML at line {line}, column {column}; check indentation there and quote string placeholders.",
+  "maintenance.pipelineConcurrencyLegacyName": "Pipeline concurrency (legacy, inactive)",
+  "maintenance.pipelineConcurrencyLegacyHelp": "This workspace setting is retained for compatibility and does not control pipeline execution. Configure concurrent pipeline runs in Platform settings → Resource limits. Contact a platform administrator if you cannot access platform settings. The stored value and legacy default are not applied."
 }

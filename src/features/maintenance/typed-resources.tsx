@@ -5,6 +5,8 @@ import type { FormConfig,ListConfig } from "../../shared/resources/types";
 import { initialValue,TypedSchemaEditor,TypedValueEditor,VALUE_TYPES,valueTypeOptions,type TypedValueRow } from "./TypedValueEditor";
 
 type Resource = "dictionaries" | "settings";
+const obsoletePipelineSetting = (resource: Resource, row: Partial<TypedValueRow>) =>
+  resource === "settings" && row.builtin === true && row.key === "pipeline_concurrent_runs";
 export const categoryLabel = (value: string) => ["general", "hosts", "history", "pipelines", "repositories"].includes(value)
   ? typedText(`category.${value}` as Parameters<typeof typedText>[0]) : value;
 export function typedResourceList(workspace: string, resource: Resource): ListConfig<TypedValueRow> {
@@ -21,7 +23,7 @@ export function typedResourceList(workspace: string, resource: Resource): ListCo
     ],
     actions: [
       { label: "查看", labelKey: "typed-domain:view", to: row => ({ id: row.id, mode: "view" }) },
-      { label: "编辑", labelKey: "typed-domain:edit", permission: `${resource}.update`, to: row => ({ id: row.id, mode: "edit" }) },
+      { label: "编辑", labelKey: "typed-domain:edit", permission: `${resource}.update`, when: row => !obsoletePipelineSetting(resource, row), to: row => ({ id: row.id, mode: "edit" }) },
       { label: "复制", labelKey: "typed-domain:copy", permission: `${resource}.create`, to: () => ({ mode: "new" }), query: row => ({ copy: row.id }) },
       { label: "删除", labelKey: "typed-domain:delete", permission: `${resource}.delete`, when: row => !row.builtin, destructive: true, action: row => deleteResource(workspace, resource, row.id) },
     ],
@@ -37,6 +39,7 @@ export function typedResourceForm(resource: Resource): FormConfig<TypedValueRow>
   };
   return {
     resource, heading: row => row.name,
+    readOnly: row => obsoletePipelineSetting(resource, row),
     blank: { key: "", name: "", description: "", category: "general", value_type: type, value_json: initialValue(type), schema_json: "{}", ...(isSetting ? {} : { items: "[]" }) },
     copy: row => ({ key: `${row.key}-copy`, name: typedText("copyName", { name: row.name }), description: row.description, category: row.category, value_type: row.value_type, value_json: row.value_json, schema_json: row.schema_json, items: row.items, value: row.value, builtin: false }),
     sections: [
