@@ -4,7 +4,7 @@ Complete approved stability/resource/conversation work and deliver tested Androi
 ## Current Phase
 TESTING / REVIEW / INTEGRATION. Goal active; do not mark complete before final source CI, integration and actual package delivery audit.
 ## Current Step
-Feature D:/Projects/github/ferry-storage-unification HEADecda725/origin matched. Eleven reviewed source/test paths plus ADR/plan/MEMORY are ready for scoped commit. ROOT D:/Projects/github/ferry remains frozen0b31d61. Version0.10.7-alpha; main remains023ac88, no v0.10.7 tag (SSH remote verified), no new main/release/deployment.
+Feature D:/Projects/github/ferry-storage-unification HEAD12d483a/origin matched. All eleven reviewed source/test paths plus ADR/plan/MEMORY committed/SSH-pushed; only current documentation checkpoint may be dirty. ROOT D:/Projects/github/ferry remains frozen0b31d61. Version0.10.7-alpha; main remains023ac88, no v0.10.7 tag (SSH remote verified), no new main/release/deployment.
 ## Confirmed Requirements / Decisions
 - Mobile client only, no deployment default or server/sandbox/Actions sidecars; reuse Tauri launcher/preferences. Desktop keeps both modes.
 - User has no Apple team/certificate: unsigned device IPA + simulator app accepted; no physical-iPhone install/store claim. Android debug-signed installable APKs identified explicitly.
@@ -13,7 +13,7 @@ Feature D:/Projects/github/ferry-storage-unification HEADecda725/origin matched.
 -48 resource ceilings default null/unlimited,0invalid; runtime timeout0 compatibility bridge. Preserve permissions/signatures/protocol invariants/liveness. Configured task_timeout_seconds governs actual I/O/work; no hidden execution ceilings.
 - Chunk-authenticated storage approved: legacy files readable, no historical rewrite; old servers cannot read new files. Coordinated upgrade MUST stop ALL old servers/workers before new file/intro-purpose activation. No forced task interruption.
 - Original local4291 PID17088 (ROOT target/debug/ferry-server-workflow-api.exe), data/keys/identities and production are protected; only isolated fixtures used in this goal turn.
-- CANVAS DECISION CLOSED: user explicitly chose retain viewport-scaled embedded controls, primarily zooming in to operate. Do NOT implement fixed selected-node toolbar. Fifteen zoomed-out9-18px diagram targets are an approved canvas-only exception; normal toolbar/zoom controls remain44px. Three mobile locale zoom-in/operate smoke cases pending worker.
+- CANVAS DECISION CLOSED: user explicitly chose retain viewport-scaled embedded controls, primarily zooming in to operate. Do NOT implement fixed selected-node toolbar. Fifteen zoomed-out9-18px diagram targets are an approved canvas-only exception; normal toolbar/zoom controls remain44px. Three mobile locale zoom-in/operate cases PASS; targets15.27->45.59px after6zoomclicks, normalpan+5hits+picker pass.
 ## Source / Git Progress
 - API context/native history/approvals/questions/intro, resource48/streaming codec and I/O policy integrated before this checkpoint; guarded additive migrations and decisions in ADR.
 -2ea831a: unlimited/>64 Actions capacity, Windows driver centralpolicy, actual upgrade catalog fixtureCA, prior settings/footer zoom fixes; independent reviews and actual gates PASS.
@@ -21,7 +21,7 @@ Feature D:/Projects/github/ferry-storage-unification HEADecda725/origin matched.
 -30ef96d: pipeline/transfer tests align central policies; preserve byte/file-count limits tests and pipefail/logs.
 -5c11e2f: five reviewed sizing-only conversation/host/shared touch files committed/SSH-pushed. Nonempty cards/members/detail wrap; shared44px controls; diagram scaling intentionally retained.
 -ecda725: dedicated platform-admin cookie session for central policy fixture; ordinary build actor still403, owns builds/variables/runs. Actual13case RED/GREEN, full Linux CI SUCCESS.
-- Ready eleven paths: maintenance/mod.rs; repository-{en-US,zh-CN,zh-TW,ja-JP,ko-KR,ms-MY}.json; typed-resources.tsx; TypedValueEditor.test.tsx; App.tsx; Platform.tsx. Pure legacy name/help projection + precise builtin readonly guard; App/Platform sizing only. No history/APIwrite/auth/schema changes. Also ADR/MEMORY/approved plan updates.
+-12d483a committed eleven paths: maintenance/mod.rs; repository-{en-US,zh-CN,zh-TW,ja-JP,ko-KR,ms-MY}.json; typed-resources.tsx; TypedValueEditor.test.tsx; App.tsx; Platform.tsx. Pure legacy name/help projection + precise builtin readonly guard; App/Platform sizing only. No history/APIwrite/auth/schema changes. Also ADR/MEMORY/approved plan updates.
 ## Final Verified Evidence
 Evidence root C:/Users/FullStack/AppData/Local/Temp/ferry-release-tools unless stated otherwise.
 - Normal production-key C: build and full workspace1398PASS/26existingignored (server1237/14ignore), assertions true. Logs combined-c-drive-normal-build.log and combined-c-drive-workspace-tests.log. Never deliver old fixture-key D: binaries.
@@ -44,16 +44,13 @@ Downloads root C:/Users/FullStack/Downloads/Ferry-0.10.7-alpha; four branded art
 - iOS/Ferry-0.10.7-alpha-ios-unsigned.ipa SHAe8b7c44e80795e6111193a6f13930fad5fa6203b812974c44bb9f49c71dd1649; simulator app ZIP SHA01984de42eefde640fab6d9b13f9065dee7a7f325189a1a5b868477dee1d819a. Plistidentifier/0.10.7 numeric version/minimumiOS15, MachOarm64 platform2device/7sim, no sidecars/no provisioning verified. Native results12cases/cleanup PASS; no physical install claim.
 ## External CI
 - PipelineCI44912089150 at ecda725 COMPLETE SUCCESS. Actual artifact14711216077 downloaded pipeline-actor-green: server1235PASS0FAIL14ignored352.03s, live179PASS0FAIL, transfers118PASS, marketplace33PASS(localfixtures). Earlier403 was wrong test actor, corrected without product permission changes; old unexplained Linux failure did not reproduce in two subsequent complete server runs.
-- Final eleven-source-path metadata/config-layout checkpoint is not committed yet, so needs its own fresh pipelineCI. Source test manifests/hash+focused acceptance all pass; no active parent process handles.
+- Final sourceCI44917232591 at12d483a is running; poll exact handle. Previous fullCI44912089150 SUCCESS is baseline evidence, not acceptance of new metadata/UI source. All local tests/source reviews/final smoke PASS. No active parent process handles.
 ## Active Worker / Ownership
-- resource_policy_finish: completed9legacyfiles; all tools/fixtures/Cargo released. Requested6representative chat cases on finalCout (3locales320normal/200); await actual handle/result, no source changes.
-- ios_native_failure_review: completed App/Platform2file144matrix/source review; verifies user-chosen3locale320 diagram zoom-in+embeddedplus path; no source changes.
-- io_policy_independent_review: completed11source-path reviews +144actual-row runtime review, no remaining implementation/Cargo; may independently review final smoke evidence.
-- Parent owns integration, durable state, final CI, release and requirement-by-requirement acceptance. Do not overwrite frozen worker source or restart completed native runs.
+All three workers completed; no active owned process/Cargo/browser/fixture. Parent owns final CI/integration/delivery. Completed6representative chat cases on final immutable C: bundle PASS6/issues0/54checkgroups/24screens; conversation-final-representative/{results,provenance,acceptance-summary}.json. Completed3canvas cases: stage4-rendered-matrix-canvas-approved-zoom/results.json; parent independently validated actual rows/target bounds/hits/dialogs. No source changed for either smoke.
 ## Remaining / Exact Next Action
-1. Collect6chat/3zoom smoke result (all expected existing behavior); no unapproved new toolbar. Then update plan/ADR status.
-2. Commit EXACT eleven verified source paths plus ADR/plan/MEMORY; SSHpush feature. Inspect new CI handle/outcomes; fix only actual failures. Current full953/build/check evidence covers source hashes.
+1. Poll final sourceCI44917232591 at12d483a; all3zoom/6chat smoke are complete PASS and documentation records the approved exception. No user choice remains.
+2. Commit only current ADR/plan/MEMORY checkpoint (no product changes), SSHpush; this docs-only push does not trigger/cancel sourceCI. Inspect finalCI outcomes and repair only actual failures; preserve frozen source/native artifacts.
 3. Once final gates PASS, fetch main, verify ancestry/conflicts, integrate/push main and new immutable0.10.7-alpha release through existing workflows. Verify artifacts/signatures/manifest/image; package mobile ZIP from exactly four verified binaries+instructions/checksums/provenance. Mobile artifacts come from verified1b8ed68 native-source revision; later differences are server-only and explicitly recorded.
 4. Final self-review + original-goal audit, actual package links, signing limits. No store publication or production business reports/notifications. If deploying, stop ALL old workers/servers safely with backup and preserve identities/data; deployment is not assumed complete by a published image.
 ## Last Checkpoint
-2026-11-21 23:02+08: all core CI/native gates PASS, final11source-path review/local953/build+144settings+27legacy PASS; canvas choice explicitly approved. Await3zoom/6chat smoke and final source commit/CI/integration. Original4291/PID17088 preserved.
+2026-11-21 23:10+08: HEAD12d483aSSHpushed; final3zoom/6chat PASS/parent checked; all local source checks953/build+144settings+27legacy PASS, no source changes pending. FinalsourceCI44917232591 running; integrate/release/deliver aftergates. Original4291/PID17088 preserved.
