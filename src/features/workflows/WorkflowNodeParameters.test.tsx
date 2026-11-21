@@ -54,7 +54,7 @@ it("edits object and list literal node values without JSON and disables all ordi
 });
 it("generates platform data path parameters from the selected GET operation and states where it runs", async () => {
   let current: Record<string, unknown> = newNode(emptyGraph(), "ferry.request", "read").params;
-  expect(current).toMatchObject({ operation: "", path_params: {}, query: {}, split_items: true, all_pages: false, max_pages: 50 });
+  expect(current).toMatchObject({ operation: "", path_params: {}, query: {}, split_items: true, all_pages: false });
   const node: GraphNode = { id: "read", type: "ferry.request", type_version: 1, name: "read", position: [0, 0], params: current };
   function Harness({ readOnly = false }: { readOnly?: boolean }) { const [value, setValue] = useState(current); current = value; return <WorkflowNodeParameters node={{ ...node, params: value }} readOnly={readOnly} update={setValue} invalid={() => {}} />; }
   await act(async () => root.render(<Harness />));

@@ -15,10 +15,11 @@ use sea_orm::{
     IntoActiveModel, PaginatorTrait, QueryFilter, QuerySelect, TransactionTrait, sea_query::Expr,
 };
 use sha2::{Digest, Sha256};
+mod streaming;
+pub(crate) use streaming::PreparedAsset;
 
 pub(crate) const DEFAULT_QUOTA: i64 = 50 * 1024 * 1024 * 1024;
 pub(crate) const GRACE_MS: i64 = 24 * 60 * 60 * 1000;
-const PACKET_LIMIT: usize = 32 * 1024 * 1024;
 
 /// A broken invariant on stored content: logged with an incident id.
 #[track_caller]
@@ -33,14 +34,21 @@ fn storage(error: impl std::fmt::Display) -> ApiError {
 fn busy() -> ApiError {
     ApiError::localized(StatusCode::CONFLICT, Message::new("storage.busy"))
 }
-fn size_text(bytes: i64) -> String {
+pub(crate) fn size_text(bytes: i64) -> String {
     let gib = 1024 * 1024 * 1024;
+    let mib = 1024 * 1024;
+    let kib = 1024;
     if bytes >= gib && bytes % gib == 0 {
         format!("{} GiB", bytes / gib)
+    } else if bytes >= mib && bytes % mib == 0 {
+        format!("{} MiB", bytes / mib)
+    } else if bytes >= kib && bytes % kib == 0 {
+        format!("{} KiB", bytes / kib)
     } else {
-        format!("{} MiB", bytes / (1024 * 1024))
+        format!("{bytes} B")
     }
 }
+
 pub(crate) struct Store<'a> {
     pub db: &'a DatabaseConnection,
     pub backend: &'a ArtifactStore,
@@ -69,7 +77,13 @@ async fn lock(tx: &DatabaseTransaction, scope: &str) -> Result<()> {
     Ok(())
 }
 async fn asset_lock(tx: &DatabaseTransaction, workspace: i64, id: i64) -> Result<()> {
-    lock(tx, &format!("content-asset:{workspace}:{id}")).await
+    let name = format!("content-asset:{workspace}:{id}");
+    let owner = uuid::Uuid::new_v4().to_string();
+    if !crate::lock::acquire_live(tx, &name, &owner, 60_000).await? {
+        return Err(busy());
+    }
+    crate::lock::release(tx, &name, &owner).await?;
+    Ok(())
 }
 async fn job(db: &impl ConnectionTrait, workspace: i64, id: i64) -> Result<Option<jobs::Model>> {
     Ok(jobs::Entity::find()
@@ -114,16 +128,35 @@ impl Store<'_> {
         node: &str,
         actor: i64,
     ) -> Result<assets::Model> {
-        if plain.len() > PACKET_LIMIT {
+        self.stage_reader(workspace, plain, mime, execution, node, actor)
+            .await
+    }
+    async fn reserve_asset(
+        &self,
+        workspace: i64,
+        hash: String,
+        size: i64,
+        mime: &str,
+        execution: i64,
+        node: &str,
+        actor: i64,
+    ) -> Result<assets::Model> {
+        let policy = crate::accounts::resource_policy::load(self.db).await?;
+        if policy
+            .file_upload_bytes
+            .is_some_and(|limit| size as u64 > limit)
+        {
             return Err(ApiError::localized(
                 StatusCode::PAYLOAD_TOO_LARGE,
-                Message::new("storage.tooLarge").with("limit", size_text(PACKET_LIMIT as i64)),
+                Message::new("storage.tooLarge")
+                    .with("limit", size_text(policy.file_upload_bytes.unwrap() as i64)),
             ));
         }
-        if workspace <= 0 || self.quota < 0 {
+        // Retain callers' legacy quota value for rollback compatibility; it no longer enforces a ceiling.
+        let _ = self.quota;
+        if workspace <= 0 {
             return Err(fault());
         }
-        let hash = hex::encode(Sha256::digest(plain));
         let tx = self.db.begin().await?;
         lock(&tx, &format!("content-quota:{workspace}")).await?;
         let existing = assets::Entity::find()
@@ -148,11 +181,14 @@ impl Store<'_> {
                     |sum, n| if n < 0 { None } else { sum.checked_add(n) },
                 )
                 .ok_or_else(|| fault())?;
-            let size = i64::try_from(plain.len()).map_err(|_| fault())?;
-            if used.checked_add(size).ok_or_else(|| fault())? > self.quota {
+            let total = used.checked_add(size).ok_or_else(|| fault())?;
+            if let Some(limit) = policy
+                .file_total_bytes
+                .filter(|limit| total as u64 > *limit)
+            {
                 return Err(ApiError::localized(
                     StatusCode::CONFLICT,
-                    Message::new("storage.quotaExceeded").with("quota", size_text(self.quota)),
+                    Message::new("storage.quotaExceeded").with("quota", size_text(limit as i64)),
                 ));
             }
             let now = crate::db::now();
@@ -187,56 +223,14 @@ impl Store<'_> {
             asset
         };
         tx.commit().await?;
-        // Candidate metadata survives a process crash or upload/commit failure.
-        let tx = self.db.begin().await?;
-        asset_lock(&tx, workspace, asset.id).await?;
-        let asset = row(&tx, workspace, asset.id).await?;
-        if job(&tx, workspace, asset.id)
-            .await?
-            .is_some_and(|j| j.state == "deleting")
-        {
-            return Err(ApiError::missing());
-        }
-        let encrypted = self.vault.seal_bytes(plain, &aad(&asset))?;
-        self.backend
-            .create(&key(&asset), encrypted.into())
-            .await
-            .map_err(storage)?;
-        let stored = self.read_bytes_row(&asset).await?;
-        if stored != plain {
-            return Err(storage("object read back differs from what was written"));
-        }
-        tx.commit().await?;
         Ok(asset)
     }
     async fn read_row(&self, asset: &assets::Model) -> Result<String> {
         String::from_utf8(self.read_bytes_row(asset).await?).map_err(|_| fault())
     }
     async fn read_bytes_row(&self, asset: &assets::Model) -> Result<Vec<u8>> {
-        let limit = usize::try_from(asset.size).map_err(|_| fault())?;
-        if limit > PACKET_LIMIT {
-            return Err(fault());
-        }
-        let bytes = self
-            .backend
-            .get(
-                &key(asset),
-                limit
-                    .checked_mul(2)
-                    .and_then(|n| n.checked_add(128))
-                    .ok_or_else(|| fault())?,
-            )
-            .await
-            .map_err(storage)?;
-        let cipher = std::str::from_utf8(&bytes).map_err(|_| fault())?;
-        let plain = self
-            .vault
-            .open_bytes(cipher, &aad(asset))
-            .map_err(|_| fault())?;
-        if plain.len() != limit || hex::encode(Sha256::digest(&plain)) != asset.sha256 {
-            return Err(fault());
-        }
-        Ok(plain)
+        let file = self.read_file_row(asset).await?;
+        tokio::fs::read(file.path()).await.map_err(storage)
     }
     pub(crate) async fn read_bytes(
         &self,
@@ -301,6 +295,21 @@ impl Store<'_> {
         owner_kind: &str,
         owner_id: i64,
     ) -> Result<()> {
+        asset_lock(tx, workspace, id).await?;
+        let asset = row(tx, workspace, id).await?;
+        let _verified = self.read_file_row(&asset).await?;
+        self.attach_metadata(tx, workspace, id, owner_kind, owner_id)
+            .await
+    }
+
+    async fn attach_metadata(
+        &self,
+        tx: &DatabaseTransaction,
+        workspace: i64,
+        id: i64,
+        owner_kind: &str,
+        owner_id: i64,
+    ) -> Result<()> {
         if !matches!(
             owner_kind,
             "execution"
@@ -314,15 +323,13 @@ impl Store<'_> {
         {
             return Err(fault());
         }
-        asset_lock(tx, workspace, id).await?;
-        let asset = row(tx, workspace, id).await?;
+        row(tx, workspace, id).await?;
         if job(tx, workspace, id)
             .await?
             .is_some_and(|j| j.state == "deleting")
         {
             return Err(ApiError::missing());
         }
-        self.read_bytes_row(&asset).await?;
         refs::Entity::insert(
             refs::Model {
                 asset_id: id,
@@ -367,7 +374,7 @@ impl Store<'_> {
             .exec(tx)
             .await?;
         if pinned {
-            self.read_bytes_row(&asset).await?;
+            let _verified = self.read_file_row(&asset).await?;
             jobs::Entity::delete_many()
                 .filter(jobs::Column::AssetId.eq(id))
                 .exec(tx)
@@ -433,7 +440,7 @@ impl Store<'_> {
             return Err(fault());
         }
         tx.commit().await?;
-        if let Err(error) = self.backend.delete(&gc.storage_key).await {
+        if let Err(error) = self.delete_payload(&asset).await {
             jobs::Entity::update_many()
                 .col_expr(jobs::Column::Error, Expr::value("object deletion failed"))
                 .col_expr(jobs::Column::UpdatedAt, Expr::value(crate::db::now()))

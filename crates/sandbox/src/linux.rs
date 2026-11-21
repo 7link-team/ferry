@@ -1,7 +1,7 @@
 //! The re-executed worker receives no environment or inherited descriptors.
 //! Tenant code starts only after identity, rlimits and seccomp are installed.
 use anyhow::{Context, ensure};
-use ferry_protocol::sandbox::{Batch, ErrorCode, MAX_RESPONSE_BYTES, Reply};
+use ferry_protocol::sandbox::{Batch, ErrorCode, Reply};
 use std::{
     io::{Read, Write},
     os::unix::process::CommandExt,
@@ -157,7 +157,11 @@ fn filter() -> anyhow::Result<()> {
     }
 }
 
-fn confine(parent: libc::pid_t, timeout_ms: u64) -> anyhow::Result<()> {
+fn confine(
+    parent: libc::pid_t,
+    timeout_ms: Option<u64>,
+    memory_bytes: Option<usize>,
+) -> anyhow::Result<()> {
     identity()?;
     // setuid resets PDEATHSIG: restore it after changing identity, then close
     // the race by checking the exact launcher pid captured before the spawn.
@@ -166,10 +170,14 @@ fn confine(parent: libc::pid_t, timeout_ms: u64) -> anyhow::Result<()> {
         "parent death",
     )?;
     ensure!(unsafe { libc::getppid() } == parent, "launcher exited");
-    limit(libc::RLIMIT_AS as _, 256 * 1024 * 1024)?;
+    if let Some(bytes) = memory_bytes {
+        limit(libc::RLIMIT_AS as _, bytes as u64)?;
+    }
     limit(libc::RLIMIT_CORE as _, 0)?;
     limit(libc::RLIMIT_NPROC as _, 0)?;
-    limit(libc::RLIMIT_CPU as _, timeout_ms.div_ceil(1000) + 2)?;
+    if let Some(ms) = timeout_ms {
+        limit(libc::RLIMIT_CPU as _, ms.div_ceil(1000).saturating_add(2))?;
+    }
     // Descriptors 0/1/2 are private pipes or /dev/null. Never let native code
     // see an inherited database, file, socket, pidfd or directory descriptor.
     checked(
@@ -181,21 +189,35 @@ fn confine(parent: libc::pid_t, timeout_ms: u64) -> anyhow::Result<()> {
 }
 
 pub(crate) fn worker(batch: Batch, parent: libc::pid_t) -> Reply {
-    if confine(parent, batch.timeout_ms).is_err() {
+    if confine(
+        parent,
+        batch.timeout_ms,
+        batch
+            .resource_policy
+            .sandbox_process_memory_bytes
+            .map(|value| usize::try_from(value).unwrap_or(usize::MAX)),
+    )
+    .is_err()
+    {
         return Reply::error(ErrorCode::Isolation, None);
     }
     crate::engine::evaluate(batch)
 }
 
-pub(crate) fn evaluate(bytes: &[u8], timeout_ms: u64) -> Reply {
-    match launch(bytes, timeout_ms, "--linux-worker") {
+pub(crate) fn evaluate(bytes: &[u8], timeout_ms: Option<u64>, packet_bytes: Option<u64>) -> Reply {
+    match launch(bytes, timeout_ms, packet_bytes, "--linux-worker") {
         Ok(output) => serde_json::from_slice(&output)
             .unwrap_or_else(|_| Reply::error(ErrorCode::Internal, None)),
         Err(_) => Reply::error(ErrorCode::Isolation, None),
     }
 }
 
-fn launch(bytes: &[u8], timeout_ms: u64, flag: &str) -> anyhow::Result<Vec<u8>> {
+fn launch(
+    bytes: &[u8],
+    timeout_ms: Option<u64>,
+    packet_bytes: Option<u64>,
+    flag: &str,
+) -> anyhow::Result<Vec<u8>> {
     let parent = unsafe { libc::getpid() };
     let mut command = Command::new(std::env::current_exe()?);
     command
@@ -224,15 +246,22 @@ fn launch(bytes: &[u8], timeout_ms: u64, flag: &str) -> anyhow::Result<Vec<u8>> 
     let reader = std::thread::spawn(move || {
         let mut output = Vec::new();
         stdout
-            .take((MAX_RESPONSE_BYTES + 1) as u64)
+            .take(
+                packet_bytes
+                    .map(|limit| limit.saturating_add(1))
+                    .unwrap_or(u64::MAX),
+            )
             .read_to_end(&mut output)
             .map(|_| output)
     });
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms + 3_000);
+    let deadline = timeout_ms
+        .and_then(|ms| Instant::now().checked_add(Duration::from_millis(ms.saturating_add(3_000))));
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(2)),
+            Ok(None) if deadline.is_none_or(|deadline| Instant::now() < deadline) => {
+                std::thread::sleep(Duration::from_millis(2))
+            }
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -251,7 +280,7 @@ fn launch(bytes: &[u8], timeout_ms: u64, flag: &str) -> anyhow::Result<Vec<u8>> 
     };
     ensure!(status.success(), "sandbox worker failed");
     write?;
-    if output.len() > MAX_RESPONSE_BYTES {
+    if !ferry_protocol::resources::allows(packet_bytes, output.len()) {
         return Ok(serde_json::to_vec(&Reply::error(
             ErrorCode::ResultLimit,
             None,
@@ -279,13 +308,14 @@ pub(crate) fn diagnostic(args: &[String]) -> Option<serde_json::Value> {
         if !worker {
             return Ok(serde_json::from_slice(&launch(
                 &bytes,
-                1000,
+                Some(1000),
+                None,
                 "--linux-probe",
             )?)?);
         }
         let parent: i32 = args[1].parse()?;
         ensure!(parent > 1, "invalid parent");
-        confine(parent, 1000)?;
+        confine(parent, Some(1000), Some(256 * 1024 * 1024))?;
         let identity = unsafe { libc::geteuid() == 65534 && libc::getegid() == 65534 };
         let filesystem_denied = std::fs::read(&probe.path).is_err();
         let write_denied = std::fs::OpenOptions::new()

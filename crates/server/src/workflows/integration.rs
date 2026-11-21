@@ -87,9 +87,17 @@ pub(super) fn supports(node: &Value) -> bool {
 }
 
 fn client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+    client_with_policy(&Default::default())
+}
+fn client_with_policy(
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> Result<reqwest::Client> {
+    let mut client = reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(30));
+    if let Some(seconds) = policy.task_timeout_seconds {
+        client = client.timeout(std::time::Duration::from_secs(seconds));
+    }
+    client
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(30))
         .user_agent("workflow-integration/1")
         .build()
         .map_err(|_| invalid())
@@ -215,7 +223,15 @@ pub(super) fn validate_declaration(http: &Value, params: &Value) -> anyhow::Resu
     Ok(())
 }
 
-async fn response(http: &Value, mut response: reqwest::Response, secret: &str) -> Result<Value> {
+async fn response(http: &Value, response: reqwest::Response, secret: &str) -> Result<Value> {
+    response_with_policy(http, response, secret, &Default::default()).await
+}
+async fn response_with_policy(
+    http: &Value,
+    mut response: reqwest::Response,
+    secret: &str,
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> Result<Value> {
     // Never log/persist upstream error text, URLs or credentials: host and status only.
     let host = response.url().host_str().unwrap_or("?").to_owned();
     let status = response.status().as_u16();
@@ -229,20 +245,32 @@ async fn response(http: &Value, mut response: reqwest::Response, secret: &str) -
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|_| unknown())? {
-        if chunk.len() > (1024 * 1024_usize).saturating_sub(bytes.len()) {
-            tracing::warn!(host, "integration response exceeds 1 MiB");
+        if !ferry_protocol::resources::allows(
+            policy.workflow_packet_bytes,
+            bytes.len().saturating_add(chunk.len()),
+        ) {
+            tracing::warn!(host, "integration response exceeds configured limit");
             return Err(error("workflow.integrationTooLarge"));
         }
         bytes.extend_from_slice(&chunk);
     }
-    response_bytes(http, status, &bytes, secret)
+    response_bytes_with_policy(http, status, &bytes, secret, policy)
 }
 
 fn response_bytes(http: &Value, status: u16, bytes: &[u8], secret: &str) -> Result<Value> {
+    response_bytes_with_policy(http, status, bytes, secret, &Default::default())
+}
+fn response_bytes_with_policy(
+    http: &Value,
+    status: u16,
+    bytes: &[u8],
+    secret: &str,
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> Result<Value> {
     if !(200..300).contains(&status) {
         return Err(remote_status(status));
     }
-    if bytes.len() > 1024 * 1024 {
+    if !ferry_protocol::resources::allows(policy.workflow_packet_bytes, bytes.len()) {
         return Err(error("workflow.integrationTooLarge"));
     }
     if !secret.is_empty()
@@ -300,11 +328,18 @@ async fn host_request(
             value.replace('\\', "\\\\").replace('"', "\\\"")
         ))
     };
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     let mut config = format!(
-        "silent\nshow-error\nmax-time = 30\nmax-filesize = 1048576\nurl = {}\nrequest = {}\n",
+        "silent\nshow-error\nconnect-timeout = 30\nurl = {}\nrequest = {}\n",
         config_quote(request.url().as_str())?,
         config_quote(request.method().as_str())?
     );
+    if let Some(seconds) = policy.task_timeout_seconds {
+        config.push_str(&format!("max-time = {seconds}\n"));
+    }
+    if let Some(bytes) = policy.workflow_packet_bytes {
+        config.push_str(&format!("max-filesize = {bytes}\n"));
+    }
     for (name, value) in request.headers() {
         config.push_str(&format!(
             "header = {}\n",
@@ -330,11 +365,12 @@ async fn host_request(
         .ok_or_else(unknown)?
         .rsplit_once('\n')
         .ok_or_else(unknown)?;
-    let mut result = response_bytes(
+    let mut result = response_bytes_with_policy(
         http,
         status.trim().parse().map_err(|_| unknown())?,
         body.as_bytes(),
         secret,
+        &policy,
     )?;
     result["execution_host"] = output["execution_host"].clone();
     Ok(result)
@@ -700,7 +736,8 @@ pub(super) async fn execute(
     } else {
         (items, params)
     };
-    let client = client()?;
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let client = client_with_policy(&policy)?;
     if params.len() != items.len() {
         return Err(invalid());
     }
@@ -810,22 +847,25 @@ pub(super) async fn execute(
         } else if super::host::requested(node) {
             host_request(s, run, node, &http, builder.ok_or_else(invalid)?, &secret).await
         } else {
-            match builder.ok_or_else(invalid)?.send().await {
-                Ok(reply) => response(&http, reply, &secret).await,
-                Err(e) => {
-                    let host = e
-                        .url()
-                        .and_then(|url| url.host_str().map(str::to_owned))
-                        .unwrap_or_else(|| "?".into());
-                    // Only a request that never reached the application is a known failure.
-                    Err(
-                        match crate::upstream::unreachable("integration", &host, &e) {
-                            Some(error) if e.is_connect() => remote_from(error),
-                            _ => unknown(),
-                        },
-                    )
+            super::host::while_active(s, run, async {
+                match builder.ok_or_else(invalid)?.send().await {
+                    Ok(reply) => response_with_policy(&http, reply, &secret, &policy).await,
+                    Err(e) => {
+                        let host = e
+                            .url()
+                            .and_then(|url| url.host_str().map(str::to_owned))
+                            .unwrap_or_else(|| "?".into());
+                        // Only a request that never reached the application is a known failure.
+                        Err(
+                            match crate::upstream::unreachable("integration", &host, &e) {
+                                Some(error) if e.is_connect() => remote_from(error),
+                                _ => unknown(),
+                            },
+                        )
+                    }
                 }
-            }
+            })
+            .await
         };
         let (state, sealed) = match &result {
             Ok(value) => (
@@ -996,15 +1036,15 @@ async fn definition_format(scope: Scope, Path(_): Path<String>) -> Result<Json<V
         "example": definition_example(),
         "execution_support": {
             "settings": {
-                "timeout_seconds":"Omit or use 0. A workflow-wide timeout is not implemented; node timeout_s remains available.",
+                "timeout_seconds":"Omit or use 0. A workflow-wide timeout is not implemented; legacy node timeout_s is accepted but ignored; administrators may configure task_timeout_seconds.",
                 "save_data":"Omit. Custom retention policies are not implemented; existing execution records remain in use.",
                 "concurrency":"Omit or use scope=none. Workflow-wide concurrency policies are not implemented.",
                 "error_workflow_id":"Omit or use an empty string. Error workflows are not implemented."
             },
             "node_settings":"Use on_error=stop and retry.max_tries=1 (or omit them). Other policies are not implemented. core.wait supports duration/until; core.merge supports append. Flat pins, bypass and always_output have restrictions on conditional/preview nodes; inspect exact run rejection paths before changing those semantics.",
             "placement":"Execution is per node, not per workflow. CLI nodes use an explicit node target, otherwise a compatible workflow default, otherwise their model's candidate Runner hosts. Different nodes may use different hosts. Pass data and file artifacts through node outputs; local filesystem paths are not shared across hosts.",
-            "api_agents":"ai.agent.run also accepts enabled API-model Agents. The server calls that model's configured provider, without a Runner, ignoring CLI host targets. The same GET-only platform tools, live user/Agent permission checks and output_schema apply. files.enabled requires a supported CLI: use structured API output followed by report.render for PDF files. max_tokens optionally sets the per-request API output length (default 1024).",
-            "metering":"No per-call or monthly monetary limit is enforced. Legacy max_cost_micros and monthly_limit_micros fields are accepted for compatibility but ignored for admission. Configured prices calculate recorded costs; absent prices do not block calls. Provider request rate and concurrency still apply. Uncertain calls are recorded and never automatically resent.",
+            "api_agents":"ai.agent.run also accepts enabled API-model Agents. The server calls that model's configured provider, without a Runner, ignoring CLI host targets. The same GET-only platform tools, live user/Agent permission checks and output_schema apply. files.enabled requires a supported CLI: use structured API output followed by report.render for PDF files. max_tokens is an explicit provider request parameter. OpenAI-compatible requests omit it when absent; Anthropic requires a positive value before execution.",
+            "metering":"No per-call or monthly monetary limit is enforced. Legacy max_cost_micros and monthly_limit_micros fields are accepted for compatibility but ignored for admission. Configured prices calculate recorded costs; absent prices do not block calls. Administrator-configured provider request rate and concurrency limits apply; legacy provider qps/concurrency values are retained but ignored. Uncertain calls are recorded and never automatically resent.",
             "recovery":"A schema-valid draft can contain settings this runtime cannot execute. On a run/publication rejection, inspect the exact path and reason. Do not attribute /settings failures to Runner availability. Remove unsupported optional settings only when their semantics are not required; otherwise explain the missing capability and ask the user. Inspect the current version before PATCH, then retry the draft before publishing or scheduling."
         },
         "requests": {
@@ -1025,7 +1065,7 @@ async fn definition_format(scope: Scope, Path(_): Path<String>) -> Result<Json<V
             "schedule":{"method":"POST","path":"/cron-jobs","body":{
                 "name":"Weekly workflow","scope":"build","action":"workflow","target_kind":"workflow",
                 "target_ref":"<workflow_id>","entry_node_id":"start","inputs":{},
-                "schedule":"0 9 * * 1","timezone":"UTC","enabled":true,"timeout_seconds":600}},
+                "schedule":"0 9 * * 1","timezone":"UTC","enabled":true}},
             "run_schedule":{"method":"POST","path":"/cron-jobs/{job_id}/runs"},
             "inspect_execution":{"method":"GET","path":"/workflow-executions/{execution_id}"},
             "inspect_nodes":{"method":"GET","path":"/workflow-executions/{execution_id}/node-runs"}
@@ -1041,7 +1081,7 @@ async fn definition_format(scope: Scope, Path(_): Path<String>) -> Result<Json<V
             "Each node: id (lower_snake, unique in its graph), type and type_version from GET /workflow-node-catalog?section=builtin (or the integration catalog), name, params valid for that type, position [x, y]. Names do not have to be unique.",
             "The schema describes the graph envelope. Node params use that node's catalog params_schema; expression_fields additionally allow strings beginning with = at those paths in saved drafts. Evaluated values must satisfy params_schema.",
             "Connections link {node, port, index} to {node, port, index}; ports are the `port` names in the node contract (usually main).",
-            "Saving also validates node versions, runtime/cache/credential settings, node-specific semantics, existing endpoint nodes and ports/indexes, duplicate connections, acyclic graphs, loop nesting, pin references, timezone and size limits. JSON Schema validation alone does not guarantee acceptance or permission to execute.",
+            "Saving also validates node versions, runtime/cache/credential settings, node-specific semantics, existing endpoint nodes and ports/indexes, duplicate connections, acyclic graphs, loop nesting, pin references, timezone and administrator-configured resource limits. JSON Schema validation alone does not guarantee acceptance or permission to execute.",
             "Replace example ids (agent_id, channel_id, report source ids) with real ones from the platform.",
             "If saving fails, the error names a JSON path and the reason: fix that field and send the request again."
         ]
@@ -1065,7 +1105,7 @@ pub(crate) fn definition_example() -> Value {
             {"id":"analyze","name":"Summarize contributors","type":"ai.agent.run","type_version":1,"position":[520,0],
              "params":{"agent_id":"1","prompt":"=Summarize this contributors report using only the provided data: {{ JSON.stringify($json) }}",
                        "output_schema":{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"}},
-                       "required":["title","summary"]},"timeout_s":600,"max_tool_calls":64}},
+                       "required":["title","summary"]}}},
             {"id":"report","name":"Render PDF","type":"report.render","type_version":1,"position":[780,0],
              "params":{"format":"pdf","title":"={{ $json.title }}","subtitle":"","period":"","summary":"={{ $json.summary }}",
                        "metrics":[],"sections":[{"title":"Contributors","markdown":"={{ $json.summary }}","page_break":false}],
@@ -1237,11 +1277,19 @@ async fn options(
     params["credential_id"] = body.credential_id.to_string().into();
     graph::validate_resolved(&node, "/options", &params)?;
     let (_, secret) = credential(&s, &scope, &spec["http"], &params).await?;
-    let reply = request(&client()?, &spec["http"], &params, &secret)?
-        .send()
-        .await
-        .map_err(|_| unknown())?;
-    Ok(Json(response(&spec["http"], reply, &secret).await?))
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let reply = request(
+        &client_with_policy(&policy)?,
+        &spec["http"],
+        &params,
+        &secret,
+    )?
+    .send()
+    .await
+    .map_err(|_| unknown())?;
+    Ok(Json(
+        response_with_policy(&spec["http"], reply, &secret, &policy).await?,
+    ))
 }
 
 #[cfg(test)]

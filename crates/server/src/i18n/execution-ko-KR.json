@@ -256,5 +256,10 @@
   "workflow.agentFileMismatch": "\"{name}\"의 내용이 파일 형식과 맞지 않아 전달하지 않았습니다. 해당 형식의 실제 파일을 만들도록 에이전트에 요청하세요.",
   "workflow.agentNoFiles": "에이전트가 끝났지만 출력 폴더에 파일이 없습니다. 마지막 메시지에서 이유를 확인하거나 요청을 더 구체적으로 하세요.",
   "hosts.fileToolsRunnerOnly": "파일 제작 도구는 Runner 호스트에서만 확인할 수 있습니다.",
-  "execution.definitionJsonAt": "파이프라인 정의의 {line}행 {column}열이 올바른 JSON이 아닙니다."
+  "execution.definitionJsonAt": "파이프라인 정의의 {line}행 {column}열이 올바른 JSON이 아닙니다.",
+  "request.resourceLimit": "요청이 관리자가 설정한 리소스 한도를 초과했습니다.",
+  "workflow.agentMaxTokensRequired": "{path}: 이 공급자는 max_tokens 값을 명시적으로 설정해야 합니다.",
+  "workflow.aiTimeout": "AI 작업이 설정된 시간 제한을 초과하여 중지되었습니다. 다시 실행하기 전에 기록된 결과를 확인하세요.",
+  "runner.resourcePolicyUpgrade": "이 Runner는 명령에 플랫폼 리소스 정책을 적용할 수 없습니다. 이 작업을 실행하기 전에 Runner를 업데이트하세요.",
+  "runner.clusterPolicyUpgrade": "요청 서버는 확인 응답이 있는 대용량 응답을 지원하지 않습니다. 이 작업을 실행하기 전에 서버를 업데이트하세요."
 }

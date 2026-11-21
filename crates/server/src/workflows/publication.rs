@@ -163,7 +163,8 @@ pub async fn create(
         .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
-    let checked = graph::checked(&revision.definition).await?;
+    let policy = crate::accounts::resource_policy::load(&tx).await?;
+    let checked = graph::checked_with_policy(&revision.definition, &policy).await?;
     let graph: Value = serde_json::from_str(&checked).map_err(|_| ApiError::missing())?;
     super::run::publication_ready(&graph)?;
     let version = row

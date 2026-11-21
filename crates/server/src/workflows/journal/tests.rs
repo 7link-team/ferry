@@ -319,6 +319,16 @@ async fn outputless_stop_snapshot_rejects_fake_ports_and_preserves_skipped_histo
 #[tokio::test]
 async fn node_budget_serializes_attempts_and_allows_replay_at_the_limit() {
     let fixture = Fixture::new().await;
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            sea_orm::sea_query::Expr::value(Some(
+                json!({"workflow_node_executions":MAX_NODE_EXECUTIONS}).to_string(),
+            )),
+        )
+        .exec(&fixture.db)
+        .await
+        .unwrap();
     let first = fixture
         .journal()
         .activate(fixture.run().await.version, activation(31, "/nodes/0"))
@@ -380,6 +390,25 @@ async fn node_budget_serializes_attempts_and_allows_replay_at_the_limit() {
         nodes::Entity::find().count(&fixture.db).await.unwrap(),
         MAX_NODE_EXECUTIONS
     );
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            sea_orm::sea_query::Expr::value(None::<String>),
+        )
+        .exec(&fixture.db)
+        .await
+        .unwrap();
+    let mut unlimited = activation(35, "/nodes/1");
+    unlimited.attempt = 3;
+    fixture
+        .journal()
+        .activate(after.version, unlimited)
+        .await
+        .unwrap();
+    assert_eq!(
+        nodes::Entity::find().count(&fixture.db).await.unwrap(),
+        MAX_NODE_EXECUTIONS + 1
+    );
 }
 fn output(value: &str) -> Output {
     Output {
@@ -400,6 +429,189 @@ fn source(node: &nodes::Model, output: &Output) -> Source {
         port: "main".into(),
         port_index: 0,
         output_sha256: digest(&output.ports[0]).unwrap(),
+    }
+}
+
+#[tokio::test]
+async fn slow_source_reads_allow_heartbeat_and_reject_changed_dependencies() {
+    use crate::content_assets::{DEFAULT_QUOTA, Store};
+    use std::time::Duration;
+
+    for completing in [false, true] {
+        for change in ["none", "source", "lease"] {
+            let fixture = Fixture::new().await;
+            let backend = crate::artifact_store::ArtifactStore::throttled_for_test(
+                Duration::from_millis(400),
+            );
+            let ids = crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap();
+            let store = Store {
+                db: &fixture.db,
+                backend: &backend,
+                vault: &fixture.vault,
+                ids: &ids,
+                quota: DEFAULT_QUOTA,
+            };
+            let journal = Journal {
+                assets: Some(&store),
+                ..fixture.journal()
+            };
+            let first = journal
+                .activate(fixture.run().await.version, activation(31, "/nodes/0"))
+                .await
+                .unwrap();
+            let large = output(&"source".repeat(32 * 1024));
+            let reference = source(&first.node, &large);
+            let source = journal
+                .complete(first.execution_version, 31, first.node.version, large)
+                .await
+                .unwrap();
+            let mut next = activation(32, "/nodes/1");
+            next.sources = vec![reference.clone()];
+            let active = if completing {
+                Some(
+                    journal
+                        .activate(source.execution_version, next)
+                        .await
+                        .unwrap(),
+                )
+            } else {
+                None
+            };
+            let version = fixture.run().await.version;
+            let operation = async {
+                if let Some(active) = &active {
+                    journal
+                        .complete(version, 32, active.node.version, output("done"))
+                        .await
+                } else {
+                    let mut next = activation(32, "/nodes/1");
+                    next.sources = vec![reference];
+                    journal.activate(version, next).await
+                }
+            };
+            let concurrent = async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::time::timeout(Duration::from_millis(200), async {
+                    assert!(fixture.lease.renew_live(&fixture.db, crate::db::now()).await.unwrap());
+                    match change {
+                        "source" => fixture.db.execute_unprepared(
+                            "UPDATE workflow_node_runs SET version=version+1 WHERE id=31"
+                        ).await.unwrap(),
+                        "lease" => fixture.db.execute_unprepared(
+                            "UPDATE locks SET expires_at=0"
+                        ).await.unwrap(),
+                        _ => fixture.db.execute_unprepared(
+                            "UPDATE workflow_node_runs SET logs='concurrent log', logs_updated_at=1 WHERE id=31"
+                        ).await.unwrap(),
+                    };
+                }).await
+            };
+            let (result, write) = tokio::join!(operation, concurrent);
+            assert!(
+                write.is_ok(),
+                "SQL heartbeat/write blocked during {completing}/{change} source download"
+            );
+            assert_eq!(result.is_ok(), change == "none", "{completing}/{change}");
+            if change != "none" {
+                assert_eq!(fixture.run().await.version, version);
+                let row = nodes::Entity::find_by_id(32)
+                    .one(&fixture.db)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row.as_ref().map(|node| node.state.as_str()),
+                    completing.then_some("running")
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn slow_frozen_snapshot_reads_allow_wait_and_wake_heartbeats() {
+    use crate::content_assets::{DEFAULT_QUOTA, Store};
+    use std::time::Duration;
+    for waking in [false, true] {
+        let mut fixture = Fixture::new().await;
+        let backend =
+            crate::artifact_store::ArtifactStore::throttled_for_test(Duration::from_millis(400));
+        let ids = crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap();
+        let mut request = activation(31, "/nodes/0");
+        request.params = vec![params(&"frozen".repeat(32 * 1024))];
+        let active = {
+            let store = Store {
+                db: &fixture.db,
+                backend: &backend,
+                vault: &fixture.vault,
+                ids: &ids,
+                quota: DEFAULT_QUOTA,
+            };
+            let journal = Journal {
+                assets: Some(&store),
+                ..fixture.journal()
+            };
+            let active = journal
+                .activate(fixture.run().await.version, request)
+                .await
+                .unwrap();
+            if waking {
+                let waited = journal
+                    .wait(
+                        active.execution_version,
+                        31,
+                        active.node.version,
+                        crate::db::now() - 1,
+                    )
+                    .await
+                    .unwrap();
+                journal.park(waited).await.unwrap();
+            }
+            active
+        };
+        if waking {
+            fixture.takeover().await;
+        }
+        let store = Store {
+            db: &fixture.db,
+            backend: &backend,
+            vault: &fixture.vault,
+            ids: &ids,
+            quota: DEFAULT_QUOTA,
+        };
+        let journal = Journal {
+            assets: Some(&store),
+            ..fixture.journal()
+        };
+        let version = fixture.run().await.version;
+        let operation = async {
+            if waking {
+                journal.wake(version, &[]).await
+            } else {
+                journal
+                    .wait(version, 31, active.node.version, crate::db::now() + 60_000)
+                    .await
+            }
+        };
+        let concurrent = async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::timeout(
+                Duration::from_millis(200),
+                fixture.lease.renew_live(&fixture.db, crate::db::now()),
+            )
+            .await
+        };
+        let (result, heartbeat) = tokio::join!(operation, concurrent);
+        assert!(
+            heartbeat.unwrap().unwrap(),
+            "heartbeat blocked while waking={waking}"
+        );
+        result.unwrap();
+        let node = nodes::Entity::find_by_id(31)
+            .one(&fixture.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(node.state, if waking { "running" } else { "waiting" });
     }
 }
 
@@ -649,7 +861,19 @@ async fn packet_boundary_and_failed_fence_preserve_limits_versions_and_track_orp
         .await
         .unwrap();
     assert!(external.asset.is_some());
-    assert!(output(&"x".repeat(1024 * 1024)).validate(false).is_err());
+    let large = output(&"x".repeat(1024 * 1024));
+    assert!(large.validate(false).is_ok());
+    assert!(
+        large
+            .validate_with_policy(
+                false,
+                &ferry_protocol::resources::ResourcePolicy {
+                    workflow_packet_bytes: Some(1024 * 1024),
+                    ..Default::default()
+                }
+            )
+            .is_err()
+    );
     let active = journal
         .activate(run.version, activation(31, "/nodes/0"))
         .await
@@ -1173,14 +1397,26 @@ fn oversized_outputs_name_the_limit_and_broken_packets_are_internal_faults() {
         version: 1,
         ports: vec![port(vec![item(MAX_ITEM_BYTES)])],
     }
-    .validate(false)
+    .validate_with_policy(
+        false,
+        &ferry_protocol::resources::ResourcePolicy {
+            workflow_packet_bytes: Some(MAX_ITEM_BYTES as u64),
+            ..Default::default()
+        },
+    )
     .unwrap_err();
     assert_eq!(key_of(one), "workflow.itemTooLarge");
     let many = Output {
         version: 1,
         ports: vec![port((0..17).map(|_| item(1024 * 1024 - 64)).collect())],
     }
-    .validate(false)
+    .validate_with_policy(
+        false,
+        &ferry_protocol::resources::ResourcePolicy {
+            workflow_packet_bytes: Some(16 * 1024 * 1024),
+            ..Default::default()
+        },
+    )
     .unwrap_err();
     assert_eq!(many.0, axum::http::StatusCode::PAYLOAD_TOO_LARGE);
     let shown = many.render(crate::i18n::Locale::ZhCn);

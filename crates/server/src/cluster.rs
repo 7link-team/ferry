@@ -31,7 +31,7 @@ use tracing::Instrument;
 const TTL: Duration = Duration::from_secs(30);
 const IO_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_FRAME: usize = 256 * 1024;
-const MAX_MESSAGE: usize = 16 * 1024 * 1024;
+use ferry_protocol::resources::allows;
 
 pub fn unavailable() -> ApiError {
     ApiError::localized(
@@ -86,6 +86,8 @@ pub struct Owner {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RunnerInfo {
+    #[serde(default)]
+    pub supports_resource_policy: bool,
     pub managed: bool,
     #[serde(default)]
     pub installation_scope: Option<String>,
@@ -108,6 +110,8 @@ pub enum Request {
         fence: String,
         session: String,
         kind: ferry_protocol::SessionKind,
+        #[serde(default)]
+        resource_policy: Option<ferry_protocol::resources::ResourcePolicy>,
     },
     Monitor {
         workspace: Id,
@@ -146,7 +150,16 @@ impl Reply {
 #[derive(Serialize, Deserialize)]
 struct Envelope<T> {
     expires_at: i64,
+    #[serde(default)]
+    reply_acknowledgements: bool,
     request: T,
+}
+
+struct RpcAssembly {
+    bytes: Vec<u8>,
+    received_at: i64,
+    last_progress: tokio::time::Instant,
+    limit: Option<u64>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -233,11 +246,7 @@ impl Cluster {
                     if locks.readers.contains_key(token) {
                         locks.readers.insert(token.into(), expires);
                         true
-                    } else if !renew
-                        && locks.writer.is_none()
-                        && locks.waiting.is_none()
-                        && locks.readers.len() < 256
-                    {
+                    } else if !renew && locks.writer.is_none() && locks.waiting.is_none() {
                         locks.readers.insert(token.into(), expires);
                         true
                     } else {
@@ -463,17 +472,26 @@ impl Cluster {
                 bucket: bucket.clone(),
                 history: 1,
                 max_age: TTL,
-                max_value_size: 256 * 1024,
+                max_value_size: -1,
                 num_replicas: replicas,
                 ..Default::default()
             };
-            let store = match js.create_key_value(config).await {
+            let mut store = match js.create_key_value(config).await {
                 Ok(store) => store,
                 Err(_) => js.get_key_value(&bucket).await.map_err(|_| {
                     anyhow::anyhow!("cannot create/open cluster KV bucket {bucket}")
                 })?,
             };
             let status = store.status().await?;
+            if status.info.config.max_message_size == 256 * 1024 {
+                // Remove the previous application default from existing buckets.
+                // Keep ownership expiry, history and replica settings unchanged.
+                let mut config = status.info.config.clone();
+                config.max_message_size = -1;
+                js.update_stream(config).await?;
+                // KV status is cached by async-nats; reopen after the update.
+                store = js.get_key_value(&bucket).await?;
+            }
             anyhow::ensure!(
                 status.max_age() == TTL
                     && status.history() == 1
@@ -571,6 +589,9 @@ impl Cluster {
     }
 
     pub async fn rpc<T: DeserializeOwned>(&self, node: &str, request: &Request) -> Result<T> {
+        let limit = crate::accounts::resource_policy::load(&self.db)
+            .await?
+            .cluster_message_bytes;
         if self.client.connection_state() != async_nats::connection::State::Connected {
             diagnostic("nats", "rpc", "broker_disconnected");
             return Err(unavailable());
@@ -578,43 +599,170 @@ impl Cluster {
         let inbox = self.client.new_inbox();
         let mut responses = self.client.subscribe(inbox.clone()).await.map_err(failed)?;
         self.client.flush().await.map_err(failed)?;
-        self.client
-            .publish_with_reply(
-                format!("{}.rpc.{node}", self.prefix),
-                inbox,
-                serde_json::to_vec(&Envelope {
-                    expires_at: crate::db::now() + IO_TIMEOUT.as_millis() as i64,
-                    request,
-                })
-                .map_err(failed)?
-                .into(),
-            )
-            .await
-            .map_err(failed)?;
-        let bytes = tokio::time::timeout(IO_TIMEOUT, async {
-            let mut bytes = Vec::new();
-            while let Some(response) = responses.next().await {
-                if response
-                    .status
-                    .is_some_and(|status| status.is_server_error())
-                {
-                    diagnostic("nats", "rpc", "broker_error_response");
-                    return Err(unavailable());
-                }
-                if append_packet(&mut bytes, &response.payload)? {
-                    return Ok(bytes);
+        let bytes = serde_json::to_vec(&Envelope {
+            expires_at: crate::db::now() + IO_TIMEOUT.as_millis() as i64,
+            reply_acknowledgements: true,
+            request,
+        })
+        .map_err(failed)?;
+        if !allows(limit, bytes.len()) {
+            return Err(unavailable());
+        }
+        let subject = format!("{}.rpc.{node}", self.prefix);
+        if bytes.len() <= MAX_FRAME {
+            // Retain the JSON request shape understood by older cluster peers.
+            self.client
+                .publish_with_reply(subject, inbox, bytes.into())
+                .await
+                .map_err(failed)?;
+        } else {
+            let count = bytes.chunks(MAX_FRAME).len();
+            for (index, chunk) in bytes.chunks(MAX_FRAME).enumerate() {
+                self.client
+                    .publish_with_reply(
+                        subject.clone(),
+                        inbox.clone(),
+                        packet(chunk, index + 1 == count),
+                    )
+                    .await
+                    .map_err(failed)?;
+                if index + 1 != count {
+                    // One request fragment in flight: broker queues are a working
+                    // window, not storage proportional to the request size.
+                    let ack = tokio::time::timeout(IO_TIMEOUT, responses.next())
+                        .await
+                        .map_err(failed)?
+                        .ok_or_else(unavailable)?;
+                    if ack.payload.as_ref() != [5] {
+                        return Err(unavailable());
+                    }
                 }
             }
-            diagnostic("nats", "rpc", "response_subscription_closed");
-            Err(unavailable())
-        })
-        .await
-        .map_err(|_| {
-            diagnostic("nats", "rpc", "response_timeout");
-            unavailable()
-        })??;
+        }
+        let mut bytes = Vec::new();
+        loop {
+            // This is an idle deadline. Every response fragment or server pulse
+            // demonstrates progress, regardless of total operation duration.
+            let response = tokio::time::timeout(IO_TIMEOUT, responses.next())
+                .await
+                .map_err(|_| {
+                    diagnostic("nats", "rpc", "response_timeout");
+                    unavailable()
+                })?
+                .ok_or_else(unavailable)?;
+            if response
+                .status
+                .is_some_and(|status| status.is_server_error())
+            {
+                return Err(unavailable());
+            }
+            if response.payload.as_ref() == [5] {
+                if let Some(ack) = response.reply {
+                    self.client
+                        .publish(ack, Bytes::from_static(&[4]))
+                        .await
+                        .map_err(failed)?;
+                }
+                continue;
+            }
+            let complete = append_packet(&mut bytes, &response.payload, limit)?;
+            if let Some(ack) = response.reply {
+                self.client
+                    .publish(ack, Bytes::from_static(&[4]))
+                    .await
+                    .map_err(failed)?;
+            }
+            if complete {
+                break;
+            }
+        }
         let reply: Reply = serde_json::from_slice(&bytes).map_err(failed)?;
         serde_json::from_value(reply.into_value()?).map_err(failed)
+    }
+
+    async fn publish_rpc_reply(
+        &self,
+        subject: async_nats::Subject,
+        answer: Result<Value>,
+        limit: Option<u64>,
+        acknowledged: bool,
+    ) -> Result<()> {
+        let reply_body = match answer {
+            Ok(value) => Reply {
+                value: Some(value),
+                status: 200,
+                error: None,
+                message: None,
+            },
+            Err(error) => Reply {
+                value: None,
+                status: error.0.as_u16(),
+                error: Some(error.1),
+                message: error.2,
+            },
+        };
+        let mut bytes = serde_json::to_vec(&reply_body).map_err(failed)?;
+        if !allows(limit, bytes.len()) {
+            let error = ApiError::localized(
+                StatusCode::BAD_GATEWAY,
+                crate::i18n::Message::new("runner.clusterResponse"),
+            );
+            bytes = serde_json::to_vec(&Reply {
+                value: None,
+                status: 502,
+                error: Some(error.1),
+                message: error.2,
+            })
+            .map_err(failed)?;
+            if !allows(limit, bytes.len()) {
+                return Err(unavailable());
+            }
+        }
+        if !acknowledged && bytes.len() > MAX_FRAME {
+            let error = ApiError::localized(
+                StatusCode::CONFLICT,
+                crate::i18n::Message::new("runner.clusterPolicyUpgrade"),
+            );
+            bytes = serde_json::to_vec(&Reply {
+                value: None,
+                status: 409,
+                error: Some(error.1),
+                message: error.2,
+            })
+            .map_err(failed)?;
+            if !allows(limit, bytes.len()) {
+                return Err(unavailable());
+            }
+        }
+        if !acknowledged {
+            return self
+                .client
+                .publish(subject, packet(&bytes, true))
+                .await
+                .map_err(failed);
+        }
+        let count = bytes.chunks(MAX_FRAME).len();
+        let inbox = self.client.new_inbox();
+        let mut acknowledgements = self.client.subscribe(inbox.clone()).await.map_err(failed)?;
+        self.client.flush().await.map_err(failed)?;
+        for (index, chunk) in bytes.chunks(MAX_FRAME).enumerate() {
+            self.client
+                .publish_with_reply(
+                    subject.clone(),
+                    inbox.clone(),
+                    packet(chunk, index + 1 == count),
+                )
+                .await
+                .map_err(failed)?;
+            let ack = tokio::time::timeout(IO_TIMEOUT, acknowledgements.next())
+                .await
+                .map_err(failed)?
+                .ok_or_else(unavailable)?;
+            if ack.payload.as_ref() != [4] {
+                return Err(unavailable());
+            }
+        }
+        Ok(())
     }
 
     pub async fn serve(
@@ -629,28 +777,74 @@ impl Cluster {
             .map_err(failed)?;
         self.client.flush().await.map_err(failed)?;
         let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
+        let mut fragments: BTreeMap<String, RpcAssembly> = BTreeMap::new();
         loop {
             tokio::select! {
                 _ = stop.changed() => break,
-                _ = heartbeat.tick()=>{if self.coordination.put(format!("node.{}",self.node),Bytes::from_static(b"alive")).await.is_err() {tracing::warn!("NATS cluster heartbeat unavailable");}},
+                _ = heartbeat.tick() => {
+                    fragments.retain(|_, assembly| assembly.last_progress.elapsed() < IO_TIMEOUT);
+                    if self.coordination.put(format!("node.{}", self.node), Bytes::from_static(b"alive")).await.is_err() {
+                        tracing::warn!("NATS cluster heartbeat unavailable");
+                    }
+                },
                 message = requests.next() => {
                     let Some(message) = message else { break; };
                     let Some(reply) = message.reply else { continue; };
+                    let key = reply.to_string();
+                    let (payload, received_at, limit) = if matches!(message.payload.first(), Some(6 | 7)) {
+                        if !fragments.contains_key(&key) {
+                            let policy = crate::accounts::resource_policy::load(&s.db).await?;
+                            fragments.insert(key.clone(), RpcAssembly { bytes: Vec::new(), received_at: crate::db::now(), last_progress: tokio::time::Instant::now(), limit: policy.cluster_message_bytes });
+                        }
+                        let assembly = fragments.get_mut(&key).unwrap();
+                        if assembly.last_progress.elapsed() >= IO_TIMEOUT {
+                            fragments.remove(&key); continue;
+                        }
+                        match append_packet(&mut assembly.bytes, &message.payload, assembly.limit) {
+                            Ok(false) => {
+                                assembly.last_progress = tokio::time::Instant::now();
+                                self.client.publish(reply, Bytes::from_static(&[5])).await.map_err(failed)?;
+                                continue;
+                            }
+                            Ok(true) => {
+                                let assembly = fragments.remove(&key).unwrap();
+                                (assembly.bytes, assembly.received_at, assembly.limit)
+                            }
+                            Err(_) => { fragments.remove(&key); continue; }
+                        }
+                    } else {
+                        let policy = crate::accounts::resource_policy::load(&s.db).await?;
+                        if !allows(policy.cluster_message_bytes, message.payload.len()) { continue; }
+                        (message.payload.to_vec(), crate::db::now(), policy.cluster_message_bytes)
+                    };
                     let this = self.clone(); let s = s.clone();
                     tokio::spawn(async move {
-                        let answer = match serde_json::from_slice::<Envelope<Request>>(&message.payload) {
-                            Ok(envelope) if envelope.expires_at>=crate::db::now()=>this.dispatch(&s,envelope.request).await,
-                            Ok(_)=>Err(unavailable()),
-                            Err(_) => Err(ApiError::localized(StatusCode::BAD_REQUEST, crate::i18n::Message::new("runner.clusterRequest"))),
+                        let decoded = serde_json::from_slice::<Envelope<Request>>(&payload);
+                        let acknowledged = decoded.as_ref().is_ok_and(|envelope| envelope.reply_acknowledgements);
+                        let operation = async {
+                            match decoded {
+                                // A long, progressing transfer was admitted at its first
+                                // fragment, so it does not expire during reassembly.
+                                Ok(envelope) if envelope.expires_at >= received_at => this.dispatch(&s, envelope.request).await,
+                                Ok(_) => Err(unavailable()),
+                                Err(_) => Err(ApiError::localized(StatusCode::BAD_REQUEST, crate::i18n::Message::new("runner.clusterRequest"))),
+                            }
                         };
-                        let reply_body = match answer {
-                            Ok(value) => Reply { value: Some(value), status: 200, error: None, message: None },
-                            Err(error) => Reply { value: None, status: error.0.as_u16(), error: Some(error.1), message: error.2 },
+                        tokio::pin!(operation);
+                        let mut pulse = tokio::time::interval(Duration::from_secs(5));
+                        pulse.tick().await;
+                        let answer = loop {
+                            tokio::select! {
+                                answer = &mut operation => break answer,
+                                _ = pulse.tick(), if acknowledged => {
+                                    match this.client.request(reply.clone(), Bytes::from_static(&[5])).await {
+                                        Ok(ack) if ack.payload.as_ref() == [4] => {},
+                                        _ => return,
+                                    }
+                                }
+                            }
                         };
-                        if let Ok(bytes) = serde_json::to_vec(&reply_body) {
-                            if bytes.len()>MAX_MESSAGE {let error=ApiError::localized(StatusCode::BAD_GATEWAY,crate::i18n::Message::new("runner.clusterResponse"));let reply_body=Reply {value:None,status:502,error:Some(error.1),message:error.2};if let Ok(bytes)=serde_json::to_vec(&reply_body){let _=this.client.publish(reply,packet(&bytes,true)).await;}}
-                            else {let chunks=bytes.chunks(MAX_FRAME);let count=chunks.len();for(index,chunk)in chunks.enumerate(){if this.client.publish(reply.clone(),packet(chunk,index+1==count)).await.is_err(){break;}}}
-                        }
+                        let _ = this.publish_rpc_reply(reply, answer, limit, acknowledged).await;
                     });
                 }
             }
@@ -674,13 +868,14 @@ impl Cluster {
                 fence,
                 session,
                 kind,
+                resource_policy,
             } => {
                 let owner = self.owner(&host).await?.ok_or_else(unavailable)?;
                 if owner.node != self.node || owner.fence != fence {
                     diagnostic("nats", "open", "ownership_changed");
                     return Err(unavailable());
                 }
-                crate::hosts::runner::cluster_open(&host, &session, kind).await?;
+                crate::hosts::runner::cluster_open(&host, &session, kind, resource_policy).await?;
                 Ok(Value::Null)
             }
             Request::Monitor {
@@ -826,6 +1021,46 @@ impl Cluster {
             .map_err(failed)
     }
 
+    async fn acknowledged_packet(
+        &self,
+        subject: &str,
+        payload: Bytes,
+        stopped: &mut tokio::sync::watch::Receiver<bool>,
+        closing: bool,
+    ) -> Result<async_nats::Message> {
+        let waiting = self.client.send_request(
+            subject.to_owned(),
+            async_nats::Request::new().payload(payload).timeout(None),
+        );
+        tokio::pin!(waiting);
+        let mut pulse = tokio::time::interval(Duration::from_secs(5));
+        pulse.tick().await;
+        loop {
+            tokio::select! {
+                _ = stopped.changed() => return Err(unavailable()),
+                answer = &mut waiting => return answer.map_err(|error| {
+                    if !closing {
+                        tracing::warn!(transport = "nats", phase = "stream_send", error_kind = %error.kind(), "Runner transport request failed");
+                        diagnostic("nats", "stream_send", "request_failed");
+                    }
+                    unavailable()
+                }),
+                _ = pulse.tick() => {
+                    // A consumer may hold the final data acknowledgement indefinitely.
+                    // Independent probes detect actual transport loss during that wait.
+                    let heartbeat = tokio::select! {
+                        _ = stopped.changed() => return Err(unavailable()),
+                        answer = self.client.request(subject.to_owned(), Bytes::from_static(&[5])) => answer.map_err(|_| {
+                            if !closing { diagnostic("nats", "stream_heartbeat", "request_failed"); }
+                            unavailable()
+                        })?,
+                    };
+                    if heartbeat.payload.as_ref() != b"ok" { return Err(unavailable()); }
+                }
+            }
+        }
+    }
+
     /// Each direction has at most two queued frames plus one acknowledged frame.
     /// Losing a peer closes the stream; request timeouts are never retried.
     pub async fn socket(
@@ -834,6 +1069,9 @@ impl Cluster {
         side: bool,
         route: &SessionRoute,
     ) -> Result<Socket> {
+        let limit = crate::accounts::resource_policy::load(&self.db)
+            .await?
+            .cluster_message_bytes;
         let incoming = format!("{}.stream.{session}.{}", self.prefix, u8::from(side));
         let outgoing = format!("{}.stream.{session}.{}", self.prefix, u8::from(!side));
         let mut subscriber = self.client.subscribe(incoming).await.map_err(failed)?;
@@ -861,7 +1099,7 @@ impl Cluster {
                 let (bytes, ack) = tokio::select! {
                     _ = stopped.changed() => break,
                     value = outgoing_rx.recv() => match value {
-                        Some((message, ack)) => match encode(message) { Ok(bytes) => (bytes, Some(ack)), Err(error) => {let _=ack.send(Err(error)); break;} },
+                        Some((message, ack)) => match encode(message, limit) { Ok(bytes) => (bytes, Some(ack)), Err(error) => {let _=ack.send(Err(error)); break;} },
                         None => break,
                     },
                     _ = pulse.tick() => {
@@ -898,16 +1136,7 @@ impl Cluster {
                     let chunks = bytes.chunks(MAX_FRAME);
                     let count = chunks.len();
                     for (index, chunk) in chunks.enumerate() {
-                        let reply = this
-                            .client
-                            .request(outgoing.clone(), packet(chunk, index + 1 == count))
-                            .await
-                            .map_err(|error| {
-                                if !closing {
-                                    tracing::warn!(transport = "nats", phase = "stream_send", error_kind = %error.kind(), "Runner transport request failed");
-                                }
-                                unavailable()
-                            })?;
+                        let reply = this.acknowledged_packet(&outgoing, packet(chunk, index + 1 == count), &mut stopped, closing).await?;
                         if reply.payload.as_ref() != b"ok" {
                             if !closing { diagnostic("nats", "stream_send", "invalid_acknowledgement"); }
                             return Err(unavailable());
@@ -934,42 +1163,52 @@ impl Cluster {
         let revoked_fence = route.owner.fence.clone();
         let reader = tokio::spawn(async move {
             let mut assembled = Vec::new();
+            let mut pending: Option<(Result<Message>, Option<async_nats::Subject>)> = None;
             loop {
                 tokio::select! {
                     _ = stopped.changed() => break,
-                    notice = revoked.next() => {if notice.is_none_or(|notice|notice.payload.as_ref()==revoked_fence.as_bytes()) {
-                        diagnostic("nats", "stream_recv", "revocation_or_subscription_closed");
-                        break;
-                    }},
+                    notice = revoked.next() => {
+                        if notice.is_none_or(|notice| notice.payload.as_ref() == revoked_fence.as_bytes()) {
+                            diagnostic("nats", "stream_recv", "revocation_or_subscription_closed"); break;
+                        }
+                    },
+                    permit = incoming_tx.reserve(), if pending.is_some() => {
+                        let Ok(permit) = permit else { break; };
+                        let (frame, reply) = pending.take().unwrap();
+                        permit.send(frame);
+                        if let Some(reply) = reply {
+                            if this.client.publish(reply, Bytes::from_static(b"ok")).await.is_err() { break; }
+                        }
+                    },
                     message = subscriber.next() => {
                         let Some(message) = message else {
-                            diagnostic("nats", "stream_recv", "subscription_closed");
-                            break;
+                            diagnostic("nats", "stream_recv", "subscription_closed"); break;
                         };
-                        active.store(true,Ordering::Release);
-                        if message.payload.as_ref() != [5] {
-                            match append_packet(&mut assembled,&message.payload) {
-                                Ok(true)=>{
-                                    let frame=decode(&assembled);assembled.clear();
-                                    match tokio::time::timeout(IO_TIMEOUT,incoming_tx.send(frame)).await {
-                                        Ok(Ok(())) => {},
-                                        Ok(Err(_)) => {
-                                            tracing::debug!(transport="nats", phase="stream_recv", "Runner stream consumer closed");
-                                            break;
-                                        },
-                                        Err(_) => {
-                                            diagnostic("nats", "stream_recv", "consumer_timeout");
-                                            break;
-                                        },
-                                    }
-                                },
-                                Ok(false)=>{},Err(_)=>{
-                                    diagnostic("nats", "stream_recv", "invalid_or_expired_packet");
-                                    break;
-                                },
+                        active.store(true, Ordering::Release);
+                        if message.payload.as_ref() == [5] {
+                            if let Some(reply) = message.reply {
+                                if this.client.publish(reply, Bytes::from_static(b"ok")).await.is_err() { break; }
+                            }
+                            continue;
+                        }
+                        // A sender has one unacknowledged data fragment. Probes can
+                        // pass a blocked consumer, but another data frame cannot.
+                        if pending.is_some() { break; }
+                        match append_packet(&mut assembled, &message.payload, limit) {
+                            Ok(true) => {
+                                let frame = decode(&assembled, limit);
+                                assembled.clear();
+                                pending = Some((frame, message.reply));
+                            }
+                            Ok(false) => {
+                                if let Some(reply) = message.reply {
+                                    if this.client.publish(reply, Bytes::from_static(b"ok")).await.is_err() { break; }
+                                }
+                            }
+                            Err(_) => {
+                                diagnostic("nats", "stream_recv", "invalid_or_expired_packet"); break;
                             }
                         }
-                        if let Some(reply) = message.reply { if this.client.publish(reply, Bytes::from_static(b"ok")).await.is_err() {break;} }
                     }
                 }
             }
@@ -1086,7 +1325,7 @@ pub async fn bridge(mut left: Socket, mut right: Socket) {
     let _ = right.send(Message::Close(None)).await;
 }
 
-fn encode(message: Message) -> Result<Bytes> {
+fn encode(message: Message, limit: Option<u64>) -> Result<Bytes> {
     let (tag, data): (u8, Bytes) = match message {
         Message::Text(value) => (0, Bytes::copy_from_slice(value.as_bytes())),
         Message::Binary(value) => (1, value),
@@ -1094,7 +1333,7 @@ fn encode(message: Message) -> Result<Bytes> {
         Message::Ping(value) => (3, value),
         Message::Pong(value) => (4, value),
     };
-    if data.len() > MAX_MESSAGE - 1 {
+    if !allows(limit, data.len().saturating_add(1)) {
         return Err(ApiError::localized(
             StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("runner.clusterFrame"),
@@ -1105,8 +1344,8 @@ fn encode(message: Message) -> Result<Bytes> {
     output.extend_from_slice(&data);
     Ok(output.into())
 }
-fn decode(bytes: &[u8]) -> Result<Message> {
-    if bytes.len() > MAX_MESSAGE {
+fn decode(bytes: &[u8], limit: Option<u64>) -> Result<Message> {
+    if !allows(limit, bytes.len()) {
         return Err(unavailable());
     }
     let (&tag, data) = bytes.split_first().ok_or_else(unavailable)?;
@@ -1127,7 +1366,7 @@ fn packet(bytes: &[u8], last: bool) -> Bytes {
     result.extend_from_slice(bytes);
     result.into()
 }
-fn append_packet(output: &mut Vec<u8>, bytes: &[u8]) -> Result<bool> {
+fn append_packet(output: &mut Vec<u8>, bytes: &[u8], limit: Option<u64>) -> Result<bool> {
     let (&tag, bytes) = bytes.split_first().ok_or_else(unavailable)?;
     if bytes.len() < 8 {
         return Err(unavailable());
@@ -1137,7 +1376,9 @@ fn append_packet(output: &mut Vec<u8>, bytes: &[u8]) -> Result<bool> {
     if expires < crate::db::now() {
         return Err(unavailable());
     }
-    if ![6, 7].contains(&tag) || bytes.len() > MAX_FRAME || output.len() + bytes.len() > MAX_MESSAGE
+    if ![6, 7].contains(&tag)
+        || bytes.len() > MAX_FRAME
+        || !allows(limit, output.len().saturating_add(bytes.len()))
     {
         return Err(unavailable());
     }
@@ -1148,6 +1389,22 @@ fn append_packet(output: &mut Vec<u8>, bytes: &[u8]) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rpc_envelopes_keep_legacy_acknowledgement_default_and_advertise_new_receivers() {
+        let legacy: Envelope<Value> =
+            serde_json::from_value(serde_json::json!({"expires_at":123,"request":{}})).unwrap();
+        assert!(!legacy.reply_acknowledgements);
+        let current = Envelope {
+            expires_at: 123,
+            reply_acknowledgements: true,
+            request: Value::Null,
+        };
+        assert_eq!(
+            serde_json::to_value(current).unwrap()["reply_acknowledgements"],
+            true
+        );
+    }
 
     #[derive(Clone, Default)]
     struct Capture(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -1300,28 +1557,31 @@ mod tests {
     }
 
     #[test]
-    fn fragmented_metadata_preserves_bytes_and_rejects_oversize_or_invalid_packets() {
-        let bytes = encode(Message::Text("x".repeat(MAX_FRAME * 3 + 123).into())).unwrap();
+    fn fragmented_metadata_is_unlimited_by_default_and_enforces_explicit_limits() {
+        let size = 16 * 1024 * 1024 + 123;
+        let bytes = encode(Message::Text("x".repeat(size).into()), None).unwrap();
         let mut received = Vec::new();
-        let chunks = bytes.chunks(MAX_FRAME);
-        let count = chunks.len();
-        for (index, chunk) in chunks.enumerate() {
+        let count = bytes.chunks(MAX_FRAME).len();
+        for (index, chunk) in bytes.chunks(MAX_FRAME).enumerate() {
             assert_eq!(
-                append_packet(&mut received, &packet(chunk, index + 1 == count)).unwrap(),
+                append_packet(&mut received, &packet(chunk, index + 1 == count), None).unwrap(),
                 index + 1 == count
             );
         }
-        let Message::Text(text) = decode(&received).unwrap() else {
-            panic!("text frame");
+        let Message::Text(text) = decode(&received, None).unwrap() else {
+            panic!("text frame")
         };
-        assert_eq!(text.len(), MAX_FRAME * 3 + 123);
-        assert!(append_packet(&mut Vec::new(), &[42]).is_err());
-        assert!(append_packet(&mut vec![0; MAX_MESSAGE], &packet(&[1], true)).is_err());
+        assert_eq!(text.len(), size);
+        assert!(encode(Message::Binary(vec![0; 1024].into()), Some(1025)).is_ok());
+        assert!(encode(Message::Binary(vec![0; 1024].into()), Some(1024)).is_err());
+        assert!(decode(&received, Some(received.len() as u64)).is_ok());
+        assert!(decode(&received, Some(received.len() as u64 - 1)).is_err());
+        assert!(append_packet(&mut Vec::new(), &[42], None).is_err());
+        assert!(append_packet(&mut vec![0; 1024], &packet(&[1], true), Some(1024)).is_err());
         let mut expired = packet(&[1], true).to_vec();
         expired[1..9].copy_from_slice(&(crate::db::now() - 1).to_be_bytes());
-        assert!(append_packet(&mut Vec::new(), &expired).is_err());
-        assert!(encode(Message::Binary(vec![0; MAX_MESSAGE].into())).is_err());
-        assert!(decode(&[0, 255]).is_err());
+        assert!(append_packet(&mut Vec::new(), &expired, None).is_err());
+        assert!(decode(&[0, 255], None).is_err());
     }
 
     #[tokio::test]
@@ -1346,6 +1606,241 @@ mod tests {
             !error.contains("wrong"),
             "the error never echoes the URL: {error}"
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires NATS_TEST_URL pointing at an isolated JetStream server"]
+    async fn broker_chunks_large_rpc_and_preserves_slow_consumer_backpressure() {
+        use sea_orm::ConnectionTrait;
+        let url = std::env::var("NATS_TEST_URL").unwrap();
+        let (dir, db) = crate::lock::tests::database().await;
+        let prefix = format!("resource_test_{}", uuid::Uuid::new_v4().simple());
+        let a = Cluster::connect(&url, &prefix, 1, db.clone())
+            .await
+            .unwrap();
+        let mut legacy = a.owners.status().await.unwrap().info.config;
+        legacy.max_message_size = 256 * 1024;
+        jetstream::new(a.client.clone())
+            .update_stream(legacy)
+            .await
+            .unwrap();
+        let b = Cluster::connect(&url, &prefix, 1, db.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            b.owners
+                .status()
+                .await
+                .unwrap()
+                .info
+                .config
+                .max_message_size,
+            -1
+        );
+        let state = |cluster: Arc<Cluster>| {
+            Arc::new(crate::state::State {
+                ids: Arc::new(
+                    crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
+                ),
+                db: db.clone(),
+                data_dir: dir.path().into(),
+                instance_id: uuid::Uuid::new_v4().to_string(),
+                server_mode: false,
+                secure_cookie: false,
+                bind: "127.0.0.1:0".parse().unwrap(),
+                vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
+                host_monitor: Default::default(),
+                monitor: Default::default(),
+                cluster: Some(cluster),
+            })
+        };
+        let sa = state(a.clone());
+        let sb = state(b.clone());
+        b.coordination
+            .delete(format!("node.{}", b.node))
+            .await
+            .unwrap();
+        let (stop, stopped) = tokio::sync::watch::channel(false);
+        let serving = tokio::spawn(b.clone().serve(sb.clone(), stopped));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !b.node_alive(&b.node).await.unwrap() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let size = 16 * 1024 * 1024 + 123;
+        let request = Request::Open {
+            host: "missing".into(),
+            fence: "fixture".into(),
+            session: "x".repeat(size),
+            kind: ferry_protocol::SessionKind::Agent,
+            resource_policy: None,
+        };
+        // The real server reaches dispatch (503 for a missing owner), rather
+        // than rejecting the multi-frame JSON request as malformed (400).
+        let error = a.rpc::<Value>(&b.node, &request).await.unwrap_err();
+        assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);
+        let mut echo = b
+            .client
+            .subscribe(format!("{}.rpc.echo", prefix))
+            .await
+            .unwrap();
+        b.client.flush().await.unwrap();
+        let responder = b.clone();
+        let reflected = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            let reply = loop {
+                let message = echo.next().await.unwrap();
+                assert!(message.payload.len() <= MAX_FRAME + 9);
+                if append_packet(&mut bytes, &message.payload, None).unwrap() {
+                    break message.reply.unwrap();
+                }
+                responder
+                    .client
+                    .publish(message.reply.unwrap(), Bytes::from_static(&[5]))
+                    .await
+                    .unwrap();
+            };
+            let envelope: Envelope<Request> = serde_json::from_slice(&bytes).unwrap();
+            let Request::Open { session, .. } = envelope.request else {
+                panic!("Open request")
+            };
+            assert_eq!(session.len(), size);
+            responder
+                .publish_rpc_reply(reply, Ok(serde_json::json!({"text":session})), None, true)
+                .await
+                .unwrap();
+        });
+        let response: Value = a.rpc("echo", &request).await.unwrap();
+        assert_eq!(response["text"].as_str().unwrap().len(), size);
+        reflected.await.unwrap();
+        // A tiny real subscription buffer must backpressure reply publication,
+        // rather than let Core NATS silently discard unread fragments.
+        let slow = async_nats::ConnectOptions::new()
+            .subscription_capacity(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        let inbox = slow.new_inbox();
+        let mut received = slow.subscribe(inbox.clone()).await.unwrap();
+        slow.flush().await.unwrap();
+        let sender = b.clone();
+        let reply_size = MAX_FRAME * 8;
+        let mut sending = tokio::spawn(async move {
+            sender
+                .publish_rpc_reply(
+                    inbox.into(),
+                    Ok(serde_json::json!({"text":"z".repeat(reply_size)})),
+                    None,
+                    true,
+                )
+                .await
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut sending)
+                .await
+                .is_err(),
+            "reply publication must wait for consumer acknowledgement"
+        );
+        let mut reply_bytes = Vec::new();
+        loop {
+            let message = received.next().await.unwrap();
+            let complete = append_packet(&mut reply_bytes, &message.payload, None).unwrap();
+            slow.publish(message.reply.unwrap(), Bytes::from_static(&[4]))
+                .await
+                .unwrap();
+            if complete {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let reply: Reply = serde_json::from_slice(&reply_bytes).unwrap();
+        assert_eq!(reply.into_value().unwrap()["text"], "z".repeat(reply_size));
+        sending.await.unwrap().unwrap();
+        // Older requesters do not acknowledge fragments. Keep small replies
+        // compatible and refuse a multi-fragment reply with an upgrade reason.
+        for (value, expected) in [
+            (serde_json::json!(true), 200),
+            (serde_json::json!("z".repeat(MAX_FRAME * 2)), 409),
+        ] {
+            let inbox = slow.new_inbox();
+            let mut legacy = slow.subscribe(inbox.clone()).await.unwrap();
+            slow.flush().await.unwrap();
+            b.publish_rpc_reply(inbox.into(), Ok(value.clone()), None, false)
+                .await
+                .unwrap();
+            let message = legacy.next().await.unwrap();
+            assert!(message.reply.is_none());
+            let mut body = Vec::new();
+            assert!(append_packet(&mut body, &message.payload, None).unwrap());
+            let reply: Reply = serde_json::from_slice(&body).unwrap();
+            assert_eq!(reply.status, expected);
+            if expected == 200 {
+                assert_eq!(reply.into_value().unwrap(), value);
+            } else {
+                assert_eq!(reply.message.unwrap().key, "runner.clusterPolicyUpgrade");
+            }
+        }
+        let (owner, revision) = b
+            .acquire_owner(&sb, "7", 1.into(), "fixture".into())
+            .await
+            .unwrap();
+        let route = SessionRoute {
+            host: "7".into(),
+            owner,
+        };
+        let mut left = a.socket("slow-consumer", false, &route).await.unwrap();
+        let mut right = b.socket("slow-consumer", true, &route).await.unwrap();
+        // Existing sockets retain their unlimited snapshot when platform limits change.
+        db.execute_unprepared("UPDATE platform_state SET resource_config='{\"cluster_message_bytes\":1024}' WHERE id=1").await.unwrap();
+        let error = a.rpc::<Value>(&b.node, &request).await.unwrap_err();
+        assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);
+        let mut limited = a.socket("limited", false, &route).await.unwrap();
+        assert!(
+            limited
+                .send(Message::Binary(vec![0; 1024].into()))
+                .await
+                .is_err()
+        );
+        drop(limited);
+        for byte in [1, 2] {
+            left.send(Message::Binary(vec![byte; 1024 * 1024].into()))
+                .await
+                .unwrap();
+        }
+        let mut blocked = tokio::spawn(async move {
+            left.send(Message::Binary(vec![3; 1024 * 1024].into()))
+                .await
+                .unwrap();
+            left
+        });
+        assert!(
+            tokio::time::timeout(IO_TIMEOUT + Duration::from_secs(1), &mut blocked)
+                .await
+                .is_err(),
+            "application backpressure must not become a transport timeout"
+        );
+        for byte in [1, 2, 3] {
+            let Message::Binary(data) = right.recv().await.unwrap().unwrap() else {
+                panic!("binary frame")
+            };
+            assert_eq!(data.len(), 1024 * 1024);
+            assert!(data.iter().all(|value| *value == byte));
+        }
+        let left = tokio::time::timeout(Duration::from_secs(5), blocked)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(left);
+        drop(right);
+        b.release("7", revision).await;
+        db.execute_unprepared("UPDATE platform_state SET resource_config=NULL WHERE id=1")
+            .await
+            .unwrap();
+        stop.send(true).unwrap();
+        serving.await.unwrap().unwrap();
+        drop(sa);
     }
 
     #[tokio::test]

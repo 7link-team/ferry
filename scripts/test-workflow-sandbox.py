@@ -20,7 +20,7 @@ checks, timings = [], {}
 
 
 def request(expression='42', **options):
-    return dict({'version': 1, 'timeout_ms': 1000, 'memory_bytes': 16 * 1024 * 1024,
+    return dict({'version': 1,
         'deterministic': True, 'evaluations': [{'expression': expression, 'context': {}}]}, **options)
 
 
@@ -36,7 +36,6 @@ def invoke(body, name, args=(), raw=None):
     (work / (name + '.stdout.json')).write_bytes(result.stdout)
     (work / (name + '.stderr.log')).write_bytes(result.stderr)
     assert result.returncode == 0, (name, result.returncode, result.stderr.decode(errors='replace'))
-    assert len(result.stdout) <= 8 * 1024 * 1024, name
     return json.loads(result.stdout)
 
 
@@ -244,25 +243,29 @@ try:
     error(request("(()=>{const a=[];while(true){a.push(new Array(10000).fill('x'));}})()",
         memory_bytes=1024*1024), 'memory', 'memory-limit')
     assert invoke(request('6*7'), 'after-memory')['values'] == [42]
-    error(request("'x'.repeat(9*1024*1024)", memory_bytes=64*1024*1024), 'result_limit', 'result-limit')
-    passed('VM memory and response-size limits are enforced; memory failure cannot poison a later request')
+    error(request("'x'.repeat(9*1024*1024)", resource_policy={"workflow_packet_bytes":8*1024*1024}), 'result_limit', 'result-limit')
+    process_limited = invoke(request(resource_policy={'sandbox_process_memory_bytes':1024*1024}), 'process-memory-limit')
+    assert process_limited['status'] == 'error' and process_limited['code'] in ('isolation','memory'), process_limited
+    passed('explicit VM heap and process memory budgets are independent; memory failure cannot poison a later request')
 
     for name, patch in [('unknown-version', {'version': 2}), ('zero-timeout', {'timeout_ms': 0}),
-                        ('large-timeout', {'timeout_ms': 5001}), ('small-memory', {'memory_bytes': 1048575}),
-                        ('large-memory', {'memory_bytes': 67108865}), ('unknown-option', {'database_url': 'PRIVATE_INVALID'})]:
+                        ('zero-memory', {'memory_bytes': 0}), ('unknown-option', {'database_url': 'PRIVATE_INVALID'})]:
         error(request(**patch), 'invalid_request', name)
     error(request(evaluations=[{'expression': '1', 'context': {'$env': {'key': 'PRIVATE_INVALID'}}}]),
         'invalid_request', 'forbidden-context')
-    error(request(evaluations=[{'expression': '1', 'context': {}}] * 20001), 'invalid_request', 'many-evaluations')
-    error(None, 'invalid_request', 'request-limit', raw=b' ' * (8 * 1024 * 1024 + 1))
-    passed('protocol rejects out-of-budget requests, forbidden contexts and arbitrary launch/configuration options')
+    error(request(resource_policy={'workflow_evaluations':20000}, evaluations=[{'expression': '1', 'context': {}}] * 20001), 'invalid_request', 'many-evaluations')
+    error(request(resource_policy={'workflow_packet_bytes':100}, evaluations=[{'expression':'1','context':{}}]), 'invalid_request', 'request-limit')
+    assert len(invoke(request("'x'.repeat(8*1024*1024+1)"), 'unlimited-result')['values'][0]) == 8*1024*1024+1
+    assert len(invoke(request(evaluations=[{'expression':'1','context':{}}]*20001), 'unlimited-evaluations')['values']) == 20001
+    assert invoke(request('42', timeout_ms=5001, memory_bytes=67108865), 'former-runtime-maxima')['values'] == [42]
+    passed('default resource limits are absent; explicit policy limits, forbidden contexts and arbitrary launch/configuration options are rejected')
 
     if os.name == 'nt':
         parent = subprocess.Popen([str(binary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             creationflags=subprocess.CREATE_NO_WINDOW)
         child_pid = None
         try:
-            parent.stdin.write(json.dumps(request('(()=>{while(true){}})()', timeout_ms=5000)).encode())
+            parent.stdin.write(json.dumps(request('(()=>{while(true){}})()')).encode())
             parent.stdin.close()
             deadline = time.monotonic() + 3
             while time.monotonic() < deadline:
@@ -297,7 +300,7 @@ try:
             stderr=subprocess.PIPE)
         child_fd = None
         try:
-            parent.stdin.write(json.dumps(request('(()=>{while(true){}})()', timeout_ms=5000)).encode())
+            parent.stdin.write(json.dumps(request('(()=>{while(true){}})()')).encode())
             parent.stdin.close()
             deadline = time.monotonic() + 3
             while time.monotonic() < deadline:

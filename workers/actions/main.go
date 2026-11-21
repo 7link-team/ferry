@@ -296,7 +296,7 @@ func executeInstance(ctx context.Context, request Request, output io.Writer, ind
 	if err != nil {
 		return result, err
 	}
-	jobCtx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
+	jobCtx, cancel := executionContext(ctx, seconds)
 	defer cancel()
 	execCtx, finish := cleanupContext(jobCtx, false)
 	defer finish()
@@ -353,7 +353,7 @@ func executeInstance(ctx context.Context, request Request, output io.Writer, ind
 }
 
 func jobTimeBudget(limit int, minutes string) (int, error) {
-	seconds := 360 * 60
+	seconds := 0
 	if minutes != "" {
 		value, err := strconv.Atoi(minutes)
 		if err != nil || value < 1 || value > int((1<<63-1)/int64(time.Minute)) {
@@ -361,7 +361,7 @@ func jobTimeBudget(limit int, minutes string) (int, error) {
 		}
 		seconds = value * 60
 	}
-	if limit > 0 && seconds > limit {
+	if limit > 0 && (seconds == 0 || seconds > limit) {
 		seconds = limit
 	}
 	return seconds, nil

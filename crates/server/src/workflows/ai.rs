@@ -17,8 +17,8 @@ use axum::{
 use base64::{Engine, engine::general_purpose::STANDARD};
 use ferry_protocol::sandbox::{Asset, Item};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
-    TransactionTrait, sea_query::ExprTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
+    QueryFilter, Set, TransactionTrait, sea_query::ExprTrait,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -132,12 +132,18 @@ pub(crate) struct Body {
     #[serde(default)]
     /// Deprecated compatibility field; retained for round trips, not enforced.
     monthly_limit_micros: i64,
+    #[serde(default = "legacy_capacity")]
     qps: i64,
+    #[serde(default = "legacy_capacity")]
     concurrency: i64,
     #[serde(default)]
     prices: Vec<Price>,
     #[serde(default)]
     version: i64,
+}
+// Retained only for old non-null stored fields; admission uses ResourcePolicy.
+fn legacy_capacity() -> i64 {
+    1
 }
 fn default_currency() -> String {
     "USD".into()
@@ -173,8 +179,8 @@ async fn validate(conn: &impl ConnectionTrait, workspace: Id, body: &Body) -> Re
         || body.currency.len() != 3
         || !body.currency.bytes().all(|b| b.is_ascii_uppercase())
         || body.timezone.parse::<chrono_tz::Tz>().is_err()
-        || !(1..=1000).contains(&body.qps)
-        || !(1..=100).contains(&body.concurrency)
+        || body.qps < 1
+        || body.concurrency < 1
         || body.prices.len() > 100
     {
         return Err(invalid());
@@ -510,19 +516,30 @@ async fn reserve(
         .with_timezone(&tz)
         .format("%Y-%m")
         .to_string();
-    let all = calls::Entity::find()
-        .filter(calls::Column::WorkspaceId.eq(run.workspace_id))
-        .filter(calls::Column::CredentialId.eq(row.credential_id))
-        .all(&tx)
-        .await?;
-    if all
-        .iter()
-        .filter(|c| matches!(c.state.as_str(), "reserved" | "sent" | "unknown"))
-        .count()
-        >= row.concurrency as usize
-        || all.iter().filter(|c| c.created_at > now - 1000).count() >= row.qps as usize
-    {
-        return Err(error("workflow.aiLimit"));
+    let policy = crate::accounts::resource_policy::load(&tx).await?;
+    if policy.provider_concurrency.is_some() || policy.provider_requests_per_second.is_some() {
+        let history = calls::Entity::find()
+            .filter(calls::Column::WorkspaceId.eq(run.workspace_id))
+            .filter(calls::Column::CredentialId.eq(row.credential_id));
+        if let Some(limit) = policy.provider_concurrency {
+            let active = history
+                .clone()
+                .filter(calls::Column::State.is_in(["reserved", "sent", "unknown"]))
+                .count(&tx)
+                .await?;
+            if active >= limit {
+                return Err(error("workflow.aiLimit"));
+            }
+        }
+        if let Some(limit) = policy.provider_requests_per_second {
+            let recent = history
+                .filter(calls::Column::CreatedAt.gt(now - 1000))
+                .count(&tx)
+                .await?;
+            if recent >= limit {
+                return Err(error("workflow.aiLimit"));
+            }
+        }
     }
     let call = calls::Model {
         id: s.next_id()?.into(),
@@ -619,14 +636,14 @@ pub(super) async fn interrupted(
     }
     Ok(())
 }
-async fn bytes(mut response: reqwest::Response) -> Result<Vec<u8>> {
+async fn bytes(mut response: reqwest::Response, limit: Option<u64>) -> Result<Vec<u8>> {
     let mut data = Vec::new();
     while let Some(chunk) = response
         .chunk()
         .await
         .map_err(|_| error("workflow.aiUnknown"))?
     {
-        if chunk.len() > super::media::MAX_FILE_BYTES.saturating_sub(data.len()) {
+        if !ferry_protocol::resources::allows(limit, data.len().saturating_add(chunk.len())) {
             return Err(invalid());
         }
         data.extend_from_slice(&chunk);
@@ -645,9 +662,10 @@ async fn asset(
     let file = storage
         .stage_bytes(run.workspace_id, data, mime, run.id, node, run.triggered_by)
         .await?;
+    let prepared = storage.prepare(run.workspace_id, file.id).await?;
     let tx = s.db.begin().await?;
-    storage
-        .attach(&tx, run.workspace_id, file.id, "workflow", run.workflow_id)
+    prepared
+        .attach(storage, &tx, "workflow", run.workflow_id)
         .await?;
     tx.commit().await?;
     Ok(Asset {
@@ -682,11 +700,77 @@ pub(super) async fn execute_indexed(
     params: &[Value],
     offset: usize,
 ) -> Result<Vec<Item>> {
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let result = {
+        let work = execute_indexed_inner(s, storage, run, node, spec, items, params, offset);
+        tokio::pin!(work);
+        let (_idle, idle) = tokio::sync::watch::channel(false);
+        let mut stop = crate::executions::stop_signal().unwrap_or(idle);
+        let deadline = async {
+            match policy.task_timeout_seconds {
+                Some(seconds) => tokio::time::sleep(std::time::Duration::from_secs(seconds)).await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::pin!(deadline);
+        let monitor = async {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                super::host::execution_scope(s, run).await?;
+            }
+            #[allow(unreachable_code)]
+            Ok::<Vec<Item>, ApiError>(vec![])
+        };
+        tokio::pin!(monitor);
+        tokio::select! {
+            result = &mut work => result,
+            _ = &mut deadline => Err(ApiError::localized(StatusCode::GATEWAY_TIMEOUT, crate::i18n::Message::new("workflow.aiTimeout"))),
+            _ = stop.changed() => Err(crate::executions::ownership_lost()),
+            result = &mut monitor => result,
+        }
+    };
+    if result.is_err() {
+        // Work has been dropped; only its local reservations or sent calls are reconciled.
+        for index in 0..items.len() {
+            interrupted(s, run, node, offset + index).await?;
+        }
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_indexed_inner(
+    s: &AppState,
+    storage: &Store<'_>,
+    run: &workflow_executions::Model,
+    node: i64,
+    spec: &Value,
+    items: &[Item],
+    params: &[Value],
+    offset: usize,
+) -> Result<Vec<Item>> {
     let mut out = Vec::new();
     let operation = spec["type"].as_str().ok_or_else(invalid)?;
     for (index, item) in items.iter().enumerate() {
         let p = params.get(index).ok_or_else(invalid)?;
-        let (provider, price, call) = reserve(s, run, node, offset + index, p, operation).await?;
+        let (provider, price, call) = loop {
+            match reserve(s, run, node, offset + index, p, operation).await {
+                Err(error)
+                    if error
+                        .2
+                        .as_ref()
+                        .is_some_and(|message| message.key == "workflow.aiLimit") =>
+                {
+                    // Only local admission is retried; a sent/uncertain paid call is never replayed.
+                    super::host::execution_scope(s, run).await?;
+                    if crate::executions::stop_requested() {
+                        return Err(crate::executions::ownership_lost());
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                other => break other?,
+            }
+        };
         if call.state == "succeeded" {
             let text = s.vault.open_secret(
                 call.result.as_deref().ok_or_else(invalid)?,
@@ -792,8 +876,12 @@ async fn prepare(
         &Id::from(provider.credential_id),
     )
     .await?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let mut client = reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(30));
+    if let Some(seconds) = policy.task_timeout_seconds {
+        client = client.timeout(std::time::Duration::from_secs(seconds));
+    }
+    let client = client
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| invalid())?;
@@ -816,10 +904,23 @@ async fn prepare(
         request.bearer_auth(secret)
     };
     let model = p["model"].as_str().ok_or_else(invalid)?;
+    if operation == "ai.llm.chat"
+        && provider.protocol == "anthropic"
+        && p.get("max_tokens")
+            .and_then(Value::as_u64)
+            .is_none_or(|value| value == 0)
+    {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workflow.agentMaxTokensRequired")
+                .with("path", "/params/max_tokens"),
+        ));
+    }
     match operation {
         "ai.llm.chat"=>{
             if let Some(messages) = p.get("agent_messages") {
-                let body = json!({"model":model,"messages":messages,"max_tokens":p["max_tokens"],"stream":false,"tools":p["agent_tools"]});
+                let mut body = json!({"model":model,"messages":messages,"stream":false,"tools":p["agent_tools"]});
+                if let Some(max_tokens) = p.get("max_tokens").filter(|value| !value.is_null()) { body["max_tokens"] = max_tokens.clone(); }
                 return Ok((request.json(&body), None));
             }
             let mut content=vec![json!({"type":"text","text":p["prompt"]})];
@@ -830,7 +931,9 @@ async fn prepare(
                 if provider.protocol=="anthropic" {content.push(json!({"type":"image","source":{"type":"base64","media_type":file.mime,"data":STANDARD.encode(data)}}));}
                 else {content.push(json!({"type":"image_url","image_url":{"url":format!("data:{};base64,{}",file.mime,STANDARD.encode(data))}}));}
             }
-            Ok((request.json(&json!({"model":model,"messages":[{"role":"user","content":content}],"max_tokens":p["max_tokens"],"stream":false})),None))
+            let mut body = json!({"model":model,"messages":[{"role":"user","content":content}],"stream":false});
+            if let Some(max_tokens) = p.get("max_tokens").filter(|value| !value.is_null()) { body["max_tokens"] = max_tokens.clone(); }
+            Ok((request.json(&body),None))
         },
         "ai.image.generate"=>Ok((request.json(&json!({"model":model,"prompt":p["prompt"],"n":1,"size":p["size"],"response_format":"b64_json"})),Some(cost(1,0,price)?))),
         "ai.audio.speech"=>Ok((request.json(&json!({"model":model,"input":p["prompt"],"voice":p["voice"],"response_format":"mp3"})),Some(cost(p["prompt"].as_str().ok_or_else(invalid)?.chars().count() as i64,0,price)?))),
@@ -855,7 +958,8 @@ async fn finish(
     price: &Price,
     known: Option<i64>,
 ) -> Result<(Item, i64)> {
-    let data = bytes(response).await?;
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let data = bytes(response, policy.file_upload_bytes).await?;
     let mut output = item.clone();
     let field = p["output_field"].as_str().ok_or_else(invalid)?;
     let node = spec["id"].as_str().ok_or_else(invalid)?;

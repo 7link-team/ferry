@@ -971,8 +971,7 @@
               },
               "size": {
                 "type": "integer",
-                "minimum": 0,
-                "maximum": 33554432
+                "minimum": 0
               }
             },
             "required": [
@@ -1054,8 +1053,7 @@
               },
               "size": {
                 "type": "integer",
-                "minimum": 0,
-                "maximum": 33554432
+                "minimum": 0
               }
             },
             "required": [
@@ -1137,8 +1135,7 @@
               },
               "size": {
                 "type": "integer",
-                "minimum": 0,
-                "maximum": 33554432
+                "minimum": 0
               }
             },
             "required": [
@@ -1220,8 +1217,7 @@
               },
               "size": {
                 "type": "integer",
-                "minimum": 0,
-                "maximum": 33554432
+                "minimum": 0
               }
             },
             "required": [
@@ -1316,12 +1312,10 @@
             "maxLength": 120
           },
           "summary": {
-            "type": "string",
-            "maxLength": 200000
+            "type": "string"
           },
           "metrics": {
             "type": "array",
-            "maxItems": 24,
             "items": {
               "type": "object",
               "properties": {
@@ -1335,8 +1329,7 @@
                     "number",
                     "boolean",
                     "null"
-                  ],
-                  "maxLength": 2000
+                  ]
                 },
                 "note": {
                   "type": "string",
@@ -1352,7 +1345,6 @@
           },
           "sections": {
             "type": "array",
-            "maxItems": 100,
             "items": {
               "type": "object",
               "properties": {
@@ -1361,15 +1353,13 @@
                   "maxLength": 200
                 },
                 "markdown": {
-                  "type": "string",
-                  "maxLength": 500000
+                  "type": "string"
                 },
                 "table": {
                   "type": "object",
                   "properties": {
                     "columns": {
                       "type": "array",
-                      "maxItems": 30,
                       "items": {
                         "type": "string",
                         "maxLength": 200
@@ -1377,18 +1367,15 @@
                     },
                     "rows": {
                       "type": "array",
-                      "maxItems": 2000,
                       "items": {
                         "type": "array",
-                        "maxItems": 30,
                         "items": {
                           "type": [
                             "string",
                             "number",
                             "boolean",
                             "null"
-                          ],
-                          "maxLength": 2000
+                          ]
                         }
                       }
                     }

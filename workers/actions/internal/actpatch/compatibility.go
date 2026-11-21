@@ -32,6 +32,9 @@ func patchCompatibility(moduleDir string) error {
 		{"runner/expression.go", "using := make(map[string]exprparser.Needs)\n\tstrategy := make(map[string]interface{})", "using := make(map[string]exprparser.Needs)\n\tstrategy := map[string]interface{}{\"job-total\": rc.StrategyJobTotal, \"job-index\": rc.StrategyJobIndex}"},
 		{"runner/expression.go", "job := rc.Run.Job()\n\tstrategy := make(map[string]interface{})", "job := rc.Run.Job()\n\tstrategy := map[string]interface{}{\"job-total\": rc.StrategyJobTotal, \"job-index\": rc.StrategyJobIndex}"},
 		{"runner/expression.go", `name := "workflow/hashfiles/index.js"`, `name := "workflow/hashfiles/index.cjs"`},
+		// File hashing inherits cancellation and explicit job limits, without a hidden minute budget.
+		{"runner/expression.go", "timeed, cancel := context.WithTimeout(ctx, time.Minute)", "timeed, cancel := context.WithCancel(ctx)"},
+		{"runner/expression.go", "\t\"time\"\n", ""},
 		{"runner/step.go", `.Debugf("Skipping step '%s' due to '%s'", stepModel, ifExpression)`, `.Infof("Skipping step '%s' due to '%s'", stepModel, ifExpression)`},
 		{"runner/step.go", "rc.Cancelled = cctx != nil && cctx.Err() != nil", "rc.Cancelled.Store(rc.Cancelled.Load() || (cctx != nil && cctx.Err() != nil))"},
 		{"runner/step.go", "if !rc.Cancelled && jobCancellationCtx != nil {", "if !rc.Cancelled.Load() && jobCancellationCtx != nil {"},

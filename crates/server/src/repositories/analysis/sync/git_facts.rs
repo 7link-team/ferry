@@ -1,6 +1,7 @@
 //! Native, read-only contribution facts. Fetching and cache locking belong to the caller.
 use crate::error::{ApiError, Result};
 use ferry_protocol::contribution::{ANALYSIS_VERSION, Artifact, Commit, SCHEMA_VERSION};
+use ferry_protocol::resources::ResourcePolicy;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -9,9 +10,6 @@ use std::{
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
-const OUTPUT_LIMIT: usize = 256 * 1024 * 1024;
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
-
 fn invalid() -> ApiError {
     ApiError::localized(
         axum::http::StatusCode::BAD_REQUEST,
@@ -19,20 +17,30 @@ fn invalid() -> ApiError {
     )
 }
 
-async fn read_bounded(reader: impl AsyncRead + Unpin, limit: usize) -> Result<Vec<u8>> {
+async fn read_bounded(mut reader: impl AsyncRead + Unpin, limit: Option<u64>) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    reader
-        .take((limit + 1) as u64)
-        .read_to_end(&mut bytes)
-        .await
-        .map_err(|_| invalid())?;
-    if bytes.len() > limit {
+    match limit {
+        Some(limit) => {
+            reader
+                .take(limit.saturating_add(1))
+                .read_to_end(&mut bytes)
+                .await
+        }
+        None => reader.read_to_end(&mut bytes).await,
+    }
+    .map_err(|_| invalid())?;
+    if !ferry_protocol::resources::allows(limit, bytes.len()) {
         return Err(invalid());
     }
     Ok(bytes)
 }
 
-async fn git(repository: &Path, args: &[&str], input: Option<Vec<u8>>) -> Result<Vec<u8>> {
+async fn git_with_policy(
+    policy: &ResourcePolicy,
+    repository: &Path,
+    args: &[&str],
+    input: Option<Vec<u8>>,
+) -> Result<Vec<u8>> {
     let mut command = tokio::process::Command::new("git");
     // Strip all inherited Git controls, including injected config and executable paths.
     for (key, _) in std::env::vars_os() {
@@ -87,20 +95,26 @@ async fn git(repository: &Path, args: &[&str], input: Option<Vec<u8>>) -> Result
             }
             Ok::<_, ApiError>(())
         };
-        let ((), output, _, status) = tokio::try_join!(
+        let ((), output, errors, status) = tokio::try_join!(
             write,
-            read_bounded(stdout, OUTPUT_LIMIT),
-            read_bounded(stderr, 64 * 1024),
+            read_bounded(stdout, policy.command_output_bytes),
+            read_bounded(stderr, policy.command_output_bytes),
             async { child.wait().await.map_err(|_| invalid()) }
         )?;
-        if !status.success() {
+        let total = output.len().checked_add(errors.len()).ok_or_else(invalid)?;
+        if !ferry_protocol::resources::allows(policy.command_output_bytes, total)
+            || !status.success()
+        {
             return Err(invalid());
         }
         Ok(output)
     };
-    tokio::time::timeout(COMMAND_TIMEOUT, operation)
-        .await
-        .map_err(|_| invalid())?
+    match policy.task_timeout_seconds {
+        Some(seconds) => tokio::time::timeout(Duration::from_secs(seconds), operation)
+            .await
+            .map_err(|_| invalid())?,
+        None => operation.await,
+    }
 }
 
 fn text(bytes: &[u8]) -> String {
@@ -186,9 +200,10 @@ fn count_extension(languages: &mut BTreeMap<String, i64>, path: &[u8]) -> Result
     Ok(())
 }
 
-async fn analyze(repository: &Path, commit: &mut Commit) -> Result<()> {
+async fn analyze(policy: &ResourcePolicy, repository: &Path, commit: &mut Commit) -> Result<()> {
     for (index, parent) in commit.parents.iter().enumerate() {
-        let rows = git(
+        let rows = git_with_policy(
+            policy,
             repository,
             &[
                 "diff",
@@ -235,7 +250,8 @@ async fn analyze(repository: &Path, commit: &mut Commit) -> Result<()> {
         }
     }
     if commit.parents.is_empty() {
-        let rows = git(
+        let rows = git_with_policy(
+            policy,
             repository,
             &["ls-tree", "-r", "-z", &commit.sha, "--"],
             None,
@@ -254,7 +270,8 @@ async fn analyze(repository: &Path, commit: &mut Commit) -> Result<()> {
     Ok(())
 }
 
-pub(super) async fn collect(
+pub(super) async fn collect_with_policy(
+    policy: &ResourcePolicy,
     repository: &Path,
     task_id: String,
     generation: i64,
@@ -262,11 +279,20 @@ pub(super) async fn collect(
     coverage_start: i64,
     known: &BTreeSet<String>,
 ) -> Result<Artifact> {
-    if git(repository, &["rev-parse", "--is-shallow-repository"], None).await? != b"false\n" {
+    if git_with_policy(
+        policy,
+        repository,
+        &["rev-parse", "--is-shallow-repository"],
+        None,
+    )
+    .await?
+        != b"false\n"
+    {
         return Err(invalid());
     }
     let mut refs = BTreeMap::new();
-    let rows = git(
+    let rows = git_with_policy(
+        policy,
         repository,
         &[
             "for-each-ref",
@@ -310,7 +336,13 @@ pub(super) async fn collect(
     for (name, target) in &refs {
         let mut members = Vec::new();
         // Never prune by date: parent clocks may run forward or backward.
-        let graph = git(repository, &["rev-list", "--timestamp", target, "--"], None).await?;
+        let graph = git_with_policy(
+            policy,
+            repository,
+            &["rev-list", "--timestamp", target, "--"],
+            None,
+        )
+        .await?;
         for row in graph.split(|b| *b == b'\n').filter(|r| !r.is_empty()) {
             let row = std::str::from_utf8(row).map_err(|_| invalid())?;
             let (seconds, sha) = row.split_once(' ').ok_or_else(invalid)?;
@@ -329,7 +361,8 @@ pub(super) async fn collect(
                 None => {
                     metadata(
                         sha,
-                        &git(repository, &["cat-file", "commit", sha], None).await?,
+                        &git_with_policy(policy, repository, &["cat-file", "commit", sha], None)
+                            .await?,
                     )?
                     .0
                     .committer_date
@@ -354,7 +387,8 @@ pub(super) async fn collect(
             input.extend_from_slice(sha.as_bytes());
             input.push(b'\n');
         }
-        let batch = git(repository, &["cat-file", "--batch"], Some(input)).await?;
+        let batch =
+            git_with_policy(policy, repository, &["cat-file", "--batch"], Some(input)).await?;
         let mut rest = batch.as_slice();
         for sha in pending {
             let end = rest.iter().position(|b| *b == b'\n').ok_or_else(invalid)?;
@@ -373,7 +407,8 @@ pub(super) async fn collect(
             rest = &rest[length + 1..];
             if reencode {
                 // Git's own iconv support avoids a second encoding implementation.
-                let encoded = git(
+                let encoded = git_with_policy(
+                    policy,
                     repository,
                     &[
                         "-c",
@@ -398,7 +433,7 @@ pub(super) async fn collect(
             }
             commit.complete = coverage_start == 0 || reachable[sha] >= coverage_start;
             if commit.complete {
-                analyze(repository, &mut commit).await?;
+                analyze(policy, repository, &mut commit).await?;
             }
             commits.push(commit);
         }
@@ -423,3 +458,28 @@ pub(super) async fn collect(
 #[cfg(test)]
 #[path = "git_facts_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+async fn git(repository: &Path, args: &[&str], input: Option<Vec<u8>>) -> Result<Vec<u8>> {
+    git_with_policy(&ResourcePolicy::default(), repository, args, input).await
+}
+#[cfg(test)]
+pub(super) async fn collect(
+    repository: &Path,
+    task_id: String,
+    generation: i64,
+    remote_path: String,
+    coverage_start: i64,
+    known: &BTreeSet<String>,
+) -> Result<Artifact> {
+    collect_with_policy(
+        &ResourcePolicy::default(),
+        repository,
+        task_id,
+        generation,
+        remote_path,
+        coverage_start,
+        known,
+    )
+    .await
+}

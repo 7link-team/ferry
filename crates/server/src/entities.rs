@@ -386,6 +386,7 @@ pub mod platform_state {
         pub page_scripts: Option<String>,
         pub site_config: Option<String>,
         pub conversation_config: Option<String>,
+        pub resource_config: Option<String>,
         pub session_config: Option<String>,
         pub mail_config: Option<String>,
         pub monitor_config: Option<String>,

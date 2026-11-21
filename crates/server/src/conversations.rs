@@ -102,9 +102,6 @@ pub(super) fn check_message(
     if client_id.is_empty() || client_id.len() > 128 || client_id.chars().any(char::is_control) {
         return Err(bad("conversations.clientInvalid"));
     }
-    if attachments.len() > 10 {
-        return Err(bad("conversations.tooManyAttachments"));
-    }
     if let Some(a) = attachments
         .iter()
         .find(|a| a.name.is_empty() || a.name.len() > 255 || a.name.chars().any(char::is_control))
@@ -115,13 +112,20 @@ pub(super) fn check_message(
                 .with("name", a.name.chars().take(64).collect::<String>()),
         ));
     }
-    if prompt.len()
-        + attachments
-            .iter()
-            .map(|a| a.text.len() + a.name.len())
-            .sum::<usize>()
-        > 48 * 1024
-    {
+    Ok(())
+}
+pub(super) fn check_message_resources(
+    prompt: &str,
+    attachments: &[Attachment],
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> Result<()> {
+    if !ferry_protocol::resources::allows(policy.file_count, attachments.len()) {
+        return Err(bad("conversations.tooManyAttachments"));
+    }
+    let bytes = attachments.iter().fold(prompt.len(), |n, a| {
+        n.saturating_add(a.text.len()).saturating_add(a.name.len())
+    });
+    if !ferry_protocol::resources::allows(policy.agent_prompt_bytes, bytes) {
         return Err(bad("conversations.messageTooLong"));
     }
     Ok(())
@@ -725,6 +729,11 @@ async fn send(
     }
     files::canonicalize(&s, &scope, id, &mut body.attachments).await?;
     check_message(&body.prompt, &body.client_id, &body.attachments)?;
+    check_message_resources(
+        &body.prompt,
+        &body.attachments,
+        &crate::accounts::resource_policy::load(&s.db).await?,
+    )?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let mut c = find(&tx, &scope, id).await?;
     available(&tx, &scope, c.agent_id.into()).await?;

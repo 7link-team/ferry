@@ -77,7 +77,6 @@ fn only_catalogue_get_operations_with_exact_safe_path_params_can_be_saved() {
     assert_eq!(key(&saves(read).unwrap_err()), "workflow.graphSchema");
     for (field, value) in [
         ("max_pages", json!(0)),
-        ("max_pages", json!(51)),
         ("operation", json!("")),
         ("query", json!({"nested":{"a":1}})),
     ] {
@@ -91,7 +90,10 @@ fn only_catalogue_get_operations_with_exact_safe_path_params_can_be_saved() {
     }
     let mut read = params("/workflows", json!({}));
     read["query"] = Value::Object((0..65).map(|i| (format!("k{i}"), json!(i))).collect());
-    assert_eq!(key(&saves(read).unwrap_err()), "workflow.graphSchema");
+    assert!(saves(read).is_ok());
+    let mut legacy = params("/workflows", json!({}));
+    legacy["max_pages"] = json!(51);
+    assert!(saves(legacy).is_ok());
 }
 
 #[test]
@@ -462,6 +464,15 @@ async fn all_pages_reads_every_page_and_fails_instead_of_truncating() {
     paged["max_pages"] = json!(4);
     assert_eq!(fixture.read(paged.clone()).await.unwrap().len(), 1);
     paged["max_pages"] = json!(3);
+    assert_eq!(fixture.read(paged.clone()).await.unwrap().len(), 1);
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            Expr::value(Some(json!({"workflow_platform_pages":3}).to_string())),
+        )
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
     let error = fixture.read(paged.clone()).await.unwrap_err();
     assert_eq!(key(&error), "workflow.platformPageLimit");
     assert_eq!(error.2.as_ref().unwrap().params["max_pages"], "3");
@@ -506,8 +517,8 @@ async fn oversized_gateway_responses_fail_with_a_narrow_the_query_error() {
     assert!(accepted[0].json["definition"].as_str().unwrap().len() > 300 * 1024);
     crate::entities::platform_state::Entity::update_many()
         .col_expr(
-            crate::entities::platform_state::Column::ConversationConfig,
-            Expr::value(json!({"tool_response_limit_kib":256}).to_string()),
+            crate::entities::platform_state::Column::ResourceConfig,
+            Expr::value(Some(json!({"tool_response_bytes":256*1024}).to_string())),
         )
         .filter(crate::entities::platform_state::Column::Id.eq(1))
         .exec(&fixture.s.db)

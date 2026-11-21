@@ -1,5 +1,5 @@
 //! QuickJS is linked only into this executable, never the business server.
-use ferry_protocol::sandbox::{Batch, ErrorCode, MAX_RESPONSE_BYTES, Reply, VERSION};
+use ferry_protocol::sandbox::{Batch, ErrorCode, Reply, VERSION};
 use rquickjs::{Context, Ctx, Function, Module, Runtime};
 use std::{
     collections::HashMap,
@@ -199,17 +199,19 @@ fn classify(
 }
 
 pub(crate) fn evaluate(batch: Batch) -> Reply {
-    let deadline = Instant::now() + Duration::from_millis(batch.timeout_ms);
+    let deadline = batch
+        .timeout_ms
+        .and_then(|ms| Instant::now().checked_add(Duration::from_millis(ms)));
     let timed_out = Arc::new(AtomicBool::new(false));
     let runtime = match Runtime::new() {
         Ok(runtime) => runtime,
         Err(_) => return Reply::error(ErrorCode::Memory, None),
     };
-    runtime.set_memory_limit(batch.memory_bytes);
-    runtime.set_max_stack_size(256 * 1024);
+    runtime.set_memory_limit(batch.memory_bytes.unwrap_or(0));
+    runtime.set_max_stack_size(0);
     let interrupted = timed_out.clone();
     runtime.set_interrupt_handler(Some(Box::new(move || {
-        let expired = Instant::now() >= deadline;
+        let expired = deadline.is_some_and(|deadline| Instant::now() >= deadline);
         if expired {
             interrupted.store(true, Ordering::Relaxed);
         }
@@ -301,9 +303,14 @@ pub(crate) fn evaluate(batch: Batch) -> Reply {
             None
         };
         let mut values = Vec::with_capacity(batch.evaluations.len());
-        let mut output_bytes = 0usize;
+        let mut output_bytes = serde_json::to_vec(&Reply::Ok {
+            version: VERSION,
+            values: vec![],
+        })
+        .expect("reply serializes")
+        .len();
         for (index, evaluation) in batch.evaluations.iter().enumerate() {
-            if Instant::now() >= deadline {
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 return Reply::error(ErrorCode::Timeout, Some(index));
             }
             let key = (
@@ -357,10 +364,18 @@ pub(crate) fn evaluate(batch: Batch) -> Reply {
                         );
                     }
                 };
-            output_bytes = match output_bytes.checked_add(encoded.len() + 1) {
-                Some(bytes) if bytes <= MAX_RESPONSE_BYTES - 128 => bytes,
-                _ => return Reply::error(ErrorCode::ResultLimit, Some(index)),
-            };
+            output_bytes =
+                match output_bytes.checked_add(encoded.len() + usize::from(!values.is_empty())) {
+                    Some(bytes)
+                        if ferry_protocol::resources::allows(
+                            batch.resource_policy.workflow_packet_bytes,
+                            bytes,
+                        ) =>
+                    {
+                        bytes
+                    }
+                    _ => return Reply::error(ErrorCode::ResultLimit, Some(index)),
+                };
             match serde_json::from_str(&encoded) {
                 Ok(value) => values.push(value),
                 Err(_) => return Reply::error(ErrorCode::Evaluation, Some(index)),
@@ -411,9 +426,10 @@ mod tests {
     fn batch(source: &str) -> Batch {
         Batch {
             program: None,
+            resource_policy: Default::default(),
             version: VERSION,
-            timeout_ms: 1000,
-            memory_bytes: 16 * 1024 * 1024,
+            timeout_ms: Some(1000),
+            memory_bytes: Some(16 * 1024 * 1024),
             deterministic: true,
             syntax_only: false,
             data: None,
@@ -427,6 +443,53 @@ mod tests {
             }],
         }
     }
+    #[test]
+    fn optional_runtime_limits_allow_large_output_and_evaluation_batches() {
+        let mut request = batch("'x'.repeat(8 * 1024 * 1024 + 1)");
+        request.timeout_ms = None;
+        request.memory_bytes = None;
+        assert!(
+            matches!(evaluate(request), Reply::Ok { values, .. } if values[0].as_str().unwrap().len() > 8 * 1024 * 1024)
+        );
+        let mut request = batch("1");
+        request.timeout_ms = None;
+        request.memory_bytes = None;
+        request.evaluations = (0..20001)
+            .map(|_| Evaluation {
+                expression: "1".into(),
+                template: false,
+                capture_presence: false,
+                item_index: None,
+                context: json!({}),
+            })
+            .collect();
+        assert!(request.valid());
+        assert!(matches!(evaluate(request), Reply::Ok { values, .. } if values.len() == 20001));
+    }
+
+    #[test]
+    fn configured_runtime_deadline_and_output_limit_are_enforced() {
+        let mut request = batch("(()=>{while(true){}})()");
+        request.timeout_ms = Some(10);
+        request.memory_bytes = None;
+        assert!(matches!(
+            evaluate(request),
+            Reply::Error {
+                code: ErrorCode::Timeout,
+                ..
+            }
+        ));
+        let mut request = batch("'x'.repeat(200)");
+        request.resource_policy.workflow_packet_bytes = Some(200);
+        assert!(matches!(
+            evaluate(request),
+            Reply::Error {
+                code: ErrorCode::ResultLimit,
+                ..
+            }
+        ));
+    }
+
     #[test]
     fn conditional_presence_captures_only_top_level_missing_and_keeps_strict_json() {
         for (source, expected) in [
@@ -548,7 +611,7 @@ mod tests {
         ] {
             let mut request = batch(source);
             request.syntax_only = true;
-            request.timeout_ms = 30;
+            request.timeout_ms = Some(30);
             assert!(
                 matches!(evaluate(request), Reply::Ok { values, .. } if values.is_empty()),
                 "{source}"
@@ -556,7 +619,7 @@ mod tests {
         }
         let mut request = batch("0)); }); (()=>{while(true){}})(); (function(){return ((0");
         request.syntax_only = true;
-        request.timeout_ms = 30;
+        request.timeout_ms = Some(30);
         let reply = evaluate(request);
         assert!(
             matches!(

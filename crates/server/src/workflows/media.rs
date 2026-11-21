@@ -21,12 +21,11 @@ use ferry_protocol::sandbox::{Asset, Item};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
 use serde_json::{Value, json};
 
-pub(super) const MAX_FILE_BYTES: usize = 32 * 1024 * 1024;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route(
             "/{workspace}/workflows/{id}/assets",
-            post(upload).layer(DefaultBodyLimit::max(MAX_FILE_BYTES + 1024 * 1024)),
+            post(upload).layer(DefaultBodyLimit::disable()),
         )
         .route("/{workspace}/workflows/{id}/assets/{hash}", get(download))
 }
@@ -58,7 +57,7 @@ async fn upload(
     scope.require("workflows.update")?;
     let row = super::scoped(&s.db, scope.workspace_id, workflow).await?;
     access::require(&s.db, &scope, &row, Operation::Edit).await?;
-    let mut field = multipart
+    let field = multipart
         .next_field()
         .await
         .map_err(|_| invalid())?
@@ -77,41 +76,28 @@ async fn upload(
     if name.is_empty() || name.len() > 255 || mime.len() > 128 {
         return Err(invalid());
     }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = field.chunk().await.map_err(|_| invalid())? {
-        if chunk.len() > MAX_FILE_BYTES.saturating_sub(bytes.len()) {
-            return Err(ApiError::localized(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                crate::i18n::Message::new("workflow.mediaTooLarge"),
-            ));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
     let backend = backend(&s).await?;
     let store = store(&s, &backend);
+    use futures::TryStreamExt;
+    let reader = Box::pin(field.map_err(|_| invalid()));
     let asset = store
-        .stage_bytes(
+        .stage_stream(
             scope.workspace_id.into(),
-            &bytes,
+            reader,
             &mime,
             0,
             "upload",
             scope.user.id.into(),
         )
         .await?;
+    let prepared = store.prepare(scope.workspace_id.into(), asset.id).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let scope =
         crate::accounts::workspace_admin::authorize(&tx, &scope, "workflows.update").await?;
     let row = super::scoped(&tx, scope.workspace_id, workflow).await?;
     access::require(&tx, &scope, &row, Operation::Edit).await?;
-    store
-        .attach(
-            &tx,
-            scope.workspace_id.into(),
-            asset.id,
-            "workflow",
-            workflow.into(),
-        )
+    prepared
+        .attach(&store, &tx, "workflow", workflow.into())
         .await?;
     tx.commit().await?;
     Ok((
@@ -184,10 +170,10 @@ pub(crate) async fn content_response(
     headers: HeaderMap,
 ) -> Result<Response> {
     let backend = backend(&s).await?;
-    let bytes = store(s, &backend)
-        .read_bytes(&s.db, asset.workspace_id, asset.id)
+    let file = store(s, &backend)
+        .read_file(&s.db, asset.workspace_id, asset.id)
         .await?;
-    media_response(bytes, &asset.mime, &headers, None)
+    media_file_response(file, &asset.mime, &headers, None).await
 }
 /// Authenticated callers supply the bytes; active document types never render inline.
 pub(crate) fn media_response(
@@ -196,6 +182,51 @@ pub(crate) fn media_response(
     headers: &HeaderMap,
     download_name: Option<&str>,
 ) -> Result<Response> {
+    let (mut response, range) =
+        media_response_head(bytes.len() as u64, mime, headers, download_name)?;
+    if let Some((start, length)) = range {
+        let bytes = bytes::Bytes::from(bytes);
+        *response.body_mut() = Body::from(bytes.slice(start as usize..(start + length) as usize));
+    }
+    Ok(response)
+}
+
+/// Keep the verified spool alive until HTTP completion or client cancellation.
+pub(crate) async fn media_file_response(
+    file: tempfile::NamedTempFile,
+    mime: &str,
+    headers: &HeaderMap,
+    download_name: Option<&str>,
+) -> Result<Response> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let size = tokio::fs::metadata(file.path()).await?.len();
+    let (mut response, range) = media_response_head(size, mime, headers, download_name)?;
+    if let Some((start, length)) = range {
+        let mut reader = tokio::fs::File::from_std(file.reopen()?);
+        reader.seek(std::io::SeekFrom::Start(start)).await?;
+        let stream = futures::stream::try_unfold(
+            (reader.take(length), file.into_temp_path()),
+            |(mut reader, owner)| async move {
+                let mut buffer = vec![0; 64 * 1024];
+                let count = reader.read(&mut buffer).await?;
+                if count == 0 {
+                    return Ok::<_, std::io::Error>(None);
+                }
+                buffer.truncate(count);
+                Ok(Some((bytes::Bytes::from(buffer), (reader, owner))))
+            },
+        );
+        *response.body_mut() = Body::from_stream(stream);
+    }
+    Ok(response)
+}
+
+fn media_response_head(
+    size: u64,
+    mime: &str,
+    headers: &HeaderMap,
+    download_name: Option<&str>,
+) -> Result<(Response, Option<(u64, u64)>)> {
     let inline = download_name.is_none()
         && matches!(
             mime,
@@ -222,48 +253,46 @@ pub(crate) fn media_response(
         if inline { "inline" } else { "attachment" }.to_owned()
     };
     let range = headers.get(header::RANGE).and_then(|h| h.to_str().ok());
-    let (status, data, content_range) = if let Some(range) = range {
-        let range = range
+    let (status, start, length, content_range) = if let Some(range) = range {
+        let bounds = range
             .strip_prefix("bytes=")
             .filter(|s| !s.contains(','))
-            .and_then(|s| s.split_once('-'));
-        let bounds = range.and_then(|(start, end)| {
-            if bytes.is_empty() {
-                return None;
-            }
-            if start.is_empty() {
-                let suffix = end.parse::<usize>().ok()?.min(bytes.len());
-                if suffix == 0 {
+            .and_then(|s| s.split_once('-'))
+            .and_then(|(start, end)| {
+                if size == 0 {
                     return None;
                 }
-                Some((bytes.len() - suffix, bytes.len() - 1))
-            } else {
-                let start = start.parse::<usize>().ok()?;
-                let end = if end.is_empty() {
-                    bytes.len() - 1
+                if start.is_empty() {
+                    let suffix = end.parse::<u64>().ok()?.min(size);
+                    (suffix > 0).then_some((size - suffix, size - 1))
                 } else {
-                    end.parse::<usize>().ok()?.min(bytes.len() - 1)
-                };
-                if start > end {
-                    return None;
+                    let start = start.parse::<u64>().ok()?;
+                    let end = if end.is_empty() {
+                        size - 1
+                    } else {
+                        end.parse::<u64>().ok()?.min(size - 1)
+                    };
+                    (start <= end).then_some((start, end))
                 }
-                Some((start, end))
-            }
-        });
+            });
         let Some((start, end)) = bounds else {
             return Ok((
-                StatusCode::RANGE_NOT_SATISFIABLE,
-                [(header::CONTENT_RANGE, format!("bytes */{}", bytes.len()))],
-            )
-                .into_response());
+                (
+                    StatusCode::RANGE_NOT_SATISFIABLE,
+                    [(header::CONTENT_RANGE, format!("bytes */{size}"))],
+                )
+                    .into_response(),
+                None,
+            ));
         };
         (
             StatusCode::PARTIAL_CONTENT,
-            bytes[start..=end].to_vec(),
-            Some(format!("bytes {start}-{end}/{}", bytes.len())),
+            start,
+            end - start + 1,
+            Some(format!("bytes {start}-{end}/{size}")),
         )
     } else {
-        (StatusCode::OK, bytes, None)
+        (StatusCode::OK, 0, size, None)
     };
     let mut response = (
         status,
@@ -278,15 +307,19 @@ pub(crate) fn media_response(
                 "default-src 'none'; sandbox",
             ),
         ],
-        Body::from(data),
+        Body::empty(),
     )
         .into_response();
+    response.headers_mut().insert(
+        header::CONTENT_LENGTH,
+        length.to_string().parse().map_err(|_| invalid())?,
+    );
     if let Some(value) = content_range {
         response
             .headers_mut()
             .insert(header::CONTENT_RANGE, value.parse().map_err(|_| invalid())?);
     }
-    Ok(response)
+    Ok((response, Some((start, length))))
 }
 pub(super) fn supports(spec: &Value) -> bool {
     matches!(
@@ -329,10 +362,9 @@ pub(super) async fn execute(
                 0,
             )
             .await?;
+        let prepared = storage.prepare(workspace, asset.id).await?;
         let tx = s.db.begin().await?;
-        storage
-            .attach(&tx, workspace, asset.id, "workflow", workflow)
-            .await?;
+        prepared.attach(storage, &tx, "workflow", workflow).await?;
         tx.commit().await?;
         let mut item = items.first().cloned().unwrap_or(Item {
             json: Default::default(),
@@ -404,10 +436,9 @@ pub(super) async fn execute(
                 let asset = storage
                     .stage_bytes(workspace, text.as_bytes(), mime, execution, node, 0)
                     .await?;
+                let prepared = storage.prepare(workspace, asset.id).await?;
                 let tx = s.db.begin().await?;
-                storage
-                    .attach(&tx, workspace, asset.id, "workflow", workflow)
-                    .await?;
+                prepared.attach(storage, &tx, "workflow", workflow).await?;
                 tx.commit().await?;
                 item.binary.insert(
                     field.into(),

@@ -249,13 +249,18 @@ pub(super) fn publication_ready(graph: &Value) -> Result<()> {
     Ok(())
 }
 
-fn input(spec: &Value, inputs: &Map<String, Value>) -> Result<()> {
+fn input(
+    spec: &Value,
+    inputs: &Map<String, Value>,
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> Result<()> {
     let value = Value::Object(inputs.clone());
-    if serde_json::to_vec(&json!({"json":value}))
-        .map_err(|_| ApiError::missing())?
-        .len()
-        > 1024 * 1024
-    {
+    if !ferry_protocol::resources::allows(
+        policy.workflow_packet_bytes,
+        serde_json::to_vec(&json!({"json":value}))
+            .map_err(|_| ApiError::missing())?
+            .len(),
+    ) {
         return Err(error("workflow.graphLimit", "/inputs"));
     }
     let validator = jsonschema::options()
@@ -303,6 +308,8 @@ pub(crate) async fn schedule_request(
         .one(conn)
         .await?
         .ok_or_else(ApiError::missing)?;
+    let policy = crate::accounts::resource_policy::load(conn).await?;
+    graph::validate_with_policy(&revision.definition, &policy)?;
     let graph: Value =
         serde_json::from_str(&revision.definition).map_err(|_| ApiError::missing())?;
     publication_ready(&graph)?;
@@ -314,7 +321,7 @@ pub(crate) async fn schedule_request(
                 .find(|node| node["id"] == entry && node["type"] == "core.trigger.manual")
         })
         .ok_or_else(|| error("workflow.runEntry", "/entry_node_id"))?;
-    input(node, inputs)?;
+    input(node, inputs, &policy)?;
     Ok(Request {
         mode: Mode::Manual,
         revision: Revision::Published,
@@ -389,7 +396,8 @@ async fn create_as(
     if entry["type"] != "core.trigger.manual" {
         return Err(error("workflow.runEntry", "/entry_node_id"));
     }
-    input(entry, &body.inputs)?;
+    let policy = crate::accounts::resource_policy::load(&tx).await?;
+    input(entry, &body.inputs, &policy)?;
     let vars = crate::variables::snapshot_for_workflow(&s, &tx, scope.workspace_id).await?;
     tx.commit().await?;
     let execution: i64 = s.next_id()?.into();
@@ -415,6 +423,7 @@ async fn create_as(
     let asset = store
         .stage(workflow.workspace_id, &plain, execution, "execution")
         .await?;
+    let prepared = store.prepare(workflow.workspace_id, asset.id).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let scope = crate::accounts::workspace_admin::authorize(&tx, &scope, "workflows.run").await?;
     let fresh = super::scoped(&tx, scope.workspace_id, id).await?;
@@ -429,9 +438,7 @@ async fn create_as(
     if fresh.lifecycle != "active" {
         return Err(super::conflict("workflow.archived"));
     }
-    store
-        .attach(&tx, workflow.workspace_id, asset.id, "execution", execution)
-        .await?;
+    prepared.attach(&store, &tx, "execution", execution).await?;
     let number = executions::next_workflow_number(&tx, scope.workspace_id).await?;
     let now = db::now();
     let context = s.vault.seal(
@@ -983,7 +990,10 @@ async fn finish(
 /// Keep the full failure message with the node that failed: the execution only
 /// stores a short reason code, and the server log is not visible to users.
 async fn record_failure(db: &sea_orm::DatabaseConnection, run_id: i64, message: &str) {
-    const LIMIT: usize = 256 * 1024;
+    let Ok(policy) = crate::accounts::resource_policy::load(db).await else {
+        return;
+    };
+    let limit = ferry_protocol::resources::byte_limit(policy.log_output_bytes);
     let Ok(active) = nodes::Entity::find()
         .filter(nodes::Column::ExecutionId.eq(run_id))
         .filter(nodes::Column::State.is_in(["running", "waiting"]))
@@ -1001,9 +1011,9 @@ async fn record_failure(db: &sea_orm::DatabaseConnection, run_id: i64, message: 
             "[{}] [error] {message}",
             chrono::Utc::now().to_rfc3339()
         ));
-        let truncated = logs.len() > LIMIT;
+        let truncated = logs.len() > limit;
         if truncated {
-            let mut cut = LIMIT;
+            let mut cut = limit;
             while !logs.is_char_boundary(cut) {
                 cut -= 1;
             }
@@ -1115,6 +1125,7 @@ async fn dispatch_inner(
     lease: &Lease,
     stop: &tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     let store = Store {
         db: &s.db,
         backend,
@@ -1170,6 +1181,7 @@ async fn dispatch_inner(
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
+    graph::validate_with_policy(&revision.definition, &policy)?;
     let graph: Value =
         serde_json::from_str(&revision.definition).map_err(|_| ApiError::missing())?;
     if plan::compile(&revision.definition, &run.trigger_ref)? != start.plan {
@@ -1268,7 +1280,7 @@ async fn dispatch_inner(
                     iteration_hash: node.iteration_hash.clone(),
                     index: offset + index,
                 }];
-                super::transform::append(&mut items, &mut input_bytes, item)?;
+                super::transform::append_with_policy(&mut items, &mut input_bytes, item, &policy)?;
             }
         }
         skipped |= if spec["type"] == "core.merge" && spec["params"]["wait"] == "any_items" {
@@ -1331,7 +1343,7 @@ async fn dispatch_inner(
             } else {
                 vec![None]
             };
-            graph::resolve_attempt(spec,&planned.path,InputData{items:items.clone(),upstream},&selections,json!({"$vars":start.vars,"$node":{"id":spec["id"],"name":spec["name"],"type":spec["type"]},"$workflow":{"id":Id::from(run.workflow_id)},"$execution":{"id":Id::from(run.id),"mode":run.mode},"$now":clock,"$today":today}),true).await?
+            super::host::while_active(s, &run, graph::resolve_attempt_with_policy(spec,&planned.path,InputData{items:items.clone(),upstream},&selections,json!({"$vars":start.vars,"$node":{"id":spec["id"],"name":spec["name"],"type":spec["type"]},"$workflow":{"id":Id::from(run.workflow_id)},"$execution":{"id":Id::from(run.id),"mode":run.mode},"$now":clock,"$today":today}),true,&policy)).await?
         };
         let active = journal
             .activate(
@@ -1353,8 +1365,17 @@ async fn dispatch_inner(
         let mut conditional =
             if super::condition::supports(spec) && !skipped && mode == "active" && pin.is_none() {
                 Some(
-                    super::condition::execute(spec, &items[..selected], &active.snapshot.params)
-                        .await?,
+                    super::host::while_active(
+                        s,
+                        &run,
+                        super::condition::execute_with_policy(
+                            spec,
+                            &items[..selected],
+                            &active.snapshot.params,
+                            &policy,
+                        ),
+                    )
+                    .await?,
                 )
             } else {
                 None
@@ -1385,8 +1406,17 @@ async fn dispatch_inner(
                     .await?
                 }
                 _ if super::platform::supports(spec) => {
-                    super::platform::execute(s, &run, &items[..selected], &active.snapshot.params)
-                        .await?
+                    super::host::while_active(
+                        s,
+                        &run,
+                        super::platform::execute(
+                            s,
+                            &run,
+                            &items[..selected],
+                            &active.snapshot.params,
+                        ),
+                    )
+                    .await?
                 }
                 _ if super::agent::supports(spec) => {
                     Box::pin(super::agent::execute(
@@ -1414,32 +1444,40 @@ async fn dispatch_inner(
                 _ if super::report::supports(spec) => {
                     let (clock, _) =
                         super::expression::clock(&graph["settings"], active.snapshot.frozen_at_ms)?;
-                    super::report::execute(
+                    super::host::while_active(
                         s,
-                        &store,
-                        &super::artifacts::Origin {
-                            workspace: run.workspace_id,
-                            workflow: run.workflow_id,
-                            execution: run.id,
-                            node: spec["id"].as_str().unwrap(),
-                        },
-                        &clock,
-                        &items[..selected],
-                        &active.snapshot.params,
+                        &run,
+                        super::report::execute(
+                            s,
+                            &store,
+                            &super::artifacts::Origin {
+                                workspace: run.workspace_id,
+                                workflow: run.workflow_id,
+                                execution: run.id,
+                                node: spec["id"].as_str().unwrap(),
+                            },
+                            &clock,
+                            &items[..selected],
+                            &active.snapshot.params,
+                        ),
                     )
                     .await?
                 }
                 _ if super::media::supports(spec) => {
-                    super::media::execute(
+                    super::host::while_active(
                         s,
-                        &store,
-                        run.workspace_id,
-                        run.workflow_id,
-                        run.id,
-                        spec["id"].as_str().unwrap(),
-                        spec,
-                        &items[..selected],
-                        &active.snapshot.params,
+                        &run,
+                        super::media::execute(
+                            s,
+                            &store,
+                            run.workspace_id,
+                            run.workflow_id,
+                            run.id,
+                            spec["id"].as_str().unwrap(),
+                            spec,
+                            &items[..selected],
+                            &active.snapshot.params,
+                        ),
                     )
                     .await?
                 }
@@ -1468,9 +1506,12 @@ async fn dispatch_inner(
                         }
                     }
                 }
-                _ if super::transform::supports(spec) => {
-                    super::transform::execute(spec, &items[..selected], &active.snapshot.params)?
-                }
+                _ if super::transform::supports(spec) => super::transform::execute_with_policy(
+                    spec,
+                    &items[..selected],
+                    &active.snapshot.params,
+                    &policy,
+                )?,
                 "core.wait" => {
                     let params = &active.snapshot.params[0];
                     let deadline = if params["mode"] == "duration" {
@@ -1631,7 +1672,18 @@ pub(crate) async fn scheduler(
         if *stop.borrow() || *drain.borrow() {
             break;
         }
-        if tasks.len() < 16 {
+        let policy = match crate::accounts::resource_policy::load(&s.db).await {
+            Ok(policy) => policy,
+            Err(error) => {
+                tracing::warn!(%error, "workflow resource policy unavailable");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+        };
+        if policy
+            .workflow_concurrent_runs
+            .is_none_or(|limit| (tasks.len() as u64) < limit)
+        {
             match claim(&s, &boot).await {
                 Ok(Some(lease)) => {
                     let s = s.clone();

@@ -390,12 +390,6 @@ fn parameters(text: &str, _kind: Kind) -> Result<BTreeMap<String, Parameter>> {
     Ok(out)
 }
 fn document(text: &str) -> Result<Value> {
-    if text.len() > 262144 {
-        return Err(ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("templates.contentTooLarge"),
-        ));
-    }
     let value: Value = serde_yaml_ng::from_str(text).map_err(|error| {
         let at = error
             .location()
@@ -812,7 +806,7 @@ fn validate_template(
 ) -> Result<(Value, BTreeMap<String, Parameter>)> {
     let definitions = parameters(text, kind)?;
     let doc = if kind == Kind::Config {
-        if content.len() > 262144 || content.contains('\0') {
+        if content.contains('\0') {
             return Err(ApiError::localized(
                 axum::http::StatusCode::BAD_REQUEST,
                 crate::i18n::Message::new("templates.configInvalid"),
@@ -1175,6 +1169,16 @@ mod official_blueprints_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn template_content_has_no_implicit_byte_cap_and_keeps_semantic_validation() {
+        let text = "x".repeat(256 * 1024 + 1);
+        validate_config(&text, "[]").unwrap();
+        assert!(validate_config("bad\0content", "[]").is_err());
+        let yaml = format!("description: {text}");
+        assert_eq!(document(&yaml).unwrap()["description"], text);
+        assert!(document("[]").is_err());
+    }
 
     #[tokio::test]
     async fn workspace_examples_and_template_kind_lists_are_isolated_and_transactional() {

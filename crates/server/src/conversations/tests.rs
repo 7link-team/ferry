@@ -1108,6 +1108,14 @@ async fn messages_are_idempotent_frozen_and_serialized_without_duplicate_runs() 
         client_id: "request-4".into(),
         attachments: vec![],
     };
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            sea_orm::sea_query::Expr::value(json!({"agent_prompt_bytes":48 * 1024}).to_string()),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
     assert_eq!(
         send(State(s), admin(1), Path(("1".into(), id)), Json(bad))
             .await
@@ -1441,6 +1449,11 @@ async fn recovered_context_contains_only_completed_same_room_messages_and_is_bou
     assert!(context.len() <= 1024);
     assert!(context.contains("COMPLETED_CONTEXT"));
     assert!(!context.contains("UNCERTAIN_DO_NOT_REPLAY"));
+    let unlimited = messages::recovery_context(&s.db, &next, usize::MAX)
+        .await
+        .unwrap();
+    assert!(unlimited.len() > 16 * 1024);
+    assert!(!unlimited.contains("UNCERTAIN_DO_NOT_REPLAY"));
     assert!(
         messages::recovery_context(&s.db, &next, 10)
             .await
@@ -1597,7 +1610,14 @@ fn message_limits_are_each_named() {
         "conversations.clientInvalid"
     );
     assert_eq!(
-        key(check_message("hi", "c", &vec![attachment("a.txt", ""); 11])),
+        key(check_message_resources(
+            "hi",
+            &vec![attachment("a.txt", ""); 11],
+            &ferry_protocol::resources::ResourcePolicy {
+                file_count: Some(10),
+                ..Default::default()
+            }
+        )),
         "conversations.tooManyAttachments"
     );
     assert_eq!(
@@ -1605,7 +1625,14 @@ fn message_limits_are_each_named() {
         "conversations.attachmentNameInvalid"
     );
     assert_eq!(
-        key(check_message(&"x".repeat(48 * 1024 + 1), "c", &[])),
+        key(check_message_resources(
+            &"x".repeat(48 * 1024 + 1),
+            &[],
+            &ferry_protocol::resources::ResourcePolicy {
+                agent_prompt_bytes: Some(48 * 1024),
+                ..Default::default()
+            }
+        )),
         "conversations.messageTooLong"
     );
     assert_eq!(
@@ -1613,6 +1640,12 @@ fn message_limits_are_each_named() {
         "conversations.messageText"
     );
     check_message("hello", "c", &[attachment("a.txt", "text")]).unwrap();
+    check_message_resources(
+        &"x".repeat(48 * 1024 + 1),
+        &vec![attachment("a.txt", ""); 11],
+        &Default::default(),
+    )
+    .unwrap();
 }
 
 #[tokio::test]

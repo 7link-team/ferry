@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path};
 
-use ferry_protocol::release::{Artifact, MAX_CATALOG, MAX_PAYLOAD, verify_catalog};
+#[cfg(test)]
+use ferry_protocol::release::MAX_CATALOG;
+use ferry_protocol::release::{Artifact, MAX_PAYLOAD, verify_catalog};
 
 pub(crate) fn verify_files(
     manifest: &Path,
@@ -13,9 +15,7 @@ pub(crate) fn verify_files(
     expected: &str,
 ) -> anyhow::Result<()> {
     let mut bytes = Vec::new();
-    std::fs::File::open(manifest)?
-        .take((MAX_CATALOG + 1) as u64)
-        .read_to_end(&mut bytes)?;
+    std::fs::File::open(manifest)?.read_to_end(&mut bytes)?;
     let mut sig = String::new();
     std::fs::File::open(signature)?
         .take(8193)
@@ -134,7 +134,7 @@ pub(crate) fn stage(
     } else {
         "ferry-runner"
     });
-    let mut input = std::fs::File::open(source)?.take(artifact.size + 1);
+    let mut input = std::fs::File::open(source)?.take(artifact.size.saturating_add(1));
     let mut output = std::fs::File::create(&binary)?;
     std::io::copy(&mut input, &mut output)?;
     output.sync_all()?;
@@ -186,6 +186,7 @@ pub(crate) async fn download(
     manifest: &str,
     signature: &str,
     version: &str,
+    policy: &ferry_protocol::resources::ResourcePolicy,
 ) -> anyhow::Result<Installed> {
     use std::io::Write;
     let artifact = verify_catalog(
@@ -196,9 +197,23 @@ pub(crate) async fn download(
         env!("CARGO_PKG_VERSION"),
         version,
     )?;
-    let client = reqwest::Client::builder()
+    ensure!(
+        ferry_protocol::resources::allows(policy.tool_response_bytes, manifest.len()),
+        "release catalog exceeds configured size limit"
+    );
+    ensure!(
+        policy
+            .file_upload_bytes
+            .is_none_or(|limit| artifact.size <= limit),
+        "release artifact exceeds configured file limit"
+    );
+    let mut builder = reqwest::Client::builder()
         .https_only(true)
-        .timeout(std::time::Duration::from_secs(300))
+        .connect_timeout(std::time::Duration::from_secs(15));
+    if let Some(seconds) = policy.task_timeout_seconds {
+        builder = builder.timeout(std::time::Duration::from_secs(seconds));
+    }
+    let client = builder
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()?;
     let mut response = client.get(&artifact.url).send().await?.error_for_status()?;

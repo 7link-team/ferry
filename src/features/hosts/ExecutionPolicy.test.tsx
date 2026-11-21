@@ -12,7 +12,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
-it("keeps shared execution opt-in and blocks invalid capacity before saving", async () => {
+it("keeps execution access controls and leaves resource ceilings to platform settings", async () => {
   const validity = vi.fn();
   function Form() {
     const [value, setValue] = useState(defaultExecutionPolicy);
@@ -24,15 +24,9 @@ it("keeps shared execution opt-in and blocks invalid capacity before saving", as
   expect(checkboxes[1]!.getAttribute("aria-checked")).toBe("false");
   await act(async () => checkboxes[1]!.click());
   expect(checkboxes[1]!.getAttribute("aria-checked")).toBe("true");
-  const input = host.querySelector<HTMLInputElement>('input[type="number"]')!;
-  expect(input.getAttribute("aria-label")).toBe(executionText("hostExecution.capacity"));
-  for (const [value, blocked] of [["0", true], ["65", true], ["2.5", true], ["4", false]] as const) {
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    expect(validity).toHaveBeenLastCalledWith(blocked);
-  }
+  expect(host.querySelector('input[type="number"]')).toBeNull();
+  expect(validity).toHaveBeenLastCalledWith(false);
+
 });
 
 it("renders execution policy as text in the shared detail form", async () => {
@@ -41,10 +35,10 @@ it("renders execution policy as text in the shared detail form", async () => {
   await act(async () => root.render(<ExecutionPolicyFields value={{ enabled: true, shared: false, capacity: 4 }} readOnly onChange={onChange} onValidityChange={validity} />));
   expect(host.querySelectorAll("input, select, textarea")).toHaveLength(0);
   expect([...host.querySelectorAll("dt")].map(node => node.textContent)).toEqual([
-    executionText("hostExecution.enabled"), executionText("hostExecution.shared"), executionText("hostExecution.capacity"),
+    executionText("hostExecution.enabled"), executionText("hostExecution.shared"),
   ]);
   expect([...host.querySelectorAll("dd")].map(node => node.textContent)).toEqual([
-    commonText("common.yes"), commonText("common.no"), "4",
+    commonText("common.yes"), commonText("common.no"),
   ]);
   expect(onChange).not.toHaveBeenCalled();
   expect(validity).toHaveBeenLastCalledWith(false);

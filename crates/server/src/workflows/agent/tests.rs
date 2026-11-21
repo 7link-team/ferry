@@ -361,7 +361,16 @@ async fn anthropic_api_agent_supports_tool_results_and_one_schema_correction() {
     ]).await;
     api_model(&fixture, "anthropic", &url).await;
     assert_eq!(
-        fixture.execute().await.unwrap()[0].json["summary"],
+        {
+            let mut p = params(fixture.agent.id);
+            p["max_tokens"] = json!(1024);
+            fixture
+                .execute_params(p, Duration::from_secs(30))
+                .await
+                .unwrap()[0]
+                .json["summary"]
+                .clone()
+        },
         "corrected"
     );
     let requests = requests.lock().unwrap();
@@ -419,6 +428,7 @@ async fn api_agent_refuses_file_execution_and_bounds_tool_calls() {
     assert!(requests.lock().unwrap().is_empty());
     let mut p = params(fixture.agent.id);
     p["max_tool_calls"] = json!(1);
+    resource_limits(&fixture, json!({"agent_tool_calls":1})).await;
     assert_eq!(
         key(&fixture
             .execute_params(p, Duration::from_secs(5))
@@ -484,6 +494,7 @@ async fn api_agent_runs_without_a_runner_and_journals_actual_usage_without_money
     let server = tokio::spawn(async move {
         axum::serve(listener, Router::new().route("/chat/completions", post(|axum::Json(body): axum::Json<Value>| async move {
             assert_eq!(body["model"], "m");
+            assert!(body.get("max_tokens").is_none());
             assert!(body["messages"][0]["content"].as_str().unwrap().contains("workflow_input_items"));
             axum::Json(json!({"choices":[{"message":{"role":"assistant","content":"{\"summary\":\"API done\"}"}}],
                 "usage":{"prompt_tokens":7,"completion_tokens":5}}))
@@ -989,6 +1000,7 @@ async fn cancelling_the_execution_or_reaching_the_timeout_cancels_the_cli() {
 #[tokio::test]
 async fn exceeding_the_tool_call_limit_cancels_and_fails() {
     let fixture = Fixture::new().await;
+    resource_limits(&fixture, json!({"agent_tool_calls":2})).await;
     let mut limited = params(fixture.agent.id);
     limited["max_tool_calls"] = json!(2);
     fixture.script(vec![
@@ -1168,6 +1180,38 @@ async fn save_time_validation_bounds_the_prompt_and_requires_an_object_schema() 
     expression["prompt"] = json!("=Analyze {{ $json.since }}");
     // (Saving compiles expressions in the JavaScript sandbox, absent in unit tests.)
     super::super::graph::validate(&graph(expression).to_string()).unwrap();
+    for (field, value) in [
+        ("prompt", json!("x".repeat(32769))),
+        (
+            "output_schema",
+            json!({"type":"object","description":"x".repeat(65537)}),
+        ),
+        ("timeout_s", json!(29)),
+        ("timeout_s", json!(1801)),
+        ("max_tool_calls", json!(129)),
+    ] {
+        let mut value_params = params(agent);
+        value_params[field] = value;
+        save(value_params).await.unwrap();
+    }
+    resource_limits(
+        &fixture,
+        json!({"agent_prompt_bytes":32768,"agent_schema_bytes":65536}),
+    )
+    .await;
+    let mut too_long = params(agent);
+    too_long["prompt"] = json!("x".repeat(32769));
+    assert_eq!(
+        key(&save(too_long).await.unwrap_err()),
+        "workflow.agentPrompt"
+    );
+    let mut large_schema = params(agent);
+    large_schema["output_schema"] = json!({"type":"object","description":"x".repeat(65537)});
+    assert_eq!(
+        key(&save(large_schema).await.unwrap_err()),
+        "workflow.agentSchema"
+    );
+    resource_limits(&fixture, json!({})).await;
     let cases = [
         (
             "output_schema",
@@ -1186,27 +1230,12 @@ async fn save_time_validation_bounds_the_prompt_and_requires_an_object_schema() 
         ),
         (
             "output_schema",
-            json!({"type":"object","description":"x".repeat(64 * 1024)}),
-            "workflow.agentSchema",
-        ),
-        (
-            "output_schema",
             json!({"type":"object","properties":{"a":{"$ref":"https://example.invalid/s.json"}}}),
             "workflow.agentSchema",
         ),
         ("prompt", json!(""), "workflow.graphSchema"),
         ("prompt", json!("   "), "workflow.agentPrompt"),
-        (
-            "prompt",
-            json!("x".repeat(32 * 1024 + 1)),
-            "workflow.graphSchema",
-        ),
-        // Within the character limit but over 32 KiB of UTF-8.
-        ("prompt", json!("数".repeat(12_000)), "workflow.agentPrompt"),
-        ("timeout_s", json!(29), "workflow.graphSchema"),
-        ("timeout_s", json!(1801), "workflow.graphSchema"),
         ("max_tool_calls", json!(0), "workflow.graphSchema"),
-        ("max_tool_calls", json!(129), "workflow.graphSchema"),
         ("agent_id", json!("0"), "workflow.graphSchema"),
         ("agent_id", json!("=1"), "workflow.graphSchema"),
         ("host_id", json!("1"), "workflow.graphSchema"),
@@ -1230,6 +1259,7 @@ async fn save_time_validation_bounds_the_prompt_and_requires_an_object_schema() 
 #[tokio::test]
 async fn no_host_and_oversized_prompts_fail_before_the_runner_is_used() {
     let fixture = Fixture::new().await;
+    resource_limits(&fixture, json!({"agent_prompt_bytes":65536})).await;
     // The node's own target wins over the Agent host; a missing host fails clearly.
     let input = Item {
         json: Map::from_iter([("blob".into(), json!("x".repeat(70 * 1024)))]),
@@ -1549,7 +1579,17 @@ async fn file_output_limits_types_links_and_old_runners_fail_clearly() {
     .await
     .unwrap_err();
     assert_eq!(key(&error), "workflow.agentFileMismatch");
-    // Too many files.
+    resource_limits(&fixture, json!({"file_upload_bytes":1})).await;
+    let error = run(
+        with(vec![("output/small.md", "ab")]),
+        json!({"enabled":true}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(key(&error), "workflow.agentFileTooLarge");
+    assert_eq!(error.2.as_ref().unwrap().params["limit"], "1 B");
+    // The administrator configures the limit; legacy per-node limits are ignored.
+    resource_limits(&fixture, json!({"file_count":1})).await;
     let error = run(
         with(vec![("output/1.md", "a"), ("output/2.md", "b")]),
         json!({"enabled":true,"max_files":1}),
@@ -1557,6 +1597,7 @@ async fn file_output_limits_types_links_and_old_runners_fail_clearly() {
     .await
     .unwrap_err();
     assert_eq!(key(&error), "workflow.agentFilesTooMany");
+    resource_limits(&fixture, json!({})).await;
     // A link is never followed: only the regular file is delivered.
     let dir = format!("/fake/workspaces/{}-{}", fixture.run.id, fixture.run.id);
     fixture
@@ -1594,6 +1635,30 @@ async fn file_output_limits_types_links_and_old_runners_fail_clearly() {
 }
 
 #[tokio::test]
+async fn cancellation_guard_keeps_large_operation_state_off_the_callers_stack() {
+    let fixture = Fixture::new().await;
+    let work = async {
+        let payload = [0u8; 128 * 1024];
+        std::future::pending::<()>().await;
+        std::hint::black_box(payload);
+        Ok(())
+    };
+    let operation_bytes = std::mem::size_of_val(&work);
+    let guarded = host::while_active(&fixture.s, &fixture.run, work);
+    let guarded_bytes = std::mem::size_of_val(&guarded);
+    let execution = fixture.execute_params(params(fixture.agent.id), Duration::ZERO);
+    println!(
+        "future bytes: operation={operation_bytes}, guarded={guarded_bytes}, agent_execution={}",
+        std::mem::size_of_val(&execution)
+    );
+    assert!(operation_bytes >= 128 * 1024);
+    assert!(
+        guarded_bytes < 64 * 1024,
+        "the guard must not embed the operation state"
+    );
+}
+
+#[tokio::test]
 async fn file_output_requires_a_confinable_cli_and_keeps_the_schema_optional_only_then() {
     // Without files the schema is still required; with files it is optional.
     let base = json!({"agent_id":"1","prompt":"p","timeout_s":600,"max_tool_calls":64});
@@ -1605,10 +1670,7 @@ async fn file_output_requires_a_confinable_cli_and_keeps_the_schema_optional_onl
     files["files"] = json!({"enabled":true});
     validate(&files, "/nodes/1").unwrap();
     files["files"]["max_files"] = json!(99);
-    assert_eq!(
-        key(&validate(&files, "/nodes/1").unwrap_err()),
-        "workflow.agentFilesInvalid"
-    );
+    validate(&files, "/nodes/1").unwrap();
     // A CLI that cannot confine its writes is refused when saving and running.
     let fixture = Fixture::new().await;
     ai_agents::Entity::update_many()
@@ -1805,4 +1867,616 @@ async fn the_published_definition_example_validates_and_saves_with_real_ids() {
         assert!(detail.contains("required"), "{detail}");
     }
     assert_eq!(fixture.workflow_count().await, count);
+}
+
+async fn resource_limits(fixture: &Fixture, value: Value) {
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            Expr::value(Some(value.to_string())),
+        )
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn default_agent_allows_more_than_former_tool_quota_and_backpressures_results() {
+    let fixture = Fixture::new().await;
+    let mut steps = Vec::new();
+    for id in 0..160 {
+        steps.push(call(&id.to_string(), "ferry_discover", json!({})));
+    }
+    for _ in 0..160 {
+        steps.push(AgentStep::Input);
+    }
+    steps.extend(answer(r#"{"summary":"done"}"#));
+    fixture.script(steps);
+    let mut legacy = params(fixture.agent.id);
+    legacy["max_tool_calls"] = json!(1);
+    legacy["timeout_s"] = json!(30);
+    let output = tokio::time::timeout(
+        Duration::from_secs(20),
+        execute(
+            &fixture.s,
+            &fixture.run,
+            0,
+            &json!({"id":"agent","type":"ai.agent.run"}),
+            &[Item {
+                json: Map::new(),
+                binary: Default::default(),
+                paired: vec![],
+            }],
+            &[legacy],
+        ),
+    )
+    .await
+    .expect("backpressure completes")
+    .unwrap();
+    assert_eq!(output[0].json["summary"], "done");
+    assert_eq!(fixture.results().len(), 160);
+    assert!(!fixture.fake.agent_cancelled.load(Ordering::SeqCst));
+    assert_eq!(fixture.requests()[0].timeout_seconds, 0);
+    assert_eq!(
+        fixture.requests()[0].resource_policy.as_ref(),
+        Some(&ResourcePolicy::default())
+    );
+}
+
+#[tokio::test]
+async fn anthropic_agent_requires_explicit_provider_tokens_before_sending() {
+    let fixture = Fixture::new().await;
+    let (url, server, requests) = api_upstream("anthropic", vec![]).await;
+    api_model(&fixture, "anthropic", &url).await;
+    let error = fixture.execute().await.unwrap_err();
+    assert_eq!(key(&error), "workflow.agentMaxTokensRequired");
+    let rendered = crate::i18n::render_stored(crate::i18n::Locale::ZhCn, &error.stored());
+    assert!(
+        rendered.contains("\u{63d0}\u{4f9b}\u{5546}") && rendered.contains("/params/max_tokens")
+    );
+    assert!(requests.lock().unwrap().is_empty());
+    server.abort();
+}
+
+#[tokio::test]
+async fn provider_defaults_ignore_legacy_quotas_and_configured_admission_waits_and_cancels() {
+    let fixture = Fixture::new().await;
+    let (url, server, requests) = api_upstream(
+        "openai",
+        vec![api_answer("one"), api_answer("two"), api_answer("three")],
+    )
+    .await;
+    let profile = api_model(&fixture, "openai", &url).await;
+    let profile = crate::agents::model_profile(&fixture.s.db, 1.into(), profile.into())
+        .await
+        .unwrap();
+    crate::entities::ai_providers::Entity::update_many()
+        .col_expr(crate::entities::ai_providers::Column::Qps, Expr::value(1))
+        .col_expr(
+            crate::entities::ai_providers::Column::Concurrency,
+            Expr::value(1),
+        )
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    let backend = crate::artifact_store::ArtifactStore::for_state(&fixture.s)
+        .await
+        .unwrap();
+    let storage = crate::content_assets::Store {
+        db: &fixture.s.db,
+        backend: &backend,
+        vault: &fixture.s.vault,
+        ids: &fixture.s.ids,
+        quota: crate::content_assets::DEFAULT_QUOTA,
+    };
+    let p = [
+        json!({"provider_id":profile.provider_id.to_string(),"model":"m","prompt":"read","output_field":"answer"}),
+    ];
+    let spec = json!({"id":"provider","type":"ai.llm.chat"});
+    let items = [Item {
+        json: Map::new(),
+        binary: BTreeMap::new(),
+        paired: vec![],
+    }];
+    let execute = |offset| {
+        super::super::ai::execute_indexed(
+            &fixture.s,
+            &storage,
+            &fixture.run,
+            0,
+            &spec,
+            &items,
+            &p,
+            offset,
+        )
+    };
+    execute(0).await.unwrap();
+    // An earlier uncertain outcome does not consume an absent concurrency quota.
+    crate::entities::ai_calls::Entity::update_many()
+        .col_expr(
+            crate::entities::ai_calls::Column::State,
+            Expr::value("unknown"),
+        )
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    execute(1).await.unwrap();
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    resource_limits(&fixture, json!({"provider_requests_per_second":1})).await;
+    let limited = execute(2);
+    tokio::pin!(limited);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), &mut limited)
+            .await
+            .is_err()
+    );
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    tokio::time::timeout(Duration::from_secs(5), &mut limited)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(requests.lock().unwrap().len(), 3);
+    resource_limits(&fixture, json!({"provider_concurrency":1})).await;
+    let queued = execute(3);
+    tokio::pin!(queued);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), &mut queued)
+            .await
+            .is_err()
+    );
+    workflow_executions::Entity::update_many()
+        .col_expr(
+            workflow_executions::Column::State,
+            Expr::value("cancelling"),
+        )
+        .filter(workflow_executions::Column::Id.eq(fixture.run.id))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(3), &mut queued)
+            .await
+            .unwrap()
+            .is_err()
+    );
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        3,
+        "queued calls never reach the paid provider"
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn ordinary_provider_cancellation_and_optional_deadline_preserve_unknown_outcomes_without_replay()
+ {
+    use axum::{Router, routing::post};
+    let fixture = Fixture::new().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let arrived = Arc::new(tokio::sync::Notify::new());
+    let (count, started) = (requests.clone(), arrived.clone());
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/chat/completions",
+                post(move || {
+                    let (count, started) = (count.clone(), started.clone());
+                    async move {
+                        count.fetch_add(1, Ordering::SeqCst);
+                        started.notify_one();
+                        std::future::pending::<axum::Json<Value>>().await
+                    }
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    let profile = api_model(&fixture, "openai", &format!("http://{address}")).await;
+    let profile = crate::agents::model_profile(&fixture.s.db, 1.into(), profile.into())
+        .await
+        .unwrap();
+    let backend = crate::artifact_store::ArtifactStore::for_state(&fixture.s)
+        .await
+        .unwrap();
+    let storage = crate::content_assets::Store {
+        db: &fixture.s.db,
+        backend: &backend,
+        vault: &fixture.s.vault,
+        ids: &fixture.s.ids,
+        quota: crate::content_assets::DEFAULT_QUOTA,
+    };
+    let params = [
+        json!({"provider_id":profile.provider_id.to_string(),"model":"m","prompt":"read","output_field":"answer"}),
+    ];
+    let spec = json!({"id":"provider","type":"ai.llm.chat"});
+    let items = [Item {
+        json: Map::new(),
+        binary: BTreeMap::new(),
+        paired: vec![],
+    }];
+    let execute = |offset| {
+        super::super::ai::execute_indexed(
+            &fixture.s,
+            &storage,
+            &fixture.run,
+            0,
+            &spec,
+            &items,
+            &params,
+            offset,
+        )
+    };
+    let work = execute(0);
+    tokio::pin!(work);
+    tokio::select! { _ = arrived.notified() => {}, result = &mut work => panic!("request finished early: {}", result.is_ok()) }
+    workflow_executions::Entity::update_many()
+        .col_expr(
+            workflow_executions::Column::State,
+            Expr::value("cancelling"),
+        )
+        .filter(workflow_executions::Column::Id.eq(fixture.run.id))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(3), &mut work)
+            .await
+            .unwrap()
+            .is_err()
+    );
+    let call = crate::entities::ai_calls::Entity::find()
+        .one(&fixture.s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(call.state, "unknown");
+    workflow_executions::Entity::update_many()
+        .col_expr(workflow_executions::Column::State, Expr::value("running"))
+        .filter(workflow_executions::Column::Id.eq(fixture.run.id))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    assert!(execute(0).await.is_err());
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    resource_limits(&fixture, json!({"task_timeout_seconds":1})).await;
+    let error = tokio::time::timeout(Duration::from_secs(3), execute(1))
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.0, StatusCode::GATEWAY_TIMEOUT);
+    assert_eq!(key(&error), "workflow.aiTimeout");
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    let calls = crate::entities::ai_calls::Entity::find()
+        .all(&fixture.s.db)
+        .await
+        .unwrap();
+    assert!(calls.iter().all(|call| call.state == "unknown"));
+    server.abort();
+}
+
+#[tokio::test]
+async fn slow_provider_execution_needs_workflow_authority_without_terminal_permission() {
+    use axum::{Router, routing::post};
+    let fixture = Fixture::new().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/chat/completions",
+                post(|| async {
+                    tokio::time::sleep(Duration::from_millis(350)).await;
+                    axum::Json(api_answer("allowed without host execution"))
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    let profile = api_model(&fixture, "openai", &format!("http://{address}")).await;
+    let profile = crate::agents::model_profile(&fixture.s.db, 1.into(), profile.into())
+        .await
+        .unwrap();
+    fixture
+        .grant_user(vec!["workflows.run", "workflows.read", "credentials.use"])
+        .await;
+    let backend = crate::artifact_store::ArtifactStore::for_state(&fixture.s)
+        .await
+        .unwrap();
+    let storage = crate::content_assets::Store {
+        db: &fixture.s.db,
+        backend: &backend,
+        vault: &fixture.s.vault,
+        ids: &fixture.s.ids,
+        quota: crate::content_assets::DEFAULT_QUOTA,
+    };
+    let params = [
+        json!({"provider_id":profile.provider_id.to_string(),"model":"m","prompt":"read","output_field":"answer"}),
+    ];
+    let items = [Item {
+        json: Map::new(),
+        binary: BTreeMap::new(),
+        paired: vec![],
+    }];
+    resource_limits(&fixture, json!({"provider_concurrency":1})).await;
+    let spec = json!({"id":"provider","type":"ai.llm.chat"});
+    let execute = |offset| {
+        super::super::ai::execute_indexed(
+            &fixture.s,
+            &storage,
+            &fixture.run,
+            0,
+            &spec,
+            &items,
+            &params,
+            offset,
+        )
+    };
+    let (first, second) = tokio::join!(execute(0), execute(1));
+    for result in [first, second] {
+        assert_eq!(
+            result.unwrap()[0].json["answer"],
+            "allowed without host execution"
+        );
+    }
+    server.abort();
+}
+
+struct SlowFileStream(Arc<std::sync::atomic::AtomicBool>);
+impl futures::Stream for SlowFileStream {
+    type Item = Result<bytes::Bytes>;
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::task::Poll::Pending
+    }
+}
+impl Drop for SlowFileStream {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+struct SlowFileChannel {
+    started: Arc<std::sync::atomic::AtomicBool>,
+    dropped: Arc<std::sync::atomic::AtomicBool>,
+}
+#[async_trait::async_trait]
+impl HostChannel for SlowFileChannel {
+    async fn monitor(&self) -> Result<ferry_protocol::HostMonitor> {
+        Err(ApiError::missing())
+    }
+    async fn exec(&self, _: &str, _: Duration) -> Result<crate::hosts::channel::Output> {
+        Err(ApiError::missing())
+    }
+    async fn exec_stream(
+        &self,
+        _: &str,
+        _: Duration,
+        _: mpsc::Sender<(String, Vec<u8>)>,
+        _: watch::Receiver<bool>,
+    ) -> Result<i32> {
+        Err(ApiError::missing())
+    }
+    async fn open_pty(
+        &self,
+        _: crate::hosts::channel::PtySize,
+    ) -> Result<Box<dyn crate::hosts::channel::Pty>> {
+        Err(ApiError::missing())
+    }
+    async fn list_dir(&self, _: &str) -> Result<Vec<crate::hosts::channel::DirEntry>> {
+        Ok(vec![crate::hosts::channel::DirEntry {
+            name: "slow.txt".into(),
+            kind: "file".into(),
+            size: 1,
+            mode: 0,
+            modified_at: 0,
+        }])
+    }
+    async fn create_file(&self, _: &str) -> Result<()> {
+        Err(ApiError::missing())
+    }
+    async fn create_dir(&self, _: &str) -> Result<()> {
+        Err(ApiError::missing())
+    }
+    async fn read_file(
+        &self,
+        _: &str,
+    ) -> Result<(
+        crate::hosts::channel::FileMeta,
+        crate::hosts::channel::ByteStream,
+    )> {
+        self.started.store(true, Ordering::SeqCst);
+        Ok((
+            crate::hosts::channel::FileMeta {
+                size: 1,
+                mode: 0,
+                modified_at: 0,
+            },
+            Box::pin(SlowFileStream(self.dropped.clone())),
+        ))
+    }
+    async fn write_file(
+        &self,
+        _: &str,
+        _: u32,
+        _: crate::hosts::channel::ByteStream,
+    ) -> Result<()> {
+        Err(ApiError::missing())
+    }
+    async fn delete_file(&self, _: &str) -> Result<()> {
+        Err(ApiError::missing())
+    }
+}
+
+#[tokio::test]
+async fn long_file_collection_renews_lease_and_drops_transfer_on_cancel_or_deadline() {
+    use crate::entities::host_execution_slots as slots;
+    let fixture = Fixture::new().await;
+    let tx = crate::variables::transaction(&fixture.s, 1.into())
+        .await
+        .unwrap();
+    let lease = Arc::new(
+        crate::hosts::execution::try_acquire(&tx, fixture.host, 1, fixture.run.id, "files")
+            .await
+            .unwrap()
+            .unwrap(),
+    );
+    tx.commit().await.unwrap();
+    let expiry = crate::db::now() + 1000;
+    slots::Entity::update_many()
+        .col_expr(slots::Column::ExpiresAt, Expr::value(expiry))
+        .filter(slots::Column::HostId.eq(fixture.host))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    let channel = SlowFileChannel {
+        started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        dropped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+    let mode = super::super::agent_files::FileMode::conversation();
+    let before_assets = crate::entities::asset_refs::Entity::find()
+        .all(&fixture.s.db)
+        .await
+        .unwrap()
+        .len();
+    let mut log = NodeLog::default();
+    {
+        let work = collect_files(
+            &fixture.s,
+            &fixture.run,
+            &channel,
+            &lease,
+            None,
+            Duration::ZERO,
+            "/files",
+            &mode,
+            "agent",
+            &mut log,
+        );
+        tokio::pin!(work);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), &mut work)
+                .await
+                .is_err()
+        );
+        assert!(channel.started.load(Ordering::SeqCst));
+        let slot = slots::Entity::find()
+            .filter(slots::Column::HostId.eq(fixture.host))
+            .one(&fixture.s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            slot.expires_at > expiry,
+            "file collection must renew the live host lease"
+        );
+        workflow_executions::Entity::update_many()
+            .col_expr(
+                workflow_executions::Column::State,
+                Expr::value("cancelling"),
+            )
+            .filter(workflow_executions::Column::Id.eq(fixture.run.id))
+            .exec(&fixture.s.db)
+            .await
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(3), &mut work)
+                .await
+                .unwrap()
+                .is_err()
+        );
+        assert!(
+            channel.dropped.load(Ordering::SeqCst),
+            "cancel drops the underlying file stream before returning"
+        );
+    }
+    workflow_executions::Entity::update_many()
+        .col_expr(workflow_executions::Column::State, Expr::value("running"))
+        .filter(workflow_executions::Column::Id.eq(fixture.run.id))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    channel.dropped.store(false, Ordering::SeqCst);
+    let work = collect_files(
+        &fixture.s,
+        &fixture.run,
+        &channel,
+        &lease,
+        Some(Instant::now() + Duration::from_secs(1)),
+        Duration::from_secs(1),
+        "/files",
+        &mode,
+        "agent",
+        &mut log,
+    );
+    let error = tokio::time::timeout(Duration::from_secs(3), work)
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(key(&error), "workflow.agentTimeout");
+    assert!(channel.dropped.load(Ordering::SeqCst));
+    assert_eq!(
+        crate::entities::asset_refs::Entity::find()
+            .all(&fixture.s.db)
+            .await
+            .unwrap()
+            .len(),
+        before_assets,
+        "cancelled or timed-out file collection never publishes an artifact"
+    );
+    lease.release(&fixture.s.db).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires a built real ferry-sandbox via absolute FERRY_SANDBOX_PATH"]
+async fn unlimited_sandbox_work_is_dropped_when_execution_is_cancelled() {
+    let fixture = Fixture::new().await;
+    let node = json!({"id":"set","type":"data.set","type_version":1,"params":{"fields":[{"path":"value","value":"={{(()=>{while(true){}})()}}"}],"keep_other_fields":true}});
+    let policy = ResourcePolicy::default();
+    let work = host::while_active(
+        &fixture.s,
+        &fixture.run,
+        super::super::graph::resolve_with_policy(
+            &node,
+            "/nodes/1",
+            ferry_protocol::sandbox::InputData {
+                items: vec![Item {
+                    json: Map::new(),
+                    binary: BTreeMap::new(),
+                    paired: vec![],
+                }],
+                upstream: vec![],
+            },
+            &[Some(0)],
+            json!({}),
+            true,
+            &policy,
+        ),
+    );
+    tokio::pin!(work);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut work)
+            .await
+            .is_err()
+    );
+    workflow_executions::Entity::update_many()
+        .col_expr(
+            workflow_executions::Column::State,
+            Expr::value("cancelling"),
+        )
+        .filter(workflow_executions::Column::Id.eq(fixture.run.id))
+        .exec(&fixture.s.db)
+        .await
+        .unwrap();
+    let error = tokio::time::timeout(Duration::from_secs(3), &mut work)
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.0, StatusCode::FORBIDDEN);
 }

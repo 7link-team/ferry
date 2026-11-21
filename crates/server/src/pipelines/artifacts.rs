@@ -72,13 +72,11 @@ pub fn file_path(s: &ServerState, row: &artifacts::Model) -> PathBuf {
 }
 pub(crate) async fn available_path(s: &ServerState, row: &artifacts::Model) -> Result<PathBuf> {
     let path = file_path(s, row);
-    if !path.exists() && crate::artifact_store::ArtifactStore::is_remote(s).await? {
-        let backend = crate::artifact_store::ArtifactStore::for_state(s).await?;
-        backend
-            .download_file(&format!("artifacts/{}/{}", row.run_id, row.id), &path)
-            .await
-            .map_err(|_| ApiError::missing())?;
-    }
+    let backend = crate::artifact_store::ArtifactStore::for_state(s).await?;
+    backend
+        .download_file(&format!("artifacts/{}/{}", row.run_id, row.id), &path)
+        .await
+        .map_err(|_| ApiError::missing())?;
     Ok(path)
 }
 
@@ -432,17 +430,15 @@ pub(crate) async fn collect_with_modes(
                 },
             });
         }
-        if crate::artifact_store::ArtifactStore::is_remote(s).await? {
-            let backend = crate::artifact_store::ArtifactStore::for_state(s).await?;
-            for row in &rows {
-                backend
-                    .upload_file(
-                        &format!("artifacts/{}/{}", row.run_id, row.id),
-                        &file_path(s, row),
-                    )
-                    .await
-                    .map_err(|_| ApiError::missing())?;
-            }
+        let backend = crate::artifact_store::ArtifactStore::for_state(s).await?;
+        for row in &rows {
+            backend
+                .upload_file(
+                    &format!("artifacts/{}/{}", row.run_id, row.id),
+                    &file_path(s, row),
+                )
+                .await
+                .map_err(|_| ApiError::missing())?;
         }
         // Bytes are staged under globally unique artifact IDs, never the
         // shared logical path. Serialize publication across all server tasks;
@@ -547,14 +543,12 @@ async fn delete_rows(s: &AppState, rows: Vec<artifacts::Model>) -> Result<()> {
     if rows.is_empty() {
         return Ok(());
     }
-    if crate::artifact_store::ArtifactStore::is_remote(s).await? {
-        let backend = crate::artifact_store::ArtifactStore::for_state(s).await?;
-        for row in &rows {
-            backend
-                .delete(&format!("artifacts/{}/{}", row.run_id, row.id))
-                .await
-                .map_err(|_| ApiError::missing())?;
-        }
+    let backend = crate::artifact_store::ArtifactStore::for_state(s).await?;
+    for row in &rows {
+        backend
+            .delete(&format!("artifacts/{}/{}", row.run_id, row.id))
+            .await
+            .map_err(|_| ApiError::missing())?;
     }
     artifacts::Entity::delete_many()
         .filter(artifacts::Column::Id.is_in(rows.iter().map(|row| row.id)))
@@ -641,7 +635,7 @@ mod tests {
 
     #[tokio::test]
     async fn deployment_resolves_converted_zip_and_historical_raw_artifacts() {
-        use crate::entities::{deployment_artifact_refs, pipelines};
+        use crate::entities::{deployment_artifact_refs, pipelines, platform_state};
         use sea_orm::{ConnectionTrait, Schema, Set};
         let dir = tempfile::tempdir().unwrap();
         let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
@@ -651,9 +645,21 @@ mod tests {
             schema.create_table_from_entity(pipeline_runs::Entity),
             schema.create_table_from_entity(artifacts::Entity),
             schema.create_table_from_entity(deployment_artifact_refs::Entity),
+            schema.create_table_from_entity(platform_state::Entity),
         ] {
             db.execute(&statement).await.unwrap();
         }
+        platform_state::Entity::insert(platform_state::ActiveModel {
+            id: Set(1),
+            initialized: Set(1),
+            registration_enabled: Set(0),
+            runner_auto_update: Set(0),
+            version: Set(1),
+            ..Default::default()
+        })
+        .exec(&db)
+        .await
+        .unwrap();
         let s = std::sync::Arc::new(crate::state::State {
             ids: std::sync::Arc::new(
                 crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
@@ -1016,13 +1022,11 @@ pub(crate) async fn deployment_file(s: &ServerState, reference: &Value) -> Resul
             )
         })?;
     let path = directory(s, run).join(id.to_string());
-    if !path.exists() && crate::artifact_store::ArtifactStore::is_remote(s).await? {
-        crate::artifact_store::ArtifactStore::for_state(s)
-            .await?
-            .download_file(&format!("artifacts/{run}/{id}"), &path)
-            .await
-            .map_err(|_| ApiError::missing())?;
-    }
+    crate::artifact_store::ArtifactStore::for_state(s)
+        .await?
+        .download_file(&format!("artifacts/{run}/{id}"), &path)
+        .await
+        .map_err(|_| ApiError::missing())?;
     if let Some(member) = reference["zip_member"].as_str() {
         let member = member.to_owned();
         let (file, hash, _, _) =

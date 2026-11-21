@@ -4,9 +4,7 @@ use crate::{
     i18n::Message,
 };
 use axum::http::StatusCode;
-use ferry_protocol::sandbox::{
-    Batch, ErrorCode, Evaluation, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, Reply, VERSION,
-};
+use ferry_protocol::sandbox::{Batch, ErrorCode, Evaluation, Reply, VERSION};
 use serde_json::json;
 use std::{path::PathBuf, process::Stdio, time::Duration};
 use tokio::{
@@ -82,13 +80,19 @@ fn executable() -> Option<PathBuf> {
     }
 }
 
-pub(crate) async fn exchange(batch: Batch) -> Reply {
+pub(crate) async fn exchange(mut batch: Batch) -> Reply {
+    batch.timeout_ms = batch.resource_policy.sandbox_timeout_ms;
+    batch.memory_bytes = batch
+        .resource_policy
+        .sandbox_memory_bytes
+        .map(|value| usize::try_from(value).unwrap_or(usize::MAX));
+    let packet_limit = batch.resource_policy.workflow_packet_bytes;
     let failure = |code| Reply::error(code, None);
     if !batch.valid() {
         return failure(ErrorCode::InvalidRequest);
     }
     let bytes = match serde_json::to_vec(&batch) {
-        Ok(bytes) if bytes.len() <= MAX_REQUEST_BYTES => bytes,
+        Ok(bytes) if ferry_protocol::resources::allows(packet_limit, bytes.len()) => bytes,
         _ => return failure(ErrorCode::InvalidRequest),
     };
     let Some(path) = executable() else {
@@ -152,7 +156,11 @@ pub(crate) async fn exchange(batch: Batch) -> Reply {
             async move {
                 let mut bytes = Vec::new();
                 output
-                    .take((MAX_RESPONSE_BYTES + 1) as u64)
+                    .take(
+                        packet_limit
+                            .map(|limit| limit.saturating_add(1))
+                            .unwrap_or(u64::MAX),
+                    )
                     .read_to_end(&mut bytes)
                     .await?;
                 Ok::<_, std::io::Error>(bytes)
@@ -160,10 +168,15 @@ pub(crate) async fn exchange(batch: Batch) -> Reply {
             child.wait()
         )
     };
-    let result = tokio::time::timeout(Duration::from_millis(batch.timeout_ms + 5_000), io).await;
+    let result = match batch.timeout_ms {
+        Some(ms) => tokio::time::timeout(Duration::from_millis(ms.saturating_add(5_000)), io)
+            .await
+            .map_err(|_| ()),
+        None => Ok(io.await),
+    };
     match result {
         Ok(Ok(((), bytes, status))) if status.success() => {
-            if bytes.len() > MAX_RESPONSE_BYTES {
+            if !ferry_protocol::resources::allows(packet_limit, bytes.len()) {
                 return failure(ErrorCode::ResultLimit);
             }
             let reply = match serde_json::from_slice::<Reply>(&bytes) {
@@ -219,7 +232,10 @@ pub(crate) fn error(code: ErrorCode, path: &str) -> ApiError {
     ApiError::localized(status, Message::new(key).with("path", path.to_owned()))
 }
 
-pub(crate) async fn syntax(expressions: Vec<(String, String)>) -> Result<()> {
+pub(crate) async fn syntax(
+    expressions: Vec<(String, String)>,
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) -> Result<()> {
     if expressions.is_empty() {
         return Ok(());
     }
@@ -235,9 +251,10 @@ pub(crate) async fn syntax(expressions: Vec<(String, String)>) -> Result<()> {
         .collect();
     let reply = exchange(Batch {
         program: None,
+        resource_policy: policy.clone(),
         version: VERSION,
-        timeout_ms: 1000,
-        memory_bytes: 64 * 1024 * 1024,
+        timeout_ms: None,
+        memory_bytes: None,
         deterministic: true,
         syntax_only: true,
         data: None,

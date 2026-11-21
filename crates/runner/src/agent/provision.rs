@@ -69,7 +69,7 @@ fn package(runtime: Runtime) -> &'static str {
 
 fn policy(state: &Path) -> Result<Policy> {
     let path = state.join("agent-runtime.json");
-    let file = match std::fs::File::open(&path) {
+    let mut file = match std::fs::File::open(&path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Policy::default()),
         Err(error) => return Err(error.into()),
@@ -80,8 +80,7 @@ fn policy(state: &Path) -> Result<Policy> {
         "runtime policy must not be a symlink"
     );
     let mut bytes = Vec::new();
-    file.take(16 * 1024 + 1).read_to_end(&mut bytes)?;
-    ensure!(bytes.len() <= 16 * 1024, "runtime policy too large");
+    file.read_to_end(&mut bytes)?;
     let policy: Policy = serde_json::from_slice(&bytes).context("invalid Agent runtime policy")?;
     for (key, version) in &policy.versions {
         ensure!(Runtime::parse(key).is_some(), "unknown runtime policy key");
@@ -97,13 +96,8 @@ fn valid_version(version: &str) -> Result<()> {
     Ok(())
 }
 
-fn bounded_file(path: &Path, limit: u64) -> Result<Vec<u8>> {
-    use std::io::Read;
-    let file = std::fs::File::open(path)?;
-    let mut bytes = Vec::new();
-    file.take(limit + 1).read_to_end(&mut bytes)?;
-    ensure!(bytes.len() as u64 <= limit, "runtime metadata too large");
-    Ok(bytes)
+fn metadata_file(path: &Path) -> Result<Vec<u8>> {
+    Ok(std::fs::read(path)?)
 }
 
 /// Creates only plain directories underneath a canonical Runner-owned root.
@@ -177,7 +171,7 @@ fn now() -> u64 {
 }
 fn installed(root: &Path) -> Result<Option<Installed>> {
     let path = root.join("current.json");
-    let bytes = match bounded_file(&path, 4096) {
+    let bytes = match metadata_file(&path) {
         Ok(bytes) => bytes,
         Err(error)
             if error
@@ -189,7 +183,7 @@ fn installed(root: &Path) -> Result<Option<Installed>> {
         Err(error) => return Err(error),
     };
     ensure!(
-        bytes.len() <= 4096 && !std::fs::symlink_metadata(path)?.file_type().is_symlink(),
+        !std::fs::symlink_metadata(path)?.file_type().is_symlink(),
         "invalid installed runtime record"
     );
     let record: Installed = serde_json::from_slice(&bytes)?;
@@ -251,11 +245,7 @@ fn entry(root: &Path, runtime: Runtime) -> Result<PathBuf> {
     );
     let base = root.join("node_modules").join(package(runtime));
     let metadata = base.join("package.json");
-    ensure!(
-        std::fs::metadata(&metadata)?.len() <= 128 * 1024,
-        "CLI package metadata too large"
-    );
-    let value: Value = serde_json::from_slice(&bounded_file(&metadata, 128 * 1024)?)?;
+    let value: Value = serde_json::from_slice(&metadata_file(&metadata)?)?;
     ensure!(
         value["name"].as_str() == Some(package(runtime)),
         "unexpected CLI package"
@@ -267,7 +257,7 @@ fn entry(root: &Path, runtime: Runtime) -> Result<PathBuf> {
         let base = root.join("node_modules").join(&platform);
         if base.is_dir() {
             let metadata: Value =
-                serde_json::from_slice(&bounded_file(&base.join("package.json"), 128 * 1024)?)?;
+                serde_json::from_slice(&metadata_file(&base.join("package.json"))?)?;
             ensure!(
                 metadata["name"].as_str() == Some(&platform)
                     && metadata["version"] == value["version"],
@@ -339,9 +329,12 @@ fn npm() -> Result<PathBuf> {
     anyhow::bail!("Node/npm is required for managed CLIs")
 }
 
-async fn latest(runtime: Runtime) -> Result<String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
+async fn latest(runtime: Runtime, resources: &ResourcePolicy) -> Result<String> {
+    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(15));
+    if let Some(seconds) = resources.task_timeout_seconds {
+        builder = builder.timeout(Duration::from_secs(seconds));
+    }
+    let client = builder
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let mut response = client
@@ -355,7 +348,10 @@ async fn latest(runtime: Runtime) -> Result<String> {
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await? {
         ensure!(
-            bytes.len() + chunk.len() <= 1024 * 1024,
+            allows(
+                resources.tool_response_bytes,
+                bytes.len().saturating_add(chunk.len())
+            ),
             "CLI registry response too large"
         );
         bytes.extend_from_slice(&chunk);
@@ -370,7 +366,12 @@ async fn latest(runtime: Runtime) -> Result<String> {
     Ok(version.into())
 }
 
-async fn install(root: &Path, runtime: Runtime, version: &str) -> Result<Installed> {
+async fn install(
+    root: &Path,
+    runtime: Runtime,
+    version: &str,
+    resources: &ResourcePolicy,
+) -> Result<Installed> {
     valid_version(version)?;
     let directory = uuid::Uuid::new_v4().to_string();
     let target = private_directory(root, Path::new(&directory)).await?;
@@ -434,7 +435,10 @@ async fn install(root: &Path, runtime: Runtime, version: &str) -> Result<Install
         #[cfg(unix)]
         let group =
             crate::exec_stream::ProcessGroup(child.id().context("missing installer process")?);
-        let result = tokio::time::timeout(Duration::from_secs(300), child.wait()).await;
+        let result = tokio::select! {
+            result = child.wait() => Ok(result),
+            _ = crate::transport::deadline(resources.task_timeout_seconds) => Err(anyhow::anyhow!("managed CLI install timed out")),
+        };
         #[cfg(windows)]
         job.terminate()?;
         #[cfg(unix)]
@@ -491,6 +495,7 @@ async fn selected(
     runtime: Runtime,
     policy: &Policy,
     prepare: bool,
+    resources: &ResourcePolicy,
 ) -> Result<Option<PathBuf>> {
     let mut record = installed(root)?;
     if prepare
@@ -510,7 +515,7 @@ async fn selected(
             let update = async {
                 let version = match desired {
                     Some(version) => version.clone(),
-                    None => latest(runtime).await?,
+                    None => latest(runtime, resources).await?,
                 };
                 if let Some(current) = &record {
                     if current.version == version {
@@ -524,7 +529,7 @@ async fn selected(
                         return Ok(refreshed);
                     }
                 }
-                let mut installed = install(root, runtime, &version).await?;
+                let mut installed = install(root, runtime, &version, resources).await?;
                 installed.requested = desired.cloned();
                 publish(root, &installed)?;
                 tracing::info!(runtime = name(runtime), version, "managed CLI installed");
@@ -554,12 +559,32 @@ async fn selected(
         .transpose()
 }
 
+#[cfg(test)]
 pub(crate) async fn environment(
     state: &Path,
     runtime: Runtime,
     cwd: &str,
     prepare: bool,
     binding: Option<&ferry_protocol::agent::Binding>,
+) -> Result<Environment> {
+    environment_with_policy(
+        state,
+        runtime,
+        cwd,
+        prepare,
+        binding,
+        &ResourcePolicy::default(),
+    )
+    .await
+}
+
+pub(crate) async fn environment_with_policy(
+    state: &Path,
+    runtime: Runtime,
+    cwd: &str,
+    prepare: bool,
+    binding: Option<&ferry_protocol::agent::Binding>,
+    resources: &ResourcePolicy,
 ) -> Result<Environment> {
     let result: Result<Environment> = async {
         let policy = policy(state)?;
@@ -569,7 +594,7 @@ pub(crate) async fn environment(
         );
         let root =
             private_directory(state, &Path::new("agent-runtimes").join(name(runtime))).await?;
-        let mut executable = selected(&root, runtime, &policy, prepare)
+        let mut executable = selected(&root, runtime, &policy, prepare, resources)
             .await?
             .or_else(|| super::probe::executable(runtime));
         if let Some(binding) = binding {
@@ -763,10 +788,16 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            selected(&root, Runtime::Codex, &Policy::default(), true)
-                .await
-                .unwrap()
-                .is_none()
+            selected(
+                &root,
+                Runtime::Codex,
+                &Policy::default(),
+                true,
+                &ResourcePolicy::default()
+            )
+            .await
+            .unwrap()
+            .is_none()
         );
         assert!(installed(&root).unwrap().is_none());
     }
@@ -851,17 +882,29 @@ mod tests {
             .versions
             .insert("codex".into(), "999999.0.0".into());
         assert_eq!(
-            selected(&root, Runtime::Codex, &disabled, true)
-                .await
-                .unwrap(),
+            selected(
+                &root,
+                Runtime::Codex,
+                &disabled,
+                true,
+                &ResourcePolicy::default()
+            )
+            .await
+            .unwrap(),
             current.executable
         );
         let _held = directory_lock(&root).unwrap();
         disabled.auto_upgrade = true;
         assert!(
-            selected(&root, Runtime::Codex, &disabled, true)
-                .await
-                .is_err()
+            selected(
+                &root,
+                Runtime::Codex,
+                &disabled,
+                true,
+                &ResourcePolicy::default()
+            )
+            .await
+            .is_err()
         );
         assert_eq!(installed(&root).unwrap().unwrap().version, "2.0.0");
     }

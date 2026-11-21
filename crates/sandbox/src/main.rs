@@ -5,15 +5,12 @@ mod linux;
 #[cfg(windows)]
 mod windows;
 
-use ferry_protocol::sandbox::{Batch, ErrorCode, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, Reply};
+use ferry_protocol::sandbox::{Batch, ErrorCode, Reply};
 use std::io::{Read, Write};
 
 fn read_request() -> anyhow::Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    std::io::stdin()
-        .take((MAX_REQUEST_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)?;
-    anyhow::ensure!(bytes.len() <= MAX_REQUEST_BYTES, "request limit");
+    std::io::stdin().read_to_end(&mut bytes)?;
     Ok(bytes)
 }
 fn run() -> Reply {
@@ -23,11 +20,25 @@ fn run() -> Reply {
         Ok(bytes) => bytes,
         Err(_) => return Reply::error(ErrorCode::InvalidRequest, None),
     };
-    let request: Batch = match serde_json::from_slice(&bytes) {
+    let mut request: Batch = match serde_json::from_slice(&bytes) {
         Ok(request) => request,
         Err(_) => return Reply::error(ErrorCode::InvalidRequest, None),
     };
-    if !request.valid() {
+    request.timeout_ms = request
+        .resource_policy
+        .sandbox_timeout_ms
+        .or(request.timeout_ms);
+    request.memory_bytes = request
+        .resource_policy
+        .sandbox_memory_bytes
+        .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
+        .or(request.memory_bytes);
+    if !request.valid()
+        || !ferry_protocol::resources::allows(
+            request.resource_policy.workflow_packet_bytes,
+            bytes.len(),
+        )
+    {
         return Reply::error(ErrorCode::InvalidRequest, None);
     }
     #[cfg(target_os = "linux")]
@@ -52,11 +63,23 @@ fn run() -> Reply {
     }
     #[cfg(windows)]
     {
-        windows::evaluate(&bytes, request.timeout_ms)
+        windows::evaluate(
+            &bytes,
+            request.timeout_ms,
+            request
+                .resource_policy
+                .sandbox_process_memory_bytes
+                .map(|value| usize::try_from(value).unwrap_or(usize::MAX)),
+            request.resource_policy.workflow_packet_bytes,
+        )
     }
     #[cfg(target_os = "linux")]
     {
-        linux::evaluate(&bytes, request.timeout_ms)
+        linux::evaluate(
+            &bytes,
+            request.timeout_ms,
+            request.resource_policy.workflow_packet_bytes,
+        )
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {
@@ -76,10 +99,5 @@ fn main() {
     }
     let reply = run();
     let bytes = serde_json::to_vec(&reply).unwrap_or_default();
-    let bytes = if bytes.len() > MAX_RESPONSE_BYTES {
-        serde_json::to_vec(&Reply::error(ErrorCode::ResultLimit, None)).unwrap()
-    } else {
-        bytes
-    };
     let _ = std::io::stdout().write_all(&bytes);
 }

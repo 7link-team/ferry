@@ -2,7 +2,7 @@
 use super::*;
 use fs2::FileExt;
 use std::{io::Write, path::Path as FilePath, process::Stdio, time::Duration};
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::AsyncRead;
 
 fn failure(key: &'static str) -> ApiError {
     ApiError::localized(
@@ -15,17 +15,11 @@ fn git_error() -> ApiError {
     failure("repository.collector.gitFailed")
 }
 
-async fn bounded(reader: impl AsyncRead + Unpin) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    reader
-        .take(65537)
-        .read_to_end(&mut bytes)
+async fn drain(mut reader: impl AsyncRead + Unpin) -> Result<()> {
+    tokio::io::copy(&mut reader, &mut tokio::io::sink())
         .await
         .map_err(|_| git_error())?;
-    if bytes.len() > 65536 {
-        return Err(git_error());
-    }
-    Ok(bytes)
+    Ok(())
 }
 
 pub(crate) struct Authorization {
@@ -106,7 +100,17 @@ pub(crate) fn command(repository: &FilePath, auth: &Authorization) -> tokio::pro
     command
 }
 
+#[cfg(test)]
 async fn run(repository: &FilePath, auth: &Authorization, args: &[&str]) -> Result<()> {
+    run_with_policy(repository, auth, args, None).await
+}
+
+async fn run_with_policy(
+    repository: &FilePath,
+    auth: &Authorization,
+    args: &[&str],
+    timeout_seconds: Option<u64>,
+) -> Result<()> {
     let mut child = command(repository, auth)
         .args(args)
         .spawn()
@@ -120,7 +124,7 @@ async fn run(repository: &FilePath, auth: &Authorization, args: &[&str]) -> Resu
     let stdout = child.stdout.take().ok_or_else(git_error)?;
     let stderr = child.stderr.take().ok_or_else(git_error)?;
     let operation = async {
-        let (_, _, status) = tokio::try_join!(bounded(stdout), bounded(stderr), async {
+        let (_, _, status) = tokio::try_join!(drain(stdout), drain(stderr), async {
             child.wait().await.map_err(|_| git_error())
         })?;
         if !status.success() {
@@ -128,9 +132,12 @@ async fn run(repository: &FilePath, auth: &Authorization, args: &[&str]) -> Resu
         }
         Ok(())
     };
-    tokio::time::timeout(Duration::from_secs(900), operation)
-        .await
-        .map_err(|_| git_error())?
+    match timeout_seconds {
+        Some(seconds) => tokio::time::timeout(Duration::from_secs(seconds), operation)
+            .await
+            .map_err(|_| git_error())?,
+        None => operation.await,
+    }
 }
 
 pub(super) async fn collect(s: &AppState, claim: &super::Claim) -> Result<()> {
@@ -213,8 +220,15 @@ pub(super) async fn collect(s: &AppState, claim: &super::Claim) -> Result<()> {
         .await
         .map_err(|_| git_error())?;
     set_phase(s, claim, "git_fetch").await?;
-    run(&bare, &auth, &["init", "--bare", "--template="]).await?;
-    run(
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    run_with_policy(
+        &bare,
+        &auth,
+        &["init", "--bare", "--template="],
+        policy.task_timeout_seconds,
+    )
+    .await?;
+    run_with_policy(
         &bare,
         &auth,
         &[
@@ -229,6 +243,7 @@ pub(super) async fn collect(s: &AppState, claim: &super::Claim) -> Result<()> {
             &repository.url,
             "+refs/heads/*:refs/heads/*",
         ],
+        policy.task_timeout_seconds,
     )
     .await?;
     let known: BTreeSet<String> = commits::Entity::find()
@@ -249,7 +264,8 @@ pub(super) async fn collect(s: &AppState, claim: &super::Claim) -> Result<()> {
         .map(|row| row.sha)
         .collect();
     set_phase(s, claim, "git_analyze").await?;
-    let artifact = super::git_facts::collect(
+    let artifact = super::git_facts::collect_with_policy(
+        &policy,
         &bare,
         claim.source.id.to_string(),
         claim.job.generation,
@@ -266,6 +282,12 @@ mod tests {
     use super::*;
     use sea_orm::Set;
     use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn discarded_git_diagnostics_are_drained_beyond_the_old_cap() {
+        let bytes = vec![b'x'; 128 * 1024];
+        drain(bytes.as_slice()).await.unwrap();
+    }
 
     #[tokio::test]
     #[ignore = "requires public GitHub network access"]

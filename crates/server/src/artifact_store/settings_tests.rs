@@ -3,6 +3,269 @@ use super::*;
 use crate::agents::tests::setup;
 use axum::http::StatusCode;
 
+#[tokio::test]
+async fn configured_store_replaces_stale_cache_and_rejects_missing_objects() {
+    let store = ArtifactStore(Arc::new(object_store::memory::InMemory::new()));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cached");
+    std::fs::write(&path, b"stale").unwrap();
+    store
+        .create("object", Bytes::from_static(b"configured"))
+        .await
+        .unwrap();
+    store.download_file("object", &path).await.unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"configured");
+    assert!(store.download_file("missing", &path).await.is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), b"configured");
+}
+
+#[tokio::test]
+async fn local_same_path_streaming_preserves_large_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ArtifactStore::local(dir.path()).unwrap();
+    let path = dir.path().join("object");
+    let bytes: Vec<u8> = (0..12 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&path, &bytes).unwrap();
+    store.upload_file("object", &path).await.unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    store.download_file("object", &path).await.unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+}
+
+#[tokio::test]
+async fn business_reads_use_configured_s3_for_cold_and_existing_cache() {
+    use axum::{body::Body, response::IntoResponse};
+    let (_dir, state) = setup().await;
+    let metadata = serde_json::json!({"id":"42","url":"/api/workspaces/1/value-files/42","name":"fixture.txt","size":7,"content_type":"text/plain","resource":"settings"});
+    let objects = Arc::new(std::sync::RwLock::new(std::collections::HashMap::from([
+        (
+            "bucket/prefix/artifacts/9/10".to_owned(),
+            Bytes::from_static(b"artifact"),
+        ),
+        (
+            "bucket/prefix/value-files/1/42/metadata.json".to_owned(),
+            Bytes::from(metadata.to_string()),
+        ),
+    ])));
+    let served = objects.clone();
+    // A protocol-level S3 GET fixture; this is not a real S3/MinIO service.
+    let router = axum::Router::new().route(
+        "/{*key}",
+        axum::routing::get(
+            move |axum::extract::Path(key): axum::extract::Path<String>| {
+                let objects = served.clone();
+                async move {
+                    match objects.read().unwrap().get(&key).cloned() {
+                        Some(bytes) => (
+                            [
+                                ("content-length", bytes.len().to_string()),
+                                ("last-modified", "Wed, 21 Oct 2015 07:28:00 GMT".into()),
+                                ("etag", "\"fixture\"".into()),
+                            ],
+                            Body::from(bytes),
+                        )
+                            .into_response(),
+                        None => StatusCode::NOT_FOUND.into_response(),
+                    }
+                }
+            },
+        ),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let config = Configuration {
+        kind: "s3".into(),
+        endpoint,
+        bucket: "bucket".into(),
+        prefix: "prefix".into(),
+        region: "test".into(),
+        access_key: "fixture".into(),
+        secret_key: "fixture".into(),
+    };
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::FileStorage,
+            sea_orm::sea_query::Expr::value(sealed(&state, &config)),
+        )
+        .exec(&state.db)
+        .await
+        .unwrap();
+    let row = crate::entities::pipeline_artifacts::Model {
+        id: 10,
+        workspace_id: 1,
+        pipeline_id: 8,
+        run_id: 9,
+        path: "fixture.txt".into(),
+        sha256: String::new(),
+        size: 8,
+        mode: 0,
+        created_at: 0,
+        expires_at: 0,
+    };
+    let artifact_path = crate::pipelines::artifacts::file_path(&state, &row);
+    assert!(!artifact_path.exists());
+    let fetched = crate::pipelines::artifacts::available_path(&state, &row)
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(fetched).unwrap(), b"artifact");
+    let value = serde_json::json!([metadata]);
+    crate::maintenance::files::validate_references(
+        &state,
+        &state.db,
+        1.into(),
+        "settings",
+        &value,
+        &serde_json::json!({}),
+    )
+    .await
+    .unwrap();
+    assert!(
+        state
+            .data_dir
+            .join("value-files/1/42/metadata.json")
+            .exists()
+    );
+    // Cached local data cannot mask a missing configured object.
+    objects.write().unwrap().clear();
+    assert!(
+        crate::pipelines::artifacts::available_path(&state, &row)
+            .await
+            .is_err()
+    );
+    assert!(
+        crate::maintenance::files::validate_references(
+            &state,
+            &state.db,
+            1.into(),
+            "settings",
+            &value,
+            &serde_json::json!({})
+        )
+        .await
+        .is_err()
+    );
+    server.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires NATS_SERVER pointing to a local nats-server executable"]
+async fn nats_default_and_saved_local_storage_work_across_shared_directory_states() {
+    struct Server(std::process::Child);
+    impl Drop for Server {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let nats_dir = tempfile::tempdir().unwrap();
+    let mut command = std::process::Command::new(std::env::var("NATS_SERVER").unwrap());
+    command
+        .args(["-js", "-a", "127.0.0.1", "-p", &port.to_string(), "-sd"])
+        .arg(nats_dir.path())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let _server = Server(command.spawn().unwrap());
+    let (_dir, state) = crate::platform_tools::tests::setup().await;
+    let mut state = Arc::try_unwrap(state).ok().expect("unshared fixture");
+    let url = format!("nats://127.0.0.1:{port}");
+    let cluster = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            if let Ok(cluster) =
+                crate::cluster::Cluster::connect(&url, "storage_test", 1, state.db.clone()).await
+            {
+                break cluster;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap();
+    state.cluster = Some(cluster.clone());
+    assert_eq!(ArtifactStore::check(&state).await.unwrap()["ok"], true);
+    let first = ArtifactStore::for_state(&state).await.unwrap();
+    let previous = sealed(&state, &s3("old"));
+    let saved = save(
+        &state,
+        Some(&previous),
+        serde_json::json!({"storage_kind":"local"}),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let state = Arc::new(state);
+    let graph = serde_json::json!({"engine":"ferry-graph","schema":1,"settings":{"timezone":"UTC"},"nodes":[
+        {"id":"start","name":"Start","type":"core.trigger.manual","type_version":1,"params":{"input_schema":{"type":"object"}},"position":[0,0]}
+    ],"connections":[]});
+    let (_, crate::error::Json(workflow)) = crate::workflows::create(
+        axum::extract::State(state.clone()), crate::agents::tests::admin(1),
+        crate::error::Json(serde_json::from_value(serde_json::json!({"name":"Local storage regression","definition":graph.to_string()})).unwrap()),
+    ).await.unwrap();
+    let workflow_id = serde_json::from_value(workflow["id"].clone()).unwrap();
+    let (_, crate::error::Json(execution)) = crate::workflows::run::create(
+        axum::extract::State(state.clone()), crate::agents::tests::admin(1),
+        crate::error::Path(("1".into(), workflow_id)),
+        crate::error::Json(serde_json::from_value(serde_json::json!({"mode":"manual","revision":"draft","version":1,"entry_node_id":"start"})).unwrap()),
+    ).await.unwrap();
+    let execution_id: crate::snowflake::Id =
+        serde_json::from_value(execution["id"].clone()).unwrap();
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    let (_drain, draining) = tokio::sync::watch::channel(false);
+    let scheduler = tokio::spawn(crate::workflows::run::scheduler(
+        state.clone(),
+        stopped,
+        draining,
+    ));
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let run =
+                crate::entities::workflow_executions::Entity::find_by_id(i64::from(execution_id))
+                    .one(&state.db)
+                    .await
+                    .unwrap()
+                    .unwrap();
+            if run.state == "succeeded" {
+                break;
+            }
+            assert_ne!(run.state, "failed");
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap();
+    stop.send(true).unwrap();
+    scheduler.await.unwrap();
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::FileStorage,
+            sea_orm::sea_query::Expr::value(saved),
+        )
+        .exec(&state.db)
+        .await
+        .unwrap();
+    first
+        .create("shared/object", Bytes::from_static(b"shared"))
+        .await
+        .unwrap();
+    let (_other_dir, other) = setup().await;
+    let mut other = Arc::try_unwrap(other).ok().expect("unshared fixture");
+    other.data_dir = state.data_dir.clone();
+    other.cluster = Some(cluster);
+    let second = ArtifactStore::for_state(&other).await.unwrap();
+    assert_eq!(second.get("shared/object", 100).await.unwrap(), "shared");
+    assert!(ArtifactStore::for_state(&state).await.is_ok());
+}
+
 fn key(error: &crate::error::ApiError) -> String {
     error.2.as_ref().map(|m| m.key.clone()).unwrap_or_default()
 }

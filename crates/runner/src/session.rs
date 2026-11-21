@@ -15,23 +15,21 @@ use tokio_tungstenite::tungstenite::Message;
 /// Transfer chunk size. One of these is the runner's whole transfer footprint,
 /// however large the file is.
 const CHUNK: usize = 64 * 1024;
-/// Captured command output is kept, so it has to be bounded.
-const OUTPUT_LIMIT: usize = 1024 * 1024;
-/// A directory listing is metadata for a person to look at, not a data dump.
-const ENTRY_LIMIT: usize = 5000;
+use wire::resources::{ResourcePolicy, allows};
 
 pub async fn run(
     url: &str,
     hello: wire::SessionHello,
     kind: wire::SessionKind,
     state_dir: &std::path::Path,
+    policy: ResourcePolicy,
 ) -> anyhow::Result<()> {
-    let mut socket = crate::transport::dial(url).await?;
+    let mut socket = crate::transport::dial_with_policy(url, &policy).await?;
     crate::transport::send(&mut socket, &hello).await?;
     let request: wire::Session = crate::transport::next_frame(&mut socket).await?;
     tracing::info!(?kind, "会话连接已建立");
 
-    let outcome = dispatch(&mut socket, request, state_dir).await;
+    let outcome = dispatch_with_policy(&mut socket, request, state_dir, &policy).await;
     if let Err(error) = &outcome {
         // The operator sees this sentence in the browser, so say it rather
         // than closing the socket and leaving them to guess.
@@ -47,24 +45,48 @@ pub async fn run(
     outcome
 }
 
+#[cfg(test)]
 async fn dispatch(
     socket: &mut Socket,
     request: wire::Session,
     state_dir: &std::path::Path,
+) -> anyhow::Result<()> {
+    dispatch_with_policy(socket, request, state_dir, &ResourcePolicy::default()).await
+}
+
+async fn dispatch_with_policy(
+    socket: &mut Socket,
+    request: wire::Session,
+    state_dir: &std::path::Path,
+    policy: &ResourcePolicy,
 ) -> anyhow::Result<()> {
     match request {
         wire::Session::TerminalStart { cols, rows } => terminal(socket, cols, rows).await,
         wire::Session::ExecStart {
             command,
             timeout_seconds,
-        } => exec(socket, &command, timeout_seconds).await,
+        } => {
+            let _ = timeout_seconds; // Legacy wire value is no longer a quota.
+            anyhow::ensure!(
+                allows(policy.command_bytes, command.len()),
+                "command exceeds size limit"
+            );
+            exec(socket, &command, policy).await
+        }
         wire::Session::ExecStreamStart {
             command,
             timeout_seconds,
-        } => exec_stream(socket, &command, timeout_seconds).await,
+        } => {
+            let _ = timeout_seconds;
+            anyhow::ensure!(
+                allows(policy.command_bytes, command.len()),
+                "command exceeds size limit"
+            );
+            exec_stream(socket, &command, policy).await
+        }
         wire::Session::ReadFile { path } => read_file(socket, &path).await,
-        wire::Session::WriteFile { path, mode } => write_file(socket, &path, mode).await,
-        wire::Session::ListDir { path } => list_dir(socket, &path).await,
+        wire::Session::WriteFile { path, mode } => write_file(socket, &path, mode, policy).await,
+        wire::Session::ListDir { path } => list_dir(socket, &path, policy).await,
         wire::Session::CreateFile { path } => create_file(socket, &path).await,
         wire::Session::CreateDir { path } => create_dir(socket, &path).await,
         wire::Session::DeleteFile { path } => delete_file(socket, &path).await,
@@ -90,12 +112,13 @@ async fn dispatch(
             } else {
                 cwd
             };
-            let environment = crate::agent::provision::environment(
+            let environment = crate::agent::provision::environment_with_policy(
                 state_dir,
                 runtime,
                 &directory,
                 prepare,
                 binding.as_ref(),
+                policy,
             )
             .await?;
             let status = crate::agent::probe::probe_with(runtime, &directory, &environment).await?;
@@ -213,34 +236,70 @@ async fn agent(
     state_dir: &std::path::Path,
 ) -> anyhow::Result<()> {
     use tokio::sync::{mpsc, watch};
-    let (events, mut receiver) = mpsc::channel(16);
+    let (events, receiver) = mpsc::channel(16);
     let (inputs, commands) = mpsc::channel(16);
     let (stop, cancelled) = watch::channel(false);
     let execution = crate::agent::run_managed(state_dir, request, events, commands, cancelled);
-    tokio::pin!(execution);
+    pump_agent(socket, execution, receiver, inputs, stop).await
+}
+
+async fn pump_agent(
+    socket: &mut Socket,
+    execution: impl std::future::Future<Output = anyhow::Result<wire::agent::Outcome>>,
+    mut receiver: tokio::sync::mpsc::Receiver<wire::agent::Event>,
+    inputs: tokio::sync::mpsc::Sender<wire::agent::Input>,
+    stop: tokio::sync::watch::Sender<bool>,
+) -> anyhow::Result<()> {
+    let (mut sink, mut source) = socket.split();
+    let (outbound, mut messages) = tokio::sync::mpsc::channel::<wire::Session>(1);
+    let writing = async move {
+        while let Some(frame) = messages.recv().await {
+            sink.send(Message::Text(serde_json::to_string(&frame)?.into()))
+                .await?;
+        }
+        Ok::<(), anyhow::Error>(())
+    };
+    tokio::pin!(writing, execution);
+    let mut pending = std::collections::VecDeque::new();
+    let mut output = None;
     let outcome = loop {
         tokio::select! {
-            result = &mut execution => {
-                // All events were queued before the adapter returned.
-                while let Ok(event) = receiver.try_recv() {
-                    tokio::time::timeout(Duration::from_secs(10), crate::transport::send(socket, &wire::Session::AgentEvent { event })).await??;
+            result = &mut writing => break result,
+            permit = outbound.clone().reserve_owned(), if output.is_some() => {
+                match permit {
+                    Ok(permit) => { permit.send(output.take().unwrap()); }
+                    Err(_) => break Err(anyhow::anyhow!("Agent event connection unavailable")),
                 }
-                return result.map(|_| ());
-            }
-            event = receiver.recv() => if let Some(event) = event {
-                let sent = tokio::time::timeout(Duration::from_secs(10), crate::transport::send(socket, &wire::Session::AgentEvent { event })).await;
-                if !matches!(sent, Ok(Ok(()))) { break Err(anyhow::anyhow!("Agent event connection unavailable")); }
             },
-            frame = socket.next() => match frame {
+            permit = inputs.reserve(), if !pending.is_empty() => {
+                match permit {
+                    Ok(permit) => { permit.send(pending.pop_front().unwrap()); }
+                    Err(_) => break Err(anyhow::anyhow!("Agent input receiver closed")),
+                }
+            },
+            result = &mut execution => {
+                let draining = async {
+                    if let Some(frame) = output.take() { outbound.send(frame).await?; }
+                    while let Ok(event) = receiver.try_recv() {
+                        outbound.send(wire::Session::AgentEvent { event }).await?;
+                    }
+                    drop(outbound);
+                    Ok::<(), anyhow::Error>(())
+                };
+                tokio::try_join!(draining, &mut writing)?;
+                return result.map(|_| ());
+            },
+            event = receiver.recv(), if output.is_none() => if let Some(event) = event {
+                output = Some(wire::Session::AgentEvent { event });
+            },
+            frame = source.next() => match frame {
                 Some(Ok(Message::Text(text))) => match serde_json::from_str::<wire::Session>(&text) {
                     Ok(wire::Session::AgentInput { input: wire::agent::Input::Cancel }) => { let _ = stop.send(true); }
-                    Ok(wire::Session::AgentInput { input }) => {
-                        if inputs.try_send(input).is_err() { break Err(anyhow::anyhow!("Agent input queue unavailable")); }
-                    }
+                    Ok(wire::Session::AgentInput { input }) => { pending.push_back(input); }
                     _ => break Err(anyhow::anyhow!("invalid Agent session frame")),
                 },
-                Some(Ok(Message::Ping(data))) => if socket.send(Message::Pong(data)).await.is_err() { break Ok(()); },
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break Ok(()),
+                // Tungstenite queues protocol Pong replies while reading.
                 _ => {},
             }
         }
@@ -343,25 +402,80 @@ pub(crate) fn shell_command(command: &str) -> tokio::process::Command {
 }
 
 fn capped(bytes: &[u8]) -> String {
-    if bytes.len() <= OUTPUT_LIMIT {
-        return String::from_utf8_lossy(bytes).into_owned();
-    }
-    let mut text = String::from_utf8_lossy(&bytes[..OUTPUT_LIMIT]).into_owned();
-    text.push_str("\n…输出过长，已截断。");
-    text
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
-async fn exec(socket: &mut Socket, command: &str, timeout_seconds: u64) -> anyhow::Result<()> {
-    let within = Duration::from_secs(timeout_seconds.clamp(1, 24 * 3600));
-    let output = tokio::time::timeout(within, shell_command(command).output())
-        .await
-        .map_err(|_| anyhow::anyhow!("命令执行超过 {} 秒，已终止。", within.as_secs()))?
-        .context("无法启动命令")?;
+async fn exec(socket: &mut Socket, command: &str, policy: &ResourcePolicy) -> anyhow::Result<()> {
+    use std::process::Stdio;
+    use tokio::io::AsyncReadExt;
+    let mut process = shell_command(command);
+    process
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    process.process_group(0);
+    let mut child = process.spawn().context("cannot start command")?;
+    #[cfg(windows)]
+    let job = crate::process_job::ProcessJob::attach(&child)?;
+    #[cfg(unix)]
+    let group = crate::exec_stream::ProcessGroup(child.id().context("missing command process id")?);
+    let mut stdout = child.stdout.take().unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let result: anyhow::Result<Option<std::process::Output>> = {
+        let capture = async {
+            let mut stdout_bytes = Vec::new();
+            let mut stderr_bytes = Vec::new();
+            let (status, _, _) = tokio::try_join!(
+                child.wait(),
+                stdout.read_to_end(&mut stdout_bytes),
+                stderr.read_to_end(&mut stderr_bytes),
+            )?;
+            Ok::<_, anyhow::Error>(std::process::Output {
+                status,
+                stdout: stdout_bytes,
+                stderr: stderr_bytes,
+            })
+        };
+        let deadline = crate::transport::deadline(policy.task_timeout_seconds);
+        tokio::pin!(capture, deadline);
+        loop {
+            tokio::select! {
+                output = &mut capture => break output.map(Some),
+                _ = &mut deadline => break Err(anyhow::anyhow!("command execution exceeded configured timeout")),
+                message = socket.next() => match message {
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break Ok(None),
+                    _ => {},
+                }
+            }
+        }
+    };
+    // All outcomes own their descendants, including a client that vanished
+    // while a command with no deadline was still producing captured output.
+    #[cfg(windows)]
+    let cleanup = job.terminate();
+    #[cfg(unix)]
+    let cleanup: anyhow::Result<()> = {
+        group.signal(true);
+        Ok(())
+    };
+    let _ = child.start_kill();
+    let reaped = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+    cleanup?;
+    reaped.context("command did not stop")??;
+    let Some(output) = result? else {
+        return Ok(());
+    };
+    anyhow::ensure!(
+        allows(
+            policy.command_output_bytes,
+            output.stdout.len().saturating_add(output.stderr.len())
+        ),
+        "command output exceeds size limit"
+    );
     crate::transport::send(
         socket,
         &wire::Session::ExecDone {
-            // A command killed by a signal has no exit code; -1 says "did not
-            // exit normally" rather than pretending it succeeded.
             code: output.status.code().unwrap_or(-1),
             stdout: capped(&output.stdout),
             stderr: capped(&output.stderr),
@@ -370,41 +484,73 @@ async fn exec(socket: &mut Socket, command: &str, timeout_seconds: u64) -> anyho
     .await
 }
 
-async fn exec_stream(socket: &mut Socket, command: &str, seconds: u64) -> anyhow::Result<()> {
+async fn exec_stream(
+    socket: &mut Socket,
+    command: &str,
+    policy: &ResourcePolicy,
+) -> anyhow::Result<()> {
     let (output, mut chunks) = tokio::sync::mpsc::channel(16);
     let (stop, cancelled) = tokio::sync::watch::channel(false);
-    let execution = crate::exec_stream::run(command, seconds, output, cancelled);
-    tokio::pin!(execution);
+    let execution = crate::exec_stream::run(
+        command,
+        policy.task_timeout_seconds.unwrap_or(0),
+        output,
+        cancelled,
+    );
+    let (mut sink, mut source) = socket.split();
+    let (outbound, mut messages) = tokio::sync::mpsc::channel::<wire::Session>(1);
+    let writing = async move {
+        while let Some(frame) = messages.recv().await {
+            sink.send(Message::Text(serde_json::to_string(&frame)?.into()))
+                .await?;
+        }
+        Ok::<(), anyhow::Error>(())
+    };
+    tokio::pin!(execution, writing);
     let mut exit = None;
-    loop {
+    let mut total = 0usize;
+    let mut pending = None;
+    let outcome = loop {
         tokio::select! {
+            result = &mut writing => break result,
             result = &mut execution, if exit.is_none() => { exit = Some(result?); }
-            chunk = chunks.recv() => match chunk {
-                Some((stream, data)) => {
-                    let sent = tokio::time::timeout(std::time::Duration::from_secs(10), crate::transport::send(socket, &wire::Session::ExecOutput {stream, data})).await;
-                    if !matches!(sent, Ok(Ok(()))) {
-                        let _ = stop.send(true);
-                        if exit.is_none() { let _ = execution.await; }
-                        return match sent { Ok(Err(error))=>Err(error), _=>Err(anyhow::anyhow!("流水线日志传输超时")) };
-                    }
-                }
-                None => {
-                    let code = match exit {Some(code) => code, None => execution.await?};
-                    return crate::transport::send(socket, &wire::Session::ExecExit {code}).await;
+            permit = outbound.clone().reserve_owned(), if pending.is_some() => {
+                match permit {
+                    Ok(permit) => { permit.send(pending.take().unwrap()); }
+                    Err(_) => break Err(anyhow::anyhow!("command output connection unavailable")),
                 }
             },
-            message = socket.next() => match message {
-                Some(Ok(Message::Text(text))) if matches!(serde_json::from_str::<wire::Session>(&text), Ok(wire::Session::ExecCancel)) => { let _ = stop.send(true); }
-                Some(Ok(Message::Ping(data))) => { socket.send(Message::Pong(data)).await?; }
-                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => {
-                    let _ = stop.send(true);
-                    if exit.is_none() { let _ = execution.await; }
+            chunk = chunks.recv(), if pending.is_none() => match chunk {
+                Some((stream, data)) => {
+                    total = total.saturating_add(data.len());
+                    if !allows(policy.command_output_bytes, total) || !allows(policy.log_output_bytes, total) {
+                        break Err(anyhow::anyhow!("command output exceeds size limit"));
+                    }
+                    pending = Some(wire::Session::ExecOutput {stream, data});
+                }
+                None => {
+                    let code = match exit { Some(code) => code, None => execution.await? };
+                    let ending = async {
+                        outbound.send(wire::Session::ExecExit { code }).await?;
+                        drop(outbound);
+                        Ok::<(), anyhow::Error>(())
+                    };
+                    tokio::try_join!(ending, &mut writing)?;
                     return Ok(());
                 }
+            },
+            message = source.next() => match message {
+                Some(Ok(Message::Text(text))) if matches!(serde_json::from_str::<wire::Session>(&text), Ok(wire::Session::ExecCancel)) => { let _ = stop.send(true); }
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break Ok(()),
                 _ => {}
             }
         }
+    };
+    let _ = stop.send(true);
+    if exit.is_none() {
+        let _ = execution.await;
     }
+    outcome
 }
 
 // ------------------------------------------------------------------ 文件
@@ -464,7 +610,12 @@ async fn read_file(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
     crate::transport::send(socket, &wire::Session::Eof).await
 }
 
-async fn write_file(socket: &mut Socket, path: &str, mode: u32) -> anyhow::Result<()> {
+async fn write_file(
+    socket: &mut Socket,
+    path: &str,
+    mode: u32,
+    policy: &ResourcePolicy,
+) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt;
     let mut options = tokio::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
@@ -479,9 +630,15 @@ async fn write_file(socket: &mut Socket, path: &str, mode: u32) -> anyhow::Resul
         .await
         .with_context(|| format!("无法写入 {path}，请检查目录是否存在及权限。"))?;
 
+    let mut total = 0usize;
     loop {
         match socket.next().await {
             Some(Ok(Message::Binary(bytes))) => {
+                total = total.saturating_add(bytes.len());
+                anyhow::ensure!(
+                    allows(policy.file_upload_bytes, total),
+                    "file upload exceeds size limit"
+                );
                 file.write_all(&bytes).await.context("写入文件时中断")?;
             }
             Some(Ok(Message::Text(text))) => match serde_json::from_str::<wire::Session>(&text) {
@@ -505,15 +662,16 @@ async fn write_file(socket: &mut Socket, path: &str, mode: u32) -> anyhow::Resul
     crate::transport::send(socket, &wire::Session::Done).await
 }
 
-async fn list_dir(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
+async fn list_dir(socket: &mut Socket, path: &str, policy: &ResourcePolicy) -> anyhow::Result<()> {
     let mut reader = tokio::fs::read_dir(path)
         .await
         .with_context(|| format!("无法打开目录 {path}"))?;
     let mut entries = Vec::new();
     while let Some(entry) = reader.next_entry().await.context("读取目录时中断")? {
-        if entries.len() >= ENTRY_LIMIT {
-            break;
-        }
+        anyhow::ensure!(
+            allows(policy.directory_entries, entries.len().saturating_add(1)),
+            "directory exceeds entry limit"
+        );
         // Does not follow the link: a dangling symlink should still be listed
         // rather than failing the whole directory.
         let Ok(meta) = entry.metadata().await else {
@@ -767,6 +925,272 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn captured_exec_preserves_large_output_stderr_and_exit_code_with_no_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("output.mjs");
+        let size = 1024 * 1024 + 123;
+        std::fs::write(&script, format!("process.stdout.write('x'.repeat({size})); process.stderr.write('trace'); process.exitCode=7;\n")).unwrap();
+        let command = format!(r#"node "{}""#, script.to_string_lossy().replace('\\', "/"));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let served = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let frame = crate::transport::next_frame(&mut socket).await.unwrap();
+            dispatch(&mut socket, frame, std::path::Path::new(".")).await
+        });
+        let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{address}"))
+            .await
+            .unwrap();
+        crate::transport::send(
+            &mut client,
+            &wire::Session::ExecStart {
+                command,
+                timeout_seconds: 0,
+            },
+        )
+        .await
+        .unwrap();
+        let frame: wire::Session = tokio::time::timeout(
+            Duration::from_secs(5),
+            crate::transport::next_frame(&mut client),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let wire::Session::ExecDone {
+            code,
+            stdout,
+            stderr,
+        } = frame
+        else {
+            panic!("ExecDone frame")
+        };
+        assert_eq!(code, 7);
+        assert_eq!(stdout.len(), size);
+        assert!(stdout.bytes().all(|byte| byte == b'x'));
+        assert_eq!(stderr, "trace");
+        served.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn captured_exec_disconnect_stops_command_and_descendants_without_a_deadline() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("parent.mjs");
+        let child = dir.path().join("child.mjs");
+        let ready = dir.path().join("ready");
+        let parent_marker = dir.path().join("parent-late");
+        let child_marker = dir.path().join("child-late");
+        // Self-expiry keeps the regression fixture contained even before the fix.
+        std::fs::write(
+            &script,
+            r#"import fs from 'node:fs'; import {spawn} from 'node:child_process';
+const [marker,ready,child,childMarker]=process.argv.slice(2);
+spawn(process.execPath,[child,childMarker],{windowsHide:true,stdio:'ignore'});
+fs.writeFileSync(ready,'ready');
+setTimeout(()=>fs.writeFileSync(marker,'late'),1000);
+setTimeout(()=>process.exit(0),2500);
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            r#"import fs from 'node:fs';
+setTimeout(()=>fs.writeFileSync(process.argv[2],'late'),1000);
+setTimeout(()=>process.exit(0),2500);
+"#,
+        )
+        .unwrap();
+        let quoted =
+            |path: &std::path::Path| format!("\"{}\"", path.to_string_lossy().replace('\\', "/"));
+        let command = format!(
+            "node {} {} {} {} {}",
+            quoted(&script),
+            quoted(&parent_marker),
+            quoted(&ready),
+            quoted(&child),
+            quoted(&child_marker)
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut served = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let frame = crate::transport::next_frame(&mut socket).await.unwrap();
+            dispatch(&mut socket, frame, std::path::Path::new(".")).await
+        });
+        let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{address}"))
+            .await
+            .unwrap();
+        crate::transport::send(
+            &mut client,
+            &wire::Session::ExecStart {
+                command,
+                timeout_seconds: 0,
+            },
+        )
+        .await
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !ready.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        client.close(None).await.unwrap();
+        let ended = tokio::time::timeout(Duration::from_secs(1), &mut served).await;
+        let prompt = matches!(&ended, Ok(Ok(Ok(()))));
+        if ended.is_err() {
+            served.abort();
+            let _ = served.await;
+        }
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(prompt, "captured command ignored its closed session");
+        assert!(
+            !parent_marker.exists(),
+            "command survived socket cancellation"
+        );
+        assert!(
+            !child_marker.exists(),
+            "descendant survived socket cancellation"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_cancellation_reaches_execution_while_socket_output_is_backpressured() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (blocked, blocked_rx) = tokio::sync::oneshot::channel();
+        let (stopped, stopped_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let (events, receiver) = tokio::sync::mpsc::channel(1);
+            let (inputs, _commands) = tokio::sync::mpsc::channel(1);
+            let (stop, mut cancelled) = tokio::sync::watch::channel(false);
+            let execution = async move {
+                let produce = async {
+                    for id in 0..64 {
+                        events
+                            .send(wire::agent::Event::Text {
+                                item_id: id.to_string(),
+                                text: "x".repeat(1024 * 1024),
+                                replace: false,
+                            })
+                            .await
+                            .unwrap();
+                    }
+                };
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(200), produce)
+                        .await
+                        .is_err(),
+                    "unread socket must backpressure event production"
+                );
+                blocked.send(()).unwrap();
+                cancelled.wait_for(|value| *value).await.unwrap();
+                stopped.send(()).unwrap();
+                Ok(wire::agent::Outcome::Cancelled)
+            };
+            pump_agent(&mut socket, execution, receiver, inputs, stop).await
+        });
+        let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}"))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), blocked_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        crate::transport::send(
+            &mut socket,
+            &wire::Session::AgentInput {
+                input: wire::agent::Input::Cancel,
+            },
+        )
+        .await
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), stopped_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(socket);
+        let _ = tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn saturated_agent_inputs_preserve_order_and_cancel_without_failure() {
+        for cancel in [false, true] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
+                let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                let (_events, receiver) = tokio::sync::mpsc::channel(1);
+                let (inputs, mut commands) = tokio::sync::mpsc::channel(1);
+                let (stop, mut cancelled) = tokio::sync::watch::channel(false);
+                let execution = async move {
+                    if cancel {
+                        cancelled.wait_for(|value| *value).await.unwrap();
+                        assert_eq!(commands.len(), 1, "input channel was saturated");
+                        Ok(wire::agent::Outcome::Cancelled)
+                    } else {
+                        for id in 0..64 {
+                            let Some(wire::agent::Input::PlatformResult { request_id, .. }) =
+                                commands.recv().await
+                            else {
+                                panic!("missing queued input")
+                            };
+                            assert_eq!(request_id, id.to_string());
+                            tokio::task::yield_now().await;
+                        }
+                        Ok(wire::agent::Outcome::Completed)
+                    }
+                };
+                pump_agent(&mut socket, execution, receiver, inputs, stop).await
+            });
+            let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}"))
+                .await
+                .unwrap();
+            for id in 0..64 {
+                crate::transport::send(
+                    &mut socket,
+                    &wire::Session::AgentInput {
+                        input: wire::agent::Input::PlatformResult {
+                            request_id: id.to_string(),
+                            result: serde_json::json!({}),
+                        },
+                    },
+                )
+                .await
+                .unwrap();
+            }
+            if cancel {
+                crate::transport::send(
+                    &mut socket,
+                    &wire::Session::AgentInput {
+                        input: wire::agent::Input::Cancel,
+                    },
+                )
+                .await
+                .unwrap();
+            }
+            tokio::time::timeout(Duration::from_secs(5), server)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        }
+    }
+
+    #[tokio::test]
     #[ignore = "requires installed, authenticated native CLI; real model usage"]
     async fn live_native_agent_wire_forwards_approval_and_cancellation() {
         use wire::agent::{Event, Input, Outcome, Permission, Request, Runtime};
@@ -793,7 +1217,7 @@ mod tests {
         crate::transport::send(&mut client, &wire::Session::AgentStart { request: Request {
             binding: None,
             runtime, cwd: dir.path().to_string_lossy().into_owned(), model: None,
-            native_session_id: None, permission: Permission::OnRequest, timeout_seconds: 120, platform_tools: false, provider: None, timezone: None, write_workdir: false,
+            native_session_id: None, permission: Permission::OnRequest, timeout_seconds: 120, resource_policy: None, platform_tools: false, provider: None, timezone: None, write_workdir: false,
             prompt: if runtime == Runtime::Claude {
                 "Use only the Write tool to create wire-marker.txt containing CANCELLED.".into()
             } else {
@@ -899,16 +1323,10 @@ mod tests {
     }
 
     #[test]
-    fn output_is_bounded_but_short_output_is_untouched() {
+    fn output_is_unlimited_by_default() {
         assert_eq!(capped(b"hello"), "hello");
-        let long = vec![b'x'; OUTPUT_LIMIT + 10];
-        let text = capped(&long);
-        assert!(text.len() < OUTPUT_LIMIT + 100, "must be truncated");
-        assert!(
-            text.ends_with("已截断。"),
-            "and say so: {}",
-            &text[text.len() - 40..]
-        );
+        let long = vec![b'x'; 1024 * 1024 + 10];
+        assert_eq!(capped(&long).as_bytes(), long);
     }
 
     #[test]

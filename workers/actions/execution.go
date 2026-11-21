@@ -30,6 +30,16 @@ type JobInstance struct {
 	index  int
 }
 
+// Missing platform/YAML budgets remain cancellable without scheduling a deadline.
+func executionContext(parent context.Context, seconds int) (context.Context, context.CancelFunc) {
+	// Larger configured budgets lie beyond Go's duration range. Keep them
+	// cancellable instead of overflowing into an immediate/short deadline.
+	if seconds > 0 && int64(seconds) <= int64((1<<63-1)/time.Second) {
+		return context.WithTimeout(parent, time.Duration(seconds)*time.Second)
+	}
+	return context.WithCancel(parent)
+}
+
 // Detach execution cancellation from the status signal so act can evaluate
 // cancelled()/always() on remaining steps. All cleanup shares one 30s grace.
 const cancellationGrace = 30 * time.Second
@@ -151,14 +161,8 @@ func execute(ctx context.Context, request Request, output io.Writer) (JobResult,
 	if request.Mode != "" && request.Mode != "plan" {
 		return result, fmt.Errorf("unknown worker mode %q", request.Mode)
 	}
-	if request.TimeoutSeconds > 0 {
-		if int64(request.TimeoutSeconds) > int64((1<<63-1)/time.Second) {
-			return result, fmt.Errorf("timeout_seconds exceeds the representable duration")
-		}
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(request.TimeoutSeconds)*time.Second)
-		defer cancel()
-	}
+	ctx, cancel := executionContext(ctx, request.TimeoutSeconds)
+	defer cancel()
 	request.Env = maps.Clone(request.Env)
 	if request.Env == nil {
 		request.Env = map[string]string{}

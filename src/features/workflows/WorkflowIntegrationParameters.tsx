@@ -520,7 +520,6 @@ export function WorkflowIntegrationParameters({
                   aria-label={t("integration.token")}
                   value={token}
                   required
-                  maxLength={65536}
                   disabled={busy}
                   onChange={(event) => setToken(event.target.value)}
                 />

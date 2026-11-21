@@ -165,6 +165,84 @@ async fn the_first_message_binds_a_host_that_later_messages_keep() {
 }
 
 #[tokio::test]
+async fn same_agent_keeps_two_rooms_native_sessions_directories_and_history_separate() {
+    let (_dir, s, _) = seeded().await;
+    let agent = floating_agent(&s).await;
+    let (_, host) = runner(&s, "shared-runner").await;
+    let a = conversation(&s, &agent, json!({})).await;
+    let b = conversation(&s, &agent, json!({})).await;
+    for (room, session, marker) in [
+        (a, "native-room-a", "ROOM_A_ONLY"),
+        (b, "native-room-b", "ROOM_B_ONLY"),
+        (a, "native-room-a", "ROOM_A_NEXT"),
+        (b, "native-room-b", "ROOM_B_NEXT"),
+    ] {
+        host.agent_scripts
+            .lock()
+            .unwrap()
+            .push_back(reply(session, marker));
+        let (_, Json(value)) = super::super::send(
+            State(s.clone()),
+            admin(1),
+            Path(("1".into(), room)),
+            Json(super::super::Send {
+                reply_to: None,
+                prompt: marker.into(),
+                client_id: marker.into(),
+                attachments: vec![],
+            }),
+        )
+        .await
+        .unwrap();
+        let id: Id = serde_json::from_value(value["id"].clone()).unwrap();
+        let (_stop, stop) = tokio::sync::watch::channel(false);
+        super::super::run::execute(s.clone(), id, stop)
+            .await
+            .unwrap();
+        assert_eq!(
+            turns::Entity::find_by_id(id)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            "completed"
+        );
+    }
+    let calls = requests(&host);
+    assert_eq!(calls.len(), 4);
+    assert_eq!(calls[0].native_session_id, None);
+    assert_eq!(calls[1].native_session_id, None);
+    assert_eq!(calls[2].native_session_id.as_deref(), Some("native-room-a"));
+    assert_eq!(calls[3].native_session_id.as_deref(), Some("native-room-b"));
+    assert_ne!(calls[0].cwd, calls[1].cwd);
+    assert_eq!(calls[0].cwd, calls[2].cwd);
+    assert_eq!(calls[1].cwd, calls[3].cwd);
+    for (index, own, other) in [
+        (0, "ROOM_A_ONLY", "ROOM_B"),
+        (1, "ROOM_B_ONLY", "ROOM_A"),
+        (2, "ROOM_A_NEXT", "ROOM_B"),
+        (3, "ROOM_B_NEXT", "ROOM_A"),
+    ] {
+        assert!(calls[index].prompt.contains(own));
+        assert!(!calls[index].prompt.contains(other));
+    }
+    for (room, other) in [(a, "ROOM_B"), (b, "ROOM_A")] {
+        let history = chat::Entity::find()
+            .filter(chat::Column::ConversationId.eq(room))
+            .all(&s.db)
+            .await
+            .unwrap();
+        assert!(!history.is_empty());
+        assert!(
+            history
+                .iter()
+                .all(|message| !message.prompt.contains(other))
+        );
+    }
+}
+
+#[tokio::test]
 async fn concurrent_first_turns_bind_one_host_once() {
     let (_dir, s, _) = seeded().await;
     let agent = floating_agent(&s).await;
@@ -536,6 +614,26 @@ async fn file_limits_become_a_notice_and_unconfinable_or_chosen_directories_neve
         .map(|i| (format!("output/{i}.md"), format!("# {i}")))
         .collect();
     let writes: Vec<(&str, &str)> = many.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let unlimited = conversation(&s, &agent, json!({})).await;
+    alpha_fake
+        .agent_scripts
+        .lock()
+        .unwrap()
+        .push_back(producing("unlimited", &writes, "made eleven"));
+    assert_eq!(
+        turn(&s, unlimited, "default-eleven").await.state,
+        "completed"
+    );
+    assert_eq!(reply_attachments(&s, unlimited).await.len(), 11);
+    alpha_fake.files.lock().unwrap().clear();
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::ResourceConfig,
+            sea_orm::sea_query::Expr::value(json!({"file_count":10}).to_string()),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
     alpha_fake
         .agent_scripts
         .lock()
@@ -598,4 +696,70 @@ async fn file_limits_become_a_notice_and_unconfinable_or_chosen_directories_neve
     let last = requests(&alpha_fake).last().cloned().unwrap();
     assert!(!last.write_workdir);
     assert!(last.prompt.contains("too old to deliver files"));
+}
+
+#[tokio::test]
+async fn resource_policy_checks_final_queued_events_before_persisting_them() {
+    for (name, limits, script) in [
+        (
+            "turn",
+            json!({"agent_turn_output_bytes":192}),
+            vec![
+                AgentStep::Event(Event::Session {
+                    native_session_id: "budget-session".into(),
+                }),
+                AgentStep::Event(Event::Text {
+                    item_id: "first".into(),
+                    text: "a".repeat(64),
+                    replace: true,
+                }),
+                AgentStep::Event(Event::Text {
+                    item_id: "second".into(),
+                    text: "must-not-store".repeat(5),
+                    replace: true,
+                }),
+                AgentStep::Event(Event::Finished {
+                    outcome: Outcome::Completed,
+                    usage: None,
+                }),
+            ],
+        ),
+        (
+            "event",
+            json!({"agent_event_bytes":100}),
+            reply("budget-session", &"must-not-store".repeat(20)),
+        ),
+    ] {
+        let (_dir, s, _) = seeded().await;
+        let agent = floating_agent(&s).await;
+        let (_, fake) = runner(&s, "budget-runner").await;
+        crate::entities::platform_state::Entity::update_many()
+            .col_expr(
+                crate::entities::platform_state::Column::ResourceConfig,
+                sea_orm::sea_query::Expr::value(limits.to_string()),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let id = conversation(&s, &agent, json!({})).await;
+        fake.agent_scripts.lock().unwrap().push_back(script);
+        let result = turn(&s, id, name).await;
+        assert_eq!(result.state, "failed", "{name}: {}", result.error);
+        assert!(
+            result.error.contains("conversations.outputLimit"),
+            "{name}: {}",
+            result.error
+        );
+        let persisted = events::Entity::find()
+            .filter(events::Column::TurnId.eq(result.id))
+            .all(&s.db)
+            .await
+            .unwrap();
+        assert!(
+            persisted
+                .iter()
+                .all(|event| !event.payload.contains("must-not-store")),
+            "{name}"
+        );
+    }
 }

@@ -142,6 +142,9 @@ impl std::fmt::Debug for Provider {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
+    /// Authoritative platform quotas. Missing values mean unlimited; legacy timeout is ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_policy: Option<crate::resources::ResourcePolicy>,
     #[serde(default)]
     pub binding: Option<Binding>,
     pub runtime: Runtime,

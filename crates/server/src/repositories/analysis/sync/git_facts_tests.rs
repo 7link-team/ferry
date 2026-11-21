@@ -245,3 +245,14 @@ async fn declared_legacy_encoding_preserves_names_and_message() {
     assert_eq!(result.commits[0].author_name, "André");
     assert_eq!(result.commits[0].message, "café\n");
 }
+
+#[tokio::test]
+async fn resource_policy_git_output_reads_unlimited_and_rejects_only_explicit_ceiling() {
+    let bytes = vec![b'x'; 64 * 1024 + 1];
+    assert_eq!(read_bounded(bytes.as_slice(), None).await.unwrap(), bytes);
+    assert_eq!(
+        read_bounded(b"1234".as_slice(), Some(4)).await.unwrap(),
+        b"1234"
+    );
+    assert!(read_bounded(b"12345".as_slice(), Some(4)).await.is_err());
+}

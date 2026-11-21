@@ -186,6 +186,18 @@ async fn hold(
     sessions: &mut tokio::task::JoinSet<()>,
     forwards: &mut tokio::task::JoinSet<()>,
 ) -> anyhow::Result<()> {
+    static SAMPLER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    hold_sampled(cfg, control_url, sessions, forwards, metrics, &SAMPLER).await
+}
+
+async fn hold_sampled(
+    cfg: &Config,
+    control_url: &str,
+    sessions: &mut tokio::task::JoinSet<()>,
+    forwards: &mut tokio::task::JoinSet<()>,
+    sample: fn() -> wire::Report,
+    sampler_slot: &'static tokio::sync::Semaphore,
+) -> anyhow::Result<()> {
     let mut socket = dial(control_url).await?;
     let (hostname, os, arch) = facts();
     let stored = Enrolment::load(&cfg.state_dir);
@@ -226,6 +238,7 @@ async fn hold(
             supports_agent_probe: true,
             supports_forward: true,
             supports_timezone: true,
+            supports_resource_policy: true,
             timezone: crate::timezone::detected(),
         },
     )
@@ -275,26 +288,33 @@ async fn hold(
 
     let session_base = cfg.server.clone();
     let mut preparing = tokio::task::JoinSet::new();
+    let mut policy = wire::resources::ResourcePolicy::default();
+    let mut sampler = tokio::task::JoinSet::new();
     let mut report = tokio::time::interval(Duration::from_secs(metrics_seconds.max(5)));
     // Report once immediately so the dashboard is populated before the first
     // interval elapses.
     report.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // Silence from the server for this long means the link is dead even though
     // the socket still looks open — the other half of the heartbeat.
-    let silence = Duration::from_secs(heartbeat_seconds.max(5) * 3);
+    let silence = Duration::from_secs(heartbeat_seconds.max(5).saturating_mul(3));
+    let mut last_incoming = tokio::time::Instant::now();
 
     loop {
         tokio::select! {
-            incoming = tokio::time::timeout(silence, socket.next()) => {
-                let Ok(incoming) = incoming else {
-                    anyhow::bail!("{}s 内没有收到服务的任何帧，判定连接已失效。", silence.as_secs());
-                };
+            _ = tokio::time::sleep_until(last_incoming + silence) => {
+                anyhow::bail!("control connection silence exceeded {}s", silence.as_secs());
+            },
+            incoming = socket.next() => {
+                last_incoming = tokio::time::Instant::now();
                 let Some(message) = incoming else { return Ok(()) };
                 match message? {
                     Message::Text(text) => match serde_json::from_str::<wire::Control>(&text)? {
                         wire::Control::Ping => send(&mut socket, &wire::Report::Pong).await?,
                         // Applies to processes started from now on; nothing restarts.
-                        wire::Control::Settings { timezone } => crate::timezone::pin(timezone),
+                        wire::Control::Settings { timezone, resource_policy } => {
+                            crate::timezone::pin(timezone);
+                            if let Some(updated) = resource_policy { policy = updated; }
+                        },
                         wire::Control::Update { request, version, manifest, signature } => {
                             if !cfg.managed {
                                 send(&mut socket, &wire::Report::UpdateFailed { request, error: "代理不是托管服务，无法自动升级".into(), message: Some(wire::SystemMessage::new("runner.updateNotManaged")) }).await?;
@@ -304,10 +324,11 @@ async fn hold(
                                 send(&mut socket, &wire::Report::UpdateFailed { request, error: "该版本启动失败，已回退，不能自动重复尝试".into(), message: Some(wire::SystemMessage::new("runner.failedTarget")) }).await?;
                             } else {
                                 let root = cfg.state_dir.clone();
-                                preparing.spawn(async move { (request, update::download(&root, &manifest, &signature, &version).await) });
+                                let policy = policy.clone();
+                                preparing.spawn(async move { (request, update::download(&root, &manifest, &signature, &version, &policy).await) });
                             }
                         }
-                        wire::Control::OpenSession { session: id, kind } => {
+                        wire::Control::OpenSession { session: id, kind, resource_policy } => {
                             if !preparing.is_empty() {
                                 send(&mut socket, &wire::Report::SessionFailed { session: id, error: "代理正在准备升级".into(), message: Some(wire::SystemMessage::new("runnerExtra.preparingUpgrade")) }).await?;
                                 continue;
@@ -321,9 +342,10 @@ async fn hold(
                             // Dialled on its own task: a slow transfer must not
                             // stall heartbeats or the next session request.
                             let root = cfg.state_dir.clone();
+                            let policy = resource_policy.unwrap_or_else(|| policy.clone());
                             let set = if kind == wire::SessionKind::Forward { &mut *forwards } else { &mut *sessions };
                             set.spawn(async move {
-                                if let Err(error) = session::run(&url, hello, kind, &root).await {
+                                if let Err(error) = session::run(&url, hello, kind, &root, policy).await {
                                     tracing::warn!(%id, ?kind, %error, "会话结束于错误");
                                 }
                             });
@@ -345,7 +367,15 @@ async fn hold(
                     }
                 }
             }
-            _ = report.tick() => send(&mut socket, &metrics()).await?,
+            _ = report.tick() => {
+                // One worker only. Missed ticks coalesce while a filesystem is slow.
+                if sampler.is_empty() && let Ok(permit) = sampler_slot.try_acquire() {
+                    sampler.spawn_blocking(move || { let _permit = permit; sample() });
+                }
+            },
+            result = sampler.join_next(), if !sampler.is_empty() => {
+                send(&mut socket, &result.context("metrics sampler disappeared")??).await?;
+            },
             _ = sessions.join_next(), if !sessions.is_empty() => {},
             _ = forwards.join_next(), if !forwards.is_empty() => {},
         }
@@ -394,6 +424,92 @@ mod tests {
         // The first three tries cover a brief network blip within ~10 s.
         assert!(secs(0, 999) + secs(1, 999) + secs(2, 999) < 11.0);
     }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn slow_metrics_do_not_block_heartbeat() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static TEST_SAMPLER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        static STARTED: AtomicBool = AtomicBool::new(false);
+        static RELEASE: AtomicBool = AtomicBool::new(false);
+        fn slow() -> wire::Report {
+            STARTED.store(true, Ordering::Release);
+            let started = std::time::Instant::now();
+            while !RELEASE.load(Ordering::Acquire) && started.elapsed() < Duration::from_secs(2) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            wire::Report::Metrics {
+                load1: 0.0,
+                cpu_percent: 0.0,
+                memory_used: 0,
+                memory_total: 0,
+                disk_used: 0,
+                disk_total: 0,
+            }
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "ws://{}/api/runners/connect",
+            listener.local_addr().unwrap()
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config {
+            managed: false,
+            installation_scope: None,
+            confirmation: None,
+            failed_version: None,
+            failed_reason: None,
+            server: url.clone(),
+            token: Some("fixture-token".into()),
+            state_dir: dir.path().to_owned(),
+        };
+        let running = tokio::spawn(async move {
+            hold_sampled(
+                &cfg,
+                &url,
+                &mut tokio::task::JoinSet::new(),
+                &mut tokio::task::JoinSet::new(),
+                slow,
+                &TEST_SAMPLER,
+            )
+            .await
+        });
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&wire::Control::Welcome {
+                    host_id: "1".into(),
+                    key: Some("fixture-key".into()),
+                    heartbeat_seconds: 5,
+                    metrics_seconds: 5,
+                })
+                .unwrap()
+                .into(),
+            ))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !STARTED.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&wire::Control::Ping).unwrap().into(),
+            ))
+            .await
+            .unwrap();
+        let pong = tokio::time::timeout(Duration::from_millis(300), socket.next()).await;
+        RELEASE.store(true, Ordering::Release);
+        running.abort();
+        let _ = running.await;
+        assert!(
+            matches!(pong, Ok(Some(Ok(Message::Text(text)))) if matches!(serde_json::from_str::<wire::Report>(&text), Ok(wire::Report::Pong)))
+        );
+    }
+
     use futures_util::SinkExt;
 
     #[tokio::test]
@@ -435,6 +551,7 @@ mod tests {
         control
             .send(Message::Text(
                 serde_json::to_string(&wire::Control::OpenSession {
+                    resource_policy: None,
                     session: "job".into(),
                     kind: wire::SessionKind::Exec,
                 })
@@ -546,6 +663,7 @@ mod tests {
                 metrics_seconds: 30,
             },
             wire::Control::OpenSession {
+                resource_policy: None,
                 session: "preview".into(),
                 kind: wire::SessionKind::Forward,
             },

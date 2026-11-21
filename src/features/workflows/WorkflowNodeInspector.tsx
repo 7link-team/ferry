@@ -771,7 +771,6 @@ export function WorkflowNodeInspector({
                         aria-label={t("inspector.notes")}
                         className={`${control} min-h-28 py-2`}
                         value={String(node.settings?.notes ?? "")}
-                        maxLength={4000}
                         readOnly={readOnly}
                         onChange={(event) =>
                           settings({ notes: event.target.value })

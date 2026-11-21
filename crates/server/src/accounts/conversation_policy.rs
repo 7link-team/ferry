@@ -45,11 +45,10 @@ impl Configuration {
         Self::read(row.conversation_config.as_deref())
     }
     fn validate(&self) -> Result<()> {
-        if self.instructions.len() > 16 * 1024
-            || self
-                .instructions
-                .chars()
-                .any(|c| c.is_control() && !['\n', '\r', '\t'].contains(&c))
+        if self
+            .instructions
+            .chars()
+            .any(|c| c.is_control() && !['\n', '\r', '\t'].contains(&c))
             || !(256..=8192).contains(&self.tool_response_limit_kib)
             || !["request", "assisted", "yolo"].contains(&self.default_approval_mode.as_str())
         {
@@ -188,8 +187,19 @@ mod tests {
             Configuration::read(Some(&restored)).unwrap().instructions,
             original.instructions
         );
+        let long = "x".repeat(16385);
+        let large = Configuration::update(
+            None,
+            json!({"conversation_instructions":long})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            Configuration::read(Some(&large)).unwrap().instructions,
+            long
+        );
         for patch in [
-            json!({"conversation_instructions":"x".repeat(16385)}),
             json!({"conversation_instructions":"bad\u{0000}"}),
             json!({"conversation_tool_response_limit_kib":255}),
             json!({"conversation_tool_response_limit_kib":8193}),

@@ -703,6 +703,9 @@ pub async fn get_settings(State(s): State<AppState>, _: Admin) -> Result<Json<Va
             .unwrap()
             .clone(),
     );
+    view["resource_limits"] = json!(super::resource_policy::read(
+        row.resource_config.as_deref()
+    )?);
     view["registration_enabled"] = json!(row.registration_enabled != 0);
     view["runner_auto_update"] = json!(row.runner_auto_update != 0);
     view.as_object_mut().unwrap().extend(
@@ -868,6 +871,11 @@ pub async fn update_settings(
     } else {
         row.conversation_config.clone()
     };
+    let resource_before = super::resource_policy::read(row.resource_config.as_deref())?;
+    let resource_config =
+        super::resource_policy::update(row.resource_config.as_deref(), &body.oauth)?;
+    let resource_after = super::resource_policy::read(resource_config.as_deref())?;
+    let resource_changed = resource_before != resource_after;
     let mail_config =
         super::mail::Configuration::update(&s, row.mail_config.as_deref(), &body.oauth)?;
     let session_before = super::session_policy::Configuration::read(row.session_config.as_deref())?;
@@ -926,6 +934,10 @@ pub async fn update_settings(
             Expr::value(conversation_config),
         )
         .col_expr(
+            platform_state::Column::ResourceConfig,
+            Expr::value(resource_config),
+        )
+        .col_expr(
             platform_state::Column::SessionConfig,
             Expr::value(session_config),
         )
@@ -972,7 +984,7 @@ pub async fn update_settings(
         "update",
         "platform-settings",
         Id::from(1),
-        json!({"registration_enabled": body.registration_enabled, "runner_auto_update":runner_auto_update != 0, "repository_oauth_updated": oauth_changed, "footer_updated":body.footer_html.is_some(), "scripts_updated":body.oauth.keys().any(|key|key.starts_with("analytics_")), "site_updated":body.oauth.keys().any(|key|key.starts_with("site_")), "otp_settings_updated":body.oauth.contains_key("otp_enabled"), "conversation_policy_updated":conversation_changed, "conversation_policy":if conversation_changed {json!({"before":conversation_before,"after":conversation_after})} else {Value::Null}, "session_policy_updated":session_changed, "session_policy":if session_changed {json!({"before":session_before,"after":session_after})} else {Value::Null}}),
+        json!({"registration_enabled": body.registration_enabled, "runner_auto_update":runner_auto_update != 0, "repository_oauth_updated": oauth_changed, "footer_updated":body.footer_html.is_some(), "scripts_updated":body.oauth.keys().any(|key|key.starts_with("analytics_")), "site_updated":body.oauth.keys().any(|key|key.starts_with("site_")), "otp_settings_updated":body.oauth.contains_key("otp_enabled"), "resource_policy_updated":resource_changed, "resource_policy":if resource_changed {json!({"before":resource_before,"after":resource_after})} else {Value::Null}, "conversation_policy_updated":conversation_changed, "conversation_policy":if conversation_changed {json!({"before":conversation_before,"after":conversation_after})} else {Value::Null}, "session_policy_updated":session_changed, "session_policy":if session_changed {json!({"before":session_before,"after":session_after})} else {Value::Null}}),
     )
     .await?;
     tx.commit().await?;
@@ -993,4 +1005,131 @@ pub async fn footer(State(s): State<AppState>) -> Result<impl axum::response::In
     )?);
     view["content"] = json!(row.footer_html.unwrap_or_default());
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(view)))
+}
+
+#[cfg(test)]
+mod resource_policy_tests {
+    use super::*;
+    #[tokio::test]
+    async fn resource_policy_defaults_and_admin_persistence_preserve_legacy_settings() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        users::Entity::update_many()
+            .col_expr(users::Column::IsSuperadmin, Expr::value(1))
+            .filter(users::Column::Id.eq(1))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let legacy = r#"{"instructions":"Keep instructions","tool_response_limit_kib":4096,"default_approval_mode":"request"}"#;
+        platform_state::Entity::update_many()
+            .col_expr(
+                platform_state::Column::ConversationConfig,
+                Expr::value(legacy),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let admin = || {
+            Admin(auth::Account {
+                user: crate::agents::tests::admin(1).user,
+                session_id: 0.into(),
+            })
+        };
+        let before = get_settings(State(s.clone()), admin()).await.unwrap().0;
+        assert!(before["resource_limits"].is_object());
+        assert!(
+            before["resource_limits"]
+                .as_object()
+                .unwrap()
+                .values()
+                .all(Value::is_null)
+        );
+        let body = || {
+            serde_json::from_value(json!({"version":before["version"],"registration_enabled":true,"resource_limits":{"file_count":3,"tool_response_bytes":10000000}})).unwrap()
+        };
+        update_settings(State(s.clone()), admin(), Json(body()))
+            .await
+            .unwrap();
+        let after = get_settings(State(s.clone()), admin()).await.unwrap().0;
+        assert_eq!(after["resource_limits"]["file_count"], 3);
+        assert_eq!(after["resource_limits"]["tool_response_bytes"], 10000000);
+        assert_eq!(after["resource_limits"]["file_upload_bytes"], Value::Null);
+        assert_eq!(
+            crate::accounts::resource_policy::load(&s.db)
+                .await
+                .unwrap()
+                .file_count,
+            Some(3)
+        );
+        let record = crate::entities::activity::Entity::find()
+            .filter(crate::entities::activity::Column::Resource.eq("platform-settings"))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let details: Value = serde_json::from_str(&record.details).unwrap();
+        assert_eq!(details["resource_policy_updated"], true);
+        assert_eq!(
+            details["resource_policy"]["before"]["file_count"],
+            Value::Null
+        );
+        assert_eq!(details["resource_policy"]["after"]["file_count"], 3);
+        let invalid = serde_json::from_value(json!({"version":after["version"],"registration_enabled":true,"resource_limits":{"file_count":0}})).unwrap();
+        assert_eq!(
+            update_settings(State(s.clone()), admin(), Json(invalid))
+                .await
+                .unwrap_err()
+                .0,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            crate::accounts::resource_policy::load(&s.db)
+                .await
+                .unwrap()
+                .file_count,
+            Some(3)
+        );
+        assert_eq!(
+            platform_state::Entity::find_by_id(1)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .conversation_config
+                .as_deref(),
+            Some(legacy)
+        );
+        assert_eq!(
+            update_settings(State(s.clone()), admin(), Json(body()))
+                .await
+                .unwrap_err()
+                .0,
+            axum::http::StatusCode::CONFLICT
+        );
+        let clear = serde_json::from_value(json!({"version":after["version"],"registration_enabled":true,"resource_limits":{"file_count":null,"tool_response_bytes":null}})).unwrap();
+        update_settings(State(s.clone()), admin(), Json(clear))
+            .await
+            .unwrap();
+        let after = get_settings(State(s.clone()), admin()).await.unwrap().0;
+        assert!(
+            after["resource_limits"]
+                .as_object()
+                .unwrap()
+                .values()
+                .all(Value::is_null)
+        );
+        users::Entity::update_many()
+            .col_expr(users::Column::IsSuperadmin, Expr::value(0))
+            .filter(users::Column::Id.eq(1))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let denied = serde_json::from_value(json!({"version":after["version"],"registration_enabled":true,"resource_limits":{"file_count":4}})).unwrap();
+        assert_eq!(
+            update_settings(State(s.clone()), admin(), Json(denied))
+                .await
+                .unwrap_err()
+                .0,
+            axum::http::StatusCode::FORBIDDEN
+        );
+    }
 }

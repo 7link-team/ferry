@@ -53,7 +53,7 @@ fn problem(problem: Problem) -> ApiError {
             .with(
                 "limit",
                 if what == "bytes" {
-                    format!("{} KiB", limit / 1024)
+                    crate::content_assets::size_text(limit as i64)
                 } else {
                     limit.to_string()
                 },
@@ -63,10 +63,9 @@ fn problem(problem: Problem) -> ApiError {
             StatusCode::PAYLOAD_TOO_LARGE,
             Message::new("workflow.reportTooManyPages").with("limit", limit.to_string()),
         ),
-        Problem::Timeout => ApiError::localized(
+        Problem::Timeout(seconds) => ApiError::localized(
             StatusCode::SERVICE_UNAVAILABLE,
-            Message::new("workflow.reportTimeout")
-                .with("seconds", report_pdf::RENDER_TIMEOUT.as_secs().to_string()),
+            Message::new("workflow.reportTimeout").with("seconds", seconds.to_string()),
         ),
         // The template is fixed, so a layout error is ours, not the user's.
         Problem::Layout(detail) => crate::error::internal_fault(format!("report layout: {detail}")),
@@ -94,6 +93,7 @@ pub(crate) async fn execute(
     items: &[Item],
     params: &[Value],
 ) -> Result<Vec<Item>> {
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     let mut output = Vec::new();
     for (index, item) in items.iter().enumerate() {
         let p = params
@@ -122,7 +122,7 @@ pub(crate) async fn execute(
         })?;
         let (bytes, meta) = match format.name {
             "pdf" => {
-                let rendered = report_pdf::render(&report, &generated(clock))
+                let rendered = report_pdf::render(&report, &generated(clock), &policy)
                     .await
                     .map_err(problem)?;
                 (

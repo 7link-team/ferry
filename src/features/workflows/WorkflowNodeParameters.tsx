@@ -945,7 +945,6 @@ export function WorkflowNodeParameters({
         {undeclared.length > 0 && <p className="text-xs leading-5 text-amber-700 dark:text-amber-400">{t("platform.queryUndeclared")} {undeclared.join(", ")}</p>}
         <Check label={t("platform.splitItems")} value={p.split_items !== false} readOnly={readOnly} change={(split_items) => patch({ split_items })} />
         <Check label={t("platform.allPages")} value={p.all_pages === true} readOnly={readOnly} change={(all_pages) => patch({ all_pages })} />
-        {p.all_pages === true && number("max_pages", "platform.maxPages", 1)}
         <p className="text-xs leading-5 text-muted-foreground">{t("platform.help")}</p>
       </>;
       break;
@@ -972,7 +971,7 @@ export function WorkflowNodeParameters({
         {text("host_id", "previewHost")}
         <p className="text-xs leading-5 text-muted-foreground">{t("previewHostHelp")}</p>
         <Field label={t("previewCommand")}>
-          <textarea aria-label={t("previewCommand")} maxLength={4000} className="min-h-32 w-full rounded-md border border-input bg-background p-3 font-mono text-sm" readOnly={readOnly} value={String(p.command??"")} onChange={event=>patch({command:event.target.value})}/>
+          <textarea aria-label={t("previewCommand")} className="min-h-32 w-full rounded-md border border-input bg-background p-3 font-mono text-sm" readOnly={readOnly} value={String(p.command??"")} onChange={event=>patch({command:event.target.value})}/>
         </Field>
         <StructuredValue label={t("commandInputEnv")} value={p.input_env??{}} readOnly={readOnly} change={value=>patch({input_env:value})}/>
         {number("port", "previewPort", 1)}

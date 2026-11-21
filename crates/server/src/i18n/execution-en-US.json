@@ -256,5 +256,10 @@
   "workflow.agentFileMismatch": "The content of \"{name}\" does not match its file type, so it was not delivered. Ask the Agent to produce a real file of that type.",
   "workflow.agentNoFiles": "The Agent finished without leaving any file in its output folder. Check its final message for why, or make the request more specific.",
   "hosts.fileToolsRunnerOnly": "Only Runner hosts report file-production tools.",
-  "execution.definitionJsonAt": "The pipeline definition is not valid JSON at line {line}, column {column}."
+  "execution.definitionJsonAt": "The pipeline definition is not valid JSON at line {line}, column {column}.",
+  "request.resourceLimit": "Request exceeds the administrator-configured resource limit.",
+  "workflow.agentMaxTokensRequired": "{path}: This provider requires an explicit max_tokens value.",
+  "workflow.aiTimeout": "The AI operation exceeded the configured time limit and was stopped. Check the recorded results before running it again.",
+  "runner.resourcePolicyUpgrade": "This Runner cannot enforce the platform resource policy for commands. Update the Runner before running this operation.",
+  "runner.clusterPolicyUpgrade": "The requesting server does not support acknowledged large responses. Update the servers before running this operation."
 }

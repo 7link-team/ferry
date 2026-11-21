@@ -1,6 +1,21 @@
 //! Host operations carried on dedicated Runner sessions.
 use super::*;
 
+#[cfg(test)]
+mod resource_policy_tests {
+    use super::*;
+    #[test]
+    fn legacy_runner_commands_require_upgrade_instead_of_silently_clamping_unlimited_to_one_second()
+    {
+        let error = require_resource_policy(wire::SessionKind::Exec, false).unwrap_err();
+        assert_eq!(error.0, StatusCode::CONFLICT);
+        assert_eq!(error.2.unwrap().key, "runner.resourcePolicyUpgrade");
+        require_resource_policy(wire::SessionKind::Exec, true).unwrap();
+        require_resource_policy(wire::SessionKind::Forward, false).unwrap();
+        require_resource_policy(wire::SessionKind::Monitor, false).unwrap();
+    }
+}
+
 // ----------------------------------------------------------- HostChannel
 
 /// The runner predates preview forwarding.
@@ -11,15 +26,35 @@ pub(crate) fn forward_unsupported() -> ApiError {
     )
 }
 
+fn require_resource_policy(kind: wire::SessionKind, supported: bool) -> Result<()> {
+    if !supported && matches!(kind, wire::SessionKind::Agent | wire::SessionKind::Exec) {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new(if kind == wire::SessionKind::Agent {
+                "runner.agentUpgrade"
+            } else {
+                "runner.resourcePolicyUpgrade"
+            }),
+        ));
+    }
+    Ok(())
+}
+
 pub struct RunnerChannel {
     _lease: crate::hosts::runner::reservations::Lease,
     cluster: Option<Arc<crate::cluster::Cluster>>,
     host_id: String,
+    policy: wire::resources::ResourcePolicy,
     /// Only for error messages: an operator reads names, not ids.
     name: String,
 }
 
-pub(crate) async fn cluster_open(host: &str, session: &str, kind: wire::SessionKind) -> Result<()> {
+pub(crate) async fn cluster_open(
+    host: &str,
+    session: &str,
+    kind: wire::SessionKind,
+    resource_policy: Option<wire::resources::ResourcePolicy>,
+) -> Result<()> {
     let registration = live().get(host).cloned().ok_or_else(|| {
         crate::cluster::diagnostic("websocket", "open", "registration_missing");
         crate::cluster::unavailable()
@@ -43,6 +78,7 @@ pub(crate) async fn cluster_open(host: &str, session: &str, kind: wire::SessionK
             crate::i18n::Message::new("runner.agentUpgrade"),
         ));
     }
+    require_resource_policy(kind, registration.supports_resource_policy)?;
     if kind == wire::SessionKind::AgentProbe && !registration.supports_agent_probe {
         return Err(ApiError::localized(
             StatusCode::CONFLICT,
@@ -55,6 +91,7 @@ pub(crate) async fn cluster_open(host: &str, session: &str, kind: wire::SessionK
     registration
         .control
         .send(wire::Control::OpenSession {
+            resource_policy,
             session: session.into(),
             kind,
         })
@@ -87,6 +124,7 @@ pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
     }
     Ok(Box::new(RunnerChannel {
         _lease: lease,
+        policy: crate::accounts::resource_policy::load(&s.db).await?,
         cluster: s.cluster.clone(),
         host_id: host.id.to_string(),
         name: host.name.clone(),
@@ -113,6 +151,13 @@ impl RunnerChannel {
                     offline(&self.name)
                 })?;
             let id = secret();
+            require_resource_policy(
+                kind,
+                owner
+                    .info
+                    .as_ref()
+                    .is_some_and(|info| info.supports_resource_policy),
+            )?;
             let route = crate::cluster::SessionRoute {
                 host: self.host_id.clone(),
                 owner: owner.clone(),
@@ -136,6 +181,7 @@ impl RunnerChannel {
                         fence: owner.fence,
                         session: id.clone(),
                         kind,
+                        resource_policy: Some(self.policy.clone()),
                     },
                 )
                 .await
@@ -163,6 +209,7 @@ impl RunnerChannel {
                 crate::i18n::Message::new("runner.agentUpgrade"),
             ));
         }
+        require_resource_policy(kind, registration.supports_resource_policy)?;
         if kind == wire::SessionKind::AgentProbe && !registration.supports_agent_probe {
             return Err(ApiError::localized(
                 StatusCode::CONFLICT,
@@ -184,6 +231,7 @@ impl RunnerChannel {
         let asked = registration
             .control
             .send(wire::Control::OpenSession {
+                resource_policy: Some(self.policy.clone()),
                 session: id.clone(),
                 kind,
             })
@@ -219,9 +267,13 @@ impl RunnerChannel {
     ) -> Result<(wire::Session, Socket)> {
         let mut socket = self.session(kind).await?;
         send_frame(&mut socket, &request).await?;
-        let answer = tokio::time::timeout(within, next_frame(&mut socket))
-            .await
-            .map_err(|_| timed_out())??;
+        let answer = if within.is_zero() {
+            next_frame(&mut socket).await?
+        } else {
+            tokio::time::timeout(within, next_frame(&mut socket))
+                .await
+                .map_err(|_| timed_out())??
+        };
         if let wire::Session::Failed { error } = answer {
             return Err(remote_failed(error));
         }
@@ -239,7 +291,12 @@ impl HostChannel for RunnerChannel {
         mut cancel: tokio::sync::watch::Receiver<bool>,
     ) -> Result<()> {
         let mut socket = self.session(wire::SessionKind::Agent).await?;
-        let deadline = tokio::time::sleep(Duration::from_secs(request.timeout_seconds + 85));
+        let within = request
+            .resource_policy
+            .as_ref()
+            .and_then(|policy| policy.task_timeout_seconds);
+        let deadline =
+            tokio::time::sleep(Duration::from_secs(within.unwrap_or(0).saturating_add(85)));
         tokio::pin!(deadline);
         send_frame(&mut socket, &wire::Session::AgentStart { request }).await?;
         let mut stopping = false;
@@ -263,17 +320,16 @@ impl HostChannel for RunnerChannel {
                     Some(input) => send_frame(&mut socket, &wire::Session::AgentInput { input }).await?,
                     None => { send_frame(&mut socket, &wire::Session::AgentInput { input: wire::agent::Input::Cancel }).await?; stopping = true; }
                 },
-                _ = &mut deadline => return Err(ApiError::localized(StatusCode::GATEWAY_TIMEOUT, crate::i18n::Message::new("runner.cleanupTimeout"))),
+                _ = &mut deadline, if within.is_some() => return Err(ApiError::localized(StatusCode::GATEWAY_TIMEOUT, crate::i18n::Message::new("runner.cleanupTimeout"))),
                 frame = next_frame(&mut socket) => match frame? {
                     wire::Session::AgentEvent { event } => {
                         let finished = matches!(event, wire::agent::Event::Finished { .. });
                         // Backpressure must never strand an owned remote process.
-                        match tokio::time::timeout(Duration::from_secs(10), events.send(event)).await {
-                            Ok(Ok(())) => {},
-                            _ => {
-                                tracing::warn!(host_id=%self.host_id, "Runner event consumer closed or remained blocked for 10 seconds");
-                                let _ = socket.send(Message::Close(None)).await;
-                                return Err(runner_extra("runner.eventDeliveryFailed"));
+                        tokio::select! {
+                            sent = events.send(event) => if sent.is_err() { return Err(runner_extra("runner.eventDeliveryFailed")); },
+                            _ = cancel.changed(), if !stopping => {
+                                send_frame(&mut socket, &wire::Session::AgentInput { input: wire::agent::Input::Cancel }).await?;
+                                stopping = true;
                             }
                         }
                         if finished { return Ok(()); }
@@ -361,7 +417,7 @@ impl HostChannel for RunnerChannel {
         }
     }
     async fn exec(&self, command: &str, timeout: Duration) -> Result<Output> {
-        let seconds = timeout.as_secs().max(1);
+        let seconds = timeout.as_secs();
         let (answer, _socket) = self
             .ask(
                 wire::SessionKind::Exec,
@@ -371,7 +427,11 @@ impl HostChannel for RunnerChannel {
                 },
                 // The runner enforces the timeout; this is the backstop for a
                 // runner that dies holding the command.
-                timeout + REQUEST_TIMEOUT,
+                if timeout.is_zero() {
+                    Duration::ZERO
+                } else {
+                    timeout + REQUEST_TIMEOUT
+                },
             )
             .await?;
         match answer {
@@ -400,7 +460,7 @@ impl HostChannel for RunnerChannel {
             &mut socket,
             &wire::Session::ExecStreamStart {
                 command: command.into(),
-                timeout_seconds: timeout.as_secs().max(1),
+                timeout_seconds: timeout.as_secs(),
             },
         )
         .await?;
@@ -417,7 +477,7 @@ impl HostChannel for RunnerChannel {
                     send_frame(&mut socket, &wire::Session::ExecCancel).await?;
                     stopping = true;
                 }
-                _ = &mut deadline => {
+                _ = &mut deadline, if !timeout.is_zero() => {
                     let _ = socket.send(Message::Close(None)).await;
                     return Err(ApiError::localized(StatusCode::GATEWAY_TIMEOUT, crate::i18n::Message::new("runner.cleanupTimeout")));
                 }
@@ -428,7 +488,7 @@ impl HostChannel for RunnerChannel {
                             let should_stop = tokio::select! {
                                 sent = output.send((stream, data)) => sent.is_err(),
                                 _ = cancel.changed() => true,
-                                _ = &mut deadline => return Err(ApiError::localized(StatusCode::GATEWAY_TIMEOUT, crate::i18n::Message::new("runner.cleanupTimeout"))),
+                                _ = &mut deadline, if !timeout.is_zero() => return Err(ApiError::localized(StatusCode::GATEWAY_TIMEOUT, crate::i18n::Message::new("runner.cleanupTimeout"))),
                             };
                             if should_stop {
                                 send_frame(&mut socket, &wire::Session::ExecCancel).await?;
@@ -667,6 +727,7 @@ mod tests {
                 supports_agent_probe: false,
                 supports_forward: false,
                 supports_timezone: false,
+                supports_resource_policy: false,
                 version: "legacy".into(),
                 ready: std::sync::atomic::AtomicBool::new(true),
                 failed_version: Mutex::new(None),
@@ -675,6 +736,7 @@ mod tests {
             }),
         );
         let channel = RunnerChannel {
+            policy: Default::default(),
             _lease: crate::hosts::runner::reservations::lease(&host).await,
             cluster: None,
             host_id: host.clone(),
@@ -685,7 +747,7 @@ mod tests {
             .await
             .err()
             .expect("legacy local runner must refuse Agent");
-        let remote = cluster_open(&host, "unused", wire::SessionKind::Agent)
+        let remote = cluster_open(&host, "unused", wire::SessionKind::Agent, None)
             .await
             .unwrap_err();
         assert!(
@@ -724,6 +786,7 @@ mod tests {
                 supports_agent_probe: false,
                 supports_forward: false,
                 supports_timezone: false,
+                supports_resource_policy: false,
                 version: "0.1.0-alpha.13".into(),
                 ready: std::sync::atomic::AtomicBool::new(true),
                 failed_version: Mutex::new(None),
@@ -732,6 +795,7 @@ mod tests {
             }),
         );
         let channel = RunnerChannel {
+            policy: Default::default(),
             _lease: crate::hosts::runner::reservations::lease(host_id).await,
             cluster: None,
             host_id: host_id.into(),

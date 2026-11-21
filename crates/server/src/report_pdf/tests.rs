@@ -81,16 +81,21 @@ fn limits_and_required_title_are_named() {
     let mut report = sample();
     report.title = " ".into();
     assert_eq!(document(&report, "").unwrap_err(), Problem::MissingTitle);
+    let policy = ResourcePolicy {
+        report_metrics: Some(MAX_METRICS as u64),
+        report_input_bytes: Some(MAX_INPUT_BYTES as u64),
+        ..Default::default()
+    };
     let mut report = sample();
     report.metrics = (0..=MAX_METRICS).map(|_| Metric::default()).collect();
     assert_eq!(
-        document(&report, "").unwrap_err(),
+        document_with_policy(&report, "", &policy).unwrap_err(),
         Problem::TooLarge("metrics", MAX_METRICS)
     );
     let mut report = sample();
     report.summary = "字".repeat(MAX_INPUT_BYTES);
     assert_eq!(
-        document(&report, "").unwrap_err(),
+        document_with_policy(&report, "", &policy).unwrap_err(),
         Problem::TooLarge("bytes", MAX_INPUT_BYTES)
     );
 }
@@ -110,4 +115,68 @@ fn table_columns_are_sized_by_their_longest_cell() {
     // Very long cells are capped so one column cannot take the whole page.
     let long = vec![vec![cell(&"x".repeat(500)), cell("1"), cell("1")]];
     assert_eq!(super::markdown::column_widths(&head, &long, 3)[0], 40);
+}
+
+#[test]
+fn default_policy_allows_reports_beyond_former_quotas() {
+    let mut report = sample();
+    report.metrics = (0..25).map(|_| Metric::default()).collect();
+    report.sections = (0..101).map(|_| Section::default()).collect();
+    report.summary = "x".repeat(1024 * 1024 + 1);
+    assert!(document(&report, "").is_ok());
+}
+
+#[tokio::test]
+async fn timed_out_report_keeps_capacity_until_worker_finishes() {
+    let policy = ResourcePolicy {
+        report_concurrency: Some(1),
+        report_timeout_seconds: Some(1),
+        ..Default::default()
+    };
+    let (release, waiting) = std::sync::mpsc::channel();
+    let result = render_worker(&policy, move || {
+        waiting.recv().unwrap();
+        Ok(Rendered {
+            pdf: vec![],
+            pages: 0,
+        })
+    })
+    .await;
+    assert!(matches!(result, Err(Problem::Timeout(1))));
+    let next = acquire(Some(1));
+    tokio::pin!(next);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut next)
+            .await
+            .is_err()
+    );
+    release.send(()).unwrap();
+    let _slot = tokio::time::timeout(std::time::Duration::from_secs(5), next)
+        .await
+        .unwrap();
+}
+
+#[test]
+fn report_page_policy_is_optional_and_exact() {
+    let mut report = sample();
+    report.metrics.clear();
+    report.summary.clear();
+    report.sections = (0..201)
+        .map(|n| Section {
+            title: n.to_string(),
+            page_break: true,
+            ..Default::default()
+        })
+        .collect();
+    let data = document(&report, "").unwrap();
+    let rendered = layout(&data).unwrap();
+    assert!(rendered.pages > 200);
+    let limited = ResourcePolicy {
+        report_pages: Some(200),
+        ..Default::default()
+    };
+    assert!(matches!(
+        layout_with_policy(&data, &limited),
+        Err(Problem::TooManyPages(200))
+    ));
 }

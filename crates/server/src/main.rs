@@ -407,13 +407,14 @@ async fn main() -> anyhow::Result<()> {
             get(accounts::auth::profile).patch(accounts::auth::update_profile),
         )
         .route("/api/repository-providers/callback",get(repositories::auth::complete))
-        .route("/api/repository-events/{id}",post(repositories::monitor::receive).layer(DefaultBodyLimit::max(1024 * 1024)))
+        .route("/api/repository-events/{id}",post(repositories::monitor::receive).layer(DefaultBodyLimit::disable()))
         .route("/api/workspaces", post(accounts::workspace::create))
         .route("/api/workspace-memberships", post(accounts::workspace::join))
         .nest("/api/workspaces", workspace_api)
         .fallback(assets::serve_configured)
         .layer(axum::Extension(accounts::auth::TrustedProxies(trusted_proxies)))
-        .layer(DefaultBodyLimit::max(256 * 1024))
+        .layer(DefaultBodyLimit::disable())
+        .layer(middleware::from_fn_with_state(s.clone(), accounts::resource_policy::middleware))
         .layer(middleware::from_fn(move |req: Request, next: Next| {
             let access_state = access_state.clone();
             let draining = draining.clone();
@@ -1171,20 +1172,20 @@ fn workspace_routes() -> Router<state::AppState> {
             "/{workspace}/pipelines",
             get(pipelines::list)
                 .post(pipelines::create)
-                .layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+                .layer(DefaultBodyLimit::disable()),
         )
         .route(
             "/{workspace}/workflows",
             get(workflows::list)
                 .post(workflows::create)
-                .layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+                .layer(DefaultBodyLimit::disable()),
         )
         .route(
             "/{workspace}/workflows/{id}",
             get(workflows::get)
                 .patch(workflows::update)
                 .delete(workflows::remove)
-                .layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+                .layer(DefaultBodyLimit::disable()),
         )
         .route(
             "/{workspace}/workflows/{id}/revisions",
@@ -1216,7 +1217,7 @@ fn workspace_routes() -> Router<state::AppState> {
         )
         .route(
             "/{workspace}/workflows/{id}/expression-previews",
-            post(workflows::preview).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+            post(workflows::preview).layer(DefaultBodyLimit::disable()),
         )
         .route(
             "/{workspace}/workflows/{id}/owner-transfers",
@@ -1295,7 +1296,7 @@ fn workspace_routes() -> Router<state::AppState> {
             get(pipelines::get)
                 .patch(pipelines::update)
                 .delete(pipelines::remove)
-                .layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+                .layer(DefaultBodyLimit::disable()),
         )
         .route(
             "/{workspace}/repositories",

@@ -13,8 +13,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
-use index::MAX_INDEX_BYTES;
-
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Source {
     pub provider: String,
@@ -203,18 +201,20 @@ async fn fetch(
 ) -> Result<String> {
     let mut url = source.url()?;
     if source.provider == "git" {
-        return git::read_index(
+        return git::read_index_with_timeout(
             url.as_str(),
             &source.branch,
             &source.index_path,
             token,
-            MAX_INDEX_BYTES,
+            usize::MAX,
+            timeout,
         )
         .await;
     }
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(timeout.min(Duration::from_secs(20)))
+        .connect_timeout(Duration::from_secs(20))
+        .read_timeout(Duration::from_secs(20))
         .user_agent("workspace-template-index/1")
         .build()
         .map_err(|_| {
@@ -281,12 +281,6 @@ async fn fetch(
             )
         })?
     {
-        if bytes.len() + chunk.len() > MAX_INDEX_BYTES * 2 {
-            return Err(ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("marketplace.responseTooLarge"),
-            ));
-        }
         bytes.extend_from_slice(&chunk);
     }
     let document: Value = serde_json::from_slice(&bytes).map_err(|_| {
@@ -303,12 +297,6 @@ async fn fetch(
                 crate::i18n::Message::new("marketplace.utf8Required"),
             )
         })?;
-        if text.len() > MAX_INDEX_BYTES {
-            return Err(ApiError::localized(
-                axum::http::StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("marketplace.indexTooLarge"),
-            ));
-        }
         return Ok(text);
     }
     let content = document
@@ -353,12 +341,6 @@ async fn fetch(
             ));
         }
     };
-    if text.len() > MAX_INDEX_BYTES {
-        return Err(ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("marketplace.indexTooLarge"),
-        ));
-    }
     Ok(text)
 }
 
@@ -961,7 +943,11 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
         )
         .await?;
         // The write budget starts after the fetch: a Git fetch may take minutes.
-        let deadline = std::time::Instant::now() + timeout;
+        let deadline = if timeout.is_zero() {
+            None
+        } else {
+            std::time::Instant::now().checked_add(timeout)
+        };
         let fresh = Scope::for_actor(s, scope.workspace_id, scope.user.id).await?;
         fresh.require("marketplace-sources.sync")?;
         fresh.require("repositories.read")?;
@@ -1075,11 +1061,28 @@ async fn load_index(
         .one(&s.db)
         .await?
         .is_some();
-    index::parse_bundle(
-        &fetch(config, token.as_deref(), oauth, timeout).await?,
-        &ferry_version(),
-        "en-US",
-    )
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
+    let text = fetch(config, token.as_deref(), oauth, timeout).await?;
+    if !ferry_protocol::resources::allows(policy.tool_response_bytes, text.len()) {
+        return Err(ApiError::localized(
+            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+            crate::i18n::Message::new("request.resourceLimit"),
+        ));
+    }
+    let rows = index::parse_bundle(&text, &ferry_version(), "en-US")?;
+    for row in &rows {
+        if !ferry_protocol::resources::allows(policy.file_count, row.files.len())
+            || row.files.iter().any(|file| {
+                !ferry_protocol::resources::allows(policy.file_upload_bytes, file.content.len())
+            })
+        {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+                crate::i18n::Message::new("request.resourceLimit"),
+            ));
+        }
+    }
+    Ok(rows)
 }
 /// The repository a source body points at: a new selection through a saved
 /// connection, or an existing repository of the workspace.

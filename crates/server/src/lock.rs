@@ -58,6 +58,62 @@ pub async fn acquire(
         .await?
         .is_some_and(|row| row.owner == owner))
 }
+/// Content object I/O fences use one database clock for acquisition and renewal.
+/// The ordinary host-timestamp lock API retains its existing scheduling policy.
+pub(crate) async fn acquire_live(
+    db: &impl ConnectionTrait,
+    name: &str,
+    owner: &str,
+    ttl: i64,
+) -> Result<bool, DbErr> {
+    if ttl <= 0 {
+        return Err(DbErr::Custom("lock TTL must be positive".into()));
+    }
+    // A placeholder is only an insert-before-update rendezvous. Claiming the
+    // owner and live interval is one SQL statement evaluated after any waits.
+    Entity::insert(
+        Model {
+            name: name.into(),
+            owner: owner.into(),
+            acquired_at: 0,
+            expires_at: 0,
+        }
+        .into_active_model(),
+    )
+    .on_conflict_do_nothing()
+    .exec_without_returning(db)
+    .await?;
+    let now = crate::db::now_expr(db.get_database_backend());
+    let changed = Entity::update_many()
+        .col_expr(Column::Owner, Expr::value(owner))
+        .col_expr(Column::AcquiredAt, now.clone())
+        .col_expr(
+            Column::ExpiresAt,
+            sea_orm::sea_query::ExprTrait::add(now.clone(), ttl),
+        )
+        .filter(Column::Name.eq(name))
+        .filter(Condition::any().add(Column::Owner.eq(owner)).add(
+            sea_orm::sea_query::ExprTrait::lt(Expr::col(Column::ExpiresAt), now),
+        ))
+        .exec(db)
+        .await?
+        .rows_affected;
+    if changed == 1 {
+        return Ok(true);
+    }
+    // MySQL may report a no-op UPDATE as zero; check live ownership under lock.
+    Ok(Entity::find_by_id(name)
+        .filter(Column::Owner.eq(owner))
+        .filter(sea_orm::sea_query::ExprTrait::gte(
+            Expr::col(Column::ExpiresAt),
+            crate::db::now_expr(db.get_database_backend()),
+        ))
+        .lock_exclusive()
+        .one(db)
+        .await?
+        .is_some())
+}
+
 pub async fn release(db: &impl ConnectionTrait, name: &str, owner: &str) -> Result<u64, DbErr> {
     Ok(Entity::delete_many()
         .filter(Column::Name.eq(name))
@@ -91,6 +147,33 @@ pub async fn renew(
         .rows_affected)
 }
 
+/// A long-running I/O owner must not resurrect a lease after its fence expired.
+pub async fn renew_live(
+    db: &impl ConnectionTrait,
+    name: &str,
+    owner: &str,
+    ttl: i64,
+) -> Result<u64, DbErr> {
+    if ttl <= 0 {
+        return Err(DbErr::Custom("lock TTL must be positive".into()));
+    }
+    let now = crate::db::now_expr(db.get_database_backend());
+    Ok(Entity::update_many()
+        .col_expr(
+            Column::ExpiresAt,
+            sea_orm::sea_query::ExprTrait::add(now.clone(), ttl),
+        )
+        .filter(Column::Name.eq(name))
+        .filter(Column::Owner.eq(owner))
+        .filter(sea_orm::sea_query::ExprTrait::gte(
+            Expr::col(Column::ExpiresAt),
+            now,
+        ))
+        .exec(db)
+        .await?
+        .rows_affected)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -106,6 +189,64 @@ pub(crate) mod tests {
         crate::migration::Migrator::up(&db, None).await.unwrap();
         (dir, db)
     }
+    #[tokio::test]
+    async fn content_clock_acquisition_is_live_after_a_database_writer_wait() {
+        use sea_orm::TransactionTrait;
+        let (_dir, db) = database().await;
+        let blocking = db.begin().await.unwrap();
+        assert!(
+            acquire(&blocking, "writer", "held", crate::db::now(), 60000)
+                .await
+                .unwrap()
+        );
+        let (acquired, released_at) =
+            tokio::join!(acquire_live(&db, "content-clock", "first", 1000), async {
+                tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+                blocking.commit().await.unwrap();
+                crate::db::now()
+            });
+        assert!(acquired.unwrap());
+        let row = Entity::find_by_id("content-clock")
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            row.acquired_at >= released_at - 100,
+            "acquisition used a timestamp captured before waiting"
+        );
+        assert!(row.expires_at >= released_at + 900);
+        assert!(
+            !acquire_live(&db, "content-clock", "another-host", 1000)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            renew_live(&db, "content-clock", "another-host", 1000)
+                .await
+                .unwrap(),
+            0
+        );
+        Entity::update_many()
+            .col_expr(Column::ExpiresAt, Expr::value(crate::db::now() - 1))
+            .filter(Column::Name.eq("content-clock"))
+            .exec(&db)
+            .await
+            .unwrap();
+        assert_eq!(
+            renew_live(&db, "content-clock", "first", 1000)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(
+            acquire_live(&db, "content-clock", "successor", 1000)
+                .await
+                .unwrap()
+        );
+        assert_eq!(release(&db, "content-clock", "first").await.unwrap(), 0);
+    }
+
     #[tokio::test]
     async fn concurrent_acquisition_has_one_winner() {
         let (_dir, db) = database().await;

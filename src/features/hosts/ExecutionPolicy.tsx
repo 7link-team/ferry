@@ -2,11 +2,10 @@ import { Switch } from "../../shared/ui/switch";
 import { useEffect } from "react";
 import { AutoField } from "../../shared/forms/auto-form";
 import { commonText, executionText } from "../../shared/i18n/i18n";
-import { Input } from "../../shared/ui/input";
 
 export type ExecutionPolicy = { enabled: boolean; shared: boolean; capacity: number };
 export type ExecutionStatus = {
-  active: number; capacity: number;
+  active: number; capacity: number | null;
   state: "disabled" | "draining" | "busy" | "available" | "recovering";
   running_jobs: { run_id: string; job_key: string }[];
 };
@@ -17,16 +16,14 @@ export function ExecutionPolicyFields({ value = defaultExecutionPolicy, readOnly
   onChange: (value: ExecutionPolicy) => void;
   onValidityChange: (blocked: boolean) => void;
 }) {
-  const invalid = !Number.isInteger(value.capacity) || value.capacity < 1 || value.capacity > 64;
   useEffect(() => {
-    onValidityChange(!readOnly && invalid);
+    onValidityChange(false);
     return () => onValidityChange(false);
-  }, [invalid, readOnly, onValidityChange]);
+  }, [onValidityChange]);
   if (readOnly) return <dl className="flex flex-wrap gap-x-8 gap-y-4 text-sm">
     {[
       [executionText("hostExecution.enabled"), commonText(value.enabled ? "common.yes" : "common.no")],
       [executionText("hostExecution.shared"), commonText(value.shared ? "common.yes" : "common.no")],
-      [executionText("hostExecution.capacity"), value.capacity],
     ].map(([label, content]) => <div key={label} className="space-y-1">
       <dt className="text-muted-foreground">{label}</dt><dd>{content}</dd>
     </div>)}
@@ -34,6 +31,6 @@ export function ExecutionPolicyFields({ value = defaultExecutionPolicy, readOnly
   return <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
     <AutoField label={<>{executionText("hostExecution.enabled")}</>} className="min-w-40"><Switch  disabled={readOnly} checked={value.enabled} onCheckedChange={checked => onChange({ ...value, enabled: checked })} /></AutoField>
     <AutoField label={<>{executionText("hostExecution.shared")}</>} className="min-w-40"><Switch  disabled={readOnly} checked={value.shared} onCheckedChange={checked => onChange({ ...value, shared: checked })} /></AutoField>
-    <AutoField label={executionText("hostExecution.capacity")}><Input className="w-24" type="number" min={1} max={64} step={1} aria-label={executionText("hostExecution.capacity")} aria-invalid={invalid} disabled={readOnly} value={Number.isNaN(value.capacity) ? "" : value.capacity} onChange={event => onChange({ ...value, capacity: event.target.valueAsNumber })} /></AutoField>
+    <p className="basis-full text-sm text-muted-foreground">{commonText("resource-domain:platform.resourceLimits.hostHelp")}</p>
   </div>;
 }

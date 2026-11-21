@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-const MAX_BYTES: usize = 50 * 1024 * 1024;
 #[derive(Deserialize)]
 pub struct UploadQuery {
     resource: String,
@@ -37,7 +36,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route(
             "/{workspace}/value-files",
-            post(upload).layer(DefaultBodyLimit::max(MAX_BYTES + 1024 * 1024)),
+            post(upload).layer(DefaultBodyLimit::disable()),
         )
         .route("/{workspace}/value-files/{id}", get(download))
 }
@@ -71,18 +70,14 @@ async fn metadata(
     id: Id,
 ) -> Result<Metadata> {
     let path = directory(s, workspace, id).join("metadata.json");
-    if !path.exists()
-        && crate::artifact_store::ArtifactStore::is_remote_for_connection(s, conn).await?
-    {
-        crate::artifact_store::ArtifactStore::for_connection(s, conn)
-            .await?
-            .download_file(
-                &format!("value-files/{workspace}/{id}/metadata.json"),
-                &path,
-            )
-            .await
-            .map_err(|_| ApiError::missing())?;
-    }
+    crate::artifact_store::ArtifactStore::for_connection(s, conn)
+        .await?
+        .download_file(
+            &format!("value-files/{workspace}/{id}/metadata.json"),
+            &path,
+        )
+        .await
+        .map_err(|_| ApiError::missing())?;
     let bytes = tokio::fs::read(directory(s, workspace, id).join("metadata.json"))
         .await
         .map_err(|_| ApiError::missing())?;
@@ -101,6 +96,7 @@ async fn upload(
     {
         scope.require(&format!("{}.update", query.resource))?;
     }
+    let policy = crate::accounts::resource_policy::load(&s.db).await?;
     let mut field = multipart
         .next_field()
         .await
@@ -143,24 +139,30 @@ async fn upload(
         let mut file = tokio::fs::File::create(dir.join("content"))
             .await
             .map_err(io_error)?;
-        let mut size = 0;
+        let mut size = 0usize;
         while let Some(chunk) = field.chunk().await.map_err(|_| {
             ApiError::localized(
                 StatusCode::BAD_REQUEST,
                 crate::i18n::Message::new("files.dataInvalid"),
             )
         })? {
-            size += chunk.len();
-            if size > MAX_BYTES {
+            size = size.checked_add(chunk.len()).ok_or_else(|| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("request.resourceLimit"),
+                )
+            })?;
+            if !ferry_protocol::resources::allows(policy.file_upload_bytes, size) {
                 return Err(ApiError::localized(
                     StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("files.tooLarge"),
+                    crate::i18n::Message::new("request.resourceLimit"),
                 ));
             }
             file.write_all(&chunk).await.map_err(io_error)?;
         }
         drop(field);
         file.flush().await.map_err(io_error)?;
+        drop(file);
         let meta = Metadata {
             id,
             url: format!("/api/workspaces/{}/value-files/{id}", scope.workspace_id),
@@ -178,17 +180,15 @@ async fn upload(
         tokio::fs::write(dir.join("metadata.json"), bytes)
             .await
             .map_err(io_error)?;
-        if crate::artifact_store::ArtifactStore::is_remote(&s).await? {
-            let backend = crate::artifact_store::ArtifactStore::for_state(&s).await?;
-            for name in ["content", "metadata.json"] {
-                backend
-                    .upload_file(
-                        &format!("value-files/{}/{id}/{name}", scope.workspace_id),
-                        &dir.join(name),
-                    )
-                    .await
-                    .map_err(|_| ApiError::missing())?;
-            }
+        let backend = crate::artifact_store::ArtifactStore::for_state(&s).await?;
+        for name in ["content", "metadata.json"] {
+            backend
+                .upload_file(
+                    &format!("value-files/{}/{id}/{name}", scope.workspace_id),
+                    &dir.join(name),
+                )
+                .await
+                .map_err(|_| ApiError::missing())?;
         }
         Ok((StatusCode::CREATED, Json(json!(meta))))
     }
@@ -217,16 +217,14 @@ async fn download(
     resource(&meta.resource)?;
     scope.require(&format!("{}.read", meta.resource))?;
     let path = directory(&s, scope.workspace_id, id).join("content");
-    if !path.exists() && crate::artifact_store::ArtifactStore::is_remote(&s).await? {
-        crate::artifact_store::ArtifactStore::for_state(&s)
-            .await?
-            .download_file(
-                &format!("value-files/{}/{id}/content", scope.workspace_id),
-                &path,
-            )
-            .await
-            .map_err(|_| ApiError::missing())?;
-    }
+    crate::artifact_store::ArtifactStore::for_state(&s)
+        .await?
+        .download_file(
+            &format!("value-files/{}/{id}/content", scope.workspace_id),
+            &path,
+        )
+        .await
+        .map_err(|_| ApiError::missing())?;
     let file = tokio::fs::File::open(directory(&s, scope.workspace_id, id).join("content"))
         .await
         .map_err(|_| ApiError::missing())?;
@@ -257,7 +255,7 @@ pub async fn validate_references(
     workspace: Id,
     kind: &str,
     value: &Value,
-    schema: &Value,
+    _schema: &Value,
 ) -> Result<()> {
     for item in value.as_array().ok_or_else(|| {
         ApiError::localized(
@@ -284,17 +282,12 @@ pub async fn validate_references(
                 crate::i18n::Message::new("files.metadataMismatch"),
             ));
         }
-        if let Some(max) = schema
-            .get("maxSizeMb")
-            .and_then(Value::as_f64)
-            .filter(|n| *n > 0.0)
-        {
-            if meta.size as f64 > max * 1024.0 * 1024.0 {
-                return Err(ApiError::localized(
-                    StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("files.configuredSizeExceeded"),
-                ));
-            }
+        let policy = crate::accounts::resource_policy::load(conn).await?;
+        if !ferry_protocol::resources::allows(policy.file_upload_bytes, meta.size) {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("request.resourceLimit"),
+            ));
         }
     }
     Ok(())

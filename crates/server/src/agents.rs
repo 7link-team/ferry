@@ -228,9 +228,6 @@ impl Body {
         if self.description.len() > 4096 {
             return Err(bad("agents.descriptionTooLong"));
         }
-        if self.system_prompt.len() > 32 * 1024 {
-            return Err(bad("agents.instructionsTooLong"));
-        }
         if self.cwd.len() > 4096 {
             return Err(bad("agents.directoryInvalid"));
         }

@@ -80,7 +80,6 @@ fn contract_accepts_both_review_modes_and_rejects_invalid_parameters() {
         json!({"port":65536}),
         json!({"host_id":"0"}),
         json!({"host_id":"abc"}),
-        json!({"command":"x".repeat(4001)}),
         json!({"name":"x".repeat(129)}),
         json!({"ready_timeout_seconds":0}),
         json!({"ready_timeout_seconds":601}),
@@ -339,7 +338,7 @@ impl HostChannel for std::sync::Arc<Service> {
         output: mpsc::Sender<(String, Vec<u8>)>,
         mut cancel: watch::Receiver<bool>,
     ) -> Result<i32> {
-        assert!(timeout > Duration::from_secs(24 * 3600), "no 120 s limit");
+        assert_eq!(timeout, Duration::ZERO, "no default service lifetime limit");
         self.commands.lock().unwrap().push(command.into());
         let _ = output.send(("stdout".into(), b"listening".to_vec())).await;
         self.started.notify_one();

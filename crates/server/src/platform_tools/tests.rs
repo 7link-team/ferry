@@ -8,6 +8,61 @@ use axum::extract::State;
 use sea_orm::{ActiveModelTrait, IntoActiveModel};
 
 #[tokio::test]
+async fn storage_failure_is_classified_without_matching_localized_text_or_retrying_the_write() {
+    use sea_orm::{PaginatorTrait, sea_query::Expr};
+    let (_dir, s) = setup().await;
+    let definition = json!({"engine":"ferry-graph","schema":1,"nodes":[{"id":"start","name":"Start","type":"core.trigger.manual","type_version":1,"params":{"input_schema":{"type":"object"}},"position":[0,0]}],"connections":[]});
+    let created = dispatch(
+        &s,
+        admin(1),
+        Call {
+            method: "POST".into(),
+            path: "/workflows".into(),
+            body: json!({"name":"Storage failure fixture","definition":definition.to_string()}),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(created["status"], 201, "{created}");
+    let id = created["data"]["id"].as_str().unwrap();
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::FileStorage,
+            Expr::value("unreadable-storage-fixture"),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+    for locale in [
+        crate::i18n::Locale::EnUs,
+        crate::i18n::Locale::ZhCn,
+        crate::i18n::Locale::MsMy,
+    ] {
+        let result = crate::i18n::with_locale(locale, dispatch(&s, admin(1), Call {method:"POST".into(),path:format!("/workflows/{id}/executions"),body:json!({"mode":"manual","revision":"draft","version":1,"entry_node_id":"start"}),..Default::default()})).await.unwrap();
+        assert_eq!(result["status"], 503, "{result}");
+        assert_eq!(result["guidance"], STORAGE_GUIDANCE);
+        assert!(
+            !result["guidance"]
+                .as_str()
+                .unwrap()
+                .contains("wait briefly")
+        );
+        assert_eq!(
+            crate::entities::workflow_executions::Entity::find()
+                .count(&s.db)
+                .await
+                .unwrap(),
+            0
+        );
+    }
+    assert_eq!(
+        denial(&crate::artifact_store::storage_unavailable())["guidance"],
+        STORAGE_GUIDANCE
+    );
+}
+
+#[tokio::test]
 async fn configured_tool_limit_accepts_large_results_and_distinguishes_read_failures() {
     use crate::entities::{platform_state, workflows};
     use sea_orm::{ColumnTrait, QueryFilter, sea_query::Expr};
@@ -41,14 +96,28 @@ async fn configured_tool_limit_accepts_large_results_and_distinguishes_read_fail
         .exec(&s.db)
         .await
         .unwrap();
+    let unlimited = dispatch(&s, admin(1), fetch()).await.unwrap();
+    assert_eq!(unlimited["status"], 200);
+    assert_eq!(
+        unlimited["data"]["definition"].as_str().unwrap().len(),
+        text.len()
+    );
+    platform_state::Entity::update_many()
+        .col_expr(
+            platform_state::Column::ResourceConfig,
+            Expr::value(json!({"tool_response_bytes":1024*1024}).to_string()),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
     let rejected = dispatch(&s, admin(1), fetch()).await.unwrap();
     assert_eq!(rejected["status"], 413, "{rejected}");
     assert!(rejected["error"].as_str().unwrap().contains("read-only"));
     assert!(!rejected["error"].as_str().unwrap().contains("write may"));
     platform_state::Entity::update_many()
         .col_expr(
-            platform_state::Column::ConversationConfig,
-            Expr::value(json!({"tool_response_limit_kib":4096}).to_string()),
+            platform_state::Column::ResourceConfig,
+            Expr::value(json!({"tool_response_bytes":4096*1024}).to_string()),
         )
         .filter(platform_state::Column::Id.eq(1))
         .exec(&s.db)
@@ -61,8 +130,8 @@ async fn configured_tool_limit_accepts_large_results_and_distinguishes_read_fail
     // counting characters in a plain ASCII result.
     platform_state::Entity::update_many()
         .col_expr(
-            platform_state::Column::ConversationConfig,
-            Expr::value(json!({"tool_response_limit_kib":8192}).to_string()),
+            platform_state::Column::ResourceConfig,
+            Expr::value(json!({"tool_response_bytes":8192*1024}).to_string()),
         )
         .filter(platform_state::Column::Id.eq(1))
         .exec(&s.db)
@@ -702,4 +771,15 @@ async fn transactional_refresh_rechecks_agent_role_after_admission() {
         response["status"], 403,
         "transaction must not retain the revoked Agent grant: {response}"
     );
+}
+
+#[test]
+fn tool_call_default_accepts_large_valid_body_without_a_hidden_megabyte_ceiling() {
+    let call = Call {
+        method: "POST".into(),
+        path: "/workflows".into(),
+        body: json!({"definition":"x".repeat(2*1024*1024)}),
+        ..Default::default()
+    };
+    call.validate().unwrap();
 }

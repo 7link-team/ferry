@@ -256,5 +256,10 @@
   "workflow.agentFileMismatch": "Kandungan \"{name}\" tidak sepadan dengan jenis failnya, jadi ia tidak dihantar. Minta Ejen menghasilkan fail sebenar jenis itu.",
   "workflow.agentNoFiles": "Ejen selesai tanpa meninggalkan sebarang fail dalam folder outputnya. Semak mesej akhirnya untuk sebabnya, atau buat permintaan lebih khusus.",
   "hosts.fileToolsRunnerOnly": "Hanya hos Runner melaporkan alat penghasilan fail.",
-  "execution.definitionJsonAt": "Definisi saluran paip bukan JSON yang sah pada baris {line}, lajur {column}."
+  "execution.definitionJsonAt": "Definisi saluran paip bukan JSON yang sah pada baris {line}, lajur {column}.",
+  "request.resourceLimit": "Permintaan melebihi had sumber yang dikonfigurasi oleh pentadbir.",
+  "workflow.agentMaxTokensRequired": "{path}: Penyedia ini memerlukan nilai max_tokens yang ditetapkan secara jelas.",
+  "workflow.aiTimeout": "Operasi AI telah melebihi had masa yang dikonfigurasikan dan dihentikan. Semak hasil yang direkodkan sebelum menjalankannya semula.",
+  "runner.resourcePolicyUpgrade": "Runner ini tidak dapat menguatkuasakan dasar sumber platform untuk arahan. Kemas kini Runner sebelum menjalankan operasi ini.",
+  "runner.clusterPolicyUpgrade": "Pelayan yang meminta tidak menyokong respons besar dengan pengakuan. Kemas kini pelayan sebelum menjalankan operasi ini."
 }

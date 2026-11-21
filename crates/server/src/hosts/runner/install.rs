@@ -10,7 +10,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::IntoResponse,
 };
-use ferry_protocol::release::{MAX_CATALOG, verify_catalog};
+use ferry_protocol::release::verify_catalog;
 
 fn metadata(
     bytes: &[u8],
@@ -76,7 +76,7 @@ async fn download(client: &reqwest::Client, url: &str, limit: usize) -> Result<V
             crate::i18n::Message::new("runner.catalogInterrupted"),
         )
     })? {
-        if bytes.len() + chunk.len() > limit {
+        if bytes.len().saturating_add(chunk.len()) > limit {
             return Err(ApiError::localized(
                 StatusCode::BAD_REQUEST,
                 crate::i18n::Message::new("runner.catalogSize"),
@@ -204,7 +204,8 @@ pub(crate) async fn catalog() -> Result<SignedCatalog> {
         format!("https://github.com/{repository}/releases/download/v{version}/runner-update.json");
     let client = reqwest::Client::builder()
         .https_only(true)
-        .timeout(std::time::Duration::from_secs(30))
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .read_timeout(std::time::Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
         .map_err(|_| {
@@ -215,7 +216,7 @@ pub(crate) async fn catalog() -> Result<SignedCatalog> {
         })?;
     let signature_url = format!("{base}.sig");
     let (bytes, signature) = tokio::try_join!(
-        download(&client, &base, MAX_CATALOG),
+        download(&client, &base, usize::MAX),
         download(&client, &signature_url, 8192)
     )?;
     let signature = String::from_utf8(signature).map_err(|_| {

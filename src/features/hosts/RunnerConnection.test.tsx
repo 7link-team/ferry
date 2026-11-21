@@ -651,3 +651,13 @@ it("offers a default install command without misrepresenting a foreground agent 
  expect(host.textContent).toContain('当前代理为直接启动');
  expect(host.querySelector('textarea[aria-label="卸载命令"]')).toBeNull();
 });
+
+it("reports resource policy incompatibility only for a connected Runner with an explicit false capability",async()=>{
+ const value={agent_version:"old",target_version:"new",supported:true,ready:true,enabled:true,auto_update:"inherit",global_auto_update:true,update:null,supports_resource_policy:false as boolean|undefined};
+ vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,status:200,json:async()=>structuredClone(value)})));
+ await act(async()=>root.render(<RunnerUpdateStatus workspace="ops" hostId="h1"/>));
+ const warning=()=>host.querySelector('[data-runner-resource-policy="unsupported"]');
+ expect(warning()).not.toBeNull();
+ for(const [ready,supported] of [[true,true],[false,false],[true,undefined]] as const){value.ready=ready;value.supports_resource_policy=supported;await act(async()=>vi.advanceTimersByTimeAsync(5000));expect(warning()).toBeNull();}
+ value.ready=true;value.supports_resource_policy=false;await act(async()=>vi.advanceTimersByTimeAsync(5000));expect(warning()).not.toBeNull();
+});

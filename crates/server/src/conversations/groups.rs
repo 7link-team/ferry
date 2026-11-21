@@ -343,8 +343,18 @@ pub(super) async fn send_message(
         return Err(bad("conversations.tooManyTargets"));
     }
     check_message(&body.prompt, &body.client_id, &body.attachments)?;
+    super::check_message_resources(
+        &body.prompt,
+        &body.attachments,
+        &crate::accounts::resource_policy::load(&s.db).await?,
+    )?;
     files::canonicalize(&s, &scope, id, &mut body.attachments).await?;
     check_message(&body.prompt, &body.client_id, &body.attachments)?;
+    super::check_message_resources(
+        &body.prompt,
+        &body.attachments,
+        &crate::accounts::resource_policy::load(&s.db).await?,
+    )?;
     body.targets.sort();
     body.targets.dedup();
     body.mentions.sort();

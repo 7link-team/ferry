@@ -14,7 +14,6 @@ use ferry_protocol::sandbox::Item;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde_json::{Map, Value, json};
 
-const MAX_PAGES: u64 = 50;
 const MAX_PATH_BYTES: usize = 4096;
 const MAX_MESSAGE_CHARS: usize = 500;
 
@@ -221,10 +220,18 @@ async fn pages(
     run: &workflow_executions::Model,
     path: &str,
     query: &Map<String, Value>,
-    max_pages: u64,
+    max_pages: Option<u64>,
 ) -> Result<Value> {
     let mut rows = Vec::new();
-    for page in 1..=max_pages {
+    let mut page = 1u64;
+    loop {
+        if max_pages.is_some_and(|limit| page > limit) {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("workflow.platformPageLimit")
+                    .with("max_pages", max_pages.unwrap().to_string()),
+            ));
+        }
         let mut query = query.clone();
         query.insert("page".into(), json!(page));
         let data = request(s, run, url(path, &query)?).await?;
@@ -239,11 +246,10 @@ async fn pages(
         if done {
             return Ok(json!({"items":rows,"total":total}));
         }
+        page = page
+            .checked_add(1)
+            .ok_or_else(|| invalid("workflow.platformPagination", "/page".into()))?;
     }
-    Err(ApiError::localized(
-        StatusCode::BAD_REQUEST,
-        Message::new("workflow.platformPageLimit").with("max_pages", max_pages.to_string()),
-    ))
 }
 
 pub(super) async fn execute(
@@ -266,10 +272,8 @@ pub(super) async fn execute(
         )?;
         let query = params["query"].as_object().cloned().unwrap_or_default();
         let data = if params["all_pages"] == true {
-            let max_pages = super::graph::port_index(&params["max_pages"])
-                .filter(|pages| (1..=MAX_PAGES).contains(pages))
-                .ok_or_else(|| invalid("workflow.graphSchema", "/params/max_pages".into()))?;
-            pages(s, run, &path, &query, max_pages).await?
+            let policy = crate::accounts::resource_policy::load(&s.db).await?;
+            pages(s, run, &path, &query, policy.workflow_platform_pages).await?
         } else {
             request(s, run, url(&path, &query)?).await?
         };

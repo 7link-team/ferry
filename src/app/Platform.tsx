@@ -1,3 +1,4 @@
+import { PlatformResourceLimits } from "./PlatformResourceLimits";
 import { ChevronDown, LogIn } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../shared/ui/dropdown-menu";
 import { AppHeader } from "./AppHeader";
@@ -110,12 +111,12 @@ const forms: Record<string, FormConfig<Row>> = {
     {key:"session_refresh_days",label:"Refresh validity (days)",labelKey:"resource-domain:platform.sessionRefreshDays",type:"number",required:true,min:1,helpKey:"resource-domain:platform.sessionLifetimesHelp"},
     {key:"session_auto_renew",label:"Renew while active",labelKey:"resource-domain:platform.sessionAutoRenew",type:"switch",helpKey:"resource-domain:platform.sessionAutoRenewHelp"},
   ]},
+  {title:"Capacity and execution",titleKey:"resource-domain:platform.resourceLimits.title",group:"resources",groupKey:"resource-domain:platform.resourceLimits.title",fields:[{key:"resource_limits",label:"Resource limits",labelKey:"resource-domain:platform.resourceLimits.title",type:"custom",span:2,render:props=><PlatformResourceLimits {...props} draft={props.draft as Record<string,unknown>} onPatch={props.onPatch} />} ]},
 {title:"Agent conversations",titleKey:"resource-domain:platform.conversationPolicy",group:"Agent conversations",groupKey:"resource-domain:platform.conversationPolicy",fields:[
     {key:"conversation_approval_mode",label:"Default approval mode",labelKey:"resource-domain:platform.conversationApproval",type:"select",required:true,
       options:[{value:"request",label:"Request approval",labelKey:"conversations:approvalRequest"},{value:"assisted",label:"Assist approval",labelKey:"conversations:approvalAssisted"},{value:"yolo",label:"YOLO (unsafe)",labelKey:"conversations:approvalYolo"}],helpKey:"resource-domain:platform.conversationApprovalHelp"},
-    {key:"conversation_tool_response_limit_kib",label:"MCP response limit (KiB)",labelKey:"resource-domain:platform.conversationToolLimit",type:"number",required:true,min:256,max:8192,helpKey:"resource-domain:platform.conversationToolLimitHelp"},
     {key:"conversation_instructions",label:"Global conversation instructions",labelKey:"resource-domain:platform.conversationInstructions",type:"custom",span:2,helpKey:"resource-domain:platform.conversationInstructionsHelp",
-      render:({draft,onPatch,readOnly})=><div className="min-w-0 space-y-2"><FieldControl name="conversation_instructions" field={{name:commonText("resource-domain:platform.conversationInstructions"),type:"code",config:{maxLength:16384}}} value={String(draft.conversation_instructions??"")} readonly={readOnly} onChange={value=>onPatch({conversation_instructions:value})}/>{!readOnly&&<div className="flex justify-end"><Button type="button" variant="outline" className="min-h-11" onClick={()=>onPatch({conversation_instructions:draft.conversation_instructions_default??""})}>{commonText("resource-domain:platform.restoreConversationInstructions")}</Button></div>}</div>},
+      render:({draft,onPatch,readOnly})=><div className="min-w-0 space-y-2"><FieldControl name="conversation_instructions" field={{name:commonText("resource-domain:platform.conversationInstructions"),type:"code"}} value={String(draft.conversation_instructions??"")} readonly={readOnly} onChange={value=>onPatch({conversation_instructions:value})}/>{!readOnly&&<div className="flex justify-end"><Button type="button" variant="outline" className="min-h-11" onClick={()=>onPatch({conversation_instructions:draft.conversation_instructions_default??""})}>{commonText("resource-domain:platform.restoreConversationInstructions")}</Button></div>}</div>},
   ]},
 {title:"监控采集",titleKey:"resource-domain:platform.monitorCollection",group:"监控采集",groupKey:"resource-domain:platform.monitorCollection",fields:[
     {key:"monitor_retention_days",label:"明细保留天数",labelKey:"resource-domain:platform.monitorRetentionDays",type:"number",min:1,max:365,helpKey:"resource-domain:platform.monitorRetentionHelp"},

@@ -5,19 +5,17 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const VERSION: u8 = 1;
-pub const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
-pub const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
-pub const MAX_EVALUATIONS: usize = 20_000;
-pub const MAX_TIMEOUT_MS: u64 = 5_000;
-pub const MIN_MEMORY_BYTES: usize = 1024 * 1024;
-pub const MAX_MEMORY_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Batch {
     pub version: u8,
-    pub timeout_ms: u64,
-    pub memory_bytes: usize,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub memory_bytes: Option<usize>,
+    #[serde(default)]
+    pub resource_policy: crate::resources::ResourcePolicy,
     pub deterministic: bool,
     /// Parse every expression without executing tenant code or producing values.
     #[serde(default)]
@@ -52,13 +50,7 @@ pub struct Code {
 }
 impl Code {
     pub fn valid(&self) -> bool {
-        self.abi == 1
-            && !self.source.trim().is_empty()
-            && self.source.len()
-                <= match self.language {
-                    Language::Wasm => 1024 * 1024,
-                    _ => 64 * 1024,
-                }
+        self.abi == 1 && !self.source.trim().is_empty()
     }
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -164,23 +156,42 @@ impl Reply {
 impl Batch {
     pub fn valid(&self) -> bool {
         self.version == VERSION
-            && (1..=MAX_TIMEOUT_MS).contains(&self.timeout_ms)
-            && (MIN_MEMORY_BYTES..=MAX_MEMORY_BYTES).contains(&self.memory_bytes)
-            && self.evaluations.len() <= MAX_EVALUATIONS
+            && self.timeout_ms.is_none_or(|limit| limit > 0)
+            && self.memory_bytes.is_none_or(|limit| limit > 0)
+            && crate::resources::allows(
+                self.resource_policy.workflow_evaluations,
+                self.evaluations.len(),
+            )
             && self.program.as_ref().is_none_or(|program| {
                 program.code.valid()
-                    && program.inputs.len() <= MAX_EVALUATIONS
+                    && crate::resources::allows(
+                        self.resource_policy.workflow_code_bytes,
+                        program.code.source.len(),
+                    )
+                    && crate::resources::allows(
+                        self.resource_policy.workflow_items,
+                        program.inputs.len(),
+                    )
                     && program.inputs.iter().all(Value::is_object)
                     && self.evaluations.is_empty()
                     && self.data.is_none()
                     && self.context.is_none()
                     && self.deterministic
             })
-            && self.data.as_ref().is_none_or(InputData::valid)
+            && self.data.as_ref().is_none_or(|data| {
+                data.valid()
+                    && crate::resources::allows(
+                        self.resource_policy.workflow_items,
+                        data.items.len(),
+                    )
+            })
             && self.context.as_ref().is_none_or(valid_context)
             && self.evaluations.iter().all(|evaluation| {
                 !evaluation.expression.is_empty()
-                    && evaluation.expression.len() <= 64 * 1024
+                    && crate::resources::allows(
+                        self.resource_policy.workflow_code_bytes,
+                        evaluation.expression.len(),
+                    )
                     && evaluation.item_index.is_none_or(|index| {
                         self.data
                             .as_ref()
@@ -259,6 +270,41 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test]
+    fn absent_resource_limits_allow_former_thresholds() {
+        let request: Batch = serde_json::from_value(json!({"version":1,"deterministic":true,
+            "evaluations":[{"expression":"x".repeat(65537),"context":{}}]}))
+        .unwrap();
+        assert!(request.valid());
+    }
+
+    #[test]
+    fn explicit_policy_enforces_evaluation_and_source_limits() {
+        let mut request: Batch = serde_json::from_value(json!({"version":1,"deterministic":true,
+            "resource_policy":{"workflow_evaluations":1,"workflow_code_bytes":3},
+            "evaluations":[{"expression":"1+1","context":{}}]}))
+        .unwrap();
+        assert!(request.valid());
+        request.evaluations[0].expression.push('0');
+        assert!(!request.valid());
+        request.evaluations[0].expression = "1".into();
+        request
+            .evaluations
+            .push(serde_json::from_value(json!({"expression":"1","context":{}})).unwrap());
+        assert!(!request.valid());
+    }
+
+    #[test]
+    fn configured_input_count_is_checked_in_batch_mode() {
+        let mut request: Batch = serde_json::from_value(json!({"version":1,"deterministic":true,
+            "data":{"items":[{"json":{}},{"json":{}}],"upstream":[]},
+            "evaluations":[{"expression":"$input.all()","context":{}}]}))
+        .unwrap();
+        assert!(request.valid());
+        request.resource_policy.workflow_items = Some(1);
+        assert!(!request.valid());
+    }
+
+    #[test]
     fn shared_context_never_accepts_host_namespaces_or_per_item_overrides() {
         let mut value = json!({"version":1,"timeout_ms":100,"memory_bytes":1048576,"deterministic":true,
             "context":{"$vars":{"value":2}},"evaluations":[{"expression":"$vars.value","context":{}}]});
@@ -324,9 +370,7 @@ mod tests {
         for (key, value) in [
             ("version", json!(2)),
             ("timeout_ms", json!(0)),
-            ("timeout_ms", json!(5001)),
-            ("memory_bytes", json!(1048575)),
-            ("memory_bytes", json!(67108865)),
+            ("memory_bytes", json!(0)),
         ] {
             let mut value2 = good.clone();
             value2[key] = value;

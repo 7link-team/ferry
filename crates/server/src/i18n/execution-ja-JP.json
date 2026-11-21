@@ -256,5 +256,10 @@
   "workflow.agentFileMismatch": "「{name}」の内容がファイル形式と一致しないため、配信しませんでした。その形式の本物のファイルを生成するようエージェントに指示してください。",
   "workflow.agentNoFiles": "エージェントは終了しましたが、出力フォルダーにファイルがありません。最終メッセージで理由を確認するか、依頼を具体的にしてください。",
   "hosts.fileToolsRunnerOnly": "ファイル作成ツールを確認できるのは Runner ホストだけです。",
-  "execution.definitionJsonAt": "パイプライン定義の {line} 行 {column} 列が有効な JSON ではありません。"
+  "execution.definitionJsonAt": "パイプライン定義の {line} 行 {column} 列が有効な JSON ではありません。",
+  "request.resourceLimit": "リクエストが管理者の設定したリソース制限を超えています。",
+  "workflow.agentMaxTokensRequired": "{path}: このプロバイダーには max_tokens の明示的な設定が必要です。",
+  "workflow.aiTimeout": "AI 操作が設定された制限時間を超えたため停止しました。再実行する前に記録済みの結果を確認してください。",
+  "runner.resourcePolicyUpgrade": "この Runner はコマンドにプラットフォームのリソースポリシーを適用できません。この操作を実行する前に Runner を更新してください。",
+  "runner.clusterPolicyUpgrade": "要求元サーバーは確認応答付きの大容量レスポンスに対応していません。この操作を実行する前にサーバーを更新してください。"
 }

@@ -1,3 +1,38 @@
+# Task State - Resource policy source checkpoint
+## Objective
+Deliver the approved48 optional platform resource ceilings and bounded file transport. This is an integration SOURCE CHECKPOINT, not overall acceptance/release.
+## Current Phase
+TESTING / PARENT INTEGRATION. Frozen source reviews PASS; actual>=1GiB runtime still running.
+## Current Step
+Commit reviewed resource deliverables on fix/default-unlimited-resource-policy (HEAD beforecheckpoint488c326); parent authorized checkpoint before runtime completion. No push/main release/deployment.
+## Parent Coordination
+Parent owns D:/Projects/github/ferry-storage-unification, feat/mobile-client-completion, cleancheckpoint622bf8b; mobile feature7f7a30d pushed separately. Parent owns API/resource merge and remaining fixed HTTP/S3 SDK timeout cleanup. Do not edit that worktree or desktop/**. Root Cargo exclusive to this task.
+## Completed Work
+- ResourcePolicy48 optional fields default null/unlimited, Runner/Go/sandbox/API/UI consumers and six locales; preserve usage records/security/permission checks.
+- New UNRELEASED content v2:64KiB AEAD frames, up to31wholeframes per immutable<=4MiB atomic PUT segment, authenticated exactlayout manifest FIRST and completion marker LAST. No MPU/LIST in new content path; legacy vault-v1 single-AEAD read fallback, no history rewrite/new schema/permission. User approved old-server inability to read new objects.
+- Renewable content-only DB-clock fences; PreparedAsset verifies before short metadata attachment TX. All production upload/generated/download consumers use bounded buffers/tempfiles. Journal preloads packets/sources outside writeTX and revalidates SQL metadata/ref/nodeversion/execution lease in activate/complete/wait/wake. Late canonical-create loser discards pre-encoded child identity.
+- Independent reviews: threeImportant fixes addressed; final tiny CAS delta PASS/noCriticalImportant. Snapshots: data/maintenance/resource-streaming-fix-review-0deb4c9611 and resource-streaming-late-create-review-74c734f7b8. Current20source hashes match those frozen snapshots.
+## Verification
+- FINAL default-stack cargo test --workspace --locked -- --test-threads=8: PASS1335/0FAIL/26existingignored; server1174PASS14ignored771.21s; resource-stream-final-workspace.log. No RUST_MIN_STACK override.
+- FINAL cargo check --workspace --locked: PASS45.64s, resource-stream-final-check.log. fmt/diff/LF and JS syntax PASS.
+- Targeted: journal19PASS146.59s after actual SQL-heartbeat-block RED15.85s; content22PASS77.73s; clock writer-wait1PASS6.44s; late-create RED/API5004.53s -> GREEN1PASS4.52s. Full suite includes final23content tests.
+- Frontend typecheck/build PASS;124files931PASS1skip62.68s, resource-stream-frontend-tests.log. Prescribed GitBash workers/actions/go.sh test ./... PASS369.279s, resource-stream-go-patched.log (raw go test invalid without existing actpatch). Generator316operations PASS.
+- Prior unchanged cluster evidence: actual NATS7PASS+recovery1PASS, capacity1/slow consumer/legacy ACK negotiation, priorTemp/resource-final-cluster-6hn3fuyq. Original file-output stack regression/defaultstack PASS; boxed operation131073B->guard3928B/Agentfuture36760B. Normal pre-stream build PASS; final runtime build below source-fresh.
+## Active Runtime - NOT YET PASS
+- Controller50112 tool session / nodePID28172; isolatedServer49528/Runner8892. Evidence C:/Users/FullStack/AppData/Local/Temp/resource-policy-runtime-IxmSXL, resource-stream-final-runtime.log. Actual1,073,807,361B per file, SHA256, conversation+workflow upload/download and realRunner/disposableCLI generated distinct file; RSS/concurrentSQL/Runner online/abort-temp checks. Native HTTP explicit30min header wait.
+- Post-final-fix build40285 PASS7m21s, resource-stream-final-runtime-build.log. ServerSHA256 A7418357FBB66C527C09490808463A49AC3C5D0ADCEB82E23A9FB87ECFB55340; all binaryhashes resource-stream-final-runtime-binaries.log.
+- Approved transient CLI-only9settings resource-stream-segment-runtime-build-config.log: dev.debug-assertions=true; package chacha20poly1305/chacha20/poly1305/cipher/aead/hex/sha2 opt-level3; ferry-server opt-level1. No committed profile change. Strict debug crypto still slow; multi-pass actual file I/O remains active, serverRSS~96MiB/Runner~35MiB observed, not final RSS acceptance.
+- Harness access session defaults30min and currently no ordinary refresh. Parent authorized future harness cookiejar/ordinary /api/sessions/refresh at step boundaries/confirmed401 only, no uncertain mutation replay/auth policy relaxation/SQL session bypass. If current run reaches auth expiry preserve result step receipts/DB/assets; resume proven/known-absent work with ordinary auth, do not fakepass/repeat proven GiB work unnecessarily.
+## Known Remaining Integration Work
+- Parent owns residual provider/integration connect30, model discovery connect/read15, and object_store0.12.5 implicit timeout30/connect5; these are NOT approved unlimited-policy exceptions. Parent will remove/configure through existing task_timeout_seconds during integration. Separate CLI readinessprobe20 is inherited control operation, no explicit user exception claimed. Accountresourcepolicy timeout10 is TEST ONLY. Do not claim S3 unlimited/overall resource acceptance before parent cleanup.
+- New content path eliminates MPU entirely. Preexisting generic ArtifactStore.upload_file outside introduced path retains inherited process-crash MPU cleanup limitation; no new bucket lifecycle/LIST policy invented. Legacy v1 read uses unavoidable old whole-value AEAD allocation.
+## Confirmed Constraints
+Preserve original local4291 service PID17088, its data/keys/identities; no database/history migration or model billing. Only isolated fixtures. No main push/tag/release/deployment. Review/stage exact165 source deliverable paths from resource-checkpoint-paths.log; never binaries/logs/data/snapshots/buildoutputs. Source commit is authorized now; runtime acceptance remains pending.
+## Next Action
+Return checkpoint SHA and full changed-path list to parent immediately; keep runtime50112 running, record actual checks/receipts and final outcome. Parent merges checkpoint/API policy cleanup independently. Any harness-only refresh followup must remain explicit, normally authenticated and reviewed. No production source edits during current frozen runtime.
+## Last Checkpoint
+2026-11-21 - final source reviews and1335 default-stack tests PASS; integration checkpoint authorized, runtime pending.
+
 ## ACTIVE - Runner disconnect and local 8091 preview investigation (2026-11-21)
 - Objective: investigate reported Runner drops and local 8091 preview 503s using actual platform metadata; do not request metadata already accessible.
 - Current phase: ACCEPTANCE / DELIVERY. Preview admission fix implemented; first workspace Rust suite finished: server 1118 PASS, 11 existing ignored, 2 environment failures (cygpath absent from PATH). Both failed tests individually reran PASS with Git/usr/bin added; no source/assertion changes. Remaining workspace suites PASS (143 passed, 12 existing ignored), log WindowsTemp/ferry-release-tools/preview-capacity-workspace-remaining.log (UTF-16 BOM). Combined unique workspace coverage: 1263 passed, 23 existing ignored; first-run two environment failures resolved by exact-test reruns, not represented as a single clean full-suite invocation. No production deployment, local 4291 restart, release or tag change.

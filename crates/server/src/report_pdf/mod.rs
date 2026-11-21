@@ -10,6 +10,7 @@ mod markdown;
 #[cfg(test)]
 mod tests;
 
+use ferry_protocol::resources::{ResourcePolicy, allows, byte_limit};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::LazyLock;
@@ -26,11 +27,10 @@ static BOLD: &[u8] = include_bytes!("../../assets/report-fonts/NotoSansSC-Bold.o
 const TEMPLATE: &str = include_str!("template.typ");
 
 /// Upper bounds for one report; a larger request is refused before layout.
+#[cfg(test)]
 pub(crate) const MAX_INPUT_BYTES: usize = 1024 * 1024;
-pub(crate) const MAX_PAGES: usize = 200;
-pub(crate) const MAX_SECTIONS: usize = 100;
+#[cfg(test)]
 pub(crate) const MAX_METRICS: usize = 24;
-pub(crate) const RENDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 struct Fonts {
     book: LazyHash<FontBook>,
@@ -49,7 +49,33 @@ static FONTS: LazyLock<Fonts> = LazyLock::new(|| {
 });
 
 /// At most two reports lay out at once; each holds a blocking thread.
-static SLOTS: LazyLock<tokio::sync::Semaphore> = LazyLock::new(|| tokio::sync::Semaphore::new(2));
+static ACTIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static AVAILABLE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+struct Slot;
+impl Drop for Slot {
+    fn drop(&mut self) {
+        ACTIVE.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        AVAILABLE.notify_waiters();
+    }
+}
+async fn acquire(limit: Option<u64>) -> Slot {
+    loop {
+        let notified = AVAILABLE.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if ACTIVE
+            .fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |active| active.checked_add(1).filter(|next| allows(limit, *next)),
+            )
+            .is_ok()
+        {
+            return Slot;
+        }
+        notified.await;
+    }
+}
 
 /// What the node asks for, after expressions are resolved.
 #[derive(Debug, Default, Deserialize)]
@@ -107,7 +133,7 @@ pub(crate) enum Problem {
     /// Layout produced more pages than allowed.
     TooManyPages(usize),
     /// Layout did not finish in time.
-    Timeout,
+    Timeout(u64),
     /// The layout engine rejected the document; logged with the details.
     Layout(String),
 }
@@ -124,15 +150,29 @@ fn text(value: &Value) -> String {
 
 /// Builds the template's data. Separate from layout so it is cheap to test.
 pub(crate) fn document(report: &Report, generated: &str) -> Result<Value, Problem> {
+    document_with_policy(report, generated, &ResourcePolicy::default())
+}
+
+pub(crate) fn document_with_policy(
+    report: &Report,
+    generated: &str,
+    policy: &ResourcePolicy,
+) -> Result<Value, Problem> {
     let title = report.title.trim();
     if title.is_empty() {
         return Err(Problem::MissingTitle);
     }
-    if report.sections.len() > MAX_SECTIONS {
-        return Err(Problem::TooLarge("sections", MAX_SECTIONS));
+    if !allows(policy.report_sections, report.sections.len()) {
+        return Err(Problem::TooLarge(
+            "sections",
+            byte_limit(policy.report_sections),
+        ));
     }
-    if report.metrics.len() > MAX_METRICS {
-        return Err(Problem::TooLarge("metrics", MAX_METRICS));
+    if !allows(policy.report_metrics, report.metrics.len()) {
+        return Err(Problem::TooLarge(
+            "metrics",
+            byte_limit(policy.report_metrics),
+        ));
     }
     let english = report.language.starts_with("en");
     let sections: Vec<Value> = report
@@ -179,28 +219,56 @@ pub(crate) fn document(report: &Report, generated: &str) -> Result<Value, Proble
         "sections": sections,
     });
     let size = data.to_string().len();
-    if size > MAX_INPUT_BYTES {
-        return Err(Problem::TooLarge("bytes", MAX_INPUT_BYTES));
+    if !allows(policy.report_input_bytes, size) {
+        return Err(Problem::TooLarge(
+            "bytes",
+            byte_limit(policy.report_input_bytes),
+        ));
     }
     Ok(data)
 }
 
 /// Lays out the report and exports the PDF, off the async runtime and bounded
 /// in time, pages and concurrency.
-pub(crate) async fn render(report: &Report, generated: &str) -> Result<Rendered, Problem> {
-    let data = document(report, generated)?;
-    let _slot = SLOTS.acquire().await.map_err(|_| Problem::Timeout)?;
-    let job = tokio::task::spawn_blocking(move || layout(&data));
-    match tokio::time::timeout(RENDER_TIMEOUT, job).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(join)) => Err(Problem::Layout(join.to_string())),
-        // The thread finishes on its own; its result is discarded.
-        Err(_) => Err(Problem::Timeout),
-    }
+pub(crate) async fn render(
+    report: &Report,
+    generated: &str,
+    policy: &ResourcePolicy,
+) -> Result<Rendered, Problem> {
+    let data = document_with_policy(report, generated, policy)?;
+    let layout_policy = policy.clone();
+    render_worker(policy, move || layout_with_policy(&data, &layout_policy)).await
+}
+
+async fn render_worker(
+    policy: &ResourcePolicy,
+    work: impl FnOnce() -> Result<Rendered, Problem> + Send + 'static,
+) -> Result<Rendered, Problem> {
+    let slot = acquire(policy.report_concurrency).await;
+    let timeout = policy.report_timeout_seconds;
+    let job = tokio::task::spawn_blocking(move || {
+        // The worker owns the permit, including after a caller timeout/cancellation.
+        let _slot = slot;
+        work()
+    });
+    let result = match timeout {
+        Some(seconds) => tokio::time::timeout(std::time::Duration::from_secs(seconds), job)
+            .await
+            .map_err(|_| Problem::Timeout(seconds))?,
+        None => job.await,
+    };
+    result.map_err(|join| Problem::Layout(join.to_string()))?
 }
 
 /// Synchronous layout + PDF export of prepared template data.
 pub(crate) fn layout(data: &Value) -> Result<Rendered, Problem> {
+    layout_with_policy(data, &ResourcePolicy::default())
+}
+
+pub(crate) fn layout_with_policy(
+    data: &Value,
+    policy: &ResourcePolicy,
+) -> Result<Rendered, Problem> {
     let world = ReportWorld::new(data);
     let document = typst::compile::<PagedDocument>(&world)
         .output
@@ -214,8 +282,8 @@ pub(crate) fn layout(data: &Value) -> Result<Rendered, Problem> {
             )
         })?;
     let pages = document.pages().len();
-    if pages > MAX_PAGES {
-        return Err(Problem::TooManyPages(MAX_PAGES));
+    if !allows(policy.report_pages, pages) {
+        return Err(Problem::TooManyPages(byte_limit(policy.report_pages)));
     }
     let pdf = typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default()).map_err(|errors| {
         Problem::Layout(

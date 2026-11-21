@@ -1,6 +1,18 @@
 use super::*;
 use sea_orm::ConnectionTrait;
 
+#[test]
+fn manual_input_defaults_unlimited_and_obeys_packet_policy_and_schema() {
+    let spec = json!({"params":{"input_schema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}});
+    let inputs = Map::from_iter([("text".into(), json!("x".repeat(1024 * 1024 + 1)))]);
+    let mut policy = ferry_protocol::resources::ResourcePolicy::default();
+    input(&spec, &inputs, &policy).unwrap();
+    policy.workflow_packet_bytes = Some(1024 * 1024);
+    assert!(input(&spec, &inputs, &policy).is_err());
+    policy.workflow_packet_bytes = None;
+    assert!(input(&spec, &Map::new(), &policy).is_err());
+}
+
 #[tokio::test]
 async fn background_notifications_restore_agent_identity_and_recheck_revocation() {
     use crate::{
@@ -758,17 +770,19 @@ fn always_output_creates_only_an_empty_item_for_successfully_executed_empty_resu
 #[test]
 fn manual_schema_does_not_fetch_external_resources_and_validates_original_types() {
     let spec = json!({"params":{"input_schema":{"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"],"additionalProperties":false}}});
-    assert!(input(&spec, json!({"answer":42}).as_object().unwrap()).is_ok());
-    assert!(input(&spec, json!({"answer":"42"}).as_object().unwrap()).is_err());
+    let policy = ferry_protocol::resources::ResourcePolicy::default();
+    assert!(input(&spec, json!({"answer":42}).as_object().unwrap(), &policy).is_ok());
+    assert!(input(&spec, json!({"answer":"42"}).as_object().unwrap(), &policy).is_err());
     assert!(
         input(
             &spec,
-            json!({"answer":42,"extra":true}).as_object().unwrap()
+            json!({"answer":42,"extra":true}).as_object().unwrap(),
+            &policy,
         )
         .is_err()
     );
     let external = json!({"params":{"input_schema":{"$ref":"file:///private-resource.json"}}});
-    assert!(input(&external, &Map::new()).is_err());
+    assert!(input(&external, &Map::new(), &policy).is_err());
 }
 #[test]
 fn set_writes_nested_objects_preserves_types_and_paired_lineage() {

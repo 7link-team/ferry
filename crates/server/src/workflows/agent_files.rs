@@ -15,16 +15,7 @@ use futures::StreamExt;
 use serde_json::{Value, json};
 
 /// One stored file may not exceed the content store's object limit.
-pub(crate) const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
-const DEFAULT_FILES: u64 = 10;
-const MAX_FILES: u64 = 50;
-const DEFAULT_TOTAL_MB: u64 = 100;
-const MAX_TOTAL_MB: u64 = 500;
-const MAX_INSTRUCTIONS: usize = 4 * 1024;
-const MAX_FORMATS: usize = 30;
 /// Bounds on what is walked under `output/`.
-const MAX_DEPTH: usize = 4;
-const MAX_ENTRIES: usize = 500;
 pub(crate) const OUTPUT_DIR: &str = "output";
 
 /// The node's `files` settings, when file output is enabled.
@@ -34,6 +25,8 @@ pub(crate) struct FileMode {
     pub formats: Vec<String>,
     pub max_files: usize,
     pub max_bytes: u64,
+    pub max_file_bytes: u64,
+    pub max_entries: usize,
     pub instructions: String,
 }
 impl FileMode {
@@ -41,8 +34,10 @@ impl FileMode {
     pub(crate) fn conversation() -> Self {
         Self {
             formats: Vec::new(),
-            max_files: DEFAULT_FILES as usize,
-            max_bytes: DEFAULT_TOTAL_MB * 1024 * 1024,
+            max_files: usize::MAX,
+            max_bytes: u64::MAX,
+            max_file_bytes: u64::MAX,
+            max_entries: usize::MAX,
             instructions: String::new(),
         }
     }
@@ -62,23 +57,18 @@ pub(super) fn mode(params: &Value, base: &str) -> Result<Option<FileMode>> {
         return Ok(None);
     }
     let path = |field: &str| format!("{base}/params/files/{field}");
-    let number = |field: &str, default: u64, max: u64| match &files[field] {
-        Value::Null => Ok(default),
-        value => value
-            .as_u64()
-            .filter(|n| (1..=max).contains(n))
-            .ok_or_else(|| invalid(path(field))),
-    };
-    let max_files = number("max_files", DEFAULT_FILES, MAX_FILES)? as usize;
-    let max_mb = number("max_total_mb", DEFAULT_TOTAL_MB, MAX_TOTAL_MB)?;
+    // Legacy per-node quota fields remain accepted; only platform policy sets quotas.
+    for key in ["max_files", "max_total_mb"] {
+        if !files[key].is_null() && files[key].as_u64().is_none_or(|value| value == 0) {
+            return Err(invalid(path(key)));
+        }
+    }
+    let max_files = usize::MAX;
     let mut formats = Vec::new();
     match &files["formats"] {
         Value::Null => {}
         Value::String(any) if any == "any" => {}
         Value::Array(list) => {
-            if list.len() > MAX_FORMATS {
-                return Err(invalid(path("formats")));
-            }
             for value in list {
                 let format = value
                     .as_str()
@@ -98,20 +88,48 @@ pub(super) fn mode(params: &Value, base: &str) -> Result<Option<FileMode>> {
     }
     let instructions = match &files["instructions"] {
         Value::Null => String::new(),
-        Value::String(text) if text.len() <= MAX_INSTRUCTIONS => text.clone(),
+        Value::String(text) => text.clone(),
         _ => return Err(invalid(path("instructions"))),
     };
     Ok(Some(FileMode {
         formats,
         max_files,
-        max_bytes: max_mb * 1024 * 1024,
+        max_bytes: u64::MAX,
+        max_file_bytes: u64::MAX,
+        max_entries: usize::MAX,
         instructions,
     }))
+}
+
+pub(crate) fn apply_policy(
+    mode: &mut FileMode,
+    policy: &ferry_protocol::resources::ResourcePolicy,
+) {
+    mode.max_files = ferry_protocol::resources::byte_limit(policy.file_count);
+    mode.max_entries = ferry_protocol::resources::byte_limit(policy.directory_entries);
+    mode.max_bytes = policy.file_total_bytes.unwrap_or(u64::MAX);
+    mode.max_file_bytes = policy.file_upload_bytes.unwrap_or(u64::MAX);
 }
 
 /// CLIs whose writes the Runner can confine to the working directory.
 pub(crate) fn runtime_supported(runtime: Runtime) -> bool {
     matches!(runtime, Runtime::Codex | Runtime::Claude)
+}
+
+fn append_limits(text: &mut String, mode: &FileMode) {
+    if mode.max_files != usize::MAX {
+        text.push_str(&format!("At most {} files.\n", mode.max_files));
+    }
+    if mode.max_file_bytes != u64::MAX {
+        text.push_str(&format!(
+            "Each file at most {} bytes.\n",
+            mode.max_file_bytes
+        ));
+    }
+    if mode.max_bytes != u64::MAX {
+        text.push_str(&format!("At most {} bytes in total.\n", mode.max_bytes));
+    }
+    text.push_str("Give files clear names with the right extension.\n");
 }
 
 /// The prompt section describing where and how to deliver files.
@@ -127,12 +145,7 @@ pub(super) fn contract(mode: &FileMode, runtime: Runtime, tools: &[String]) -> S
             mode.formats.join(", ")
         ));
     }
-    text.push_str(&format!(
-        "At most {} files, each at most {} MiB, {} MiB in total. Give files clear names with the right extension.\n",
-        mode.max_files,
-        MAX_FILE_BYTES / 1024 / 1024,
-        mode.max_bytes / 1024 / 1024
-    ));
+    append_limits(&mut text, mode);
     if runtime == Runtime::Claude {
         text.push_str("In this mode you can create text files directly (Markdown, CSV, JSON, HTML, SVG...), but you cannot run programs, so binary formats (PDF, DOCX, XLSX, PPTX, images, video) cannot be produced here; say so instead of writing a fake file.\n");
     } else {
@@ -232,6 +245,51 @@ pub(super) fn matches_content(mime: &str, bytes: &[u8]) -> bool {
     }
 }
 
+async fn matches_file(mime: &str, path: &std::path::Path) -> Result<bool> {
+    use tokio::io::AsyncReadExt;
+    let text = mime.starts_with("text/")
+        || matches!(
+            mime,
+            "application/json" | "application/xml" | "application/yaml" | "image/svg+xml"
+        );
+    let mut file = tokio::fs::File::open(path).await?;
+    if !text {
+        let mut prefix = [0; 12];
+        let mut count = 0;
+        while count < prefix.len() {
+            let read = file.read(&mut prefix[count..]).await?;
+            if read == 0 {
+                break;
+            }
+            count += read;
+        }
+        return Ok(matches_content(mime, &prefix[..count]));
+    }
+    let mut buffer = vec![0; 64 * 1024];
+    let mut incomplete = Vec::new();
+    let mut suffix = Vec::new();
+    let mut svg = false;
+    loop {
+        let count = file.read(&mut buffer).await?;
+        if count == 0 {
+            break;
+        }
+        let mut scan = std::mem::take(&mut suffix);
+        scan.extend_from_slice(&buffer[..count]);
+        svg |= scan.windows(4).any(|bytes| bytes == b"<svg");
+        suffix = scan[scan.len().saturating_sub(3)..].to_vec();
+        incomplete.extend_from_slice(&buffer[..count]);
+        match std::str::from_utf8(&incomplete) {
+            Ok(_) => incomplete.clear(),
+            Err(error) if error.error_len().is_none() => {
+                incomplete = incomplete[error.valid_up_to()..].to_vec();
+            }
+            Err(_) => return Ok(false),
+        }
+    }
+    Ok(incomplete.is_empty() && (mime != "image/svg+xml" || svg))
+}
+
 /// A display-safe file name: no separators, control or reserved characters.
 pub(crate) fn sanitize(name: &str) -> String {
     let cleaned: String = name
@@ -275,13 +333,14 @@ fn rejected(status: StatusCode, message: Message) -> ApiError {
     ApiError::localized(status, message)
 }
 
-/// One collected file, still in memory.
+/// One collected file, spooled privately and removed when its owner is dropped.
 pub(crate) struct Collected {
     /// Path under `output/`, `/`-separated.
     pub path: String,
     pub name: String,
     pub mime: &'static str,
-    pub bytes: Vec<u8>,
+    pub content: tempfile::TempPath,
+    pub size: u64,
 }
 
 /// Like `collect`, but no files is not an error: a conversation turn produces
@@ -327,12 +386,7 @@ pub(crate) fn conversation_contract(runtime: Runtime, confined: bool, tools: &[S
             "You may write only inside your working directory and have no network access. ",
         );
     }
-    text.push_str(&format!(
-        "At most {} files, each at most {} MiB, {} MiB in total.\n",
-        mode.max_files,
-        MAX_FILE_BYTES / 1024 / 1024,
-        mode.max_bytes / 1024 / 1024
-    ));
+    append_limits(&mut text, &mode);
     if runtime == Runtime::Claude && confined {
         text.push_str("You can create text files directly (Markdown, CSV, JSON, HTML, SVG), but you cannot run programs here, so say so instead of producing binary formats.\n");
     } else {
@@ -363,8 +417,8 @@ pub(super) async fn collect(
 ) -> Result<Vec<Collected>> {
     let mut pending = vec![(String::new(), 0usize)];
     let mut found = Vec::new();
-    let mut seen = 0usize;
     let mut total = 0u64;
+    let mut seen = 0usize;
     while let Some((relative, depth)) = pending.pop() {
         let entries = match channel
             .list_dir(&join(dir, &format!("{OUTPUT_DIR}/{relative}")))
@@ -376,12 +430,14 @@ pub(super) async fn collect(
             Err(error) => return Err(error),
         };
         for entry in entries {
-            seen += 1;
-            if seen > MAX_ENTRIES {
+            seen = seen
+                .checked_add(1)
+                .ok_or_else(|| invalid("/files".into()))?;
+            if seen > mode.max_entries {
                 return Err(rejected(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     limit_error("workflow.agentFilesTooMany")
-                        .with("max", mode.max_files.to_string()),
+                        .with("max", mode.max_entries.to_string()),
                 ));
             }
             if entry.name.is_empty() || entry.name == "." || entry.name == ".." {
@@ -393,14 +449,17 @@ pub(super) async fn collect(
                 format!("{relative}/{}", entry.name)
             };
             match entry.kind.as_str() {
-                "directory" if depth + 1 < MAX_DEPTH => pending.push((path, depth + 1)),
+                "directory" => pending.push((path, depth + 1)),
                 "file" => {
-                    if entry.size > MAX_FILE_BYTES {
+                    if entry.size > mode.max_file_bytes {
                         return Err(rejected(
                             StatusCode::PAYLOAD_TOO_LARGE,
                             Message::new("workflow.agentFileTooLarge")
                                 .with("name", sanitize(&path))
-                                .with("limit", (MAX_FILE_BYTES / 1024 / 1024).to_string()),
+                                .with(
+                                    "limit",
+                                    crate::content_assets::size_text(mode.max_file_bytes as i64),
+                                ),
                         ));
                     }
                     found.push((path, entry.size));
@@ -435,29 +494,47 @@ pub(super) async fn collect(
         let (_, mut stream) = channel
             .read_file(&join(dir, &format!("{OUTPUT_DIR}/{path}")))
             .await?;
-        let mut bytes = Vec::new();
+        use tokio::io::AsyncWriteExt;
+        let content = tempfile::NamedTempFile::new().map_err(ApiError::from)?;
+        let mut output = tokio::fs::File::from_std(content.reopen().map_err(ApiError::from)?);
+        let mut size = 0u64;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
-            if bytes.len() as u64 + chunk.len() as u64 > MAX_FILE_BYTES {
+            size = size
+                .checked_add(chunk.len() as u64)
+                .ok_or_else(|| invalid("/files".into()))?;
+            if size > mode.max_file_bytes {
                 return Err(rejected(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     Message::new("workflow.agentFileTooLarge")
                         .with("name", name.clone())
-                        .with("limit", (MAX_FILE_BYTES / 1024 / 1024).to_string()),
+                        .with(
+                            "limit",
+                            crate::content_assets::size_text(mode.max_file_bytes as i64),
+                        ),
                 ));
             }
-            bytes.extend_from_slice(&chunk);
+            if total
+                .checked_add(size)
+                .is_none_or(|value| value > mode.max_bytes)
+            {
+                return Err(rejected(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Message::new("workflow.agentFilesTotal").with(
+                        "limit",
+                        crate::content_assets::size_text(mode.max_bytes as i64),
+                    ),
+                ));
+            }
+            output.write_all(&chunk).await.map_err(ApiError::from)?;
         }
-        total += bytes.len() as u64;
-        if total > mode.max_bytes {
-            return Err(rejected(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                Message::new("workflow.agentFilesTotal")
-                    .with("limit", (mode.max_bytes / 1024 / 1024).to_string()),
-            ));
-        }
+        output.flush().await.map_err(ApiError::from)?;
+        drop(output);
+        total = total
+            .checked_add(size)
+            .ok_or_else(|| invalid("/files".into()))?;
         let mime = mime(&name);
-        if !matches_content(mime, &bytes) {
+        if !matches_file(mime, content.path()).await? {
             return Err(rejected(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Message::new("workflow.agentFileMismatch").with("name", name.clone()),
@@ -467,7 +544,8 @@ pub(super) async fn collect(
             path,
             name,
             mime,
-            bytes,
+            content: content.into_temp_path(),
+            size,
         });
     }
     if files.is_empty() {
@@ -559,7 +637,7 @@ pub(super) async fn store(
     };
     // The shared file-artifact helper: same output shape and signed download
     // link as report.render, so notifications can attach these files too.
-    let stored = super::artifacts::store(
+    let stored = super::artifacts::store_file(
         s,
         &storage,
         &super::artifacts::Origin {
@@ -568,7 +646,7 @@ pub(super) async fn store(
             execution: run.id,
             node,
         },
-        &file.bytes,
+        file.content.as_ref(),
         file.mime,
         &file.name,
         json!({"path": file.path}),
@@ -589,7 +667,7 @@ mod tests {
         let on = mode(&json!({"files":{"enabled":true}}), "")
             .unwrap()
             .unwrap();
-        assert_eq!((on.max_files, on.max_bytes), (10, 100 * 1024 * 1024));
+        assert_eq!((on.max_files, on.max_bytes), (usize::MAX, u64::MAX));
         assert!(on.formats.is_empty());
         let picked = mode(
             &json!({"files":{"enabled":true,"formats":[".PPTX","pdf","pdf"],"max_files":3,"max_total_mb":500}}),
@@ -598,14 +676,26 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(picked.formats, ["pptx", "pdf"]);
-        assert_eq!(picked.max_bytes, 500 * 1024 * 1024);
+        assert_eq!(picked.max_bytes, u64::MAX);
+        assert_eq!(picked.max_files, usize::MAX);
+        let mut limited = picked;
+        apply_policy(
+            &mut limited,
+            &ferry_protocol::resources::ResourcePolicy {
+                file_count: Some(3),
+                file_total_bytes: Some(500),
+                file_upload_bytes: Some(200),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            (limited.max_files, limited.max_bytes, limited.max_file_bytes),
+            (3, 500, 200)
+        );
         for bad in [
-            json!({"files":{"enabled":true,"max_total_mb":501}}),
             json!({"files":{"enabled":true,"max_files":0}}),
-            json!({"files":{"enabled":true,"max_files":51}}),
             json!({"files":{"enabled":true,"formats":["../x"]}}),
             json!({"files":{"enabled":true,"formats":"pdf"}}),
-            json!({"files":{"enabled":true,"instructions":"x".repeat(5000)}}),
         ] {
             let error = mode(&bad, "/nodes/0").unwrap_err();
             assert!(
@@ -649,6 +739,8 @@ mod tests {
         let mode = FileMode {
             formats: vec!["pptx".into()],
             max_files: 2,
+            max_file_bytes: u64::MAX,
+            max_entries: usize::MAX,
             max_bytes: 5 * 1024 * 1024,
             instructions: "Use the company colours.".into(),
         };

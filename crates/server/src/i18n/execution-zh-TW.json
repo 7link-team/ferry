@@ -256,5 +256,10 @@
   "workflow.agentFileMismatch": "檔案「{name}」的內容與其檔案類型不符，未交付。請要求智慧體產生真正的該類型檔案。",
   "workflow.agentNoFiles": "智慧體已結束，但輸出目錄中沒有任何檔案。請查看它的最終回覆了解原因，或把要求寫得更具體。",
   "hosts.fileToolsRunnerOnly": "只有 Runner 主機可以偵測檔案製作能力。",
-  "execution.definitionJsonAt": "流水線定義在第 {line} 行第 {column} 欄不是合法的 JSON。"
+  "execution.definitionJsonAt": "流水線定義在第 {line} 行第 {column} 欄不是合法的 JSON。",
+  "request.resourceLimit": "請求超過管理員設定的資源限制。",
+  "workflow.agentMaxTokensRequired": "{path}：此提供商要求明確設定 max_tokens。",
+  "workflow.aiTimeout": "AI 操作超過設定的時限，已停止。再次執行前請檢查已記錄的結果。",
+  "runner.resourcePolicyUpgrade": "此 Runner 無法為命令套用平台資源政策。請先更新 Runner，再執行此操作。",
+  "runner.clusterPolicyUpgrade": "請求方伺服器不支援帶確認的大型回應。請先更新伺服器，再執行此操作。"
 }

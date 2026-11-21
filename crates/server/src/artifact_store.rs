@@ -356,9 +356,6 @@ impl Configuration {
                 crate::i18n::Message::new("platform.storageChangeRequiresMigration"),
             )
         };
-        if config.kind == "local" && s.cluster.is_some() {
-            return Err(Problem::new("platform.storageClusterRequiresS3", "cluster").rejected());
-        }
         // Switching a populated store without a migration would strand existing files.
         if config.kind != previous.kind
             || config.endpoint != previous.endpoint
@@ -406,6 +403,21 @@ impl Configuration {
 pub(crate) struct ArtifactStore(Arc<dyn ObjectStore>);
 
 impl ArtifactStore {
+    #[cfg(test)]
+    pub(crate) fn from_backend_for_test(backend: Arc<dyn ObjectStore>) -> Self {
+        Self(backend)
+    }
+    #[cfg(test)]
+    pub(crate) fn throttled_for_test(delay: std::time::Duration) -> Self {
+        Self(Arc::new(object_store::throttle::ThrottledStore::new(
+            object_store::memory::InMemory::new(),
+            object_store::throttle::ThrottleConfig {
+                wait_get_per_call: delay,
+                wait_put_per_call: delay,
+                ..Default::default()
+            },
+        )))
+    }
     fn normalize_prefix(prefix: &str) -> anyhow::Result<String> {
         let prefix = prefix.trim();
         anyhow::ensure!(!prefix.starts_with('/'), "S3 prefix must be relative");
@@ -426,33 +438,12 @@ impl ArtifactStore {
             Path::parse(prefix)?,
         ))))
     }
-    pub(crate) async fn is_remote(s: &crate::state::State) -> crate::error::Result<bool> {
-        Self::is_remote_for_connection(s, &s.db).await
-    }
-    pub(crate) async fn is_remote_for_connection(
-        s: &crate::state::State,
-        conn: &impl sea_orm::ConnectionTrait,
-    ) -> crate::error::Result<bool> {
-        if let Ok(kind) = std::env::var("FERRY_ARTIFACT_STORE") {
-            return Ok(kind == "s3");
-        }
-        let row = crate::entities::platform_state::Entity::find_by_id(1)
-            .one(conn)
-            .await?
-            .ok_or_else(|| crate::error::internal_fault("platform state row missing"))?;
-        Ok(Configuration::read(s, row.file_storage.as_deref())
-            .map_err(|error| {
-                tracing::error!(error = %format!("{error:#}"), "saved file storage settings unreadable");
-                storage_unavailable()
-            })?
-            .kind
-            == "s3")
-    }
     pub(crate) async fn upload_file(&self, key: &str, file: &FsPath) -> anyhow::Result<()> {
         use tokio::io::AsyncWriteExt;
         let mut input = tokio::fs::File::open(file).await?;
         let mut output = object_store::buffered::BufWriter::new(self.0.clone(), Self::path(key)?);
         tokio::io::copy(&mut input, &mut output).await?;
+        drop(input);
         output.shutdown().await?;
         Ok(())
     }
@@ -471,12 +462,10 @@ impl ArtifactStore {
             output.write_all(&bytes).await?;
         }
         output.sync_all().await?;
+        drop(stream);
         drop(output);
-        match temp.persist_noclobber(file) {
-            Ok(_) => Ok(()),
-            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-            Err(error) => Err(error.error.into()),
-        }
+        temp.persist(file).map_err(|error| error.error)?;
+        Ok(())
     }
     pub(crate) async fn for_state(s: &crate::state::State) -> crate::error::Result<Self> {
         Self::for_connection(s, &s.db).await
@@ -501,12 +490,6 @@ impl ArtifactStore {
         conn: &impl sea_orm::ConnectionTrait,
     ) -> crate::error::Result<Result<(Self, Option<std::path::PathBuf>), Problem>> {
         if let Ok(kind) = std::env::var("FERRY_ARTIFACT_STORE") {
-            if s.cluster.is_some() && kind != "s3" {
-                return Ok(Err(Problem::new(
-                    "platform.storageClusterRequiresS3",
-                    "FERRY_ARTIFACT_STORE must be s3 in a cluster",
-                )));
-            }
             let local = (kind == "local").then(|| s.data_dir.clone());
             return Ok(Self::configured(&s.data_dir)
                 .map(|store| (store, local))
@@ -525,12 +508,6 @@ impl ArtifactStore {
                 )));
             }
         };
-        if s.cluster.is_some() && config.kind != "s3" {
-            return Ok(Err(Problem::new(
-                "platform.storageClusterRequiresS3",
-                "cluster",
-            )));
-        }
         let local = (config.kind == "local").then(|| s.data_dir.clone());
         Ok(config.open(&s.data_dir).map(|store| (store, local)))
     }
@@ -643,6 +620,27 @@ impl ArtifactStore {
             bytes.extend_from_slice(&chunk);
         }
         Ok(bytes.into())
+    }
+    /// Inspect a format header without materializing the object body.
+    pub(crate) async fn header(&self, key: &str, length: usize) -> anyhow::Result<Option<Bytes>> {
+        let path = Self::path(key)?;
+        let metadata = match self.0.head(&path).await {
+            Ok(metadata) => metadata,
+            Err(object_store::Error::NotFound { .. }) => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let end = metadata.size.min(length as u64);
+        if end == 0 {
+            return Ok(Some(Bytes::new()));
+        }
+        Ok(Some(self.0.get_range(&path, 0..end).await?))
+    }
+    pub(crate) async fn exists(&self, key: &str) -> anyhow::Result<bool> {
+        match self.0.head(&Self::path(key)?).await {
+            Ok(_) => Ok(true),
+            Err(object_store::Error::NotFound { .. }) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
     }
     pub(crate) async fn delete(&self, key: &str) -> anyhow::Result<()> {
         match self.0.delete(&Self::path(key)?).await {
