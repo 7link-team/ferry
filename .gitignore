@@ -4,6 +4,7 @@ node_modules/
 /dist/
 # Unanchored on purpose: also covers desktop/target.
 target/
+/target-api-context/
 build-artifacts/
 .DS_Store
 *.log
