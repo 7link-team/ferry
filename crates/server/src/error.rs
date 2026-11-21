@@ -235,7 +235,14 @@ impl<T, E: std::fmt::Display> LogCause for std::result::Result<T, E> {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let detail = self.render(crate::i18n::current_locale());
-        (self.0, Json(json!({"error": detail}))).into_response()
+        let identity = self.2.clone();
+        let mut response = (self.0, Json(json!({"error": detail}))).into_response();
+        // Internal callers can classify failures without matching translated copy.
+        // Extensions are not serialized: the public error body remains unchanged.
+        if let Some(message) = identity {
+            response.extensions_mut().insert(message);
+        }
+        response
     }
 }
 
@@ -269,6 +276,28 @@ mod extraction_tests {
         routing::{get, post},
     };
     use serde::Deserialize;
+
+    #[tokio::test]
+    async fn localized_error_identity_stays_internal_without_changing_the_http_body() {
+        let error = crate::artifact_store::storage_unavailable();
+        let expected = error.render(crate::i18n::current_locale());
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response
+                .extensions()
+                .get::<crate::i18n::Message>()
+                .map(|message| message.key.as_str()),
+            Some("storage.unavailable")
+        );
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+            json!({"error":expected})
+        );
+    }
 
     #[tokio::test]
     async fn typed_extraction_rejections_keep_status_and_diagnostics_in_all_six_languages() {

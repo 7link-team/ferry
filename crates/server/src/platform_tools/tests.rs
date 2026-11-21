@@ -8,6 +8,61 @@ use axum::extract::State;
 use sea_orm::{ActiveModelTrait, IntoActiveModel};
 
 #[tokio::test]
+async fn storage_failure_is_classified_without_matching_localized_text_or_retrying_the_write() {
+    use sea_orm::{PaginatorTrait, sea_query::Expr};
+    let (_dir, s) = setup().await;
+    let definition = json!({"engine":"ferry-graph","schema":1,"nodes":[{"id":"start","name":"Start","type":"core.trigger.manual","type_version":1,"params":{"input_schema":{"type":"object"}},"position":[0,0]}],"connections":[]});
+    let created = dispatch(
+        &s,
+        admin(1),
+        Call {
+            method: "POST".into(),
+            path: "/workflows".into(),
+            body: json!({"name":"Storage failure fixture","definition":definition.to_string()}),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(created["status"], 201, "{created}");
+    let id = created["data"]["id"].as_str().unwrap();
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(
+            crate::entities::platform_state::Column::FileStorage,
+            Expr::value("unreadable-storage-fixture"),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+    for locale in [
+        crate::i18n::Locale::EnUs,
+        crate::i18n::Locale::ZhCn,
+        crate::i18n::Locale::MsMy,
+    ] {
+        let result = crate::i18n::with_locale(locale, dispatch(&s, admin(1), Call {method:"POST".into(),path:format!("/workflows/{id}/executions"),body:json!({"mode":"manual","revision":"draft","version":1,"entry_node_id":"start"}),..Default::default()})).await.unwrap();
+        assert_eq!(result["status"], 503, "{result}");
+        assert_eq!(result["guidance"], STORAGE_GUIDANCE);
+        assert!(
+            !result["guidance"]
+                .as_str()
+                .unwrap()
+                .contains("wait briefly")
+        );
+        assert_eq!(
+            crate::entities::workflow_executions::Entity::find()
+                .count(&s.db)
+                .await
+                .unwrap(),
+            0
+        );
+    }
+    assert_eq!(
+        denial(&crate::artifact_store::storage_unavailable())["guidance"],
+        STORAGE_GUIDANCE
+    );
+}
+
+#[tokio::test]
 async fn configured_tool_limit_accepts_large_results_and_distinguishes_read_failures() {
     use crate::entities::{platform_state, workflows};
     use sea_orm::{ColumnTrait, QueryFilter, sea_query::Expr};

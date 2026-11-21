@@ -351,6 +351,10 @@ pub(crate) async fn dispatch(s: &AppState, scope: Scope, mut call: Call) -> Resu
         .await
         .unwrap();
     let status = response.status();
+    let error_key = response
+        .extensions()
+        .get::<crate::i18n::Message>()
+        .map(|message| message.key.clone());
     let content_type = response
         .headers()
         .get("content-type")
@@ -381,10 +385,16 @@ pub(crate) async fn dispatch(s: &AppState, scope: Scope, mut call: Call) -> Resu
     redact(&mut body);
     let mut result = json!({"status":status.as_u16(),"ok":status.is_success(),"data":body});
     if !status.is_success() {
-        result["guidance"] = json!(call_guidance(&call, status.as_u16()));
+        result["guidance"] = json!(if error_key.as_deref() == Some("storage.unavailable") {
+            STORAGE_GUIDANCE
+        } else {
+            call_guidance(&call, status.as_u16())
+        });
     }
     Ok(result)
 }
+
+const STORAGE_GUIDANCE: &str = "File storage failed. Check File storage health in Platform settings and ask an administrator to inspect the server diagnostics. Do not change the workflow definition, model or Runner to work around it. Do not blindly retry while storage is unhealthy. Before retrying a write after storage recovers, read the resource and its executions to check whether it already completed.";
 
 fn call_guidance(call: &Call, status: u16) -> &'static str {
     let path = call.path.split('?').next().unwrap_or("");
@@ -472,7 +482,13 @@ pub(crate) fn read_path(path: &str) -> bool {
 /// The tool result returned to an Agent when the platform refuses a call.
 pub(crate) fn denial(error: &ApiError) -> Value {
     let status = error.0.as_u16();
-    let guidance = if matches!(status, 401 | 403) {
+    let guidance = if error
+        .2
+        .as_ref()
+        .is_some_and(|message| message.key == "storage.unavailable")
+    {
+        STORAGE_GUIDANCE
+    } else if matches!(status, 401 | 403) {
         "The platform denied this call. No Agent role means no platform access. Check this workspace's current user and Agent role grants. Do not substitute local filesystem searches or invent counts."
     } else {
         guidance(status)
