@@ -352,6 +352,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc lsof openssh-client python3 git curl libdigest-sha-perl
           docker info
+          if [[ '${{ matrix.harness }}' == deployments* ]]; then
+            # Use the same verified fixture input as deployment-ha.yml.
+            compose_path=$(docker info --format '{{json .ClientInfo.Plugins}}' | python3 -c 'import json,sys; print(next(p["Path"] for p in json.load(sys.stdin) if p["Name"] == "compose"))')
+            test -x "$compose_path"
+            echo "FERRY_TEST_COMPOSE_BINARY=$compose_path" >> "$GITHUB_ENV"
+            "$compose_path" version --short
+          fi
       - uses: actions/setup-node@v4
         if: matrix.harness == 'build-ui' || startsWith(matrix.harness, 'deployments') || matrix.harness == 'variables-ui' || matrix.harness == 'runner'
         with:
