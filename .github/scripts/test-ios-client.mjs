@@ -82,6 +82,7 @@ let mode = 'stable';
 let command = '';
 let reloaded = false;
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
+const nativeBuildTimeout = 600000;
 function run(binary, argv, allowFailure = false, timeout = 60000) {
   const result = spawnSync(binary, argv, { encoding: 'utf8', windowsHide: true, timeout, maxBuffer: 8 * 1024 * 1024 });
   commands.push({ at: Date.now(), binary, argv, status: result.status,
@@ -216,7 +217,7 @@ async function testNativeUI(secondURL, phase = 'first') {
   try {
     const code = await new Promise((done, reject) => {
       // Async is essential: localhost fixture HTTP must keep serving during XCTest.
-      const child = spawn('xcodebuild', argv, { stdio: ['ignore', log, log], windowsHide: true, timeout: 600000 });
+      const child = spawn('xcodebuild', argv, { stdio: ['ignore', log, log], windowsHide: true, timeout: nativeBuildTimeout });
       child.once('error', reject); child.once('exit', (code, signal) => done({ code, signal }));
     });
     commands.push({ at: Date.now(), binary: 'xcodebuild', argv, ...code, log: logName });
@@ -242,7 +243,8 @@ try {
   assert.ok(!Object.hasOwn(applications, bundle), 'Refusing an existing application from the installed-app inventory');
   const existing = run('xcrun', ['simctl', 'get_app_container', args.udid, bundle, 'data'], true);
   assert.notEqual(existing.status, 0, 'Refusing to overwrite an existing app; use a fresh disposable simulator');
-  run('xcrun', ['swiftc', join(root, '.github/scripts/ios-client-ocr.swift'), '-o', join(scratch, 'ocr')]);
+  // Cold macOS framework compilation uses the existing native build budget.
+  run('xcrun', ['swiftc', join(root, '.github/scripts/ios-client-ocr.swift'), '-o', join(scratch, 'ocr')], false, nativeBuildTimeout);
   run('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', join(scratch, 'key.pem'),
     '-out', join(scratch, 'cert.pem'), '-days', '1', '-subj', '/CN=localhost']);
   const tls = createHttpsServer({ key: readFileSync(join(scratch, 'key.pem')), cert: readFileSync(join(scratch, 'cert.pem')) }, (_req, res) => res.end('UNTRUSTED TLS'));
