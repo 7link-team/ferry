@@ -768,7 +768,7 @@ export function Composer({
               <AtSign />
             </Button>
           )}
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center gap-1">
             {current && (
               <Button
                 type="button"
@@ -781,11 +781,11 @@ export function Composer({
                 <Square className="size-4" />
               </Button>
             )}
-            <div className="flex shrink-0 items-stretch">
+            <div className="flex min-w-0 max-w-full shrink-0 items-stretch">
               <Button
                 type="submit"
                 size="sm"
-                className="rounded-r-none text-xs disabled:opacity-100 disabled:text-primary-foreground/50"
+                className="h-auto min-w-0 flex-1 whitespace-normal rounded-r-none text-xs disabled:opacity-100 disabled:text-primary-foreground/50"
                 title={t(mode === "enter" ? "enterSends" : "ctrlEnterSends")}
                 disabled={
                   locked ||

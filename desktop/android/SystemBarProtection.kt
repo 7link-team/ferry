@@ -6,6 +6,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -37,7 +38,12 @@ fun MainActivity.protectSystemBars() {
       padding.right + if (keyboardVisible && ime.right > 0) 0 else safe.right,
       padding.bottom + if (keyboardVisible && ime.bottom > 0) 0 else safe.bottom
     )
-    insets
+    // Native padding owns these safe areas. Forward IME/gesture insets unchanged.
+    WindowInsetsCompat.Builder(insets)
+      .setInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(), Insets.NONE)
+      .setInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(), Insets.NONE)
+      .setDisplayCutout(null)
+      .build()
   }
   ViewCompat.requestApplyInsets(content)
   for ((kind, type) in listOf(
@@ -54,8 +60,10 @@ fun MainActivity.protectSystemBars() {
       layoutParams = FrameLayout.LayoutParams(0, 0, edge)
     }
     ViewCompat.setOnApplyWindowInsetsListener(protection) { view, insets ->
-      val bars = insets.getInsets(type)
-      val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+      // Older Android versions forward consumed child insets to later siblings.
+      val windowInsets = ViewCompat.getRootWindowInsets(view) ?: insets
+      val bars = windowInsets.getInsets(type)
+      val ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
       val thickness = when (edge) {
         Gravity.TOP -> bars.top
         Gravity.BOTTOM -> bars.bottom
@@ -71,7 +79,7 @@ fun MainActivity.protectSystemBars() {
       // adjustResize moves the app's bottom above the IME. Its navigation bar
       // belongs to the keyboard window; do not paint over the app's last row.
       // Preserve side navigation protection when an IME occupies only bottom.
-      view.alpha = if (kind == "navigation" && insets.isVisible(WindowInsetsCompat.Type.ime()) && imeOwnsEdge) 0f else 1f
+      view.alpha = if (kind == "navigation" && windowInsets.isVisible(WindowInsetsCompat.Type.ime()) && imeOwnsEdge) 0f else 1f
       view.layoutParams = view.layoutParams.apply {
         width = if (edge == Gravity.LEFT || edge == Gravity.RIGHT) thickness else ViewGroup.LayoutParams.MATCH_PARENT
         height = if (edge == Gravity.TOP || edge == Gravity.BOTTOM) thickness else ViewGroup.LayoutParams.MATCH_PARENT

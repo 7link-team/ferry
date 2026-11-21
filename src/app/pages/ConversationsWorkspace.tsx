@@ -188,7 +188,7 @@ export function ConversationsWorkspace({
       </div>
       <nav
         aria-label={t("conversationList")}
-        className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2"
+        className="min-h-0 flex-1 basis-0 space-y-1 overflow-y-auto p-2"
       >
         {!loaded && <LoadingSkeleton variant="page" />}
         {error && (
@@ -305,7 +305,7 @@ export function ConversationsWorkspace({
     </Button>
   );
   return (
-    <div className="grid min-h-0 min-w-0 grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)]">
+    <div className="grid min-h-0 min-w-0 grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)] [&_.conversation-feed]:basis-0 [&_.conversation-feed]:overscroll-y-auto">
       <aside className="hidden min-h-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex">
         {sidebar}
       </aside>
