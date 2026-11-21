@@ -217,11 +217,14 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     if 'agent_update_state' in after:
                         assert after['agent_update_state'] is None
                         before[path]['agent_update_state'] = None
-                    # Existing hosts stay private with one execution slot. These
-                    # additive fields must not alter any persisted host data.
+                    # This status is computed, not persisted: the central policy
+                    # now defaults to unlimited even if an older API reported 1.
+                    assert after['execution_status'] == {'active': 0, 'capacity': None, 'state': 'available', 'running_jobs': []}, ('execution_status', after['execution_status'])
+                    before[path]['execution_status'] = after['execution_status']
+                    # Keep the legacy policy projection (private, capacity 1).
+                    # Additive defaults must not alter persisted host data.
                     for key, default in {
                         'execution': {'enabled': True, 'shared': False, 'capacity': 1},
-                        'execution_status': {'active': 0, 'capacity': 1, 'state': 'available', 'running_jobs': []},
                         # Time zone: automatic, nothing detected or supported until a runner reports it.
                         'timezone': '',
                         'detected_timezone': '',

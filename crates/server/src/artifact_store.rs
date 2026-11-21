@@ -496,20 +496,6 @@ impl ArtifactStore {
     pub(crate) fn from_backend_for_test(backend: Arc<dyn ObjectStore>) -> Self {
         Self(backend, None)
     }
-    #[cfg(test)]
-    pub(crate) fn throttled_for_test(delay: std::time::Duration) -> Self {
-        Self(
-            Arc::new(object_store::throttle::ThrottledStore::new(
-                object_store::memory::InMemory::new(),
-                object_store::throttle::ThrottleConfig {
-                    wait_get_per_call: delay,
-                    wait_put_per_call: delay,
-                    ..Default::default()
-                },
-            )),
-            None,
-        )
-    }
     fn normalize_prefix(prefix: &str) -> anyhow::Result<String> {
         let prefix = prefix.trim();
         anyhow::ensure!(!prefix.starts_with('/'), "S3 prefix must be relative");

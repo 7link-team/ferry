@@ -366,10 +366,15 @@ RUN sed -i 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu
             # members address each other by fixture IP on one private network.
             fixtures=[]
             plain=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            fetch_errors={}
             def fetch(url):
                 try:
-                    with plain.open(url,timeout=3) as r: return r.read().decode()
-                except OSError: return None
+                    with plain.open(url,timeout=3) as r: text=r.read().decode()
+                    fetch_errors.pop(url,None)
+                    return text
+                except OSError as error:
+                    fetch_errors[url]=f'{type(error).__name__}: {error}'
+                    return None
             def fixture_docker(child,*args):
                 return subprocess.run(['docker','exec',child,'/usr/bin/docker',*args],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
             def diagnostics(label,row=None):
@@ -525,9 +530,13 @@ RUN sed -i 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu
                 prefix=f"deployment-{workspace['id']}-{id}"
                 return sorted(n[len(prefix)+1:] for n in fixture_docker(child,'ps','--filter','label=workspace.deployment='+prefix,'--format','{{.Names}}').stdout.decode().split())
             def monitor(ip,port_number,path):
-                text=fetch(f'http://{ip}:{port_number}{path}')
-                try: return json.loads(text) if text else None
-                except ValueError: return None
+                url=f'http://{ip}:{port_number}{path}'
+                text=fetch(url)
+                if text is None: return None
+                try: return json.loads(text)
+                except ValueError as error:
+                    fetch_errors[url]=f'{type(error).__name__}: {error}'
+                    return None
             def two_routes(ip,port_number):
                 routes=(monitor(ip,port_number,'/routez') or {}).get('routes') or []
                 return len({r.get('remote_name') or r.get('remote_id') for r in routes})==2
@@ -535,7 +544,7 @@ RUN sed -i 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu
             def meta_cluster(ip,port_number):
                 jsz=monitor(ip,port_number,'/jsz') or {}
                 meta=jsz.get('meta_cluster') or {}
-                observation={'endpoint':f'{ip}:{port_number}','meta_cluster':meta,'response_keys':sorted(jsz)}
+                observation={'endpoint':f'{ip}:{port_number}','meta_cluster':meta,'response_keys':sorted(jsz),'request_error':fetch_errors.get(f'http://{ip}:{port_number}/jsz')}
                 if observed_meta.get((ip,port_number)) != observation:
                     observed_meta[(ip,port_number)]=observation
                     print('JetStream metadata observation: '+json.dumps(observation),flush=True)

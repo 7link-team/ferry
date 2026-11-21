@@ -112,7 +112,32 @@ mod tests {
     struct AtomicOnly(
         object_store::memory::InMemory,
         std::sync::Mutex<Option<(object_store::path::Path, bytes::Bytes)>>,
+        Option<std::sync::Arc<MetadataIoGate>>,
     );
+    #[derive(Debug)]
+    struct MetadataIoGate {
+        // 1 = GET, 2 = PUT; consume the arm once, after fixture setup.
+        armed: std::sync::atomic::AtomicU8,
+        entered: tokio::sync::Notify,
+        release: tokio::sync::Semaphore,
+    }
+    impl MetadataIoGate {
+        async fn wait(&self, operation: u8) {
+            if self
+                .armed
+                .compare_exchange(
+                    operation,
+                    0,
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                )
+                .is_ok()
+            {
+                self.entered.notify_one();
+                self.release.acquire().await.unwrap().forget();
+            }
+        }
+    }
     impl std::fmt::Display for AtomicOnly {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "atomic-only fixture")
@@ -126,6 +151,9 @@ mod tests {
             b: object_store::PutPayload,
             o: object_store::PutOptions,
         ) -> object_store::Result<object_store::PutResult> {
+            if let Some(gate) = &self.2 {
+                gate.wait(2).await;
+            }
             assert!(matches!(o.mode, object_store::PutMode::Create));
             assert!(b.content_length() <= SEGMENT_LIMIT);
             let winner = {
@@ -162,6 +190,9 @@ mod tests {
             p: &object_store::path::Path,
             o: object_store::GetOptions,
         ) -> object_store::Result<object_store::GetResult> {
+            if let Some(gate) = &self.2 {
+                gate.wait(1).await;
+            }
             self.0.get_opts(p, o).await
         }
         async fn delete(&self, p: &object_store::path::Path) -> object_store::Result<()> {
@@ -633,49 +664,69 @@ mod tests {
     async fn slow_object_io_does_not_hold_the_metadata_writer() {
         use std::time::Duration;
         let fixture = Fixture::new().await;
-        let backend = ArtifactStore::throttled_for_test(Duration::from_millis(300));
+        let gate = std::sync::Arc::new(MetadataIoGate {
+            armed: std::sync::atomic::AtomicU8::new(0),
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Semaphore::new(0),
+        });
+        let backend = ArtifactStore::from_backend_for_test(std::sync::Arc::new(AtomicOnly(
+            Default::default(),
+            Default::default(),
+            Some(gate.clone()),
+        )));
         let store = Store {
             backend: &backend,
             ..fixture.store()
         };
         let bytes = vec![77; CHUNK + 19];
-        let work = store.stage_bytes(11, &bytes, "application/octet-stream", 0, "slow", 7);
-        tokio::pin!(work);
-        let (asset, writes) = tokio::join!(&mut work, async {
-            let mut writes = 0;
-            for index in 0..10 {
-                tokio::time::sleep(Duration::from_millis(40)).await;
-                tokio::time::timeout(Duration::from_millis(200), async {
-                    let tx = store.db.begin().await.unwrap();
-                    assert!(
-                        crate::lock::acquire(
-                            &tx,
-                            "unrelated-metadata-writer",
-                            &index.to_string(),
-                            crate::db::now(),
-                            1000
-                        )
-                        .await
-                        .unwrap()
-                    );
-                    crate::lock::release(&tx, "unrelated-metadata-writer", &index.to_string())
-                        .await
-                        .unwrap();
-                    tx.commit().await.unwrap();
+        let mut staged = None;
+        // Block a real upload, then a read while reusing that same stored asset.
+        // I/O cannot finish until every metadata write has committed.
+        for operation in [2, 1] {
+            gate.armed
+                .store(operation, std::sync::atomic::Ordering::SeqCst);
+            let work = store.stage_bytes(11, &bytes, "application/octet-stream", 0, "slow", 7);
+            let (asset, writes) = tokio::join!(work, async {
+                tokio::time::timeout(Duration::from_secs(5), gate.entered.notified())
+                    .await
+                    .expect("staging must reach the object I/O gate");
+                let writes = tokio::time::timeout(Duration::from_secs(5), async {
+                    for index in 0..10 {
+                        let tx = store.db.begin().await.unwrap();
+                        assert!(
+                            crate::lock::acquire(
+                                &tx,
+                                "unrelated-metadata-writer",
+                                &index.to_string(),
+                                crate::db::now(),
+                                1000
+                            )
+                            .await
+                            .unwrap()
+                        );
+                        crate::lock::release(&tx, "unrelated-metadata-writer", &index.to_string())
+                            .await
+                            .unwrap();
+                        tx.commit().await.unwrap();
+                    }
+                    10
                 })
-                .await
-                .expect("metadata writer blocked by object I/O");
-                writes += 1;
-            }
-            writes
-        });
-        let asset = asset.unwrap();
-        assert_eq!(writes, 10);
+                .await;
+                gate.release.add_permits(1);
+                writes
+            });
+            assert_eq!(writes.expect("metadata writer blocked by object I/O"), 10);
+            staged = Some(asset.unwrap());
+        }
+        let asset = staged.unwrap();
+        gate.armed.store(1, std::sync::atomic::Ordering::SeqCst);
         let preparing = store.prepare(11, asset.id);
         tokio::pin!(preparing);
         let (receipt, ()) = tokio::join!(&mut preparing, async {
-            tokio::time::sleep(Duration::from_millis(80)).await;
-            tokio::time::timeout(Duration::from_millis(200), async {
+            tokio::time::timeout(Duration::from_secs(5), gate.entered.notified())
+                .await
+                .expect("attachment verification must reach the object I/O gate");
+            let write = tokio::time::timeout(Duration::from_secs(5), async {
                 let tx = store.db.begin().await.unwrap();
                 assert!(
                     crate::lock::acquire(&tx, "another-writer", "writer", crate::db::now(), 1000)
@@ -684,8 +735,9 @@ mod tests {
                 );
                 tx.commit().await.unwrap();
             })
-            .await
-            .expect("metadata writer blocked by attachment verification");
+            .await;
+            gate.release.add_permits(1);
+            write.expect("metadata writer blocked by attachment verification");
         });
         let receipt = receipt.unwrap();
         let tx = store.db.begin().await.unwrap();
