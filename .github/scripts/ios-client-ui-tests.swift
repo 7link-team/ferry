@@ -116,6 +116,7 @@ final class ClientAcceptanceTests: XCTestCase {
     @MainActor
     private func assertKeyboardReachability(_ app: XCUIApplication, address: XCUIElement, open: XCUIElement) {
         let keyboard = app.keyboards.firstMatch
+        print("Keyboard reachability: app=\(app.frame) address=\(address.frame) open=\(open.frame) keyboard=\(keyboard.frame)")
         XCTAssertTrue(keyboard.exists)
         XCTAssertTrue(address.isHittable)
         XCTAssertTrue(open.isHittable, "Core action must remain hittable with the software keyboard open")

@@ -64,7 +64,17 @@ jobs:
           node mobile-prepare.mjs
       - name: Build installable debug APKs
         working-directory: desktop
-        run: npx tauri android build --debug --target aarch64 x86_64 --apk --split-per-abi --ci
+        run: |
+          set -o pipefail
+          mkdir -p ../build-artifacts/mobile-android
+          npx tauri android build --debug --target aarch64 x86_64 --apk --split-per-abi --ci 2>&1 | tee ../build-artifacts/mobile-android/build.log
+      - name: Preserve failed Android build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-client-build-diagnostics
+          if-no-files-found: warn
+          path: build-artifacts/mobile-android/
       - name: Verify package identity and absence of server sidecars
         run: |
           python3 - <<'PY'

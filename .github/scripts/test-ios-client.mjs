@@ -211,7 +211,12 @@ async function testNativeUI(secondURL, phase = 'first') {
     });
     commands.push({ at: Date.now(), binary: 'xcodebuild', argv, ...code, log: logName });
     assert.equal(code.code, 0, `XCTest failed (${JSON.stringify(code)}); inspect ${logName} and ${resultBundle}`);
-  } finally { closeSync(log); }
+  } finally {
+    closeSync(log);
+    // Preserve directly viewable screenshots and accessibility attachments on failure.
+    run('xcrun', ['xcresulttool', 'export', 'attachments', '--path', join(output, resultBundle),
+      '--output-path', join(output, `ui-${phase}-attachments`)], true);
+  }
   assert.equal(new URL(JSON.parse(readFileSync(prefs, 'utf8')).server_url).href, new URL(secondURL).href,
     'Actual UI server change did not save the second fixture address');
   report.uiAcceptance = 'PASS';
