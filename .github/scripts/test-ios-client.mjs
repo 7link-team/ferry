@@ -111,7 +111,8 @@ async function observe(label) {
   sim('io', args.udid, 'screenshot', filename);
   const lines = JSON.parse(run(join(scratch, 'ocr'), [filename]).stdout);
   writeFileSync(filename.replace(/\.png$/, '.json'), JSON.stringify(lines, null, 2));
-  return lines.join('\n');
+  // OCR line boundaries reflect wrapping, not changes to the expected UI text.
+  return lines.join(' ').replace(/\s+/g, ' ').trim();
 }
 async function waitText(label, predicate, timeout = 45000) {
   const deadline = Date.now() + timeout;

@@ -1,0 +1,26 @@
+// Prefer the other official Maven Central endpoint when hosted runners hit 429s.
+// Keep the generated project's remaining repositories and dependency versions.
+beforeSettings { settings ->
+    settings.pluginManagement.repositories {
+        maven {
+            name = 'centralAlternative'
+            url = uri('https://repo1.maven.org/maven2')
+        }
+        gradlePluginPortal()
+    }
+}
+
+allprojects {
+    buildscript.repositories {
+        maven {
+            name = 'centralAlternative'
+            url = uri('https://repo1.maven.org/maven2')
+        }
+    }
+    repositories {
+        maven {
+            name = 'centralAlternative'
+            url = uri('https://repo1.maven.org/maven2')
+        }
+    }
+}

@@ -11,6 +11,7 @@ on:
       - ".github/workflows/mobile-client.yml"
       - ".github/scripts/test-ios-client.mjs"
       - ".github/scripts/ios-client-*.swift"
+      - ".github/scripts/mobile-gradle.init.gradle"
   pull_request:
     paths:
       - "desktop/**"
@@ -19,6 +20,7 @@ on:
       - ".github/workflows/mobile-client.yml"
       - ".github/scripts/test-ios-client.mjs"
       - ".github/scripts/ios-client-*.swift"
+      - ".github/scripts/mobile-gradle.init.gradle"
 
 permissions:
   contents: read
@@ -43,6 +45,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            package-lock.json
+            desktop/mobile-prepare.mjs
+            desktop/Cargo.lock
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,x86_64-linux-android
@@ -50,6 +57,7 @@ jobs:
         with:
           workspaces: desktop -> target
           key: mobile-android
+          cache-on-failure: true
       - run: npm ci
       - name: Launcher and navigation regressions
         run: npx vitest run --config desktop/vitest.config.js
@@ -62,6 +70,10 @@ jobs:
         run: |
           npx tauri android init --ci --skip-targets-install
           node mobile-prepare.mjs
+      - name: Configure official Maven Central alternative
+        run: |
+          mkdir -p "$HOME/.gradle/init.d"
+          cp .github/scripts/mobile-gradle.init.gradle "$HOME/.gradle/init.d/mobile-repositories.gradle"
       - name: Build installable debug APKs
         working-directory: desktop
         run: |
@@ -114,6 +126,7 @@ jobs:
         with:
           workspaces: desktop -> target
           key: mobile-ios
+          cache-on-failure: true
       - run: npm ci
       - name: Install Xcode project generator
         run: command -v xcodegen || brew install xcodegen
