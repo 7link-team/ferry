@@ -99,10 +99,12 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(outsider,f'/workspaces/{workspace_other}/cron-jobs/'+cid+'/runs',expected=404)
         request(owner,root+'/nodes/'+host,method='DELETE',expected=409)
         check(True,'tenant, permission and target reference guards enforced')
-        for changes in [{'schedule':'bad'},{'timezone':'Bad/Zone'},{'scope':'build'},{'timeout_seconds':0},{'max_retries':11}]:
+        for changes in [{'schedule':'bad'},{'timezone':'Bad/Zone'},{'scope':'build'},{'max_retries':11}]:
             request(owner,root+'/cron-jobs',dict(body,**changes),expected=400)
+        unlimited=create(dict(body,name='Legacy zero timeout',timeout_seconds=0))
+        request(owner,root+'/cron-jobs/'+unlimited,method='DELETE',expected=204)
         request(owner,root+'/cron-jobs/'+cid,dict(body,version=0),'PATCH',409)
-        check(True,'schedule/action/timeout/retry validation and CAS enforced')
+        check(True,'schedule/action/retry validation and CAS enforced; legacy zero timeout accepted')
         first=execute(cid);finished=done(first)
         check(finished['state']=='succeeded' and 'CRON_OK' in finished['output'],'real runner command succeeds and records output')
         request(outsider,f'/workspaces/{workspace_other}/cron-runs/'+first,expected=404)
@@ -116,7 +118,18 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         retry=create(dict(body,name='Retry',command=command(f'from pathlib import Path; import sys; p=Path({counter}); n=int(p.read_text())+1 if p.exists() else 1; p.write_text(str(n)); sys.exit(0 if n>=3 else 1)'),max_retries=2))
         result=done(execute(retry))
         check(result['state']=='succeeded' and result['attempt']==3 and (data/'attempts').read_text().strip()=='3','configured retry succeeds on third real attempt')
-        uncertain=create(dict(body,name='Timeout',command=command("import time; time.sleep(3); print('LATE')"),timeout_seconds=1,max_retries=2))
+        def configure_timeout(seconds):
+            current=request(admin,'/platform/settings/1')
+            request(admin,'/platform/settings/1',{
+                'version':current['version'],
+                'registration_enabled':current['registration_enabled'],
+                'public_url':current.get('public_url'),
+                'preview_domain':current.get('preview_domain'),
+                'resource_limits':{'task_timeout_seconds':seconds},
+            },method='PATCH')
+        previous_timeout=request(admin,'/platform/settings/1')['resource_limits']['task_timeout_seconds']
+        configure_timeout(1)
+        uncertain=create(dict(body,name='Timeout',command=command("import time; time.sleep(3); print('LATE')"),timeout_seconds=0,max_retries=2))
         pending=execute(uncertain)
         request(owner,root+'/cron-jobs/'+uncertain,method='DELETE',expected=409)
         result=done(pending)
@@ -127,6 +140,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(owner,root+'/cron-runs/'+pending+'/acknowledgements',{'version':result['version'],'note':'Remote command has finished.'})
         check(run(pending)['state']=='failed','operator acknowledgement resolves uncertain execution')
         request(owner,root+'/cron-jobs/'+uncertain,method='DELETE',expected=204)
+        configure_timeout(previous_timeout)
         overlap=create(dict(body,name='Overlap',schedule='* * * * * *',enabled=True,command=command("import time; time.sleep(2); print('SCHEDULED')")))
         eventually(lambda:any(r['state']=='running' for r in runs(overlap)))
         request(owner,root+'/cron-jobs/'+overlap+'/runs',{},expected=409)
@@ -137,7 +151,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         pipe=request(owner,root+'/pipelines',{'name':'Cron pipeline','target_kind':'host','target_ref':host,'definition':json.dumps({'workdir':str(data/'build'),'steps':[{'name':'Build','run':'echo CRON_PIPELINE'}]})},expected=201)['id']
         build=create(dict(body,name='Scheduled pipeline',scope='build',action='pipeline',target_kind='pipeline',target_ref=pipe,command=''))
         result=done(execute(build))
-        check(result['state']=='succeeded' and result['downstream_kind']=='pipeline-runs' and result['downstream_id']!='0','build schedule follows real pipeline run')
+        check(result['state']=='succeeded' and result['downstream_kind']=='pipeline-runs' and result['downstream_id']!='0',f'build schedule follows real pipeline run: {result}')
         check(request(owner,root+'/pipeline-runs/'+result['downstream_id'])['state']=='succeeded','child run really succeeds')
         request(owner,root+'/pipelines/'+pipe,method='DELETE',expected=409)
         check(request(owner,root+'/cron-jobs?scope=build')['total']==1 and request(owner,root+'/cron-jobs?scope=deploy')['total']==0,'shared resource filters three scopes')

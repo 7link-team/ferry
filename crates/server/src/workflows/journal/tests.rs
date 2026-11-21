@@ -432,6 +432,112 @@ fn source(node: &nodes::Model, output: &Output) -> Source {
     }
 }
 
+/// Keep one real object-store read pending until the concurrent SQL work finishes.
+/// Unlike a short wall-clock race, this also detects a transaction held across I/O
+/// on a busy CI host: the read cannot finish merely because a timer elapsed.
+#[derive(Debug)]
+struct SourceReadGate {
+    armed: std::sync::atomic::AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Semaphore,
+}
+impl SourceReadGate {
+    fn backend() -> (crate::artifact_store::ArtifactStore, std::sync::Arc<Self>) {
+        let gate = std::sync::Arc::new(Self {
+            armed: std::sync::atomic::AtomicBool::new(false),
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Semaphore::new(0),
+        });
+        let backend = crate::artifact_store::ArtifactStore::from_backend_for_test(
+            std::sync::Arc::new(GatedSourceStore {
+                inner: object_store::memory::InMemory::new(),
+                gate: gate.clone(),
+            }),
+        );
+        (backend, gate)
+    }
+    fn arm(&self) {
+        self.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+#[derive(Debug)]
+struct GatedSourceStore {
+    inner: object_store::memory::InMemory,
+    gate: std::sync::Arc<SourceReadGate>,
+}
+impl std::fmt::Display for GatedSourceStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("gated source fixture")
+    }
+}
+#[async_trait::async_trait]
+impl object_store::ObjectStore for GatedSourceStore {
+    async fn put_opts(
+        &self,
+        path: &object_store::path::Path,
+        payload: object_store::PutPayload,
+        options: object_store::PutOptions,
+    ) -> object_store::Result<object_store::PutResult> {
+        self.inner.put_opts(path, payload, options).await
+    }
+    async fn put_multipart_opts(
+        &self,
+        path: &object_store::path::Path,
+        options: object_store::PutMultipartOptions,
+    ) -> object_store::Result<Box<dyn object_store::MultipartUpload>> {
+        self.inner.put_multipart_opts(path, options).await
+    }
+    async fn get_opts(
+        &self,
+        path: &object_store::path::Path,
+        options: object_store::GetOptions,
+    ) -> object_store::Result<object_store::GetResult> {
+        if self
+            .gate
+            .armed
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.gate.entered.notify_one();
+            self.gate
+                .release
+                .acquire()
+                .await
+                .expect("fixture gate remains open")
+                .forget();
+        }
+        self.inner.get_opts(path, options).await
+    }
+    async fn delete(&self, path: &object_store::path::Path) -> object_store::Result<()> {
+        self.inner.delete(path).await
+    }
+    fn list(
+        &self,
+        prefix: Option<&object_store::path::Path>,
+    ) -> futures::stream::BoxStream<'static, object_store::Result<object_store::ObjectMeta>> {
+        self.inner.list(prefix)
+    }
+    async fn list_with_delimiter(
+        &self,
+        prefix: Option<&object_store::path::Path>,
+    ) -> object_store::Result<object_store::ListResult> {
+        self.inner.list_with_delimiter(prefix).await
+    }
+    async fn copy(
+        &self,
+        from: &object_store::path::Path,
+        to: &object_store::path::Path,
+    ) -> object_store::Result<()> {
+        self.inner.copy(from, to).await
+    }
+    async fn copy_if_not_exists(
+        &self,
+        from: &object_store::path::Path,
+        to: &object_store::path::Path,
+    ) -> object_store::Result<()> {
+        self.inner.copy_if_not_exists(from, to).await
+    }
+}
+
 #[tokio::test]
 async fn slow_source_reads_allow_heartbeat_and_reject_changed_dependencies() {
     use crate::content_assets::{DEFAULT_QUOTA, Store};
@@ -440,9 +546,7 @@ async fn slow_source_reads_allow_heartbeat_and_reject_changed_dependencies() {
     for completing in [false, true] {
         for change in ["none", "source", "lease"] {
             let fixture = Fixture::new().await;
-            let backend = crate::artifact_store::ArtifactStore::throttled_for_test(
-                Duration::from_millis(400),
-            );
+            let (backend, gate) = SourceReadGate::backend();
             let ids = crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap();
             let store = Store {
                 db: &fixture.db,
@@ -478,6 +582,7 @@ async fn slow_source_reads_allow_heartbeat_and_reject_changed_dependencies() {
                 None
             };
             let version = fixture.run().await.version;
+            gate.arm();
             let operation = async {
                 if let Some(active) = &active {
                     journal
@@ -490,8 +595,10 @@ async fn slow_source_reads_allow_heartbeat_and_reject_changed_dependencies() {
                 }
             };
             let concurrent = async {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                tokio::time::timeout(Duration::from_millis(200), async {
+                tokio::time::timeout(Duration::from_secs(5), gate.entered.notified())
+                    .await
+                    .expect("source read must reach the gate");
+                let write = tokio::time::timeout(Duration::from_secs(5), async {
                     assert!(fixture.lease.renew_live(&fixture.db, crate::db::now()).await.unwrap());
                     match change {
                         "source" => fixture.db.execute_unprepared(
@@ -504,7 +611,9 @@ async fn slow_source_reads_allow_heartbeat_and_reject_changed_dependencies() {
                             "UPDATE workflow_node_runs SET logs='concurrent log', logs_updated_at=1 WHERE id=31"
                         ).await.unwrap(),
                     };
-                }).await
+                }).await;
+                gate.release.add_permits(1);
+                write
             };
             let (result, write) = tokio::join!(operation, concurrent);
             assert!(
@@ -533,8 +642,7 @@ async fn slow_frozen_snapshot_reads_allow_wait_and_wake_heartbeats() {
     use std::time::Duration;
     for waking in [false, true] {
         let mut fixture = Fixture::new().await;
-        let backend =
-            crate::artifact_store::ArtifactStore::throttled_for_test(Duration::from_millis(400));
+        let (backend, gate) = SourceReadGate::backend();
         let ids = crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap();
         let mut request = activation(31, "/nodes/0");
         request.params = vec![params(&"frozen".repeat(32 * 1024))];
@@ -583,6 +691,7 @@ async fn slow_frozen_snapshot_reads_allow_wait_and_wake_heartbeats() {
             ..fixture.journal()
         };
         let version = fixture.run().await.version;
+        gate.arm();
         let operation = async {
             if waking {
                 journal.wake(version, &[]).await
@@ -593,12 +702,16 @@ async fn slow_frozen_snapshot_reads_allow_wait_and_wake_heartbeats() {
             }
         };
         let concurrent = async {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            tokio::time::timeout(
-                Duration::from_millis(200),
+            tokio::time::timeout(Duration::from_secs(5), gate.entered.notified())
+                .await
+                .expect("frozen snapshot read must reach the gate");
+            let heartbeat = tokio::time::timeout(
+                Duration::from_secs(5),
                 fixture.lease.renew_live(&fixture.db, crate::db::now()),
             )
-            .await
+            .await;
+            gate.release.add_permits(1);
+            heartbeat
         };
         let (result, heartbeat) = tokio::join!(operation, concurrent);
         assert!(

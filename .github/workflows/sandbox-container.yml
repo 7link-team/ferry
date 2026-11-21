@@ -10,6 +10,12 @@ on:
       - scripts/quickstart.sh
       - scripts/test-quickstart.sh
       - scripts/test-workflow-sandbox.py
+      - Dockerfile
+      - Cargo.toml
+      - Cargo.lock
+      - crates/protocol/src/sandbox.rs
+      - crates/protocol/src/resources.rs
+      - crates/sandbox/**
       - .github/scripts/test-sandbox-container.py
       - .github/scripts/smoke-server-image.mjs
       - .github/workflows/sandbox-container.yml
@@ -21,11 +27,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
-      IMAGE: ghcr.io/${{ github.repository }}-server:latest
+      IMAGE: ferry-server:sandbox-check
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,10 +43,21 @@ jobs:
           node-version: "24"
       - name: Install and upgrade script regression
         run: sh scripts/test-quickstart.sh
-      - name: Test shipped non-root image with the deployment policy
+      # The protocol and test driver must come from the same revision. Testing
+      # main's driver against the previous release's latest image mixes contracts.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the current revision without publishing an image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          load: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha,scope=server-${{ matrix.arch }}
+          cache-to: type=gha,scope=server-${{ matrix.arch }},mode=max
+      - name: Test the candidate non-root image with the deployment policy
         shell: bash
         run: |
-          docker pull "$IMAGE"
           mkdir -p harness-logs
           set +e
           python3 .github/scripts/test-sandbox-container.py "$IMAGE" 2>&1 | tee harness-logs/sandbox.log

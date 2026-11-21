@@ -115,6 +115,8 @@ RUNNER_TESTS=$(grep -c '^test hosts::runner::' "$WORK/test.log")
 SESSION_TESTS=$(grep -c '^test session::tests::' "$WORK/test.log")
 if [ "$TEST_EXIT" -ne 0 ]; then
   grep -E '^(test .* FAILED|failures:|test result: FAILED)' "$WORK/test.log" | head -20
+  # Keep assertion/panic details in the CI artifact, not only the failed name.
+  sed -n '/^failures:/,$p' "$WORK/test.log" | tail -100
   bad "cargo test --workspace exited $TEST_EXIT"
 elif [ "$RUNNER_TESTS" -lt 1 ] || [ "$SESSION_TESTS" -lt 1 ]; then
   bad "cargo test ran no runner tests (hosts::runner=$RUNNER_TESTS session::tests=$SESSION_TESTS) — the module is probably not declared"
@@ -380,7 +382,12 @@ start_server
 RECONNECTED=no
 for _ in $(seq 1 60); do
   NOW=$(c "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A" | field seen_at)
-  if [ -n "$NOW" ] && [ "$NOW" -gt "${SEEN_BEFORE:-0}" ]; then RECONNECTED=yes; break; fi
+  # A final heartbeat from the old server can advance seen_at before shutdown.
+  # Within the same readiness deadline, require the live channel as well.
+  if [ -n "$NOW" ] && [ "$NOW" -gt "${SEEN_BEFORE:-0}" ]; then
+    CHANNEL_READY=$(c -X POST "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/connection-tests")
+    if printf '%s' "$CHANNEL_READY" | grep -q '"ok":true'; then RECONNECTED=yes; break; fi
+  fi
   sleep 1
 done
 ck "runner reconnected by itself (seen_at advanced)" "^yes$" "$RECONNECTED"

@@ -480,11 +480,9 @@ pub async fn update(
         row.group_id = group.into();
     }
     if let Some(value) = body.definition {
-        row.definition = graph::checked_with_policy(
-            &value,
-            &crate::accounts::resource_policy::load(&s.db).await?,
-        )
-        .await?;
+        row.definition =
+            graph::checked_with_policy(&value, &crate::accounts::resource_policy::load(&tx).await?)
+                .await?;
         graph::repository_auth_policy(&row.definition, Some(&current.definition))?;
         integration::validate_connections(&tx, &scope, &row.definition).await?;
         agent::validate_agents(&tx, &scope, &row.definition).await?;
