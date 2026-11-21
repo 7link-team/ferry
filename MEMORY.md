@@ -1,3 +1,10 @@
+## ACTIVE - v0.10.6-alpha storage hotfix release (2026-11-21)
+- Approved: user continued after verified storage source delivery; publish next version, follow Compose deployment and verify storage. Scope only committed main changes (preview capacity + unified file storage); pending default-unlimited branch excluded.
+- Phase: RELEASE PREPARATION. Main clean at6d61b38 before seven version input/lock updates0.10.5=>0.10.6-alpha. Never rewrite existing tags. Reuse existing release/image CI/signatures/checksums and test gates.
+- Evidence: source full server1125 + NATS1 + otherworkspace143 PASS; build/typecheck/workspacecheck PASS. Current source CI44863581533 in progress; latest released0.10.5-alpha. SSH key login rejected, supplied password being verified without logging it.
+- Remaining: verify version-only diff, generation and manifest gates; commit+annotated tag atomic SSH push; follow both release/image CI, fix real failures without weakening tests; verify signed assets/two architectures; inspect Compose mounts/config/active work, backup and guarded server-only upgrade then storage/workflow validation without sending business report.
+- Next action: finish release version validation and record immutable release SHA/tag before CI monitoring. Production unchanged.
+
 ## VERIFIED - Unified file storage correction (2026-11-21)
 - Task: fix workflow execution storage503; business code must not distinguish local/S3. Investigated on fix/unified-file-storage worktree, switched main for scoped delivery. Main checkout default-unlimited work remains separate/uncommitted.
 - Root cause: preceding production inspection found one Ferry service with NATS and default local storage; store resolution rejected detail=cluster before I/O. Workflow had no execution records. No production changes in this fix.
