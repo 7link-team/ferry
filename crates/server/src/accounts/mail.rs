@@ -191,6 +191,35 @@ impl Configuration {
         }
         Ok(Some(config.seal(s)?))
     }
+    pub(super) async fn send_workspace_invitation(
+        &self,
+        to: &str,
+        workspace: &str,
+        code: &str,
+        public_url: &str,
+        policy: &ferry_protocol::resources::ResourcePolicy,
+    ) -> Result<()> {
+        if !self.enabled || self.verified_at.is_none() {
+            return Err(ApiError::localized(
+                StatusCode::SERVICE_UNAVAILABLE,
+                crate::i18n::Message::new("mail.invitationUnavailable"),
+            ));
+        }
+        let locale = crate::i18n::current_locale();
+        let subject = crate::i18n::message("mail.invitationSubject");
+        let text = crate::i18n::render(
+            locale,
+            &crate::i18n::Message::new("mail.invitationBody")
+                .with("workspace", workspace)
+                .with("code", code),
+        );
+        let content = format!("{}{}", plain_html(&text), plain_html(public_url));
+        let body = include_str!("../../../../src/shared/mail/layout.html")
+            .replacen("{{title}}", &escape_html(&subject), 1)
+            .replacen("{{content}}", &content, 1);
+        self.send(to, subject, body, policy).await
+    }
+
     async fn send(
         &self,
         to: &str,

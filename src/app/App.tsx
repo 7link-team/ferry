@@ -7,7 +7,8 @@ import { AppHeader } from "./AppHeader";
 import { MobileNavigation } from "./MobileNavigation";
 import { ChevronDown, ChevronRight, LogOut } from "lucide-react";
 import { LoadingSkeleton } from "../shared/ui/loading-skeleton";
-import { useEffect,useMemo,useState } from "react";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Dashboard } from "../features/dashboard/Dashboard";
 import { Invitation } from "../features/workspaces/Invitation";
@@ -83,28 +84,32 @@ export function App() {
     }
   }, [identity, route, setupRequired, deferredSetup]);
 
-  const reload = () => {
-    setLoading(true);
-    Promise.all([api<Identity>("/me"), api<{ required: boolean }>("/setup", { cache: "no-store" })])
+  const identityRequest = useRef(0);
+  const reload = useCallback(() => {
+    const request = ++identityRequest.current;
+    Promise.all([api<Identity>("/me", { cache: "no-store" }), api<{ required: boolean }>("/setup", { cache: "no-store" })])
       .then(([value, setup]) => {
+        if (request !== identityRequest.current) return;
         setIdentity(value);
         setSetupRequired(setup.required);
         setError("");
       })
       .catch((cause: unknown) => {
-        setIdentity(undefined);
+        if (request !== identityRequest.current) return;
+        const unauthorized = cause instanceof Error && "status" in cause && cause.status === 401;
+        if (unauthorized) setIdentity(undefined);
+        else toast.error(errorText(cause));
         // 401 is the normal unauthenticated state, not an error to show.
         setError(cause instanceof Error && "status" in cause && cause.status === 401 ? "" : errorText(cause));
       })
-      .finally(() => setLoading(false));
-  };
+      .finally(() => { if (request === identityRequest.current) setLoading(false); });
+  }, []);
   useEffect(reload, []);
   useEffect(watchSessionActivity, []);
   useEffect(() => {
-    const renewed = () => { void api<Identity>("/me").then(value => { setIdentity(value); setError(""); }).catch(() => {}); };
-    window.addEventListener("session:renewed", renewed);
-    return () => window.removeEventListener("session:renewed", renewed);
-  }, []);
+    window.addEventListener("session:renewed", reload);
+    return () => window.removeEventListener("session:renewed", reload);
+  }, [reload]);
   useEffect(() => {
     if (!loading && !identity && !error && !isPublicEntryPath()) navigateToLogin();
   }, [loading, identity, error, route]);
@@ -122,7 +127,7 @@ export function App() {
     }
   }, []);
   useEffect(() => {
-    const onUnauthorized = () => { setIdentity(undefined); navigateToLogin(); };
+    const onUnauthorized = () => { identityRequest.current++; setIdentity(undefined); setLoading(false); setError(""); navigateToLogin(); };
     window.addEventListener("ferry:unauthorized", onUnauthorized);
     return () => window.removeEventListener("ferry:unauthorized", onUnauthorized);
   }, []);
@@ -140,9 +145,9 @@ export function App() {
   if (setupRequired && !deferredSetup)
     return <><AppearanceActions floating /><Entry signedIn initialize onReady={() => { setDeferredSetup(true); reload(); }} error={error} /></>;
   if (route.workspace === "_workspaces") return <div className="h-full overflow-auto"><AppearanceActions floating />{(identity.workspaces.length > 0 || identity.user.is_superadmin) && <Button className="absolute top-4 left-4" variant="outline" onClick={() => navigate(identity.workspaces.length ? {workspace:identity.workspaces[0]!.id,group:"ops",item:"hosts",mode:"list"} : {workspace:"_platform",group:"platform",item:"workspaces",mode:"list"}, {})}>{commonText("shell.backWorkspace")}</Button>}<Entry signedIn onReady={reload} error={error} /></div>;
-  if (route.workspace === "_account") return <Account identity={identity} reload={reload} headerActions={<WorkspaceHeaderActions identity={identity} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={signedOut} />} />;
+  if (route.workspace === "_account") return <Account identity={identity} reload={reload} headerActions={<WorkspaceHeaderActions identity={identity} onRefresh={reload} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={signedOut} />} />;
   if (route.workspace === "_platform" || (identity.user.is_superadmin && !route.workspace))
-    return <Platform identity={identity} reload={reload} onSignedOut={signedOut} headerActions={<WorkspaceHeaderActions identity={identity} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={signedOut} />} />;
+    return <Platform identity={identity} reload={reload} onSignedOut={signedOut} headerActions={<WorkspaceHeaderActions identity={identity} onRefresh={reload} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={signedOut} />} />;
   if (route.group === "ops" && route.item === "hosts" && route.mode === "workspace" && route.id) {
     const current = identity.workspaces.find(workspace => workspace.id === route.workspace)
       ?? identity.workspaces.find(workspace => workspace.slug === route.workspace);
@@ -289,10 +294,10 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
         </nav>
       } actions={<>
         <div className="flex min-w-0 max-w-full items-center gap-1 max-sm:min-w-11 max-sm:flex-1 max-sm:basis-0">
-          <WorkspaceSwitcher identity={identity} current={current} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} />
+          <WorkspaceSwitcher identity={identity} current={current} onRefresh={reload} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} />
           {identity.user.is_superadmin && <Button variant="ghost" className="max-sm:hidden" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
         </div>
-        <WorkspaceHeaderActions identity={identity} onSignedOut={onSignedOut} />
+        <WorkspaceHeaderActions identity={identity} onRefresh={reload} onSignedOut={onSignedOut} />
       </>} />
 
       {item.resource === "conversations" ? <ConversationsWorkspace key={current.id} workspace={current.id} permissions={permissions} form={formConfig} /> : <div className="grid min-h-0 min-w-0 grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)]">
@@ -323,7 +328,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
 
         {/* Content keeps its scroll container; configuration forms retain a readable
             minimum and let the outer shell scroll when space is constrained. */}
-        <main className="grid min-h-0 min-w-0 grid-rows-[auto_1fr] px-4 pt-3">
+        <main className={cn("grid min-h-0 min-w-0 px-4 pt-3", item.resource === "members" && route.mode === "list" ? "grid-rows-[auto_minmax(min-content,1fr)] overflow-y-auto" : "grid-rows-[auto_1fr]")}>
           <div>
           {route.mode === "list" && visibleMenu.length > 1 && <div className="mb-2 md:hidden"><DropdownMenu key={route.item}><DropdownMenuTrigger asChild><Button variant="outline" className="min-h-11 w-full justify-between"><span className="min-w-0 truncate">{group.label} · {parentItem.label}</span><ChevronDown className="size-4 shrink-0" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" collisionPadding={8} className="max-h-[60dvh] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto">{visibleMenu.map(entry => <DropdownMenuItem asChild key={entry.key}><a {...to(group.key, menuTarget(group, entry).key, menuTarget(group, entry).params)} aria-current={entry.key === parentItem.key ? "page" : undefined} className="min-h-11 whitespace-normal break-words">{entry.section ? `${commonText(entry.section)} · ` : ""}{entry.label}</a></DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>}
           <nav aria-label={commonText("shell.breadcrumbs")}>
@@ -380,7 +385,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
           </div>
           {!canVisit(item) ? <p role="alert">{commonText("shell.forbidden")}</p> : nodeCatalogPending ? nodeCatalogFeedback : route.mode === "list" ? (
             item.resource === "dashboard" ? <Dashboard key={current.id} workspace={current.id} /> : listConfig ? (
-              <div className="flex min-h-0 min-w-0 flex-col">
+              <div className={item.resource === "members" && permissions.has("members.create") ? "grid min-h-min min-w-0 grid-rows-[auto_minmax(40rem,1fr)]" : "flex min-h-0 min-w-0 flex-col"}>
               {item.resource === "members" && permissions.has("members.create") && <Invitation key={current.id} workspace={current.id} />}
               {(preferences || preferencesError) ? item.resource === "pipelines" ? <PipelineList
                 key={current.id}
@@ -458,10 +463,10 @@ function AppearanceActions({ floating = false }: { floating?: boolean }) {
   return <div className={floating ? "fixed end-3 top-2 z-40 flex items-center gap-1 rounded-md bg-card" : "flex shrink-0 items-center gap-1"}><LanguageSwitcher /><ThemeSwitcher /></div>;
 }
 
-function WorkspaceHeaderActions({ identity, onWorkspaces, onSignedOut }: { identity: Identity; onWorkspaces?: () => void; onSignedOut: () => void }) {
+function WorkspaceHeaderActions({ identity, onRefresh, onWorkspaces, onSignedOut }: { identity: Identity; onRefresh: () => void; onWorkspaces?: () => void; onSignedOut: () => void }) {
   const { t } = useTranslation();
   return <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 max-sm:gap-1">
-        {onWorkspaces && <WorkspaceSwitcher identity={identity} onWorkspaces={onWorkspaces} />}
+        {onWorkspaces && <WorkspaceSwitcher identity={identity} onRefresh={onRefresh} onWorkspaces={onWorkspaces} />}
         <AppearanceActions />
 
         <DropdownMenu>
@@ -485,11 +490,11 @@ function WorkspaceHeaderActions({ identity, onWorkspaces, onSignedOut }: { ident
   </div>;
 }
 
-function WorkspaceSwitcher({ identity, current, onWorkspaces }: { identity: Identity; current?: Identity["workspaces"][number]; onWorkspaces: () => void }) {
+function WorkspaceSwitcher({ identity, current, onRefresh, onWorkspaces }: { identity: Identity; current?: Identity["workspaces"][number]; onRefresh: () => void; onWorkspaces: () => void }) {
   const { t } = useTranslation();
   const route = useRoute();
   return (
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={open => { if (open) onRefresh(); }}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" className="min-h-11 min-w-0 max-w-[min(18rem,calc(100vw-2rem))] shrink gap-1.5 max-sm:max-w-[38vw] max-sm:px-2" aria-label={workflowText("switchWorkspace")}>
               <span className="truncate">{current?.name ?? workflowText("switchWorkspace")}</span>

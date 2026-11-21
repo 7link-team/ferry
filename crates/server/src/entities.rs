@@ -459,6 +459,22 @@ pub mod users {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+pub mod account_email_verifications {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "account_email_verifications")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub user_id: i64,
+        pub email: String,
+        pub verified_at: i64,
+        pub verified_by: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod user_otp {
     use sea_orm::entity::prelude::*;
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]

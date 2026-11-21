@@ -27,6 +27,8 @@ const profile = (userId: string): FormConfig<Row> => ({
       { key: "language_preferences", label: "语言", labelKey: "language.label", type: "custom", render: () => <LanguageSwitcher showLabel /> },
     ] },
     { group: "security", groupKey: "account.security", title: "登录邮箱", titleKey: "account.loginEmail", fields: [
+      { key: "email_verified", label: "验证状态", labelKey: "account.emailVerification", type: "custom",
+        render: ({ draft }) => <span className="flex min-h-11 items-center rounded-md border px-3 text-sm">{commonText(draft.email_verified === true ? "account.emailVerified" : "account.emailUnverified")}</span> },
       { key: "email", label: "登录邮箱", labelKey: "account.loginEmail", type: "text", required: true, help: "修改后用新邮箱登录，其他设备上的登录会失效。", helpKey: "account.emailHelp" },
     ] },
     { group: "security", groupKey: "account.security", title: "修改密码", titleKey: "account.changePassword", fields: [
@@ -46,8 +48,7 @@ export const accountRoute = { workspace: "_account", group: "account", item: "pr
 export function Account({ identity, reload, headerActions }: { identity: Identity; reload: () => void; headerActions?: ReactNode }) {
   useCommonTranslation();
   const config = useMemo(() => profile(identity.user.id), [identity.user.id]);
-  // /account always parses to the edit view; remount after saving or cancelling
-  // so the form reloads the stored record and clears the password inputs.
+  // Cancelling discards edits; successful saves refresh the existing form data.
   const [saves, setSaves] = useState(0);
   const back = () => navigate(identity.user.is_superadmin && !identity.workspaces.length
     ? { workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }
@@ -56,9 +57,9 @@ export function Account({ identity, reload, headerActions }: { identity: Identit
     <AppHeader navigation={<Button variant="ghost" className="min-h-11 shrink-0" onClick={back}>{commonText("account.back")}</Button>} actions={headerActions} />
     <main className="mx-auto w-full max-w-5xl p-4 sm:p-6">
       <h1 className="mb-6 text-xl font-semibold">{commonText("account.title")}</h1>
-      <ResourceForm key={saves} config={config} workspace="_account" permissions={permissions} showHeading={false}
+      <ResourceForm key={saves} config={config} workspace="_account" permissions={permissions} showHeading={false} editInPlace
         onCancel={() => setSaves(count => count + 1)}
-        onSaved={() => { toast.success(commonText("account.saved")); setSaves(count => count + 1); reload(); }} />
+        onSaved={() => { toast.success(commonText("account.saved")); reload(); }} />
     </main>
   </div>;
 }

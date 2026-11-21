@@ -65,6 +65,7 @@ const labels: Record<string, string> = {
   update: "dashboard.updatedAction",
   delete: "common.delete",
   "rotate-invitation": "dashboard.rotateInvitation",
+  "invite-email": "invitation.email",
 };
 const label = (key: string) => labels[key] ? commonText(labels[key]) : key;
 export function Dashboard({ workspace }: { workspace: string }) {

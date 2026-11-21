@@ -10,7 +10,8 @@ use crate::error::Json;
 use crate::{
     db,
     entities::{
-        session_refresh_tokens, sessions, users, workspace_members, workspace_roles, workspaces,
+        account_email_verifications, session_refresh_tokens, sessions, users, workspace_members,
+        workspace_roles, workspaces,
     },
     error::{ApiError, Result},
     state::AppState,
@@ -402,6 +403,16 @@ pub async fn register(
     })
     .exec(&tx)
     .await?;
+    if mail.required() {
+        account_email_verifications::Entity::insert(account_email_verifications::ActiveModel {
+            user_id: Set(i64::from(id)),
+            email: Set(email.clone()),
+            verified_at: Set(now),
+            verified_by: Set(i64::from(id)),
+        })
+        .exec(&tx)
+        .await?;
+    }
     let session = start_session(&s, &id, &tx).await?;
     tx.commit().await?;
     Ok((session.headers(&s), Json(json!({"id": id, "email": email}))))
@@ -793,8 +804,13 @@ pub async fn profile(State(s): State<AppState>, account: Account) -> Result<Json
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::unauthorized)?;
+    let verified = account_email_verifications::Entity::find_by_id(row.id)
+        .one(&s.db)
+        .await?
+        .is_some_and(|evidence| evidence.email == row.email);
     Ok(Json(json!({
         "id": "1", "name": row.name, "email": row.email, "version": row.version,
+        "email_verified": verified,
         "new_password": "", "current_password": "",
         "avatar": super::preferences::avatars(&s.db, vec![row.id]).await?.remove(&row.id),
     })))
@@ -884,6 +900,11 @@ pub async fn update_profile(
         .filter(users::Column::Id.eq(row.id))
         .exec(&tx)
         .await?;
+    if email_changed {
+        account_email_verifications::Entity::delete_by_id(row.id)
+            .exec(&tx)
+            .await?;
+    }
     if email_changed || password_changed {
         sessions::Entity::delete_many()
             .filter(sessions::Column::UserId.eq(row.id))

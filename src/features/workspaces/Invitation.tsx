@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api,errorText } from "../../shared/api/api";
-import { AutoField } from "../../shared/forms/auto-form";
+import { AutoField, AutoForm } from "../../shared/forms/auto-form";
 import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
@@ -11,6 +11,18 @@ export function Invitation({ workspace }: { workspace: string }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [messageKey, setMessageKey] = useState("");
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const sendEmail = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true); setMessage(""); setMessageKey("");
+    try {
+      await api(`/workspaces/${workspace}/members/invitation-emails`, { method: "POST", body: JSON.stringify({ email }) });
+      setMessageKey("invitation.sent");
+    } catch (cause) { setMessage(errorText(cause)); }
+    finally { setBusy(false); }
+  };
   const load = async (rotate: boolean) => {
     if (rotate && !window.confirm(commonText("invitation.rotateConfirm")))
       return;
@@ -43,6 +55,9 @@ export function Invitation({ workspace }: { workspace: string }) {
         >
           {commonText("invitation.view")}
         </Button>
+        <Button variant="outline" disabled={busy} aria-expanded={emailOpen} onClick={() => setEmailOpen(value => !value)}>
+          {commonText("invitation.email")}
+        </Button>
         {code && (
           <>
             <AutoField label={commonText("auth.invitation")} className="text-sm">
@@ -73,6 +88,12 @@ export function Invitation({ workspace }: { workspace: string }) {
           </>
         )}
       </div>
+      {emailOpen && <AutoForm onSubmit={event => void sendEmail(event)} className="flex min-w-0 flex-wrap items-end gap-2">
+        <AutoField label={commonText("invitation.recipient")} className="min-w-0 flex-1 basis-64">
+          <Input type="email" required value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" disabled={busy} />
+        </AutoField>
+        <Button type="submit" disabled={busy || !email.trim()}>{commonText("invitation.send")}</Button>
+      </AutoForm>}
       <p className="text-xs text-muted-foreground">
         {commonText("invitation.help")}
       </p>

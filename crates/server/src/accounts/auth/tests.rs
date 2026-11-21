@@ -1,6 +1,79 @@
 use super::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set, sea_query::Expr};
 
+#[tokio::test]
+async fn legacy_profile_without_email_verification_evidence_is_unverified() {
+    let (_dir, s) = crate::agents::tests::setup().await;
+    let account = Account {
+        user: crate::agents::tests::admin(1).user,
+        session_id: Id::from(1),
+    };
+    let Json(value) = profile(State(s), account).await.unwrap();
+    assert_eq!(value["email_verified"], false);
+}
+
+#[tokio::test]
+async fn email_verification_requires_matching_evidence_and_email_change_clears_it() {
+    let (_dir, s) = crate::agents::tests::setup().await;
+    let account = || Account {
+        user: crate::agents::tests::admin(1).user,
+        session_id: Id::from(1),
+    };
+    users::Entity::update_many()
+        .col_expr(
+            users::Column::PasswordHash,
+            Expr::value(hash("email-password").unwrap()),
+        )
+        .filter(users::Column::Id.eq(1))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    account_email_verifications::Entity::insert(account_email_verifications::ActiveModel {
+        user_id: Set(1),
+        email: Set("user1@example.invalid".into()),
+        verified_at: Set(123),
+        verified_by: Set(1),
+    })
+    .exec(&s.db)
+    .await
+    .unwrap();
+    let Json(value) = profile(State(s.clone()), account()).await.unwrap();
+    assert_eq!(value["email_verified"], true);
+    let change = |password: &str| ProfileUpdate {
+        avatar: None,
+        version: 1,
+        name: "Owner".into(),
+        email: "new@example.invalid".into(),
+        new_password: String::new(),
+        current_password: password.into(),
+    };
+    assert!(
+        update_profile(State(s.clone()), account(), Json(change("wrong-password")))
+            .await
+            .is_err()
+    );
+    assert!(
+        account_email_verifications::Entity::find_by_id(1)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    update_profile(State(s.clone()), account(), Json(change("email-password")))
+        .await
+        .unwrap();
+    assert!(
+        account_email_verifications::Entity::find_by_id(1)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let Json(value) = profile(State(s), account()).await.unwrap();
+    assert_eq!(value["email"], "new@example.invalid");
+    assert_eq!(value["email_verified"], false);
+}
+
 fn refresh_headers(value: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(

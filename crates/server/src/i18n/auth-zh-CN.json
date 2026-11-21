@@ -177,5 +177,8 @@
   "notification.smsTestUnsupported": "短信渠道只能发送带参数的已审核模板；请使用“发送”并填写模板参数来测试。",
   "platform.conversationInvalid": "会话策略无效：注入内容最多 16 KiB，MCP 响应上限为 256–8192 KiB，审批模式须为 request、assisted 或 yolo。",
   "auth.sessionPolicyInvalid": "访问有效期与刷新有效期必须为正整数，访问有效期不能超过刷新有效期，且到期时间须在支持范围内。",
-  "auth.sessionAutoRenewDisabled": "自动续期已关闭，访问凭证到期后请重新登录。"
+  "auth.sessionAutoRenewDisabled": "自动续期已关闭，访问凭证到期后请重新登录。",
+  "mail.invitationUnavailable": "请先在平台设置中配置、启用并测试邮件服务，再发送邀请。",
+  "mail.invitationSubject": "工作空间邀请",
+  "mail.invitationBody": "邀请你加入工作空间：{workspace}。\n邀请码：{code}\n登录或注册后，打开“创建/加入工作空间”并输入此邀请码。"
 }

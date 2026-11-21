@@ -177,5 +177,8 @@
   "notification.smsTestUnsupported": "SMS 채널은 매개변수가 있는 승인된 템플릿만 보낼 수 있습니다. '보내기'에서 템플릿 매개변수를 입력해 테스트하세요.",
   "platform.conversationInvalid": "대화 정책이 유효하지 않습니다. 지침은 최대 16 KiB, 응답 한도는 256–8192 KiB, 모드는 request, assisted 또는 yolo입니다.",
   "auth.sessionPolicyInvalid": "분과 일은 양의 정수여야 하고 접근 기간은 갱신 기간 이하여야 하며 지원되는 만료 날짜를 사용해야 합니다.",
-  "auth.sessionAutoRenewDisabled": "세션 자동 갱신이 꺼져 있습니다. 접근 만료 후 다시 로그인하세요."
+  "auth.sessionAutoRenewDisabled": "세션 자동 갱신이 꺼져 있습니다. 접근 만료 후 다시 로그인하세요.",
+  "mail.invitationUnavailable": "초대를 보내기 전에 플랫폼 설정에서 이메일 서비스를 구성하고 활성화한 후 테스트하세요.",
+  "mail.invitationSubject": "워크스페이스 초대",
+  "mail.invitationBody": "{workspace}에 초대되었습니다.\n초대 코드: {code}\n로그인하거나 가입한 후 워크스페이스 만들기/참가에서 이 코드를 입력하세요."
 }

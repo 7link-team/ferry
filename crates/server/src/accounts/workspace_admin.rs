@@ -360,8 +360,8 @@ struct Member {
     created_at: i64,
 }
 impl Member {
-    fn json(self) -> Value {
-        json!({"id":Id::from(self.id),"user_id":Id::from(self.user_id),"role_id":Id::from(self.role_id),"name":self.name,"email":self.email,"role_name":workspace::role_name(&self.role_name, self.role_builtin != 0),"active":self.active!=0,"owner":self.user_id==self.owner_id,"state":self.state,"version":self.version,"created_at":self.created_at})
+    fn json(self, avatar: Option<Value>) -> Value {
+        json!({"id":Id::from(self.id),"user_id":Id::from(self.user_id),"role_id":Id::from(self.role_id),"name":self.name,"email":self.email,"avatar":avatar,"role_name":workspace::role_name(&self.role_name, self.role_builtin != 0),"active":self.active!=0,"owner":self.user_id==self.owner_id,"state":self.state,"version":self.version,"created_at":self.created_at})
     }
 }
 fn member_select() -> sea_orm::Select<members::Entity> {
@@ -441,8 +441,10 @@ pub async fn members(
         &q,
     )
     .await?;
+    let mut avatars =
+        super::preferences::avatars(&s.db, rows.iter().map(|row| row.user_id).collect()).await?;
     Ok(Json(
-        json!({"items":rows.into_iter().map(Member::json).collect::<Vec<_>>(),"total":total,"page":q.page,"page_size":q.page_size}),
+        json!({"items":rows.into_iter().map(|row| { let avatar = avatars.remove(&row.user_id); row.json(avatar) }).collect::<Vec<_>>(),"total":total,"page":q.page,"page_size":q.page_size}),
     ))
 }
 pub async fn get_member(
@@ -451,17 +453,18 @@ pub async fn get_member(
     Path((_, id)): Path<(String, Id)>,
 ) -> Result<Json<Value>> {
     scope.require("members.read")?;
-    Ok(Json(
-        member_select()
-            .filter(members::Column::WorkspaceId.eq(scope.workspace_id))
-            .filter(roles::Column::WorkspaceId.eq(scope.workspace_id))
-            .filter(members::Column::Id.eq(id))
-            .into_model::<Member>()
-            .one(&s.db)
-            .await?
-            .ok_or_else(ApiError::missing)?
-            .json(),
-    ))
+    let row = member_select()
+        .filter(members::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(roles::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(members::Column::Id.eq(id))
+        .into_model::<Member>()
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    let avatar = super::preferences::avatars(&s.db, vec![row.user_id])
+        .await?
+        .remove(&row.user_id);
+    Ok(Json(row.json(avatar)))
 }
 async fn mutable_member(
     conn: &impl ConnectionTrait,
@@ -617,6 +620,58 @@ pub async fn rotate_invitation(
         [(header::CACHE_CONTROL, "no-store")],
         Json(json!({"code":code})),
     ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmailInvitation {
+    email: String,
+}
+
+/// Send the current workspace join code; this does not add a member or rotate it.
+pub async fn email_invitation(
+    State(s): State<AppState>,
+    scope: Scope,
+    Json(body): Json<EmailInvitation>,
+) -> Result<Json<Value>> {
+    scope.require("members.create")?;
+    let email = super::auth::email(&body.email)?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let scope = authorize(&tx, &scope, "members.create").await?;
+    let workspace = workspaces::Entity::find_by_id(i64::from(scope.workspace_id))
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    let platform = crate::entities::platform_state::Entity::find_by_id(1)
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    let config = super::mail::Configuration::read(&s, platform.mail_config.as_deref())?;
+    let policy = super::resource_policy::read(platform.resource_config.as_deref())?;
+    let address = super::addresses::Configuration::read(&s, &platform)?.public_url;
+    // Persist the send request before SMTP; never hold a write lock during delivery
+    // or report a post-send audit failure as a reason to repeat the external write.
+    crate::hosts::activity_in(
+        &s,
+        &tx,
+        &scope,
+        "invite-email",
+        "members",
+        &Id::from(0),
+        json!({"name":email,"email":email,"workspace":workspace.name,"delivery":"requested"}),
+    )
+    .await?;
+    tx.commit().await?;
+    config
+        .send_workspace_invitation(
+            &email,
+            &workspace.name,
+            &workspace.join_code,
+            &address,
+            &policy,
+        )
+        .await?;
+    Ok(Json(json!({"sent":true})))
 }
 
 #[cfg(test)]

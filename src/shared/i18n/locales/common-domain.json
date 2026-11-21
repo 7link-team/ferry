@@ -414,7 +414,15 @@
     "form.startBlank": "Start blank",
     "form.blankHelp": "Start editing with the existing default configuration.",
     "form.useTemplate": "Use this template",
-    "nav.sections.notifications": "Notifications"
+    "nav.sections.notifications": "Notifications",
+    "invitation.email": "Email invitation",
+    "invitation.recipient": "Recipient email",
+    "invitation.send": "Send invitation",
+    "invitation.sent": "The invitation email was sent.",
+    "account.emailVerification": "Verification status",
+    "account.emailVerified": "Verified",
+    "account.emailUnverified": "Unverified",
+    "account.gender": "Gender"
   },
   "zh-CN": {
     "app.serverConnection": "服务器连接",
@@ -831,7 +839,15 @@
     "form.startBlank": "空白创建",
     "form.blankHelp": "使用现有默认配置开始编辑。",
     "form.useTemplate": "使用此模板",
-    "nav.sections.notifications": "通知"
+    "nav.sections.notifications": "通知",
+    "invitation.email": "发送邮件邀请",
+    "invitation.recipient": "收件人邮箱",
+    "invitation.send": "发送邀请",
+    "invitation.sent": "邀请邮件已发送。",
+    "account.emailVerification": "验证状态",
+    "account.emailVerified": "已验证",
+    "account.emailUnverified": "未验证",
+    "account.gender": "性别"
   },
   "zh-TW": {
     "app.serverConnection": "伺服器連線",
@@ -1248,7 +1264,15 @@
     "form.startBlank": "空白建立",
     "form.blankHelp": "使用現有預設設定開始編輯。",
     "form.useTemplate": "使用此範本",
-    "nav.sections.notifications": "通知"
+    "nav.sections.notifications": "通知",
+    "invitation.email": "傳送郵件邀請",
+    "invitation.recipient": "收件人電子郵件",
+    "invitation.send": "傳送邀請",
+    "invitation.sent": "邀請郵件已傳送。",
+    "account.emailVerification": "驗證狀態",
+    "account.emailVerified": "已驗證",
+    "account.emailUnverified": "未驗證",
+    "account.gender": "性別"
   },
   "ja-JP": {
     "app.serverConnection": "サーバー接続",
@@ -1665,7 +1689,15 @@
     "form.startBlank": "空白から作成",
     "form.blankHelp": "既存の初期設定で編集を開始します。",
     "form.useTemplate": "このテンプレートを使用",
-    "nav.sections.notifications": "通知"
+    "nav.sections.notifications": "通知",
+    "invitation.email": "招待メール",
+    "invitation.recipient": "送信先メールアドレス",
+    "invitation.send": "招待を送信",
+    "invitation.sent": "招待メールを送信しました。",
+    "account.emailVerification": "確認状況",
+    "account.emailVerified": "確認済み",
+    "account.emailUnverified": "未確認",
+    "account.gender": "性別"
   },
   "ko-KR": {
     "app.serverConnection": "서버 연결",
@@ -2082,7 +2114,15 @@
     "form.startBlank": "빈 구성으로 시작",
     "form.blankHelp": "기존 기본 구성으로 편집을 시작합니다.",
     "form.useTemplate": "이 템플릿 사용",
-    "nav.sections.notifications": "알림"
+    "nav.sections.notifications": "알림",
+    "invitation.email": "이메일 초대",
+    "invitation.recipient": "받는 사람 이메일",
+    "invitation.send": "초대 보내기",
+    "invitation.sent": "초대 이메일을 보냈습니다.",
+    "account.emailVerification": "인증 상태",
+    "account.emailVerified": "인증됨",
+    "account.emailUnverified": "인증되지 않음",
+    "account.gender": "성별"
   },
   "ms-MY": {
     "app.serverConnection": "Sambungan pelayan",
@@ -2499,6 +2539,14 @@
     "form.startBlank": "Mulakan kosong",
     "form.blankHelp": "Mula menyunting dengan konfigurasi lalai sedia ada.",
     "form.useTemplate": "Gunakan templat ini",
-    "nav.sections.notifications": "Pemberitahuan"
+    "nav.sections.notifications": "Pemberitahuan",
+    "invitation.email": "Jemputan e-mel",
+    "invitation.recipient": "E-mel penerima",
+    "invitation.send": "Hantar jemputan",
+    "invitation.sent": "E-mel jemputan telah dihantar.",
+    "account.emailVerification": "Status pengesahan",
+    "account.emailVerified": "Disahkan",
+    "account.emailUnverified": "Belum disahkan",
+    "account.gender": "Jantina"
   }
 }

@@ -1080,6 +1080,10 @@ fn workspace_routes() -> Router<state::AppState> {
             get(accounts::workspace_admin::role_options),
         )
         .route(
+            "/{workspace}/members/invitation-emails",
+            post(accounts::workspace_admin::email_invitation),
+        )
+        .route(
             "/{workspace}/members/{id}",
             get(accounts::workspace_admin::get_member)
                 .patch(accounts::workspace_admin::update_member)

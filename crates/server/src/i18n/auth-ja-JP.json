@@ -177,5 +177,8 @@
   "notification.smsTestUnsupported": "SMS チャネルはパラメーター付きの承認済みテンプレートのみ送信できます。「送信」でテンプレートのパラメーターを入力してテストしてください。",
   "platform.conversationInvalid": "会話ポリシーが無効です。指示は最大 16 KiB、応答上限は 256～8192 KiB、モードは request、assisted、yolo のいずれかです。",
   "auth.sessionPolicyInvalid": "分と日には正の整数を指定し、アクセス期間を更新期間以下にし、対応する有効期限を指定してください。",
-  "auth.sessionAutoRenewDisabled": "セッションの自動更新は無効です。アクセス期限後に再ログインしてください。"
+  "auth.sessionAutoRenewDisabled": "セッションの自動更新は無効です。アクセス期限後に再ログインしてください。",
+  "mail.invitationUnavailable": "招待する前に、プラットフォーム設定でメールサービスを設定、有効化してテストしてください。",
+  "mail.invitationSubject": "ワークスペースへの招待",
+  "mail.invitationBody": "{workspace} への参加に招待されました。\n招待コード：{code}\nログインまたは登録してから、ワークスペースの作成・参加画面でこのコードを入力してください。"
 }

@@ -55,6 +55,36 @@ it("translates the complete invitation flow and updates existing feedback when t
   vi.mocked(window.confirm).mockRestore();
 });
 
+it("sends an invitation email without rotating the workspace code", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ sent: true }))));
+  await act(async () => root.render(<Invitation workspace="ops" />));
+  const open = [...host.querySelectorAll("button")].find(button => button.textContent === commonText("invitation.email"));
+  expect(open).toBeTruthy();
+  await act(async () => open!.click());
+  const recipient = host.querySelector<HTMLInputElement>('input[type="email"]')!;
+  await fill(recipient, "recipient@example.invalid");
+  await act(async () => recipient.form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(fetch).toHaveBeenCalledTimes(1);
+  const [url, options] = vi.mocked(fetch).mock.calls[0]!;
+  expect(url).toBe("/api/workspaces/ops/members/invitation-emails");
+  expect(options?.method).toBe("POST");
+  expect(JSON.parse(String(options?.body))).toEqual({ email: "recipient@example.invalid" });
+  expect(host.querySelector('[role="status"]')?.textContent).toBe(commonText("invitation.sent"));
+});
+
+it("keeps the invitation recipient editable after SMTP failure without reporting success", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "SMTP unavailable" }), { status:503 })));
+  await act(async () => root.render(<Invitation workspace="ops" />));
+  await act(async () => [...host.querySelectorAll("button")].find(button=>button.textContent===commonText("invitation.email"))!.click());
+  const recipient=host.querySelector<HTMLInputElement>('input[type="email"]')!;
+  await fill(recipient,"recipient@example.invalid");
+  await act(async () => recipient.form!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true})));
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("SMTP unavailable");
+  expect(host.textContent).not.toContain(commonText("invitation.sent"));
+  expect(recipient.value).toBe("recipient@example.invalid");
+  expect(recipient.disabled).toBe(false);
+});
+
 it("uses translated All and Ungrouped labels without concatenating a resource noun in six languages", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({items:[],total:0,page:1,page_size:200}))));
   for (const locale of ["en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "ms-MY"] as const) {

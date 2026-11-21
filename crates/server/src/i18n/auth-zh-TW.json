@@ -177,5 +177,8 @@
   "notification.smsTestUnsupported": "簡訊通道只能傳送帶參數的已審核範本；請使用「傳送」並填寫範本參數來測試。",
   "platform.conversationInvalid": "對話策略無效：注入內容最多 16 KiB，MCP 回應上限為 256–8192 KiB，審批模式須為 request、assisted 或 yolo。",
   "auth.sessionPolicyInvalid": "存取與更新有效期必須為正整數，存取有效期不得超過更新有效期，且到期時間須在支援範圍內。",
-  "auth.sessionAutoRenewDisabled": "自動續期已關閉，存取憑證到期後請重新登入。"
+  "auth.sessionAutoRenewDisabled": "自動續期已關閉，存取憑證到期後請重新登入。",
+  "mail.invitationUnavailable": "請先在平台設定中配置、啟用並測試郵件服務，再傳送邀請。",
+  "mail.invitationSubject": "工作空間邀請",
+  "mail.invitationBody": "邀請你加入工作空間：{workspace}。\n邀請碼：{code}\n登入或註冊後，開啟「建立/加入工作空間」並輸入此邀請碼。"
 }

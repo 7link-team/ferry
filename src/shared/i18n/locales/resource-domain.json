@@ -1275,7 +1275,8 @@
     "platform.resourceLimits.field.provider_concurrency": "Provider request concurrency",
     "platform.resourceLimits.field.provider_requests_per_second": "Provider requests per second",
     "runner.resourcePolicyUnsupported": "This connected Runner does not support platform resource limits. Its legacy limits still apply. Update the Runner to apply the platform resource policy.",
-    "platform.resourceLimits.field.workflow_concurrent_runs": "Concurrent workflows per server instance"
+    "platform.resourceLimits.field.workflow_concurrent_runs": "Concurrent workflows per server instance",
+    "activity.invite-email": "Email invitation"
   },
   "zh-CN": {
     "runner.scopeFallback": "节点未上报服务安装方式。下方默认生成系统服务安装命令，不代表现有代理以系统服务运行；需要安装到当前用户时可切换。",
@@ -2553,7 +2554,8 @@
     "platform.resourceLimits.field.provider_concurrency": "模型服务并发请求数",
     "platform.resourceLimits.field.provider_requests_per_second": "模型服务每秒请求数",
     "runner.resourcePolicyUnsupported": "此在线 Runner 尚不支持平台资源策略，仍受旧版本限制。请升级 Runner 后使用统一资源策略。",
-    "platform.resourceLimits.field.workflow_concurrent_runs": "每个服务实例的并发工作流数"
+    "platform.resourceLimits.field.workflow_concurrent_runs": "每个服务实例的并发工作流数",
+    "activity.invite-email": "发送邮件邀请"
   },
   "zh-TW": {
     "runner.scopeFallback": "節點未回報服務安裝方式。下方預設產生系統服務安裝命令，不代表現有代理以系統服務運行；需要安裝到目前使用者時可切換。",
@@ -3831,7 +3833,8 @@
     "platform.resourceLimits.invalid": "請輸入不超過 9,007,199,254,740,991 的正整數。",
     "platform.resourceLimits.hostHelp": "任務並行數由平台資源限制控制，預設無限制。",
     "platform.resourceLimits.help": "所有應用程式資源限制預設為無限制。選取「自訂」可設定正整數上限；選取「無限制」可清除上限。平台設定控制資源限制；舊版任務及檔案配額僅保留供回復，不再生效。檔案數量按每次操作計算。檔案總大小涵蓋工作空間內容資產及每次 Agent 執行所產生的檔案。對話與排程任務並行數按每個伺服器執行個體計算。",
-    "runner.resourcePolicyUnsupported": "目前連線的 Runner 不支援平台資源限制，仍套用舊版限制。請更新 Runner 以套用平台資源政策。"
+    "runner.resourcePolicyUnsupported": "目前連線的 Runner 不支援平台資源限制，仍套用舊版限制。請更新 Runner 以套用平台資源政策。",
+    "activity.invite-email": "傳送郵件邀請"
   },
   "ja-JP": {
     "runner.scopeFallback": "ノードからサービスのインストール範囲が報告されていません。コマンドの既定値はシステムサービスですが、現在のエージェントの実行方式を示すものではありません。必要に応じて現在のユーザーに切り替えてください。",
@@ -5109,7 +5112,8 @@
     "platform.resourceLimits.invalid": "9,007,199,254,740,991 以下の正の整数を入力してください。",
     "platform.resourceLimits.hostHelp": "タスクの同時実行数はプラットフォームのリソース制限で制御され、既定では無制限です。",
     "platform.resourceLimits.help": "すべてのアプリケーションリソース制限は既定で無制限です。「カスタム」で正の整数の上限を設定し、「無制限」で解除できます。リソース制限はプラットフォーム設定で管理されます。旧タスク・ファイル割り当てはロールバック用に保持され、適用されません。ファイル数は操作ごとに適用されます。合計ファイルサイズにはワークスペースのコンテンツ資産と各 Agent 実行で生成されたファイルが含まれます。会話と定期タスクの同時実行数はサーバーインスタンスごとに適用されます。",
-    "runner.resourcePolicyUnsupported": "接続中の Runner はプラットフォームのリソース制限に対応していないため、旧制限が適用されます。プラットフォームのリソースポリシーを適用するには Runner を更新してください。"
+    "runner.resourcePolicyUnsupported": "接続中の Runner はプラットフォームのリソース制限に対応していないため、旧制限が適用されます。プラットフォームのリソースポリシーを適用するには Runner を更新してください。",
+    "activity.invite-email": "招待メール"
   },
   "ko-KR": {
     "runner.scopeFallback": "노드가 서비스 설치 범위를 보고하지 않았습니다. 명령의 기본값은 시스템 서비스이며 현재 에이전트의 실행 방식을 뜻하지 않습니다. 필요하면 현재 사용자로 전환하세요.",
@@ -6387,7 +6391,8 @@
     "platform.resourceLimits.invalid": "9,007,199,254,740,991 이하의 양의 정수를 입력하세요.",
     "platform.resourceLimits.hostHelp": "작업 동시 실행 수는 플랫폼 리소스 제한으로 제어되며 기본값은 무제한입니다.",
     "platform.resourceLimits.help": "모든 애플리케이션 리소스 제한은 기본적으로 무제한입니다. 사용자 지정을 선택하여 양의 정수 한도를 설정하고 무제한을 선택하여 해제하세요. 리소스 제한은 플랫폼 설정에서 관리합니다. 이전 작업 및 파일 할당량은 롤백용으로만 유지되며 적용되지 않습니다. 파일 수는 작업별로 적용됩니다. 파일 총 크기에는 작업 공간 콘텐츠 자산과 각 Agent 실행에서 생성된 파일이 포함됩니다. 대화 및 예약 작업 동시 실행 수는 서버 인스턴스별로 적용됩니다.",
-    "runner.resourcePolicyUnsupported": "현재 연결된 Runner는 플랫폼 리소스 제한을 지원하지 않아 이전 제한이 적용됩니다. 플랫폼 리소스 정책을 적용하려면 Runner를 업데이트하세요."
+    "runner.resourcePolicyUnsupported": "현재 연결된 Runner는 플랫폼 리소스 제한을 지원하지 않아 이전 제한이 적용됩니다. 플랫폼 리소스 정책을 적용하려면 Runner를 업데이트하세요.",
+    "activity.invite-email": "이메일 초대"
   },
   "ms-MY": {
     "runner.scopeFallback": "Nod belum melaporkan skop pemasangan perkhidmatan. Arahan lalai ialah perkhidmatan sistem; ini tidak menerangkan ejen yang sedang berjalan. Pilih Pengguna semasa jika diperlukan.",
@@ -7665,6 +7670,7 @@
     "platform.resourceLimits.field.provider_concurrency": "Keserentakan permintaan penyedia",
     "platform.resourceLimits.field.provider_requests_per_second": "Permintaan penyedia setiap saat",
     "runner.resourcePolicyUnsupported": "Runner yang tersambung ini tidak menyokong had sumber platform. Had versi lamanya masih terpakai. Kemas kini Runner untuk menggunakan dasar sumber platform.",
-    "platform.resourceLimits.field.workflow_concurrent_runs": "Aliran kerja serentak setiap tika pelayan"
+    "platform.resourceLimits.field.workflow_concurrent_runs": "Aliran kerja serentak setiap tika pelayan",
+    "activity.invite-email": "Jemputan e-mel"
   }
 }

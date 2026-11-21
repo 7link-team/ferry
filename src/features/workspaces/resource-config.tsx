@@ -1,4 +1,6 @@
 import { api } from "../../shared/api/api";
+import type { AvatarValue } from "../../shared/api/api";
+import { IdentityAvatar } from "../../shared/ui/identity-avatar";
 import { deleteResource } from "../../shared/api/resource";
 import { commonText } from "../../shared/i18n/i18n";
 import type { ResourceConfigContext } from "../../shared/resources/config";
@@ -15,6 +17,8 @@ export interface Role {
 
 export interface Member {
   id: string;
+  user_id: string;
+  avatar?: AvatarValue | null;
   name: string;
   email: string;
   role_id: string;
@@ -43,8 +47,9 @@ export function workspacesLists({
         },
       ],
       columns: [
-        { key: "name", label: "姓名", labelKey: "common-domain:auth.name" },
+        { key: "name", label: "姓名", labelKey: "common-domain:auth.name", render: (r: Member) => <span className="flex min-w-0 items-center gap-2"><IdentityAvatar id={r.user_id} name={r.name} kind="user" value={r.avatar} className="size-8 shrink-0" /><span className="min-w-0 break-words">{r.name}</span></span> },
         { key: "email", label: "邮箱", labelKey: "common-domain:auth.email" },
+        { key: "gender", label: "性别", labelKey: "common-domain:account.gender", render: (r: Member) => <span className="whitespace-nowrap">{commonText(`identity:${r.avatar?.gender ?? "neutral"}`)}</span> },
         {
           key: "role_name",
           label: "角色",

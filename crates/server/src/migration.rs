@@ -5,6 +5,7 @@
 use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 mod access_addresses;
+mod account_email_verification;
 mod account_otp;
 mod account_preferences;
 mod agent_models;
@@ -207,6 +208,7 @@ impl MigratorTrait for Migrator {
             Box::new(session_policy::Migration),
             Box::new(chat_api::Migration),
             Box::new(resource_policy::Migration),
+            Box::new(account_email_verification::Migration),
         ]
     }
 }

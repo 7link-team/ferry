@@ -3160,6 +3160,21 @@
     ]
   },
   {
+    "path": "/members/invitation-emails",
+    "method": "POST",
+    "handler": "accounts::workspace_admin::email_invitation",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn email_invitation(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<EmailInvitation>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct EmailInvitation {\n    email: String,\n}"
+    ],
+    "permission_checks": [
+      "members.create"
+    ],
+    "documentation": "Send the current workspace join code; this does not add a member or rotate it.",
+    "permission": "members.create"
+  },
+  {
     "path": "/members/role-options",
     "method": "GET",
     "handler": "accounts::workspace_admin::role_options",

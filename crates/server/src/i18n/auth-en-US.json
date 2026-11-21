@@ -177,5 +177,8 @@
   "notification.smsTestUnsupported": "SMS channels send approved templates with parameters; test this channel with Send, filling in a template's parameters.",
   "platform.conversationInvalid": "Invalid conversation policy: instructions up to 16 KiB, MCP response limit 256–8192 KiB, approval mode request, assisted or yolo.",
   "auth.sessionPolicyInvalid": "Use positive whole minutes/days, with access no longer than refresh validity and an expiry date within the supported range.",
-  "auth.sessionAutoRenewDisabled": "Automatic session renewal is disabled. Sign in again after access expires."
+  "auth.sessionAutoRenewDisabled": "Automatic session renewal is disabled. Sign in again after access expires.",
+  "mail.invitationUnavailable": "Configure, enable and test email in Platform settings before sending invitations.",
+  "mail.invitationSubject": "Workspace invitation",
+  "mail.invitationBody": "You have been invited to join {workspace}.\nInvitation code: {code}\nSign in or create an account, then open Create/join workspace and enter this code."
 }

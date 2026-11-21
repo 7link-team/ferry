@@ -40,6 +40,59 @@ beforeEach(() => {
   } })));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+it("refreshes identity after saving a profile without replacing the mounted form", async () => {
+  required = false;
+  const original = fetch;
+  let releaseIdentity!: (response: unknown) => void;
+  let refresh = false;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
+    if (url === "/api/profile/1") return { ok: true, status: 200, json: async () => ({ id: "1", name: "Owner", email: "owner@example.invalid", version: 1, current_password: "", new_password: "" }) };
+    if (url === "/api/me" && refresh) return new Promise(resolve => { releaseIdentity = resolve; });
+    return original(url, options);
+  }));
+  history.replaceState({}, "", "/zh-CN/account");
+  await act(async () => root.render(<App />));
+  const field = host.querySelector<HTMLInputElement>('input[name="name"]')!;
+  expect(field).toBeTruthy();
+  refresh = true;
+  await act(async () => field.form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(releaseIdentity).toBeTypeOf("function");
+  expect(host.querySelector('input[name="name"]')).toBe(field);
+  await act(async () => releaseIdentity(await original("/api/me")));
+  expect(host.querySelector('input[name="name"]')).toBe(field);
+});
+it("revalidates workspaces on every menu open while keeping the old list and page visible", async () => {
+  required = false;
+  const original = fetch;
+  let releaseIdentity!: (response: unknown) => void;
+  let reads = 0;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
+    if (url === "/api/me" && ++reads > 1) return new Promise(resolve => { releaseIdentity = resolve; });
+    return original(url, options);
+  }));
+  await act(async () => root.render(<App />));
+  const table = host.querySelector("table");
+  const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="切换空间"]')!;
+  expect(trigger).toBeTruthy();
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+  expect(releaseIdentity).toBeTypeOf("function");
+  expect(document.querySelector('[role="menu"]')?.textContent).toContain("Existing workspace");
+  expect(vi.mocked(fetch).mock.calls.filter(([url])=>url==="/api/me").at(-1)?.[1]?.cache).toBe("no-store");
+  expect(host.querySelector("table")).toBe(table);
+  const response = await original("/api/me");
+  const value = await response.json();
+  value.workspaces.push({ ...value.workspaces[0], id: "3", name: "New workspace" });
+  await act(async () => releaseIdentity({ ok: true, status: 200, json: async () => value }));
+  expect(document.querySelector('[role="menu"]')?.textContent).toContain("New workspace");
+  await act(async () => document.querySelector('[role="menu"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  const previousReads = reads;
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+  expect(reads).toBeGreaterThan(previousReads);
+  expect(document.querySelector('[role="menu"]')?.textContent).toContain("New workspace");
+  await act(async () => releaseIdentity({ ok: false, status: 503, json: async () => ({ error: "temporarily offline" }) }));
+  expect(host.querySelector("table")).toBe(table);
+  expect(document.querySelector('[role="menu"]')?.textContent).toContain("New workspace");
+});
 it.each(["new", "42/edit"])("preserves a workspace form draft after renewal: %s", async mode => {
   required = false;
   permissions = ["variables.read", "variables.create", "variables.update"];
