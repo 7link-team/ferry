@@ -288,7 +288,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
           ))}
         </nav>
       } actions={<>
-        <div className="flex min-w-0 max-w-full items-center gap-1">
+        <div className="flex min-w-0 max-w-full items-center gap-1 max-sm:min-w-11 max-sm:flex-1 max-sm:basis-0">
           <WorkspaceSwitcher identity={identity} current={current} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} />
           {identity.user.is_superadmin && <Button variant="ghost" className="max-sm:hidden" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
         </div>
@@ -460,13 +460,13 @@ function AppearanceActions({ floating = false }: { floating?: boolean }) {
 
 function WorkspaceHeaderActions({ identity, onWorkspaces, onSignedOut }: { identity: Identity; onWorkspaces?: () => void; onSignedOut: () => void }) {
   const { t } = useTranslation();
-  return <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 max-sm:flex-nowrap max-sm:gap-1">
+  return <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 max-sm:gap-1">
         {onWorkspaces && <WorkspaceSwitcher identity={identity} onWorkspaces={onWorkspaces} />}
         <AppearanceActions />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="min-h-11 min-w-0 max-w-[min(16rem,calc(100vw-2rem))] max-sm:px-1.5">
+            <Button variant="ghost" size="sm" className="min-h-11 min-w-11 max-w-[min(16rem,calc(100vw-2rem))] max-sm:px-1.5">
               <IdentityAvatar id={identity.user.id} name={identity.user.name} kind="user" value={identity.user.avatar} className="size-7" />
               <span className="truncate max-sm:sr-only">{identity.user.name}</span>
             </Button>

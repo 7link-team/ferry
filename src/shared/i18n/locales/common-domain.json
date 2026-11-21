@@ -1,5 +1,6 @@
 {
   "en-US": {
+    "app.serverConnection": "Server connection",
     "nav.sections.access": "Identity & permissions",
     "nav.sections.models": "Model services",
     "nav.sections.hosts": "Hosts",
@@ -416,6 +417,7 @@
     "nav.sections.notifications": "Notifications"
   },
   "zh-CN": {
+    "app.serverConnection": "服务器连接",
     "nav.sections.access": "身份与权限",
     "nav.sections.models": "模型服务",
     "nav.sections.hosts": "主机",
@@ -832,6 +834,7 @@
     "nav.sections.notifications": "通知"
   },
   "zh-TW": {
+    "app.serverConnection": "伺服器連線",
     "nav.sections.access": "身分與權限",
     "nav.sections.models": "模型服務",
     "nav.sections.hosts": "主機",
@@ -1248,6 +1251,7 @@
     "nav.sections.notifications": "通知"
   },
   "ja-JP": {
+    "app.serverConnection": "サーバー接続",
     "nav.sections.access": "IDと権限",
     "nav.sections.models": "モデルサービス",
     "nav.sections.hosts": "ホスト",
@@ -1664,6 +1668,7 @@
     "nav.sections.notifications": "通知"
   },
   "ko-KR": {
+    "app.serverConnection": "서버 연결",
     "nav.sections.access": "ID 및 권한",
     "nav.sections.models": "모델 서비스",
     "nav.sections.hosts": "호스트",
@@ -2080,6 +2085,7 @@
     "nav.sections.notifications": "알림"
   },
   "ms-MY": {
+    "app.serverConnection": "Sambungan pelayan",
     "nav.sections.access": "Identiti & kebenaran",
     "nav.sections.models": "Perkhidmatan model",
     "nav.sections.hosts": "Hos",
