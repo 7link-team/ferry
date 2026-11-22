@@ -1,5 +1,5 @@
 //! Schema migrations built with SeaQuery, applied in order and never edited once
-//! shipped. The full target schema is in docs/ferry-运维平台产品与技术方案.md;
+//! shipped. The full target schema is in docs/architecture/platform-product-and-technical-design.md;
 //! `Initial` carries only the identity and tenancy bedrock every module needs.
 
 use sea_orm::DbBackend;

@@ -1840,7 +1840,7 @@ mod tests {
         assert_eq!(stored[0].name, "Run command");
     }
 
-    /// A run's previews (docs/preview-automation-design.md section 5): the run
+    /// A run's previews (docs/design/preview-automation-design.md section 5): the run
     /// page lists them, and the run's terminal write revokes them.
     #[tokio::test]
     async fn run_lists_its_previews_and_revokes_them_when_it_ends() {

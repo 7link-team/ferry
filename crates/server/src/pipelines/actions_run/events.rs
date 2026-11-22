@@ -276,7 +276,7 @@ async fn event(
 }
 
 /// A worker invocation's side of `ferry/preview@v1`
-/// (docs/preview-automation-design.md section 5).
+/// (docs/design/preview-automation-design.md section 5).
 pub(super) struct Preview<'a> {
     /// Known only to this invocation's rewritten preview steps.
     pub nonce: &'a str,

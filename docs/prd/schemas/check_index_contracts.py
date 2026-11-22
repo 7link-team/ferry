@@ -11,7 +11,7 @@ HERE = ROOT / 'src/shared/workflow-contracts'
 
 
 def run():
-    model_path = ROOT / 'docs/prd/ferry-工作流平台数据模型.md'
+    model_path = ROOT / 'docs/prd/workflow-platform-data-model.md'
     model = model_path.read_text(encoding='utf-8')
     contract = json.loads((HERE / 'workflow-data-nodes.json').read_text(encoding='utf-8'))['storage_contract']
     prefix_bytes = contract['text_prefix_bytes']

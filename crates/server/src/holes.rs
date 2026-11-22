@@ -1,5 +1,5 @@
 //! Preview holes: a public `/holes/{token}/` link to a loopback port on a
-//! Runner host, for remote preview. Design: docs/preview-holes-design.md.
+//! Runner host, for remote preview. Design: docs/design/preview-holes-design.md.
 //!
 //! This module is the workspace resource (list, create, edit, revoke, delete,
 //! probe) and the background reachability monitor; `proxy` is the public

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import {previewFetch as fetch, previewResolverRules} from './preview-test-network.mjs';
-// Live preview-automation check (docs/preview-automation-design.md section 9):
+// Live preview-automation check (docs/design/preview-automation-design.md section 9):
 // an isolated server, a real Runner, real local services and a real browser
 // drive ferry/preview@v1 (approve and reject), the host.preview workflow node
 // with human review, and the host detail's preview tab.

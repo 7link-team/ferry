@@ -1,7 +1,7 @@
 use super::*;
 
 /// Preview holes: a public token mapped to a loopback port on a runner host.
-/// Columns and indexes follow docs/preview-holes-design.md section 10.
+/// Columns and indexes follow docs/design/preview-holes-design.md section 10.
 pub struct Migration;
 impl MigrationName for Migration {
     fn name(&self) -> &str {

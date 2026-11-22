@@ -1,4 +1,4 @@
-//! Previews opened by pipelines and workflows (docs/preview-automation-design.md):
+//! Previews opened by pipelines and workflows (docs/design/preview-automation-design.md):
 //! an optional human review, and a lifetime bound to the run or execution that
 //! opened them. Nothing here is edited by hand; it is revoked when its source
 //! ends, by the source's own terminal write or by `sweep` as a backstop.

@@ -410,7 +410,7 @@ def run():
 
     source_map = catalog["source_mapping"]
     assert [m["source_id"] for m in source_map] == [f"B{i:03}" for i in range(1, 76)]
-    inventory = (ROOT / "docs/ferry-工作流能力清单.md").read_text(encoding="utf-8")
+    inventory = (ROOT / "docs/reference/workflow-capability-matrix.md").read_text(encoding="utf-8")
     core_section = inventory.split("## B.", 1)[1].split("## C.", 1)[0]
     inventory_rows = {}
     for line in core_section.splitlines():
@@ -431,7 +431,7 @@ def run():
         if "source_ids" in spec:
             assert set(spec["source_ids"]) == {row["source_id"] for row in source_map
                                                 if spec["type"] in row["ferry_types"]}
-    file_review = (ROOT / "docs/prd/ferry-工作流平台PRD.md").read_text(encoding="utf-8").split("## 20.", 1)[1]
+    file_review = (ROOT / "docs/prd/workflow-platform-prd.md").read_text(encoding="utf-8").split("## 20.", 1)[1]
     review_members = dict(re.findall(r"^\| (B\d{3}) ([^|]+?) \|", file_review, re.MULTILINE))
     assert set(review_members) == set(file_catalog["source_members"])
     for source_id, member in review_members.items():
@@ -1144,7 +1144,7 @@ def run():
               "not_tested": ["publisher, trigger binding/index atomicity and runtime planner; incomplete draft API and typed/GPU payload validation", "expression runtime", "OS sandbox", "permissions/DB concurrency", "provider/host execution", "screens/translations", "actual archive/parser limits, isolation and format roundtrip", "Merge scheduler, crash recovery and atomic commits; position/field/join data algebra", "runtime Schema instance validation budgets, regex interruption and cross-language dialect parity", "credential vault/live permissions/rotation paths, typed adapters, OAuth refresh and credential-aware runtime cache"]}
     result["artifact_sha256"] = {
         path.relative_to(ROOT).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in (HERE / "workflow-graph.schema.json", HERE / "workflow-core-nodes.json", HERE / "workflow-data-nodes.json", HERE / "workflow-file-nodes.json", DOCS / "check_contracts.py", DOCS / "README.md", ROOT / "docs/ferry-工作流能力清单.md", ROOT / "docs/prd/ferry-工作流平台PRD.md", ROOT / "docs/prd/ferry-工作流平台数据模型.md")
+        for path in (HERE / "workflow-graph.schema.json", HERE / "workflow-core-nodes.json", HERE / "workflow-data-nodes.json", HERE / "workflow-file-nodes.json", DOCS / "check_contracts.py", DOCS / "README.md", ROOT / "docs/reference/workflow-capability-matrix.md", ROOT / "docs/prd/workflow-platform-prd.md", ROOT / "docs/prd/workflow-platform-data-model.md")
     }
     destination = ROOT / "data/maintenance/workflow-contract-validation.json"
     destination.parent.mkdir(parents=True, exist_ok=True)

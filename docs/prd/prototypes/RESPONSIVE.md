@@ -1,3 +1,9 @@
+---
+documentation_revision: "1.0"
+organized_on: "2026-11-22"
+source_updated_on: "2026-11-03"
+---
+
 # 响应式原型交付
 
 本交付没有 Figma 文件。**HTML prototypes（HTML 原型）+ PNG screenshots（PNG 截图）替代 Figma screens/variants**；应按此命名，不得声称是 Figma 文件或 Figma 画板。16 页共用同一套 HTML，不创建设备专用副本。

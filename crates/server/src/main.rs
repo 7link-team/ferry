@@ -345,7 +345,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/runners/sessions/{session}", get(hosts::runner::session))
         // Generated files shared by expiring, sealed links (e.g. in notifications).
         .merge(file_links::routes())
-        // Preview holes are public by token; see docs/preview-holes-design.md.
+        // Preview holes are public by token; see docs/design/preview-holes-design.md.
         .route("/holes/{token}", any(holes::serve_root))
         .route("/holes/{token}/", any(holes::serve))
         .route("/holes/{token}/{*rest}", any(holes::serve))

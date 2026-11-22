@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {previewFetch as fetch, previewResolverRules} from './preview-test-network.mjs';
 // Live preview-hole check: an isolated server, a real Runner, a real Vite dev
-// server and a real browser (docs/preview-holes-design.md section 14).
+// server and a real browser (docs/design/preview-holes-design.md section 14).
 // Build first: `cargo build -p ferry-server -p ferry-runner` and `npm run build`.
 // Evidence lands in data/maintenance/preview-holes-<stamp>/.
 import assert from 'node:assert/strict';

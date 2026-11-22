@@ -1,4 +1,4 @@
-//! Preview hole tests: see docs/preview-holes-design.md section 14.
+//! Preview hole tests: see docs/design/preview-holes-design.md section 14.
 //!
 //! The proxy tests run the real control and session endpoints, the real
 //! request guard, and a fake Runner that implements `Forward` the same way the

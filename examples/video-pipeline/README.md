@@ -39,4 +39,4 @@ python -m unittest discover -s examples/video-pipeline -p test_video.py
 
 ## 验证状态
 
-Windows 的新检出流水线实测结果与 Linux 验证缺口记录于 `docs/ferry-vs-lobehub-real-scenarios-2026-11-12.md`。单元测试中的 Linux 平台选择检查不等于 Linux 原生运行验证。
+Windows 的新检出流水线实测结果与 Linux 验证缺口记录于 `docs/research/2026-11-12-ferry-vs-lobehub-real-scenarios.md`。单元测试中的 Linux 平台选择检查不等于 Linux 原生运行验证。

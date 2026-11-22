@@ -438,7 +438,7 @@
 ## T8 独立资源实现 / 保留策略待答复
 - Decision：继续用户已批准的密钥变量模块；独立实现加密资源、共享表单、作用域解析和测试，尚不决定旧密钥保留。
 - Reason：回滚恢复当时值会加密保留旧密钥；回滚使用当前值会改变完整配置恢复语义。2026-10-25已发异步二选一问题，推荐历史加密快照，尚未收到答复。CLAUDE §2适用，不将继续模块等同于选择保留政策。
-- Alternatives Considered：历史快照/当前值两方案已写docs/tasks/T8-variables.md。
+- Alternatives Considered：历史快照/当前值两方案已写docs/archive/implementation/t8-variables.md。
 - Tradeoffs：实际Compose交付尚未接入。pure render明确标记未绑定引用，执行入口拒绝标记，绝不静默漏掉环境项。
 - Scope / Status：本地变量资源/共享UI/测试已实施；回滚与快照待选择。没有commit/push/release；不影响已发布alpha.4。
 
@@ -508,7 +508,7 @@ Decision: code connection consists of platform + auth, existing credentials reus
 Decision: user explicitly says “agent runner 这个版本就要” after discussion of service installation, auto recovery and graceful automatic upgrade. Include Linux/macOS/Windows native services/autostart/crash restart and drain→verified upgrade→healthcheck→rollback in next alpha, not a later release. Existing network reconnect retained. Boundary: brief agent offline during replacement is disclosed; no zero-disconnect/automatic failed-job resume claim. Scope includes necessary signed artifacts and native platform acceptance. Status APPROVED, not implemented.
 
 ## T17 desktop unattended Windows updates — APPROVED 2026-10-28
-Decision: user approved independent updater, ordinary helper for CurrentUser and protected initially-authorized native updater service for AllUsers. Preserve graceful task drain and automatic original-user restart; eliminate repeated installer wizard/UAC on already provisioned installs. Old installation migration may need one authorization; no OS privilege bypass. Scope: desktop Windows update lifecycle plus necessary signed broker/installer/native tests. AgentRunner supervisor remains separate. Implementation plan docs/tasks/T17-desktop-unattended-updates.md; not implemented/accepted yet.
+Decision: user approved independent updater, ordinary helper for CurrentUser and protected initially-authorized native updater service for AllUsers. Preserve graceful task drain and automatic original-user restart; eliminate repeated installer wizard/UAC on already provisioned installs. Old installation migration may need one authorization; no OS privilege bypass. Scope: desktop Windows update lifecycle plus necessary signed broker/installer/native tests. AgentRunner supervisor remains separate. Implementation plan docs/plans/t17-desktop-unattended-updates.md; not implemented/accepted yet.
 
 ## 根目录共享项目记录 — 2026-10-29
 - Decision：将原 `.claude/decisions.md` 移至根目录 `ADR.md`，原 `.claude/task-state.md` 移至 `MEMORY.md`。ADR 保存长期决策，MEMORY 保存当前状态、限制、验证证据和交接记录。
@@ -643,7 +643,7 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Verification: worker `go test` on Windows 19 PASS/2 SKIP, linux+darwin vet; `scripts/test-actions-windows.py` real server + current-user runner + worker on this Windows machine 9 PASS; CI runner-services (Windows) runs both and gates releases.
 
 ## Pipeline v2 decisions D1–D17 — confirmed as recommended (2026-11-02)
-- Decision: user accepted all recommendations in docs/ferry-流水线全功能设计.md §27 (D1–D13) and docs/ferry-流水线对标功能清单.md §3.1 (D14–D17): worker evaluate subcommand for server-side expressions; S3-compatible artifact store for clusters; YAML on.schedule rejected in favour of cron jobs; trigger_run_as rebinding to last definition editor; legacy JSON frozen with converter; Windows native shell jobs in P3; robot-webhook notifications without email; phase order P0→P1→P2; reruns create new runs with copied artifacts; concurrency in envelope settings with queue_latest default for event triggers; fork MRs never auto-run; environment protection gates; trigger_environments mapping; pipeline-level permissions in P2; admin bypass off by default with per-environment switch; draft/publish where event and schedule triggers use the published revision (P1); generic secret webhook trigger (P1).
+- Decision: user accepted all recommendations in docs/architecture/pipeline-v2.md §27 (D1–D13) and docs/reference/pipeline-feature-benchmark.md §3.1 (D14–D17): worker evaluate subcommand for server-side expressions; S3-compatible artifact store for clusters; YAML on.schedule rejected in favour of cron jobs; trigger_run_as rebinding to last definition editor; legacy JSON frozen with converter; Windows native shell jobs in P3; robot-webhook notifications without email; phase order P0→P1→P2; reruns create new runs with copied artifacts; concurrency in envelope settings with queue_latest default for event triggers; fork MRs never auto-run; environment protection gates; trigger_environments mapping; pipeline-level permissions in P2; admin bypass off by default with per-environment switch; draft/publish where event and schedule triggers use the published revision (P1); generic secret webhook trigger (P1).
 - Scope: design only; development not started (user waiting on another session). Checklist §3.2 items still need folding into the design before T18 task breakdown.
 - Status: CONFIRMED.
 
@@ -665,7 +665,7 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - v2 design header, PRD (FR-PIPE-01, NFR-COMP-02, §12, Q02) and capability inventory are annotated accordingly. Found by the PRD drafting review (Q02).
 
 ## v3 V1–V12 and PRD open items Q03–Q15 confirmed as recommended (2026-11-02)
-- V1–V12 confirmed as recommended in docs/ferry-工作流平台v3总体设计.md §16 (V6/V7 concrete model families and providers still chosen before S4/S3).
+- V1–V12 confirmed as recommended in docs/architecture/workflow-platform-v3.md §16 (V6/V7 concrete model families and providers still chosen before S4/S3).
 - Q03 permissions: workspace permission is the ceiling; object roles (owner/all/run/view) granted within it; group grants inherited by members and unioned with object grants; no explicit deny; ownership transferable to members with edit permission.
 - Q04 skip failed job: requires the object's "all" permission; only failed/timed-out host jobs; approvals, deploy tasks and environment gates cannot be skipped; downstream continues; audited.
 - Q05 merged MR runs check out the exact merge commit from the event, never the target branch head.
@@ -773,7 +773,7 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Reason：不分配额外域名；Rathole为L4按端口转发、与现有通道重复；同源不加沙箱时预览页JS可用查看者会话调用全部Ferry API。
 - Alternatives Considered：Rathole；子域名/独立端口origin；仅凭token权限（不安全，风险来自查看者登录态）；HTML改写（不可靠）。
 - Tradeoffs：被预览应用不能用Cookie/localStorage/IndexedDB；Web预览需应用配置base或相对路径。
-- Scope：详见docs/preview-holes-design.md；转发长连接不持有升级租约，Runner停止/升级时主动关闭。
+- Scope：详见docs/design/preview-holes-design.md；转发长连接不持有升级租约，Runner停止/升级时主动关闭。
 - Status：已实现并验证，提交于feat/preview-holes@403a5b6，待合并main（2026-11-09）。实现补充：导航放host分组；url返回根相对路径由浏览器拼接；错误页为带沙箱CSP的纯文本；转发会话不持有Runner升级租约。
 
 ## 中断私聊显式恢复（2026-11-09，用户确认）
@@ -818,7 +818,7 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Decision：主要公开URL和可选预览根域名统一在平台设置的访问地址分区；控制台接受网络可达合法Host，保留认证、同源和写入请求标记。预览按token.根域名分流且不回退控制台，未配置域名时禁用。
 - Reason：用户拒绝路径前缀开关及env/部署脚本重复维护业务域名。原256位token无损Base32转换成52字符标签，复用原授权、撤销、Runner和沙箱。
 - Alternatives：旧有效路径308迁移，旧域名和未知token404。运维DNS/TLS/代理设置仍属于部署层，数据库配置不能替代。
-- Scope/Tradeoffs：新增access_config可空TEXT迁移，保留旧加密URL和历史strip_prefix字段。详细模型、up/down、全状态与验收见docs/preview-holes-design.md第17节。旧配置base路径的应用需调整为根路径。
+- Scope/Tradeoffs：新增access_config可空TEXT迁移，保留旧加密URL和历史strip_prefix字段。详细模型、up/down、全状态与验收见docs/design/preview-holes-design.md第17节。旧配置base路径的应用需调整为根路径。
 - Status：已实现，真实Runner/Actions/工作流、CI测试DNS与发布证据以MEMORY.md为准，不宣称公网DNS/TLS验收。
 
 ## 2026-11-11 Monitoring health v1 (isolated branch)
@@ -827,7 +827,7 @@ Reason: entry reachability alone masks failed cluster nodes; execution success i
 Alternatives considered: remove existing alert rules; replace host monitoring; both rejected because shared capabilities remain necessary.
 Tradeoffs: runtime state is explicitly process/container/task evidence, not protocol quorum. HTTP/TCP originate on server network.
 Cluster identity: Swarm observations include the Cluster ID returned by a bounded read-only `docker info` command. Only observations with the same cluster identity merge replica demand; independent clusters in a host group remain separate. Missing identity is unknown evidence, never an inferred shared cluster.
-Scope: docs/监控与应用健康一期设计.md. No phase-two protocols/log/scripts/heartbeat/automatic repair. No existing data migration or shared service update. Status: implementation in isolated worktree, not accepted.
+Scope: docs/design/monitoring-and-application-health-phase-1.md. No phase-two protocols/log/scripts/heartbeat/automatic repair. No existing data migration or shared service update. Status: implementation in isolated worktree, not accepted.
 
 ## 2026-11-11 Preview token strength
 - Decision: user requires long secure subdomain tokens; preserve 32 cryptographically random bytes (256 bits), losslessly represented as52 lowercase unpadded Base32 characters. No shortening.
@@ -888,16 +888,16 @@ Scope: site name/title prefixes and menu organization only. Status: implemented 
 - 入口为工作空间“维护 → 通知”，集中渠道、模板和发送记录。各工作空间独立管理；不把工作空间机器人或SMTP连接放到平台注册邮箱配置。
 - 仓库监控保留启停、仓库范围、事件订阅和业务内容；代码洞察、告警、流水线与工作流保留各自触发条件，只引用通知渠道/模板。业务规则不迁入通知菜单，平台注册验证码及其模板仍归账户注册设置。
 - 现有源码的业务渠道配置位于仓库连接监控，非独立代码洞察发送模块。复用 notifications/channel.rs 和 webhook.rs，统一传输、签名、接收方错误判断；不是把仓库专用的推送字段强加给其他业务消息。
-- 存量渠道转换为本空间共享渠道并保存绑定，保留地址、密钥、语言、启停及订阅行为；不重置监控轮询、已有事件和已投递记录，不因转换自动补发。模型、字段/索引/DDL与备份降级契约见 docs/统一通知设计.md；4291 已执行 notification_center_v1，转换及整库保全证据见 data/maintenance/notification-center/local-update.json。本轮实际迁移验证为 SQLite，PG/MySQL 未实连验证。
+- 存量渠道转换为本空间共享渠道并保存绑定，保留地址、密钥、语言、启停及订阅行为；不重置监控轮询、已有事件和已投递记录，不因转换自动补发。模型、字段/索引/DDL与备份降级契约见 docs/design/unified-notifications.md；4291 已执行 notification_center_v1，转换及整库保全证据见 data/maintenance/notification-center/local-update.json。本轮实际迁移验证为 SQLite，PG/MySQL 未实连验证。
 - 统一发送接口供工作流节点、构建步骤及 ferry_request 复用。渠道查看、配置、发送分权，按当前空间和可用渠道验证；AI沿用调用人权限与Agent角色交集，密钥服务端解密，不出现在MCP响应或执行日志。副作用调用记录来源、操作人及关联运行/会话，幂等控制避免重试重复发送；不得把“具有查看权限”视为发送授权。
 - 实现及验收边界：统一 notification.send 节点支持 SMTP 与现有机器人/Webhook渠道，ferry_request 使用统一发送接口；构建增加 ferry/notify@v1，复用消息参数表单与私有 worker 桥，仅支持 Native 任务。容器构建须通过 needs 串联独立 Native 通知任务。Agent 来源在工作流/流水线加密上下文持久化，后台重新检查账号、Agent、渠道权限及撤权。实际本地 HTTP/SMTP、幂等、失败不重发、空间/角色/Agent隔离、存量转换与响应式页面证据见 data/maintenance/notification-center 及 notification-*.log；未向商业通知渠道实发。平台注册邮件仍归账户注册，不迁入业务通知。
 
-AGENT-PROVISIONING-64: Accepted user scope install/update/isolation. Use Runner-local opt-in policy and immutable npm installations; preserve native mode and permissions. Configuration isolation is not an OS sandbox. Do not copy execution-user credentials or claim API profiles work. No migration. See docs/agent-runtime-provisioning.md.
+AGENT-PROVISIONING-64: Accepted user scope install/update/isolation. Use Runner-local opt-in policy and immutable npm installations; preserve native mode and permissions. Configuration isolation is not an OS sandbox. Do not copy execution-user credentials or claim API profiles work. No migration. See docs/guides/agent-runtime-provisioning.md.
 
 ## 2026-11-11 Confirmed login renewal policy and DSH identity
 Decision: retain Cookie-based authentication. New sessions use 30-minute access and 14-day absolute refresh lifetime; automatic refresh enabled by default and triggered only by user activity. Rotate refresh tokens; never extend the original absolute deadline. Logout revokes both tokens. Platform duration changes affect new logins, disabling automatic refresh stops future automatic renewal immediately.
 Reason: user explicitly accepted these recommended semantics. Alternatives considered: JWT replacement and indefinite sliding refresh. Tradeoffs: additive persistence and race/replay tests are needed; existing sliding sessions need explicit compatible migration treatment. Scope: login/session policy; implementation pending.
-Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-ai/deepseek-harness, npm @deepseek-ai/dsh, verified from upstream README and CLI help. Node >=24.9.0. Reuse ACP transport with DSH's session/resume and session/set_config_option, managed installation and per-Agent DSH_HOME. A temporary plugin invokes the native permission service for readonly admission and forwards native turn/end reason, since upstream ACP maps errors to end_turn. Require the root session's receipt; descendant endings cannot complete the root turn. Alternatives considered: copying generic ACP load/modes (unsupported) and treating end_turn as success (loses failures). Tradeoffs: depends on DSH's public plugin lifecycle APIs; no OS sandbox or automatic vendor login. Scope: adapter/provisioning, no schema change. Status: implemented and real process acceptance PASS8/8; installed on local4291 with both Runners updated, no database migration. See docs/agent-runtime-provisioning.md for verification boundaries.
+Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-ai/deepseek-harness, npm @deepseek-ai/dsh, verified from upstream README and CLI help. Node >=24.9.0. Reuse ACP transport with DSH's session/resume and session/set_config_option, managed installation and per-Agent DSH_HOME. A temporary plugin invokes the native permission service for readonly admission and forwards native turn/end reason, since upstream ACP maps errors to end_turn. Require the root session's receipt; descendant endings cannot complete the root turn. Alternatives considered: copying generic ACP load/modes (unsupported) and treating end_turn as success (loses failures). Tradeoffs: depends on DSH's public plugin lifecycle APIs; no OS sandbox or automatic vendor login. Scope: adapter/provisioning, no schema change. Status: implemented and real process acceptance PASS8/8; installed on local4291 with both Runners updated, no database migration. See docs/guides/agent-runtime-provisioning.md for verification boundaries.
 
 ## 2026-11-11 Local main integration
 - Decision: user explicitly authorized merging monitoring d56de5a and preview ingress 8a27a57 into local main, preserving main 8f4a884.
@@ -912,7 +912,7 @@ Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-a
 - Reason：用户要求类似 `helm repo add` 的平台级多源、模板以 Git 管理、平台级先只做公开仓库；参考 Helm/Nomad Pack/1Panel 的目录+版本结构，同步只读 CI 生成的单一 bundle 以避开匿名 API 限额。
 - Alternatives：平台来源独立新表（重复空间来源的查询与条目存储，否决）；同步时逐文件请求目录（匿名 60 次/小时不足，否决）；平台级私有仓库与平台凭据（用户确认本期不做）。
 - Scope/Tradeoffs：同步以 `sync_owner/sync_lease_until` 租约保证多实例只执行一次，后台每 60 秒调度到期来源，失败保留旧目录；`marketplace::recover` 不再处理平台来源。导入在一个事务里创建应用模板与附带配置模板，配置模板重名追加 `-2…-20`，应用模板 `fromTemplate` 改写为配置模板 ID，并记录 `origin_*`。未知 kind / `requires.ferry` 不满足 / 集群蓝图（P2 前）入库但不可导入。官方模板先放本仓库 `marketplace/`，协议稳定后再拆独立仓库。迁移内置一条默认官方来源（id=1，`7link-team/ferry` main `marketplace/index.json`，用户确认），可停用/删除且不再重建。迁移 `marketplace_platform` 仅新增列与索引，down 删除新增列。
-- Status：P1 已在分支 `feature/marketplace-p1` 实现并本地验收（证据 `data/maintenance/marketplace-p1/`）；集群蓝图、拓扑变更、六个 HA 模板按 `docs/应用市场与集群模板设计.md` 后续分期。未合并 main、未发布。
+- Status：P1 已在分支 `feature/marketplace-p1` 实现并本地验收（证据 `data/maintenance/marketplace-p1/`）；集群蓝图、拓扑变更、六个 HA 模板按 `docs/design/marketplace-and-cluster-templates.md` 后续分期。未合并 main、未发布。
 
 ## 集群蓝图 P2a（2026-11-11，分支 feature/marketplace-p2）
 
@@ -1235,3 +1235,11 @@ Decision: dsh refers to official DeepSeek Harness, https://github.com/deepseek-a
 - Decision: exclude only code-insights view mode from the form-specific outer grid sizing; reuse the original bounded shell and existing tabpanel scrolling. Keep edit/new configuration minimums, existing data refresh, permissions, routes and all browser assertions unchanged. No API/schema/localization change or migration.
 - Verification: unchanged production insight browser acceptance RED before the one-condition fix, GREEN after production rebuild; all six locales, mobile choices, manual/automatic refresh, reading offset, expanded diagnostics and chart/table identity pass. App unit suite 42 PASS and npm production build PASS. Source-mode diagnostic timed out while loading Vite dependencies; acceptance uses the built production output. Original local 4291 and production services remain untouched.
 - Fresh embedded server build and real-server CRUD acceptance PASS (TEMP/crud-detail-KjRbiI): 17 groups covering view/edit/save/cancel, actual optimistic conflict, 1440/900/390/320px, EN/MS and 150% font. No test assertion changed. Self-review: one App condition plus decision/state records only; final release acceptance still awaits remote gates.
+
+## Repository consolidation and documentation organization (2026-11-22)
+- Decision: the user requested all branches and worktrees consolidated into main, SSH pushed and removed, including sibling worktrees; the user then requested English documentation paths, clearer organization, version/date metadata, and appropriate merging/cleanup. All branch tips were made reachable from main. Resource-policy integration retained the current progress record; obsolete CI probe commits were joined using an unchanged-tree merge so reduced test matrices, temporary triggers and paused release checks did not override current configuration.
+- Evidence/retention: 66 dirty source files in the old detached worktree exactly matched blobs already in main history. Two remaining documents were stale progress/decision snapshots; the decisions already have current counterparts in main. Full dirty-source ZIPs, patches and blob evidence are preserved outside Git in the task's temporary evidence directory. Worktree deletion encountered shared directory junctions; those were detached before remaining cleanup, and shared npm dependencies were restored with npm ci and reverified. A residual directory that the tool policy refused to recursively delete was reversibly moved outside the repository to D:/Temp/ferry-worktree-cleanup. Original service data/keys and production were not migrated or restarted.
+- Documentation scope: organize existing material under architecture/guides/design/prd/plans/research/reference/archive, retain prototype/schema/screenshot ownership, move dated task records to historical archives, and unify discovery through docs/README.md. Preserve independent PRD/data/API/copy/review contracts and their original statuses; no byte-identical duplicate existed among the original 164 assets. No product behavior, schema, permissions, financial policy, dependency version or source contract is changed.
+- Naming/version policy: English paths and stable kebab-case names; date prefixes for historical plans/evidence, not unstable version suffixes on canonical links. Metadata documentation_revision 1.0 denotes the new cataloguing baseline, organized_on is this pass's date, and source_updated_on comes from the original Git source date. These fields do not replace a body's design/PRD version or assert implementation/release acceptance. Existing bodies retain their original language under the announced filenames-only interpretation; a clarification asking whether all bodies also need translation remains open.
+- Verification: before/after original local Markdown links 552/552 valid; unified index expands checked links to 650 with zero missing targets. All docs paths are ASCII. Independent original/new legacy contract-checker executions fail at the same unchanged fixed-46-node assertion; this pre-existing limitation is explicitly documented, not weakened. The separate storage-index reference suite passes all 32 cases. Source changes outside docs are documentation references/comments only; validators retain checks and update moved filenames. Remaining final verification and delivery status are recorded in MEMORY.md.
+- Final acceptance: 656 local targets resolve after supporting-asset links; all 164 original assets accounted for, 85 existing Markdown documents have metadata, 55 reference assets retain their original bytes and the raw Codeup capture is unchanged. Independent comparison permits only relocated references, metadata, the explicit legacy-validator notice and one changed log-reference line's trailing-space cleanup; source changes outside docs are path comments only. Full frontend127files/957PASS/1existingSkip, TypeScript, theme check and production Vite build PASS after shared dependency restoration. Self-review and current cleanup/documentation acceptance PASS; existing release-CI failure remains a separate NOT READY gate.

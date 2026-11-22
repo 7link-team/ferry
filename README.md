@@ -39,7 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
 
 打开 **http://localhost:4290**，使用令牌创建第一个平台超级管理员。**没有默认账号或密码。**
 
-域名、HTTPS、MySQL、备份与升级方法见 [Compose 部署指南](docs/compose-quickstart.md)。
+域名、HTTPS、MySQL、备份与升级方法见 [Compose 部署指南](docs/guides/compose-quickstart.md)。
 
 ### 轻量单机部署
 
@@ -127,15 +127,17 @@ npm test
 
 ## 文档
 
-- [产品与技术方案](docs/ferry-运维平台产品与技术方案.md)
-- [Compose 部署、HTTPS、备份与升级](docs/compose-quickstart.md)
-- [仓库连接与授权](docs/repository-connections.md)
-- [部署与数据导入导出](docs/deployments-and-transfers.md)
-- [工作流能力清单](docs/ferry-工作流能力清单.md) · [工作流总体设计](docs/ferry-工作流平台v3总体设计.md)
+完整分类、版本和更新时间见[文档索引](docs/README.md)。
+
+- [产品与技术方案](docs/architecture/platform-product-and-technical-design.md)
+- [Compose 部署、HTTPS、备份与升级](docs/guides/compose-quickstart.md)
+- [仓库连接与授权](docs/guides/repository-connections.md)
+- [部署与数据导入导出](docs/guides/deployments-and-transfers.md)
+- [工作流能力清单](docs/reference/workflow-capability-matrix.md) · [工作流总体设计](docs/architecture/workflow-platform-v3.md)
 - [工作流扩展示例](examples/workflow-extensions/README.md)
-- [Runner 安装、运行与升级](docs/tasks/T16-runner-lifecycle.md)
-- [桌面应用更新](docs/tasks/T17-desktop-unattended-updates.md)
-- [阶段实现与验收记录](docs/tasks/T12-product-completion.md)
+- [Runner 安装、运行与升级](docs/plans/t16-runner-lifecycle.md)
+- [桌面应用更新](docs/plans/t17-desktop-unattended-updates.md)
+- [阶段实现与验收记录](docs/archive/implementation/t12-product-completion.md)
 
 ## 反馈与参与
 

@@ -1,4 +1,14 @@
+---
+documentation_revision: "1.0"
+organized_on: "2026-11-22"
+source_updated_on: "2026-11-05"
+---
+
 # 工作流可机读设计契约
+
+## 校验适用范围（2026-11-22）
+
+本页保留原设计批次的契约和评审记录，不将历史样例宣称为当前运行时的完整节点目录。整理文档时，`check_contracts.py` 在整理前后的同一断言处失败：它固定要求 46 个核心节点，而当前共享契约已继续演进；本次没有修改该计数或放宽断言。`check_index_contracts.py` 的 32 项存储索引参考用例仍通过。文档路径和元信息整理不等于重新完成全部历史设计验收，发布状态以实际构建和运行时检查为准。
 
 四份 JSON 契约的唯一源码位于 `src/shared/workflow-contracts`，由前后端共用。本目录只维护设计说明和参考校验脚本，不作为产品运行时依赖。下文设计范围与实施进度应分开理解：Schema 存在不代表对应执行器已经交付。
 
@@ -71,25 +81,25 @@ python -X utf8 docs/prd/schemas/check_contracts.py
 
 ## v1.10 文件与归档契约
 
-新增file.archive_pack、file.archive_unpack、file.encode、file.decode共4个S2节点，逐源映射B005/B020/B021/B041/B047/B057。输入输出基数、逐格式有损边界、CSV转义、XLSX日期、归档安全、资源计数与失败恢复见[PRD §20](../ferry-工作流平台PRD.md)。显式参数限额不提供未经批准默认值；部署硬限制和解析器版本尚未冻结。
+新增file.archive_pack、file.archive_unpack、file.encode、file.decode共4个S2节点，逐源映射B005/B020/B021/B041/B047/B057。输入输出基数、逐格式有损边界、CSV转义、XLSX日期、归档安全、资源计数与失败恢复见[PRD §20](../workflow-platform-prd.md)。显式参数限额不提供未经批准默认值；部署硬限制和解析器版本尚未冻结。
 
 v1.10阶段check_contracts.py共303例（原245+新增58）检查53套manifest、75项源映射与PRD逐源名称、格式条件、虚拟路径/重复/父子冲突、CSV分隔/引号字符及sheet名称。样例与负例使用已解析参数；它没有读取ZIP/PDF/Office文件，也没有执行文件字节转换、流式资源守卫、权限查询或OS隔离。required_evidence表示未来实测要求，格式往返不能由Schema通过替代。索引参考夹具保留32例。
 
 ## v1.11 Merge就绪与恢复参考
 
-core目录新增merge_readiness：16行两输入真值表、符号定义、恢复身份及输入投影字段，规范语义见[PRD §21](../ferry-工作流平台PRD.md)及[模型 §14](../ferry-工作流平台数据模型.md)。manifest参数与53节点/75源成员不变。现有参数正反例全部保留，v1.11阶段check_contracts.py共376例（原303+73）；两输入决策32例、N输入/到达顺序1组、门槛10例、归一16例、非法投影5例、SQLite最小事务9例。
+core目录新增merge_readiness：16行两输入真值表、符号定义、恢复身份及输入投影字段，规范语义见[PRD §21](../workflow-platform-prd.md)及[模型 §14](../workflow-platform-data-model.md)。manifest参数与53节点/75源成员不变。现有参数正反例全部保留，v1.11阶段check_contracts.py共376例（原303+73）；两输入决策32例、N输入/到达顺序1组、门槛10例、归一16例、非法投影5例、SQLite最小事务9例。
 
 merge_projection消费的是已提交的所连端口投影状态；分支的S需要从选择/跳过记录构建，不能拿If整体succeeded+空数组猜测。merge_readiness输出wait/hold/stop等只是参考决策标签，不新增产品状态。SQL夹具只验证手工给定快照下的局部事务条件，未执行调度器、真实崩溃恢复或完整Merge数据运算。多来源同端口、error_output未选main的E/S、position/fields/join值冲突及重复键规则仍未冻结。
 
 ## v1.12 内嵌Schema编译参考
 
-v1.12阶段check_contracts.py共430例（原376+54），53个manifest/75源映射保持。核心目录embedded_schema_contract给出单资源2020-12设计配置、完整关键字及子位置分类、显式夹具预算；规则见[PRD §22](../ferry-工作流平台PRD.md)。局部$ref解析到真实Schema位置，支持Pointer与唯一anchor，校验前向/转义/百分号/false目标；引用环只检测不展开，不能当运行终止保证。
+v1.12阶段check_contracts.py共430例（原376+54），53个manifest/75源映射保持。核心目录embedded_schema_contract给出单资源2020-12设计配置、完整关键字及子位置分类、显式夹具预算；规则见[PRD §22](../workflow-platform-prd.md)。局部$ref解析到真实Schema位置，支持Pointer与唯一anchor，校验前向/转义/百分号/false目标；引用环只检测不展开，不能当运行终止保证。
 
 本设计配置拒绝$id资源切换、动态词汇、其它方言及未知关键字；普通default/const/examples数据不作为引用指令。format/content*为注解，默认值不执行。预算数字只是文档例值，运行部署配置和整图聚合预算仍待冻结。校验器不执行不可信实例的断言、正则中断、OS资源隔离或提交事务，具体边界以PRD为准；历史§v1.7“局部引用未验”现在由本阶段静态范围部分覆盖。
 
 ## v1.13 凭据逻辑槽与授权投影
 
-核心目录credential_contract及data.crypto/key、net.http/auth、net.smtp/smtp补逻辑profile和操作条件，规范见[PRD §23](../ferry-工作流平台PRD.md)。存储kind与profile分开，现有host/build/deploy scope保持，不新增workflow枚举；适配器配置存储和工作流module绑定尚未冻结。缓存投影复用凭据行version避免同ID轮换旧结果，不读/不hash秘密；所有写路径仍需实际审计。
+核心目录credential_contract及data.crypto/key、net.http/auth、net.smtp/smtp补逻辑profile和操作条件，规范见[PRD §23](../workflow-platform-prd.md)。存储kind与profile分开，现有host/build/deploy scope保持，不新增workflow枚举；适配器配置存储和工作流module绑定尚未冻结。缓存投影复用凭据行version避免同ID轮换旧结果，不读/不hash秘密；所有写路径仍需实际审计。
 
 v1.13阶段check_contracts.py共473例（原430+43），53manifest/75映射保持。credential_projection只用合成当前资格元数据检查同空间/module/身份/profile与版本，输出非敏感分区；不是实际鉴权、解密、缓存查找或外部调用实现。4个阶段撤权例是反复调用参考资格函数，不是实际发布/队列/缓存的端到端证据；type/profile相容不证明实际payload、远端认证或OAuth刷新可用。
 
@@ -163,7 +173,7 @@ previous_run_as 明确确认旧身份。生产身份及修订指针、账本与�
 owner；转让不更改修订、发布指针、生产身份或在途执行。接口验收以 MEMORY 及原始
 HTTP 证据为准，不表示 UI 或流水线转让已经完成。
 
-核心目录graph_publication_contract及[PRD §24](../ferry-工作流平台PRD.md)区分结构参考、完整参数、发布评审及显式触发入口。structure只放过缺必填凭据/host绑定，仍检查解析后参数；不能冒充真实草稿API。拓扑诊断只分析结构合格的顶层图并返回warning，缺Merge端口/同端口多来源/未选入口依赖不伪造E/S或自动升级Q06发布错误；循环body接口、model/main冲突与typed运行支持保留待冻结。
+核心目录graph_publication_contract及[PRD §24](../workflow-platform-prd.md)区分结构参考、完整参数、发布评审及显式触发入口。structure只放过缺必填凭据/host绑定，仍检查解析后参数；不能冒充真实草稿API。拓扑诊断只分析结构合格的顶层图并返回warning，缺Merge端口/同端口多来源/未选入口依赖不伪造E/S或自动升级Q06发布错误；循环body接口、model/main冲突与typed运行支持保留待冻结。
 
 当前check_contracts.py共505例（原473+32），53manifest/75映射不变。新增16端口关系、5阶段区别、9拓扑/入口及2个Unicode固定数据容量边界；当前数据类型仍为main，typed/GPU例只测参考关系。pin_data按严格UTF-8封装计1MiB，不以ASCII转义后的长度误拒中文。该参考检查不包含运行发布事务、触发器或生产计划构建，问题面板/六语言仍未验。
 

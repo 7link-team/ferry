@@ -1,4 +1,4 @@
-//! `host.preview` (docs/preview-automation-design.md section 6): optionally
+//! `host.preview` (docs/design/preview-automation-design.md section 6): optionally
 //! start a service on a runner host, open a preview of its port, and with
 //! `review: human` park the execution until a person approves or rejects it.
 //! The service outlives the node and ends with the execution: `run::finish`

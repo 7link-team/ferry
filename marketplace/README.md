@@ -1,6 +1,6 @@
 # Ferry official templates
 
-Source layout (see `docs/应用市场与集群模板设计.md` §5):
+Source layout (see `docs/design/marketplace-and-cluster-templates.md` §5):
 
 ```
 apps/<key>/package.yaml          package metadata (localized name/description, category, topology, drivers) — like Helm Chart.yaml

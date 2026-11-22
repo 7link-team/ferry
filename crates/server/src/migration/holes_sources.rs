@@ -1,6 +1,6 @@
 use super::*;
 
-/// Who opened a preview and its review outcome (docs/preview-automation-design.md
+/// Who opened a preview and its review outcome (docs/design/preview-automation-design.md
 /// section 3). Existing rows become manual previews with no review.
 pub struct Migration;
 impl MigrationName for Migration {

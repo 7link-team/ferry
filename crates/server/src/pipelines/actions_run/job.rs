@@ -170,7 +170,7 @@ pub(super) async fn job_state(
         return Err(crate::executions::ownership_lost());
     }
     if !matches!(state, "running" | "waiting") {
-        // The job's previews end with it (docs/preview-automation-design.md).
+        // The job's previews end with it (docs/design/preview-automation-design.md).
         let revoked = crate::holes::revoke_source(&s.db, "pipeline", run, Some(key)).await?;
         crate::holes::close_all(&revoked);
     }

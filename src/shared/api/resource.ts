@@ -1,6 +1,6 @@
 /**
  * The client half of the list contract in
- * docs/ferry-运维平台产品与技术方案.md §6. One place builds resource URLs and
+ * docs/architecture/platform-product-and-technical-design.md §6. One place builds resource URLs and
  * reads the envelope, so a resource page never assembles a query string.
  */
 import { commonText } from "../i18n/i18n";
