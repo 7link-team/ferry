@@ -154,10 +154,16 @@ try {
   let pagesChecked=0;
   for (const group of nav) for (const item of group.items) {
     const resource = ({hosts:'nodes', 'host-groups':'node-groups'})[item.resource] || item.resource;
-    const loaded=p.waitForResponse(r=>new URL(r.url()).pathname===`/api${root}/${resource}` && r.request().method()==='GET');
+    const endpoint = resource === 'workspace-settings' ? `${resource}/1` : resource;
+    const loaded=p.waitForResponse(r=>new URL(r.url()).pathname===`/api${root}/${endpoint}` && r.request().method()==='GET');
     await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/${resource}${item.params ? '?'+new URLSearchParams(item.params) : ''}`);
     const response=await loaded;
     assert(response.ok(),`${item.resource}: ${await response.text()}`);
+    if (resource === 'workspace-settings') {
+      const settings = await response.json();
+      assert.equal(settings.id, '1');
+      assert.equal(settings.timezone, null, 'legacy workspace remains unconfirmed');
+    }
     await p.locator('main').waitFor();
     assert(!/还未实现|此页面不支持当前操作/.test(await p.locator('main').innerText()),item.resource);
     pagesChecked++;
