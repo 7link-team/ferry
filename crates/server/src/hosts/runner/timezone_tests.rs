@@ -69,6 +69,7 @@ async fn connect_runner(
         supports_agent_probe: false,
         supports_forward: false,
         supports_timezone: supports,
+        supports_process_timezone: false,
         supports_resource_policy: false,
         timezone: "Asia/Tokyo".into(),
     };

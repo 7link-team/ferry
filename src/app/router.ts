@@ -44,6 +44,7 @@ function parseRoute(pathname: string, search: string): Route {
   if (segments[0] === "account") return { workspace: "_account", group: "account", item: "profile", id: "1", mode: "edit" };
   if (segments[0] === "workspaces") {
     const [, workspace = "", resource = "dashboard", detail = "", action = ""] = segments;
+    if (resource === "workspace-settings" && !detail) return { workspace, group: "ops", item: "workspace-settings", id: "1", mode: "view" };
     if (resource === "application-health") return { workspace, group: "deploy", item: "overview", mode: detail && detail !== "new" ? "view" : "list", ...(detail && detail !== "new" ? { id: detail } : {}) };
     const scope = new URLSearchParams(search).get("scope");
     if (resource === "credentials" && scope === "ai") return {workspace,group:"ops",item:"ai-models",mode:detail === "new" ? "new" : "list"};

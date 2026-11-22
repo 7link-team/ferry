@@ -180,5 +180,6 @@
   "auth.sessionAutoRenewDisabled": "Automatic session renewal is disabled. Sign in again after access expires.",
   "mail.invitationUnavailable": "Configure, enable and test email in Platform settings before sending invitations.",
   "mail.invitationSubject": "Workspace invitation",
-  "mail.invitationBody": "You have been invited to join {workspace}.\nInvitation code: {code}\nSign in or create an account, then open Create/join workspace and enter this code."
+  "mail.invitationBody": "You have been invited to join {workspace}.\nInvitation code: {code}\nSign in or create an account, then open Create/join workspace and enter this code.",
+  "workspace.error.timezone_invalid": "Choose a valid IANA time zone for this workspace."
 }

@@ -1,6 +1,6 @@
 {
   "name": "ferry",
-  "version": "0.10.7-alpha",
+  "version": "0.10.8-alpha",
   "private": true,
   "type": "module",
   "scripts": {

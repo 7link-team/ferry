@@ -823,6 +823,7 @@ async fn fake_runner(s: &AppState, address: SocketAddr, host: i64, key: &str, fo
             supports_agent_probe: false,
             supports_forward: forward,
             supports_timezone: false,
+            supports_process_timezone: false,
             supports_resource_policy: false,
             timezone: String::new(),
         },

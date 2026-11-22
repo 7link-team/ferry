@@ -57,6 +57,7 @@ mod locale_tests {
             cluster: None,
         });
         workspaces::Entity::insert(workspaces::ActiveModel {
+            timezone: Set(None),
             id: Set(1),
             slug: Set("maintenance-test".into()),
             name: Set("Workspace".into()),

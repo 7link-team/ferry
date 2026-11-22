@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { AutoField } from "../../shared/forms/auto-form";
 import { EditorFormActionsContext } from "../../shared/forms/auto-form/form-actions";
 import { EmptyWorkflowCanvas } from "../../shared/editor/EmptyWorkflowCanvas";
@@ -751,12 +752,12 @@ export function WorkflowEditor({
       } },
       { key: "last_run_at", label: t("history.lastRunAt"), render: row => {
         const run = row.latest_execution as Record<string, unknown> | null;
-        return run ? new Date(Number(run.created_at)).toLocaleString() : "—";
+        return run ? <WorkspaceDate value={Number(run.created_at)} /> : "—";
       } },
       {
         key: "created_at",
         label: t("createdAt"),
-        render: (row) => new Date(Number(row.created_at)).toLocaleString(),
+        render: (row) => <WorkspaceDate value={Number(row.created_at)} />,
       },
     ],
   };
@@ -776,9 +777,9 @@ export function WorkflowEditor({
       { key: "revision_number", label: t("history.version"), render: row => row.revision_number ? `v${row.revision_number}` : "—" },
       { key: "trigger_kind", label: t("history.trigger"), render: row => row.trigger_kind === "manual" ? t("manual") : row.trigger_kind === "schedule" ? commonText("resource-domain:cron.scheduled") : String(row.trigger_kind || "—") },
       { key: "triggered_by_name", label: t("history.actor") },
-      { key: "created_at", label: t("createdAt"), sortable:true, render: row => new Date(Number(row.created_at)).toLocaleString() },
-      { key: "started_at", label: t("execution.startedAt"), sortable:true, render: row => Number(row.started_at)>0 ? new Date(Number(row.started_at)).toLocaleString() : "—" },
-      { key: "finished_at", label: t("execution.finishedAt"), sortable:true, render: row => Number(row.finished_at)>0 ? new Date(Number(row.finished_at)).toLocaleString() : "—" },
+      { key: "created_at", label: t("createdAt"), sortable:true, render: row => <WorkspaceDate value={Number(row.created_at)} /> },
+      { key: "started_at", label: t("execution.startedAt"), sortable:true, render: row => Number(row.started_at)>0 ? <WorkspaceDate value={Number(row.started_at)} /> : "—" },
+      { key: "finished_at", label: t("execution.finishedAt"), sortable:true, render: row => Number(row.finished_at)>0 ? <WorkspaceDate value={Number(row.finished_at)} /> : "—" },
       { key: "duration", label: t("execution.duration"), render: row => Number(row.started_at)>0 ? `${Math.max(0,(Number(row.finished_at)||Date.now())-Number(row.started_at))} ms` : "—" },
       { key: "end_reason", label: t("history.endReason"), render: row => row.end_reason === "node_wait" ? t("execution.state.waiting") : String(row.end_reason ?? "") },
     ],
@@ -849,7 +850,8 @@ export function WorkflowEditor({
                     }}>{t(execution.state === "cancelling" ? "execution.cancelling" : "execution.cancel")}</Button>
                   </div>
                 )}
-                {execution.end_reason && execution.end_reason !== "node_wait" ? (
+                {execution.error ? <p role="alert" className="mb-3 break-words text-sm text-destructive">{String(execution.error)}</p> : null}
+                {!execution.error && execution.end_reason && execution.end_reason !== "node_wait" ? (
                   <p className="mb-3 text-sm text-destructive">
                     {execution.end_reason === "integration_unknown" ? t("integration.failure.unknown") : execution.end_reason === "integration_remote" ? t("integration.failure.remote") : execution.end_reason === "integration_invalid" ? t("integration.failure.invalid") : ["platform_request", "platform_too_large", "platform_page_limit", "platform_invalid"].includes(String(execution.end_reason)) ? t(`platform.failure.${execution.end_reason}` as Parameters<typeof t>[0]) : ["agent_output", "agent_limit", "agent_timeout", "agent_failed", "agent_invalid", "agent_permission"].includes(String(execution.end_reason)) ? t(`agent.failure.${execution.end_reason}` as Parameters<typeof t>[0]) : String(execution.end_reason)}
                   </p>

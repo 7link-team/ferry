@@ -87,6 +87,9 @@ pub struct Hello {
     /// Understands `Control::Settings` and `agent::Request::timezone`.
     #[serde(default)]
     pub supports_timezone: bool,
+    /// Per-session child-process timezone for exec, streaming exec and new terminals.
+    #[serde(default)]
+    pub supports_process_timezone: bool,
     #[serde(default)]
     pub supports_resource_policy: bool,
     /// The host's own IANA time zone as detected by the runner; empty if unknown.
@@ -253,6 +256,8 @@ pub struct Entry {
 pub enum Session {
     // ---- server -> runner requests
     TerminalStart {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timezone: Option<String>,
         cols: u16,
         rows: u16,
     },
@@ -261,11 +266,15 @@ pub enum Session {
         rows: u16,
     },
     ExecStart {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timezone: Option<String>,
         command: String,
         timeout_seconds: u64,
     },
     /// Additive streaming command protocol; legacy ExecStart remains unchanged.
     ExecStreamStart {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timezone: Option<String>,
         command: String,
         timeout_seconds: u64,
     },
@@ -467,6 +476,7 @@ mod tests {
             supports_agent_probe: false,
             supports_forward: true,
             supports_timezone: true,
+            supports_process_timezone: false,
             supports_resource_policy: true,
             timezone: "Asia/Shanghai".into(),
         };
@@ -489,9 +499,14 @@ mod tests {
         assert_eq!(back.timezone, "Asia/Shanghai");
         assert!(back.supports_timezone);
         legacy.as_object_mut().unwrap().remove("supports_timezone");
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("supports_process_timezone");
         legacy.as_object_mut().unwrap().remove("timezone");
         let old: Hello = serde_json::from_value(legacy.clone()).unwrap();
         assert!(!old.supports_timezone);
+        assert!(!old.supports_process_timezone);
         assert_eq!(old.timezone, "");
         assert!(
             !serde_json::from_value::<Hello>(legacy.clone())
@@ -589,6 +604,7 @@ mod tests {
             Session::TerminalStart {
                 cols: 120,
                 rows: 40,
+                timezone: None,
             },
             Session::TerminalResize { cols: 80, rows: 24 },
             Session::ForwardStart {
@@ -603,6 +619,7 @@ mod tests {
             Session::ExecStart {
                 command: "echo hi".into(),
                 timeout_seconds: 15,
+                timezone: None,
             },
             Session::ReadFile {
                 path: "/etc/hosts".into(),
@@ -772,5 +789,24 @@ mod tests {
         let back: agent::Request =
             serde_json::from_str(&serde_json::to_string(&zoned).unwrap()).unwrap();
         assert_eq!(back.timezone.as_deref(), Some("Europe/Berlin"));
+    }
+}
+
+#[cfg(test)]
+mod process_timezone_tests {
+    #[test]
+    fn per_process_timezone_is_additive_and_survives_round_trip() {
+        for value in [
+            serde_json::json!({"type":"exec_start","command":"date","timeout_seconds":1}),
+            serde_json::json!({"type":"exec_stream_start","command":"date","timeout_seconds":1}),
+            serde_json::json!({"type":"terminal_start","cols":80,"rows":24}),
+        ] {
+            let legacy: super::Session = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(legacy).unwrap(), value);
+            let mut scoped = value;
+            scoped["timezone"] = serde_json::json!("Asia/Kuala_Lumpur");
+            let frame: super::Session = serde_json::from_value(scoped.clone()).unwrap();
+            assert_eq!(serde_json::to_value(frame).unwrap(), scoped);
+        }
     }
 }

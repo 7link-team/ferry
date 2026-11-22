@@ -223,6 +223,7 @@ async fn record_fingerprint(s: &AppState, host: &Host, channel: &SshChannel) -> 
 }
 
 pub struct SshChannel {
+    timezone: Option<String>,
     resource_policy: ferry_protocol::resources::ResourcePolicy,
     /// `Arc` 是为了让 `read_file` 返回的流能把连接一起带走。
     session: Arc<Handle<Tofu>>,
@@ -350,11 +351,38 @@ impl SshChannel {
         // 走到这里 `check_server_key` 一定跑过了，所以 `seen` 必有值。
         let fingerprint = seen.lock().expect("fingerprint lock").clone();
         Ok(Self {
+            timezone: None,
             resource_policy: Default::default(),
             session: Arc::new(session),
             jump,
             learned_host_key: host.host_key.is_empty().then_some(fingerprint).flatten(),
         })
+    }
+
+    async fn process_channel(&self) -> Result<Channel<client::Msg>> {
+        let mut channel = self.session_channel().await?;
+        if let Some(zone) = &self.timezone {
+            let rejected = || crate::hosts::channel::timezone_unsupported(zone);
+            channel
+                .set_env(true, "TZ", zone.as_str())
+                .await
+                .map_err(|_| rejected())?;
+            let accepted = tokio::time::timeout(Duration::from_secs(15), async {
+                loop {
+                    match channel.wait().await {
+                        Some(ChannelMsg::Success) => return true,
+                        Some(ChannelMsg::Failure | ChannelMsg::Close) | None => return false,
+                        _ => {}
+                    }
+                }
+            })
+            .await
+            .map_err(|_| rejected())?;
+            if !accepted {
+                return Err(rejected());
+            }
+        }
+        Ok(channel)
     }
 
     async fn session_channel(&self) -> Result<Channel<client::Msg>> {
@@ -464,6 +492,11 @@ fn parse_linux_monitor(output: &str) -> Result<HostMonitor> {
 
 #[async_trait::async_trait]
 impl HostChannel for SshChannel {
+    fn set_timezone(&mut self, timezone: Option<String>) -> Result<()> {
+        self.timezone = timezone;
+        Ok(())
+    }
+
     async fn monitor(&self) -> Result<HostMonitor> {
         const COMMAND: &str = "head -n 1 /proc/stat; sleep 1; head -n 1 /proc/stat; awk '{print \"load\", $1}' /proc/loadavg; awk '/^MemTotal:/ {total=$2} /^MemAvailable:/ {available=$2} END {printf \"mem %.0f %.0f\\n\", (total-available)*1024, total*1024}' /proc/meminfo; df -P -B1 | awk 'NR>1 && $1 ~ /^\\/dev\\// {printf \"disk %s %s %s %s\\n\", $1, $6, $2, $3}'; for item in /sys/class/net/*; do test -e \"$item/device\" || continue; name=${item##*/}; printf 'net %s %s %s\\n' \"$name\" \"$(cat \"$item/statistics/rx_bytes\")\" \"$(cat \"$item/statistics/tx_bytes\")\"; done";
         let output = self.exec(COMMAND, Duration::from_secs(10)).await?;
@@ -489,7 +522,7 @@ impl HostChannel for SshChannel {
     }
 
     async fn exec(&self, command: &str, timeout: Duration) -> Result<Output> {
-        let mut channel = self.session_channel().await?;
+        let mut channel = self.process_channel().await?;
         channel.exec(true, command).await.map_err(|error| {
             ApiError::localized(
                 StatusCode::BAD_GATEWAY,
@@ -525,7 +558,7 @@ impl HostChannel for SshChannel {
         output: tokio::sync::mpsc::Sender<(String, Vec<u8>)>,
         mut cancel: tokio::sync::watch::Receiver<bool>,
     ) -> Result<i32> {
-        let mut channel = self.session_channel().await?;
+        let mut channel = self.process_channel().await?;
         channel.exec(true, command).await.map_err(|_| {
             ApiError::localized(
                 StatusCode::BAD_REQUEST,
@@ -588,7 +621,7 @@ impl HostChannel for SshChannel {
 
     async fn open_pty(&self, size: PtySize) -> Result<Box<dyn Pty>> {
         let size = size.sane();
-        let channel = self.session_channel().await?;
+        let channel = self.process_channel().await?;
         channel
             .request_pty(
                 true,
@@ -1493,5 +1526,134 @@ mod tests {
             "提示里要带上实际指纹：{}",
             error.1
         );
+    }
+}
+
+#[cfg(test)]
+mod process_timezone_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct Peer {
+        accept: bool,
+        executed: Arc<AtomicBool>,
+        timezone: Option<String>,
+    }
+    impl russh::server::Handler for Peer {
+        type Error = russh::Error;
+        async fn auth_password(
+            &mut self,
+            _: &str,
+            _: &str,
+        ) -> std::result::Result<russh::server::Auth, Self::Error> {
+            Ok(russh::server::Auth::Accept)
+        }
+        async fn channel_open_session(
+            &mut self,
+            _: Channel<russh::server::Msg>,
+            reply: russh::server::ChannelOpenHandle,
+            _: &mut russh::server::Session,
+        ) -> std::result::Result<(), Self::Error> {
+            reply.accept().await;
+            Ok(())
+        }
+        async fn env_request(
+            &mut self,
+            channel: russh::ChannelId,
+            name: &str,
+            value: &str,
+            session: &mut russh::server::Session,
+        ) -> std::result::Result<(), Self::Error> {
+            assert_eq!(name, "TZ");
+            self.timezone = Some(value.to_owned());
+            if self.accept {
+                session.channel_success(channel)?;
+            } else {
+                session.channel_failure(channel)?;
+            }
+            Ok(())
+        }
+        async fn exec_request(
+            &mut self,
+            channel: russh::ChannelId,
+            command: &[u8],
+            session: &mut russh::server::Session,
+        ) -> std::result::Result<(), Self::Error> {
+            self.executed.store(true, Ordering::SeqCst);
+            assert_eq!(command, b"original user command");
+            session.channel_success(channel)?;
+            session.data(
+                channel,
+                self.timezone.clone().unwrap_or_default().into_bytes(),
+            )?;
+            session.exit_status_request(channel, 0)?;
+            session.eof(channel)?;
+            session.close(channel)?;
+            Ok(())
+        }
+    }
+    #[tokio::test]
+    async fn ssh_process_timezone_requires_a_real_positive_environment_acknowledgement() {
+        use russh::keys::ssh_key::private::{Ed25519Keypair, KeypairData};
+        for accept in [false, true] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let executed = Arc::new(AtomicBool::new(false));
+            let peer = Peer {
+                accept,
+                executed: executed.clone(),
+                timezone: None,
+            };
+            let key = PrivateKey::new(
+                KeypairData::Ed25519(Ed25519Keypair::from_seed(&[73_u8; 32])),
+                "test",
+            )
+            .unwrap();
+            let config = Arc::new(russh::server::Config {
+                keys: vec![key],
+                ..Default::default()
+            });
+            let serving = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let session = russh::server::run_stream(config, stream, peer)
+                    .await
+                    .unwrap();
+                let _ = session.await;
+            });
+            let host = Host {
+                id: 1.into(),
+                workspace_id: 1.into(),
+                credential_id: 0.into(),
+                name: "SSH zone test".into(),
+                address: "127.0.0.1".into(),
+                port: address.port(),
+                username: "fixture".into(),
+                connection: "ssh".into(),
+                host_key: String::new(),
+            };
+            let mut channel = SshChannel::open(&host, Credential::Password("fixture".into()))
+                .await
+                .unwrap();
+            channel
+                .set_timezone(Some("Asia/Kuala_Lumpur".into()))
+                .unwrap();
+            let result = channel
+                .exec("original user command", Duration::from_secs(5))
+                .await;
+            if accept {
+                assert_eq!(result.unwrap().stdout, "Asia/Kuala_Lumpur");
+            } else {
+                assert_eq!(
+                    result.unwrap_err().2.unwrap().key,
+                    "channel.timezoneUnsupported"
+                );
+            }
+            assert_eq!(
+                executed.load(Ordering::SeqCst),
+                accept,
+                "rejected TZ must never start the command"
+            );
+            serving.abort();
+            let _ = serving.await;
+        }
     }
 }

@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { applicationSections } from "./application-sections";
 import { deleteResource, named } from "../../shared/api/resource";
 import { currentLocale } from "../../shared/i18n/locale";
@@ -62,7 +63,7 @@ export function deploymentsLists({
         },
         { key: "mode", label: "部署模式", labelKey: "resource-domain:deployment.mode", render: r => ({ native: "Native (systemd)", docker: "Docker", compose: "Docker Compose", stack: "Docker Swarm / Stack" })[r.mode as string] ?? r.mode },
         { key: "revision_number", label: "版本", labelKey: "common-domain:common.version", render: r => r.revision_number ? `v${r.revision_number}` : "—" },
-        { key: "updated_at", label: "更新时间", labelKey: "resource-domain:platform.workspaceUpdated", sortable: true, render: r => r.updated_at ? new Date(r.updated_at).toLocaleString(currentLocale()) : "—" },
+        { key: "updated_at", label: "更新时间", labelKey: "resource-domain:platform.workspaceUpdated", sortable: true, render: r => r.updated_at ? <WorkspaceDate value={r.updated_at} locale={currentLocale()} /> : "—" },
         {
           key: "description",
           label: "备注",
@@ -132,12 +133,12 @@ export function deploymentsLists({
           labelKey: "resource-domain:execution.startedAt",
           render: (r) =>
             r.started_at
-              ? new Date(r.started_at).toLocaleString(currentLocale())
+              ? <WorkspaceDate value={r.started_at} locale={currentLocale()} />
               : "—",
         },
         { key: "triggered_by_name", label: "触发人", labelKey: "resource-domain:execution.triggeredBy", render: r => named(r.triggered_by_name, r.triggered_by) },
-        { key: "finished_at", label: "结束时间", labelKey: "resource-domain:deployment.finishedAt", render: r => r.finished_at ? new Date(r.finished_at).toLocaleString(currentLocale()) : "—" },
-        { key: "created_at", label: "创建时间", labelKey: "resource-domain:platform.workspaceCreated", sortable: true, render: r => r.created_at ? new Date(r.created_at).toLocaleString(currentLocale()) : "—" },
+        { key: "finished_at", label: "结束时间", labelKey: "resource-domain:deployment.finishedAt", render: r => r.finished_at ? <WorkspaceDate value={r.finished_at} locale={currentLocale()} /> : "—" },
+        { key: "created_at", label: "创建时间", labelKey: "resource-domain:platform.workspaceCreated", sortable: true, render: r => r.created_at ? <WorkspaceDate value={r.created_at} locale={currentLocale()} /> : "—" },
       ],
       actions: [
         {

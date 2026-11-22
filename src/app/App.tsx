@@ -1,3 +1,4 @@
+import { WorkspaceTimezoneContext } from "../shared/timezone";
 import { IdentityAvatar } from "../shared/ui/identity-avatar";
 import { installIntegrationCatalog, type IntegrationManifest } from "../features/workflows/integrations";
 import { TypedValueList } from "./pages/TypedValueList";
@@ -151,9 +152,10 @@ export function App() {
   if (route.group === "ops" && route.item === "hosts" && route.mode === "workspace" && route.id) {
     const current = identity.workspaces.find(workspace => workspace.id === route.workspace)
       ?? identity.workspaces.find(workspace => workspace.slug === route.workspace);
-    if (current) return <HostWorkspace key={`${route.workspace}/${route.id}`} workspace={current.id} hostId={route.id} permissions={new Set(current.permissions)} headerActions={<AppearanceActions />} />;
+    if (current) return <WorkspaceTimezoneContext.Provider value={current.timezone ?? null}><HostWorkspace key={`${route.workspace}/${route.id}`} workspace={current.id} hostId={route.id} permissions={new Set(current.permissions)} headerActions={<AppearanceActions />} /></WorkspaceTimezoneContext.Provider>;
   }
-  return <Workspace identity={identity} reload={reload} onSignedOut={signedOut} />;
+  const active = identity.workspaces.find(w => w.id === route.workspace || w.slug === route.workspace) ?? (!route.workspace ? identity.workspaces[0] : undefined);
+  return <WorkspaceTimezoneContext.Provider value={active?.timezone ?? null}><Workspace identity={identity} reload={reload} onSignedOut={signedOut} /></WorkspaceTimezoneContext.Provider>;
 }
 
 function Workspace({ identity, reload, onSignedOut }: { identity: Identity; reload: () => void; onSignedOut: () => void }) {
@@ -370,6 +372,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
               )}
             </ol>
           </nav>
+          {permissions.has("settings.update") && <p className="mb-2 break-words text-sm text-muted-foreground">{!current.timezone && <>{commonText("resource-domain:workspace.unconfirmedNotice")} </>}<a className="underline" href={href({ workspace: current.id, group: "ops", item: "workspace-settings", id: "1", mode: "edit" }, {})}>{commonText("resource-domain:workspace.settings")}</a></p>}
           <h1 className="mt-1.5 mb-3 text-xl font-semibold">
             {item.label}
             {route.mode === "new" && (item.resource === "hosts" ? commonText("shell.addSuffix") : commonText("shell.createSuffix"))}
@@ -439,7 +442,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
             <div className="min-h-96 overflow-auto">
               <ResourceForm
                 key={`${current.id}/${route.group}/${item.resource}/${route.id ?? "new"}/${route.mode}`}
-                {...(item.resource === "roles" || item.resource === "members" ? { onSaved: reload } : {})}
+                {...(item.resource === "roles" || item.resource === "members" || item.resource === "workspace-settings" ? { onSaved: reload } : {})}
                 config={formConfig}
                 workspace={current.id}
                 permissions={permissions}

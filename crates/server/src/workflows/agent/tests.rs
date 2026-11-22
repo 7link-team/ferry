@@ -1,4 +1,93 @@
 use super::*;
+
+#[tokio::test]
+async fn api_and_cli_agents_receive_the_same_frozen_workflow_clock() {
+    let instant = chrono::DateTime::parse_from_rfc3339("2026-11-22T16:30:00Z")
+        .unwrap()
+        .timestamp_millis();
+    let (now, today) =
+        super::super::expression::clock(&json!({"timezone":"Asia/Kuala_Lumpur"}), instant).unwrap();
+    let clock =
+        json!({"$now":now,"$today":today,"frozen_at_ms":instant,"timezone":"Asia/Kuala_Lumpur"});
+    for api in [false, true] {
+        let fixture = Fixture::new().await;
+        crate::entities::workspaces::Entity::update_many()
+            .col_expr(
+                crate::entities::workspaces::Column::Timezone,
+                Expr::value(Some("Asia/Tokyo")),
+            )
+            .filter(crate::entities::workspaces::Column::Id.eq(1))
+            .exec(&fixture.s.db)
+            .await
+            .unwrap();
+        hosts::Entity::update_many()
+            .col_expr(hosts::Column::TimezoneSupported, Expr::value(1_i64))
+            .filter(hosts::Column::Id.eq(fixture.host))
+            .exec(&fixture.s.db)
+            .await
+            .unwrap();
+        let (url, server, requests) =
+            api_upstream("openai", vec![api_answer(r#"{"summary":"done"}"#)]).await;
+        if api {
+            api_model(&fixture, "openai", &url).await;
+        } else {
+            fixture.script(answer(r#"{"summary":"done"}"#));
+        }
+        let output = execute_with(
+            &fixture.s,
+            &fixture.run,
+            0,
+            &json!({"id":"agent","type":"ai.agent.run"}),
+            &[Item {
+                json: Map::new(),
+                binary: Default::default(),
+                paired: vec![],
+            }],
+            &[params(fixture.agent.id)],
+            Limits {
+                timeout: Duration::from_secs(10),
+                clock: Some(clock.clone()),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(output[0].json["summary"], "done");
+        let prompt = if api {
+            requests.lock().unwrap()[0]["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        } else {
+            assert_eq!(
+                fixture.requests()[0].timezone.as_deref(),
+                Some("Asia/Kuala_Lumpur")
+            );
+            fixture.requests()[0].prompt.clone()
+        };
+        assert!(
+            prompt.contains(&serde_json::to_string(&clock).unwrap()),
+            "{prompt}"
+        );
+        assert!(prompt.contains("2026-11-23T00:30:00.000+08:00"));
+        assert!(prompt.contains("persisted node-attempt clock"));
+        assert!(prompt.contains("workflow_input_items"));
+        assert!(prompt.contains("output_contract"));
+        server.abort();
+    }
+    // Recovery must reuse the identical serialized clock rather than reading a new instant.
+    let first = compose("system", "task", &[], None, false, Some(&clock)).unwrap();
+    assert_eq!(
+        first,
+        compose("system", "task", &[], None, false, Some(&clock)).unwrap()
+    );
+    let (legacy_now, _) = super::super::expression::clock(&json!({}), instant).unwrap();
+    assert_eq!(legacy_now["zone"], "local");
+    assert!(
+        !compose("system", "task", &[], None, false, None)
+            .unwrap()
+            .contains("workflow_runtime_context")
+    );
+}
 use crate::{
     agents::tests::admin,
     entities::workspace_roles,
@@ -238,6 +327,7 @@ async fn api_agent_timeout_stops_waiting_and_does_not_resend_the_request() {
         }],
         &[params(fixture.agent.id)],
         Limits {
+            clock: None,
             timeout: Duration::from_secs(5),
         },
     )
@@ -648,7 +738,10 @@ impl Fixture {
             &node,
             &[input],
             &[params],
-            Limits { timeout },
+            Limits {
+                timeout,
+                clock: None,
+            },
         )
         .await
     }
@@ -1276,6 +1369,7 @@ async fn no_host_and_oversized_prompts_fail_before_the_runner_is_used() {
         &[input],
         &[params(fixture.agent.id)],
         Limits {
+            clock: None,
             timeout: Duration::from_secs(30),
         },
     )
@@ -1322,6 +1416,7 @@ async fn no_host_and_oversized_prompts_fail_before_the_runner_is_used() {
         }],
         &[params(fixture.agent.id)],
         Limits {
+            clock: None,
             timeout: Duration::from_secs(30),
         },
     )
@@ -1337,6 +1432,7 @@ async fn no_host_and_oversized_prompts_fail_before_the_runner_is_used() {
         &[],
         &[params(fixture.agent.id)],
         Limits {
+            clock: None,
             timeout: Duration::from_secs(30),
         },
     )
@@ -1422,10 +1518,10 @@ async fn successive_cli_nodes_use_their_own_hosts_and_transfer_structured_output
     };
     let first = execute_with(&fixture.s, &fixture.run, 0,
         &json!({"id":"first","type":"ai.agent.run","settings":{"runtime":"host","target_kind":"host","target_ref":fixture.host.to_string()}}),
-        &[first_input], std::slice::from_ref(&p), Limits {timeout:Duration::from_secs(10)}).await.unwrap();
+        &[first_input], std::slice::from_ref(&p), Limits {timeout:Duration::from_secs(10), clock:None}).await.unwrap();
     let output = execute_with(&fixture.s, &fixture.run, 0,
         &json!({"id":"second","type":"ai.agent.run","settings":{"runtime":"host","target_kind":"host","target_ref":second_id.to_string()}}),
-        &first, &[p], Limits {timeout:Duration::from_secs(10)}).await.unwrap();
+        &first, &[p], Limits {timeout:Duration::from_secs(10), clock:None}).await.unwrap();
     assert_eq!(output[0].json["summary"], "second host consumed data");
     assert_eq!(fixture.requests().len(), 1);
     let requests = second.agent_requests.lock().unwrap();
@@ -1922,6 +2018,7 @@ async fn api_prompt_policy_checks_composed_system_and_items_before_dispatch() {
             &[item],
             &[p],
             Limits {
+                clock: None,
                 timeout: Duration::from_secs(5),
             },
         )
@@ -2016,6 +2113,7 @@ async fn default_agent_allows_more_than_former_tool_quota_and_backpressures_resu
                 paired: vec![],
             }],
             &[legacy],
+            json!({}),
         ),
     )
     .await

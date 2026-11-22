@@ -34,6 +34,8 @@ pub(crate) struct FakeHost {
     pub agent_scripts: Mutex<std::collections::VecDeque<Vec<AgentStep>>>,
     /// Every Agent request received, in order.
     pub agent_requests: Mutex<Vec<ferry_protocol::agent::Request>>,
+    pub process_timezones: Mutex<Vec<Option<String>>>,
+    pub stream_commands: AtomicBool,
     /// Every input the server sent to a running Agent, in order.
     pub agent_inputs: Mutex<Vec<ferry_protocol::agent::Input>>,
     /// Set once the server requested cancellation of a running Agent.
@@ -105,7 +107,7 @@ pub(crate) fn open(host: &Host) -> Result<Box<dyn HostChannel>> {
     if fake.unreachable.load(Ordering::SeqCst) {
         return Err(connection_lost(&host.address));
     }
-    Ok(Box::new(Channel(fake)))
+    Ok(Box::new(Channel(fake, None)))
 }
 
 fn connection_lost(address: &str) -> ApiError {
@@ -117,7 +119,7 @@ fn connection_lost(address: &str) -> ApiError {
     )
 }
 
-struct Channel(Arc<FakeHost>);
+struct Channel(Arc<FakeHost>, Option<String>);
 
 fn ok(stdout: String) -> Output {
     Output {
@@ -129,6 +131,11 @@ fn ok(stdout: String) -> Output {
 
 #[async_trait::async_trait]
 impl HostChannel for Channel {
+    fn set_timezone(&mut self, timezone: Option<String>) -> Result<()> {
+        self.1 = timezone;
+        Ok(())
+    }
+
     async fn monitor(&self) -> Result<ferry_protocol::HostMonitor> {
         Err(ApiError::bad("fake host has no monitor"))
     }
@@ -137,6 +144,11 @@ impl HostChannel for Channel {
         if self.0.unreachable.load(Ordering::SeqCst) {
             return Err(connection_lost("fake"));
         }
+        self.0
+            .process_timezones
+            .lock()
+            .unwrap()
+            .push(self.1.clone());
         self.0.commands.lock().unwrap().push(command.into());
         if command.starts_with("set -eu") && self.0.fail.load(Ordering::SeqCst) {
             return Ok(Output {
@@ -186,12 +198,21 @@ impl HostChannel for Channel {
     }
     async fn exec_stream(
         &self,
-        _: &str,
+        command: &str,
         _: Duration,
-        _: tokio::sync::mpsc::Sender<(String, Vec<u8>)>,
+        output: tokio::sync::mpsc::Sender<(String, Vec<u8>)>,
         _: tokio::sync::watch::Receiver<bool>,
     ) -> Result<i32> {
-        Err(ApiError::bad("fake host does not stream"))
+        if !self.0.stream_commands.load(Ordering::SeqCst) {
+            return Err(ApiError::bad("fake host does not stream"));
+        }
+        let result = self.exec(command, Duration::ZERO).await?;
+        if !result.stdout.is_empty() {
+            let _ = output
+                .send(("stdout".into(), result.stdout.into_bytes()))
+                .await;
+        }
+        Ok(result.code)
     }
     async fn open_pty(&self, _: PtySize) -> Result<Box<dyn Pty>> {
         Err(ApiError::bad("fake host has no pty"))

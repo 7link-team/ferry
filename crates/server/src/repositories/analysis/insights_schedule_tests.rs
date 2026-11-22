@@ -482,3 +482,68 @@ async fn scheduled_tick_only_dirties_its_selected_path_on_a_shared_connection() 
     );
     assert_eq!(row(&s, b).await.next_run_at, other_next);
 }
+
+#[tokio::test]
+async fn confirmed_workspace_insight_schedule_recomputes_without_changing_collector_or_config() {
+    use crate::entities::workspaces;
+    let (_dir, s) = setup().await;
+    workspaces::Entity::update_many()
+        .col_expr(
+            workspaces::Column::Timezone,
+            Expr::value(Some("Asia/Kuala_Lumpur")),
+        )
+        .filter(workspaces::Column::Id.eq(1))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let mut value = request("Workspace calendar", "team/repo");
+    value["schedule"] = json!("0 9 * * *");
+    value["timezone"] = json!("UTC");
+    let before_create = db::now();
+    let id = new(&s, value).await;
+    let saved = row(&s, id).await;
+    assert_eq!(
+        saved.next_run_at,
+        crate::cron_jobs::next_schedule("0 9 * * *", "Asia/Kuala_Lumpur", before_create).unwrap()
+    );
+    let at = chrono::DateTime::parse_from_rfc3339("2026-01-01T00:59:59Z")
+        .unwrap()
+        .timestamp_millis();
+    let tx = crate::variables::transaction(&s, 1.into()).await.unwrap();
+    recompute_workspace_schedules(&tx, 1.into(), chrono_tz::America::New_York, at)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let changed = row(&s, id).await;
+    assert_eq!(
+        changed.next_run_at,
+        crate::cron_jobs::next_schedule("0 9 * * *", "America/New_York", at).unwrap()
+    );
+    assert_eq!(changed.config, saved.config);
+    assert_eq!(changed.coverage_start, saved.coverage_start);
+    assert_eq!(changed.version, saved.version);
+    assert_eq!(
+        next_run(
+            &InsightConfig {
+                update_mode: "event".into(),
+                ..Default::default()
+            },
+            Some(chrono_tz::America::New_York),
+            at
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        next_run(
+            &InsightConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            Some(chrono_tz::America::New_York),
+            at
+        )
+        .unwrap(),
+        0
+    );
+}

@@ -87,6 +87,24 @@ fn aad(run: &runs::Model, node: Option<i64>, field: &str) -> String {
     )
 }
 
+fn execution_context(vault: &Vault, run: &runs::Model) -> Result<Value> {
+    let value = match &run.context {
+        None => json!({}),
+        Some(value) => open(vault, value, &aad(run, None, "context"))?,
+    };
+    if !value.is_object() {
+        return Err(fault());
+    }
+    Ok(value)
+}
+
+/// Only expose the saved public diagnostic, never the rest of the encrypted context.
+pub(crate) fn execution_failure(vault: &Vault, run: &runs::Model) -> Result<Option<String>> {
+    Ok(execution_context(vault, run)?["failure"]
+        .as_str()
+        .map(crate::i18n::display_stored))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Identity {
@@ -204,6 +222,7 @@ pub(crate) struct Activation {
     pub redo_round: i64,
     pub params: Vec<Value>,
     pub frozen_at_ms: i64,
+    pub timezone: Option<String>,
     pub sources: Vec<Source>,
     pub seed: Option<i64>,
 }
@@ -349,6 +368,28 @@ impl ReadSet {
 }
 
 impl Journal<'_> {
+    /// Resolution can fail before a node attempt exists. Keep its public error
+    /// under the same encryption and lease fence as the rest of the execution.
+    pub(crate) async fn record_execution_failure(&self, message: &str) -> Result<()> {
+        let current = runs::Entity::find_by_id(self.lease.execution().id)
+            .one(self.db)
+            .await?
+            .ok_or_else(fault)?;
+        let tx = self.db.begin().await?;
+        let run = self.guard(&tx, current.version).await?;
+        let mut context = self.context(&run)?;
+        context["failure"] = json!(message);
+        runs::Entity::update_many()
+            .col_expr(
+                runs::Column::Context,
+                Expr::value(seal(self.vault, &context, &aad(&run, None, "context"))?),
+            )
+            .filter(runs::Column::Id.eq(run.id))
+            .exec(&tx)
+            .await?;
+        self.commit(tx, &run).await?;
+        Ok(())
+    }
     async fn packet<T: Serialize>(
         &self,
         run: &runs::Model,
@@ -604,8 +645,11 @@ impl Journal<'_> {
         for params in &activation.params {
             super::graph::validate_resolved(spec, &activation.node_path, params)?;
         }
-        let (now, today) =
-            super::expression::clock(&definition["settings"], activation.frozen_at_ms)?;
+        let (now, today) = super::expression::clock_with_timezone(
+            &definition["settings"],
+            activation.timezone.as_deref(),
+            activation.frozen_at_ms,
+        )?;
         let snapshot = Snapshot {
             outputless: super::graph::manifest(spec)
                 .and_then(|manifest| manifest["outputs"].as_array())
@@ -864,16 +908,7 @@ impl Journal<'_> {
     }
 
     fn context(&self, run: &runs::Model) -> Result<Value> {
-        match &run.context {
-            None => Ok(json!({})),
-            Some(value) => {
-                let value: Value = open(self.vault, value, &aad(run, None, "context"))?;
-                if !value.is_object() {
-                    return Err(fault());
-                }
-                Ok(value)
-            }
-        }
+        execution_context(self.vault, run)
     }
 
     /// Mark an individual timed wait; other concurrent nodes may still complete.

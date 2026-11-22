@@ -222,6 +222,7 @@ async fn control(s: AppState, mut socket: Socket) {
         supports_agent_probe: hello.supports_agent_probe,
         supports_forward: hello.supports_forward,
         supports_timezone: hello.supports_timezone,
+        supports_process_timezone: hello.supports_process_timezone,
         supports_resource_policy: hello.supports_resource_policy,
         version: hello.agent_version.clone(),
         ready: std::sync::atomic::AtomicBool::new(!hello.managed_updates),
@@ -389,7 +390,7 @@ async fn pump_control(
                 if !matches!(hosts::Entity::find_by_id(i64::from(row_id)).filter(hosts::Column::RunnerKeyHash.eq(&registration.key_hash)).one(&s.db).await,Ok(Some(_))) {break;}
                 let cluster=s.cluster.as_ref().unwrap();
                 let mut owner=registration.owner.as_ref().unwrap().clone();
-                owner.info=Some(crate::cluster::RunnerInfo {supports_resource_policy:registration.supports_resource_policy,managed:registration.managed,installation_scope:registration.installation_scope.clone(),ready:registration.ready.load(std::sync::atomic::Ordering::Acquire), version:registration.version.clone(), failed_version:registration.failed_version.lock().unwrap_or_else(|error|error.into_inner()).clone(), failed_reason:registration.failed_reason.lock().unwrap_or_else(|error|error.into_inner()).clone()});
+                owner.info=Some(crate::cluster::RunnerInfo {supports_resource_policy:registration.supports_resource_policy,supports_process_timezone:registration.supports_process_timezone,managed:registration.managed,installation_scope:registration.installation_scope.clone(),ready:registration.ready.load(std::sync::atomic::Ordering::Acquire), version:registration.version.clone(), failed_version:registration.failed_version.lock().unwrap_or_else(|error|error.into_inner()).clone(), failed_reason:registration.failed_reason.lock().unwrap_or_else(|error|error.into_inner()).clone()});
                 let revision=registration.owner_revision.load(std::sync::atomic::Ordering::Acquire);
                 match cluster.renew_owner(s,host_id,&owner,revision).await {
                     Ok(revision)=>registration.owner_revision.store(revision,std::sync::atomic::Ordering::Release),

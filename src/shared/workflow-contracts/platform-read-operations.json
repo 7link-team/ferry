@@ -2240,5 +2240,8 @@
   {
     "path": "/workflows/{id}/revisions/{revision}",
     "permission": "workflows.read"
+  },
+  {
+    "path": "/workspace-settings/{id}"
   }
 ]

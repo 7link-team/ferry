@@ -866,5 +866,6 @@
   "transfers.csvInvalid": "Fail CSV tidak dapat dibaca pada baris {row}; semak tanda petikan dan bilangan lajur pada baris itu.",
   "templates.documentInvalidAt": "Templat bukan JSON/YAML yang sah pada baris {line}, lajur {column}; semak inden di situ dan letakkan tanda petikan pada pemegang tempat rentetan.",
   "maintenance.pipelineConcurrencyLegacyName": "Pelaksanaan saluran paip serentak (tetapan lama, tidak aktif)",
-  "maintenance.pipelineConcurrencyLegacyHelp": "Tetapan ruang kerja ini dikekalkan untuk keserasian dan tidak mengawal pelaksanaan saluran paip. Tetapkan bilangan saluran paip serentak dalam Tetapan platform → Had sumber. Hubungi pentadbir platform jika anda tidak dapat mengakses tetapan platform. Nilai tersimpan dan nilai lalai lama tidak digunakan."
+  "maintenance.pipelineConcurrencyLegacyHelp": "Tetapan ruang kerja ini dikekalkan untuk keserasian dan tidak mengawal pelaksanaan saluran paip. Tetapkan bilangan saluran paip serentak dalam Tetapan platform → Had sumber. Hubungi pentadbir platform jika anda tidak dapat mengakses tetapan platform. Nilai tersimpan dan nilai lalai lama tidak digunakan.",
+  "channel.timezoneUnsupported": "Hos tidak menerima zon waktu proses yang diperlukan {zone}. Konfigurasikan SSH untuk menerima TZ atau gunakan Runner terkini."
 }

@@ -18,6 +18,28 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::{pin::Pin, time::Duration};
 
+tokio::task_local! { static EXECUTION_TIMEZONE: Option<String>; }
+
+pub(crate) fn execution_timezone() -> Option<Option<String>> {
+    EXECUTION_TIMEZONE.try_with(Clone::clone).ok()
+}
+
+pub(crate) fn with_timezone<T>(
+    timezone: Option<String>,
+    work: impl std::future::Future<Output = T>,
+) -> impl std::future::Future<Output = T> {
+    // Allocate before entering the task-local scope; workflow executor futures
+    // otherwise inflate each scope/poll frame on Windows' default worker stack.
+    EXECUTION_TIMEZONE.scope(timezone, Box::pin(work))
+}
+
+pub(crate) fn timezone_unsupported(zone: &str) -> ApiError {
+    ApiError::localized(
+        axum::http::StatusCode::CONFLICT,
+        crate::i18n::Message::new("channel.timezoneUnsupported").with("zone", zone),
+    )
+}
+
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>>;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -72,6 +94,14 @@ pub trait Pty: Send {
 
 #[async_trait::async_trait]
 pub trait HostChannel: Send + Sync {
+    /// Captured on this connection only, never on the host or a shared Runner.
+    fn set_timezone(&mut self, timezone: Option<String>) -> Result<()> {
+        if let Some(zone) = timezone {
+            return Err(timezone_unsupported(&zone));
+        }
+        Ok(())
+    }
+
     async fn agent(
         &self,
         _request: ferry_protocol::agent::Request,
@@ -285,6 +315,56 @@ mod tests {
             r"\\.\PhysicalDrive0",
         ] {
             assert!(check_path(path).is_err(), "{path}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod timezone_tests {
+    use super::*;
+    use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, sea_query::Expr};
+    #[tokio::test]
+    async fn workspace_process_timezone_is_connection_scoped_and_frozen_override_keeps_legacy() {
+        let (_dir, s) = crate::agents::tests::setup().await;
+        for (workspace, zone) in [(1_i64, "Asia/Kuala_Lumpur"), (2_i64, "America/New_York")] {
+            crate::entities::workspaces::Entity::update_many()
+                .col_expr(
+                    crate::entities::workspaces::Column::Timezone,
+                    Expr::value(Some(zone)),
+                )
+                .filter(crate::entities::workspaces::Column::Id.eq(workspace))
+                .exec(&s.db)
+                .await
+                .unwrap();
+            let id = s.next_id().unwrap();
+            let row = crate::hosts::fake::host_row(workspace, id.into(), "timezone", "online");
+            crate::entities::hosts::Entity::insert(row.into_active_model())
+                .exec(&s.db)
+                .await
+                .unwrap();
+            let fake = crate::hosts::fake::register(id.into());
+            let current = crate::hosts::remote::open(&s, &workspace.into(), &id)
+                .await
+                .unwrap();
+            let frozen = with_timezone(
+                Some("Pacific/Chatham".into()),
+                crate::hosts::remote::open(&s, &workspace.into(), &id),
+            )
+            .await
+            .unwrap();
+            let legacy =
+                with_timezone(None, crate::hosts::remote::open(&s, &workspace.into(), &id))
+                    .await
+                    .unwrap();
+            // Capture is per channel; opening another one never mutates an existing channel.
+            current.exec("date", Duration::from_secs(1)).await.unwrap();
+            frozen.exec("date", Duration::from_secs(1)).await.unwrap();
+            legacy.exec("date", Duration::from_secs(1)).await.unwrap();
+            assert_eq!(
+                *fake.process_timezones.lock().unwrap(),
+                vec![Some(zone.into()), Some("Pacific/Chatham".into()), None]
+            );
+            assert!(execution_timezone().is_none());
         }
     }
 }

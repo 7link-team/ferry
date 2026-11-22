@@ -1,7 +1,8 @@
+import { useWorkspaceTimezone, dayKey, nextDayAt } from "../../shared/timezone";
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search, SlidersHorizontal, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { analysisConfig, analysisFilters, analysisReport, analysisReports, dayMs } from "../../features/code-insights/analysis-config";
+import { analysisConfig, analysisFilters, analysisReport, analysisReports } from "../../features/code-insights/analysis-config";
 import { AnalysisOverview } from "../../features/code-insights/AnalysisOverview";
 import { AutoForm } from "../../shared/forms/auto-form";
 import { commonText, configText, insightText } from "../../shared/i18n/i18n";
@@ -16,6 +17,7 @@ const primary = new Set(["repos", "authors", "since", "until", "period"]);
 
 export function RepositoryAnalysis({ workspace, connectionId, permissions, scope = "connection", refreshVersion = 0 }: { workspace: string; connectionId: string; permissions: Set<string>; scope?: "connection" | "insight"; refreshVersion?: number }) {
   useTranslation("insight-domain");
+  const timezone = useWorkspaceTimezone();
   const [report, setReport] = useQueryValue("analysis_report", "overview");
   const kind = analysisReports.some(([key]) => key === report) ? report : "overview";
   const [conditions, setConditions] = useState(() => readFilters(filterKeys));
@@ -23,18 +25,19 @@ export function RepositoryAnalysis({ workspace, connectionId, permissions, scope
   const [advanced, setAdvanced] = useState(() => analysisFilters.some(filter => !primary.has(filter.key) && !!conditions[filter.key]));
   const [refreshKey, setRefreshKey] = useState(0);
   useEffect(() => { if (refreshVersion) setRefreshKey(value => value + 1); }, [refreshVersion]);
-  const [utcDay, setUtcDay] = useState(() => new Date().toISOString().slice(0, 10));
+  const [utcDay, setUtcDay] = useState(() => dayKey(new Date(), timezone));
   useEffect(() => {
-    const timer = window.setTimeout(() => setUtcDay(new Date().toISOString().slice(0, 10)), Date.parse(`${utcDay}T00:00:00Z`) + dayMs - Date.now() + 100);
+    setUtcDay(dayKey(new Date(), timezone));
+    const timer = window.setTimeout(() => setUtcDay(dayKey(new Date(), timezone)), nextDayAt(Date.now(), timezone) - Date.now() + 100);
     return () => clearTimeout(timer);
-  }, [utcDay]);
+  }, [timezone, utcDay]);
   useEffect(() => {
     const sync = () => { const next = readFilters(filterKeys); setConditions(next); setDraft(next); };
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
   const form = useMemo(() => analysisConfig(workspace, connectionId, permissions), [workspace, connectionId, permissions]);
-  const reportConfig = useMemo(() => analysisReport(workspace, connectionId, kind, scope), [workspace, connectionId, kind, scope]);
+  const reportConfig = useMemo(() => analysisReport(workspace, connectionId, kind, scope, timezone), [workspace, connectionId, kind, scope, timezone]);
   const list = useMemo(() => {
     const { summary, ...config } = reportConfig;
     return { ...config, queryPrefix: `analysis.${kind}`, filters: [], filterPresets: [], defaultRefresh: 0,

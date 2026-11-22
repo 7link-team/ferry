@@ -1,4 +1,5 @@
 use super::*;
+use chrono::{Datelike, TimeZone};
 use sea_orm::{
     Condition, DbBackend, FromQueryResult,
     sea_query::{Alias as A, ExprTrait, JoinType, Order, Query as Q, SelectStatement, SimpleExpr},
@@ -46,16 +47,38 @@ fn list(raw: &HashMap<String, String>, key: &str) -> Vec<String> {
         })
         .unwrap_or_default()
 }
-fn date(value: &str, end: bool) -> Result<i64> {
+fn date_error() -> ApiError {
+    ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new("repository.analysis.dateInvalid"),
+    )
+}
+
+/// Midnight can repeat, fall in a gap, or belong to a skipped calendar date.
+/// The first valid instant is also the exclusive end of the preceding date.
+fn day_start(day: chrono::NaiveDate, zone: chrono_tz::Tz) -> Result<i64> {
+    let midnight = day.and_hms_opt(0, 0, 0).ok_or_else(date_error)?;
+    zone.from_local_datetime(&midnight)
+        .earliest()
+        .or_else(|| chrono_tz::GapInfo::new(&midnight, &zone).and_then(|gap| gap.end))
+        .map(|time| time.timestamp_millis())
+        .ok_or_else(date_error)
+}
+
+fn date_in_zone(value: &str, end: bool, zone: Option<chrono_tz::Tz>) -> Result<i64> {
     if let Ok(time) = chrono::DateTime::parse_from_rfc3339(value) {
         return Ok(time.timestamp_millis());
     }
-    let day = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
-        ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("repository.analysis.dateInvalid"),
-        )
-    })?;
+    let day = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| date_error())?;
+    if let Some(zone) = zone {
+        return if end {
+            day_start(day.succ_opt().ok_or_else(date_error)?, zone)?
+                .checked_sub(1)
+                .ok_or_else(date_error)
+        } else {
+            day_start(day, zone)
+        };
+    }
     Ok(day
         .and_hms_opt(0, 0, 0)
         .unwrap()
@@ -63,6 +86,94 @@ fn date(value: &str, end: bool) -> Result<i64> {
         .timestamp_millis()
         + if end { 86_399_999 } else { 0 })
 }
+
+struct CalendarBucket {
+    start: i64,
+    end: i64,
+    label: String,
+}
+
+/// Only occupied UTC days are projected, never the empty span between facts.
+/// Every IANA fixed offset is strictly between -24h and +24h; neighboring
+/// local dates also cover skipped/repeated midnight boundaries.
+fn calendar_buckets(
+    zone: chrono_tz::Tz,
+    period: &str,
+    occupied_days: &[i64],
+) -> Result<Vec<CalendarBucket>> {
+    if !["day", "daily", "week", "weekly", "month", "monthly"].contains(&period) {
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.analysis.periodInvalid"),
+        ));
+    }
+    let mut starts = BTreeSet::new();
+    for utc_day in occupied_days {
+        let utc = chrono::DateTime::from_timestamp_millis(
+            utc_day.checked_mul(86_400_000).ok_or_else(date_error)?,
+        )
+        .ok_or_else(date_error)?
+        .date_naive();
+        for offset in -2..=2 {
+            let Some(mut day) = utc.checked_add_signed(chrono::Duration::days(offset)) else {
+                continue;
+            };
+            match period {
+                "week" | "weekly" => {
+                    day = day
+                        .checked_sub_signed(chrono::Duration::days(i64::from(
+                            day.weekday().num_days_from_monday(),
+                        )))
+                        .ok_or_else(date_error)?;
+                }
+                "month" | "monthly" => day = day.with_day(1).ok_or_else(date_error)?,
+                _ => {}
+            }
+            starts.insert(day);
+        }
+    }
+    let mut buckets = Vec::with_capacity(starts.len());
+    for day in starts {
+        let (next, label) = match period {
+            "day" | "daily" => (day.succ_opt(), day.format("%Y-%m-%d").to_string()),
+            "week" | "weekly" => (
+                day.checked_add_signed(chrono::Duration::days(7)),
+                day.checked_add_signed(chrono::Duration::days(6))
+                    .ok_or_else(date_error)?
+                    .format("%Y-%m-%d")
+                    .to_string(),
+            ),
+            _ => (
+                day.checked_add_months(chrono::Months::new(1)),
+                day.format("%Y-%m").to_string(),
+            ),
+        };
+        let next = next.ok_or_else(date_error)?;
+        let start = day_start(day, zone)?;
+        let end = day_start(next, zone)?;
+        if start < end {
+            buckets.push(CalendarBucket { start, end, label });
+        }
+    }
+    Ok(buckets)
+}
+
+fn occupied_day_query(cohort: &FactCohort, backend: DbBackend) -> SelectStatement {
+    let cast = if backend == DbBackend::MySql {
+        "SIGNED"
+    } else {
+        "BIGINT"
+    };
+    // Positive modulo yields floor division for pre-epoch timestamps too.
+    // Cast the exact quotient so all three backends return an integer value.
+    let day = format!(
+        "CAST((f.author_date - (f.author_date % 86400000 + 86400000) % 86400000) / 86400000 AS {cast})"
+    );
+    let mut query = cohort.select();
+    query.distinct().expr_as(Expr::cust(day), a("utc_day"));
+    query
+}
+
 fn period_expression(backend: DbBackend, period: &str) -> Result<SimpleExpr> {
     if period.is_empty() {
         return Ok(Expr::val("").into());
@@ -116,6 +227,7 @@ struct FactCohort {
     source_ids: Vec<i64>,
     branches: Vec<String>,
     current: bool,
+    calendar: Option<Vec<CalendarBucket>>,
 }
 impl FactCohort {
     fn membership(source_ids: &[i64], branches: &[String], current: bool) -> SelectStatement {
@@ -160,11 +272,21 @@ impl FactCohort {
     ) -> Result<Self> {
         Self::with_projection(workspace, source_ids, raw, Projection::Legacy(user))
     }
+    #[cfg(test)]
     fn with_projection(
         workspace: i64,
         source_ids: Vec<i64>,
         raw: &HashMap<String, String>,
         projection: Projection,
+    ) -> Result<Self> {
+        Self::with_timezone_projection(workspace, source_ids, raw, projection, None)
+    }
+    fn with_timezone_projection(
+        workspace: i64,
+        source_ids: Vec<i64>,
+        raw: &HashMap<String, String>,
+        projection: Projection,
+        zone: Option<chrono_tz::Tz>,
     ) -> Result<Self> {
         let branches = list(raw, "branches");
         let current = raw.get("history").is_some_and(|v| v == "current");
@@ -236,7 +358,7 @@ impl FactCohort {
         )));
         for (key, end) in [("since", false), ("until", true)] {
             if let Some(value) = raw.get(key).filter(|v| !v.is_empty()) {
-                let value = date(value, end)?;
+                let value = date_in_zone(value, end, zone)?;
                 q.and_where(if end {
                     col("c", "committer_date").lte(value)
                 } else {
@@ -302,7 +424,50 @@ impl FactCohort {
             source_ids,
             branches,
             current,
+            calendar: None,
         })
+    }
+    async fn prepare_calendar(
+        &mut self,
+        s: &AppState,
+        zone: chrono_tz::Tz,
+        period: &str,
+    ) -> Result<()> {
+        #[derive(FromQueryResult)]
+        struct OccupiedDay {
+            utc_day: i64,
+        }
+        let query = occupied_day_query(self, s.db.get_database_backend());
+        let days = rows::<OccupiedDay>(s, &query)
+            .await?
+            .into_iter()
+            .map(|row| row.utc_day)
+            .collect::<Vec<_>>();
+        self.calendar = Some(calendar_buckets(zone, period, &days)?);
+        Ok(())
+    }
+    fn period_expression(&self, backend: DbBackend, period: &str) -> Result<SimpleExpr> {
+        if period.is_empty() {
+            return period_expression(backend, period);
+        }
+        let Some(buckets) = &self.calendar else {
+            return period_expression(backend, period);
+        };
+        // Only Rust-derived integer UTC boundaries and calendar labels are
+        // literals. A flat CASE avoids backend timezone tables, bind limits,
+        // and loading individual commit facts into application memory.
+        let mut expression = String::from("CASE");
+        for bucket in buckets {
+            expression.push_str(&format!(
+                " WHEN f.author_date >= {} AND f.author_date < {} THEN '{}'",
+                bucket.start, bucket.end, bucket.label
+            ));
+        }
+        if buckets.is_empty() {
+            return Ok(Expr::val("").into());
+        }
+        expression.push_str(" ELSE '' END");
+        Ok(Expr::cust(expression))
     }
     fn select(&self) -> SelectStatement {
         Q::select()
@@ -458,7 +623,7 @@ fn grouped(
         },
         a("nickname"),
     )
-    .expr_as(period_expression(backend, period)?, a("period"))
+    .expr_as(cohort.period_expression(backend, period)?, a("period"))
     .expr_as(col("f", "repository_id").count_distinct(), a("projects"))
     .expr_as(Expr::cust("COUNT(*)"), a("commits"));
     for name in ["additions", "deletions", "effectives"] {
@@ -468,7 +633,7 @@ fn grouped(
         q.group_by_col((a("f"), a("contributor_id")));
     }
     if !period.is_empty() {
-        q.add_group_by([period_expression(backend, period)?]);
+        q.add_group_by([cohort.period_expression(backend, period)?]);
     }
     if totals && period.is_empty() {
         q.and_having(Expr::cust("COUNT(*) > 0"));
@@ -514,7 +679,7 @@ async fn aggregate_items(
             a("contributor_id"),
         )
         .expr_as(
-            period_expression(s.db.get_database_backend(), period)?,
+            cohort.period_expression(s.db.get_database_backend(), period)?,
             a("period"),
         )
         .column((a("f"), a("author_name")))
@@ -526,7 +691,8 @@ async fn aggregate_items(
     }
     if !period.is_empty() {
         q.and_where(
-            period_expression(s.db.get_database_backend(), period)?
+            cohort
+                .period_expression(s.db.get_database_backend(), period)?
                 .is_in(aggregates.iter().map(|row| row.period.clone())),
         );
     }
@@ -663,7 +829,8 @@ pub async fn report(
 }
 
 /// Report kinds: overview, contributors, ranking, repositories, branches, commits, heatmap, period.
-/// Query: since/until (YYYY-MM-DD inclusive UTC dates or RFC3339 timestamps), page/page_size
+/// Query: since/until (inclusive workspace calendar dates, UTC until confirmed,
+/// or absolute RFC3339 timestamps), page/page_size
 /// (page_size 1..500), repos (comma-separated repository paths, URLs or IDs), authors
 /// (comma-separated contributor IDs, nicknames or emails), branches (comma-separated refs).
 /// Merge commits are excluded by default; isMerge=0,1 includes both. Read coverage before
@@ -725,15 +892,17 @@ async fn render(
                 selected.contains(&repo.url) || selected.contains(&repo.id.to_string())
             })
     });
-    let cohort = FactCohort::with_projection(
+    let timezone = crate::accounts::workspace::business_timezone(&s.db, scope.workspace_id).await?;
+    let mut cohort = FactCohort::with_timezone_projection(
         scope.workspace_id.into(),
         source_rows.iter().map(|row| row.id).collect(),
         &raw,
         projection,
+        timezone,
     )?;
     let coverage = json!({"start":source_rows.iter().map(|row|row.coverage_start).reduce(coverage_union),"complete":!source_rows.is_empty()&&source_rows.iter().all(|row|row.state=="complete"),
         "sources":source_rows.iter().map(|row|json!({"repository":row.remote_path,"state":row.state,"synced_at":row.synced_at,"coverage_start":row.coverage_start,"last_error":crate::i18n::display_stored(&row.last_error)})).collect::<Vec<_>>(),
-        "date_filter":"committer_date","date_bucket":"author_date","timezone":"UTC","history":if cohort.current{"current"}else{"observed"}});
+        "date_filter":"committer_date","date_bucket":"author_date","timezone":timezone.map(|zone|zone.name()).unwrap_or("UTC"),"history":if cohort.current{"current"}else{"observed"}});
     let (page, size, offset) = pagination(&raw);
     let backend = s.db.get_database_backend();
     if kind == "commits" {
@@ -883,6 +1052,9 @@ async fn render(
         ""
     };
     let totals = kind == "overview" || kind == "heatmap";
+    if let Some(zone) = timezone.filter(|_| !period.is_empty()) {
+        cohort.prepare_calendar(&s, zone, period).await?;
+    }
     let mut q = grouped(&cohort, backend, period, totals)?;
     if period.is_empty() {
         q.order_by(a("effectives"), Order::Desc)

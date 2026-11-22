@@ -1,3 +1,4 @@
+import { WorkspaceDateTimeInput } from "../../shared/forms/WorkspaceDateTimeInput";
 import { AutoField } from "../../shared/forms/auto-form";
 import { Switch } from "../../shared/ui/switch";
 import { NotificationParameters } from "../notifications/NotificationParameters";
@@ -1202,31 +1203,7 @@ export function WorkflowNodeParameters({
           {p.mode === "duration" && number("duration_ms", "durationMs")}
           {p.mode === "until" && (
             <Field label={t("untilTime")}>
-              <Input
-                aria-label={t("untilTime")}
-                type="datetime-local"
-                readOnly={readOnly}
-                value={
-                  typeof p.until === "string" &&
-                  !Number.isNaN(Date.parse(p.until))
-                    ? new Date(
-                        Date.parse(p.until) -
-                          new Date(p.until).getTimezoneOffset() * 60000,
-                      )
-                        .toISOString()
-                        .slice(0, 16)
-                    : ""
-                }
-                onChange={(event) => {
-                  if (event.target.value)
-                    patch({
-                      until: new Date(event.target.value).toISOString(),
-                    });
-                }}
-              />
-              <span className="block text-xs text-muted-foreground">
-                {t("localTime")}
-              </span>
+              <WorkspaceDateTimeInput value={String(p.until ?? "")} readOnly={readOnly} onChange={until => patch({ until })} onValidityChange={blocked => invalid("until", blocked)} />
             </Field>
           )}
           {p.mode === "callback" && (

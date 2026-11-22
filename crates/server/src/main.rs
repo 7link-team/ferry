@@ -644,7 +644,13 @@ pub async fn channel_open(
     s: &state::AppState,
     host: &hosts::remote::Host,
 ) -> error::Result<Box<dyn hosts::channel::HostChannel>> {
-    match host.connection.as_str() {
+    let timezone = match hosts::channel::execution_timezone() {
+        Some(frozen) => frozen,
+        None => accounts::workspace::business_timezone(&s.db, host.workspace_id)
+            .await?
+            .map(|zone| zone.name().to_owned()),
+    };
+    let mut channel = match host.connection.as_str() {
         "ssh" => hosts::ssh::open(s, host).await,
         "runner" => hosts::runner::open(s, host).await,
         #[cfg(test)]
@@ -653,7 +659,9 @@ pub async fn channel_open(
             axum::http::StatusCode::BAD_REQUEST,
             i18n::Message::new("host.connectionUnknown"),
         )),
-    }
+    }?;
+    channel.set_timezone(timezone)?;
+    Ok(channel)
 }
 
 /// Shared by authenticated HTTP and permission-scoped Agent tools.
@@ -858,6 +866,10 @@ fn workspace_routes() -> Router<state::AppState> {
         .merge(models::routes())
         .merge(conversations::routes())
         .route("/{workspace}/preferences", get(maintenance::preferences))
+        .route(
+            "/{workspace}/workspace-settings/{id}",
+            get(accounts::workspace::timezone::read).patch(accounts::workspace::timezone::update),
+        )
         .route(
             "/{workspace}/settings/categories",
             get(maintenance::setting_categories),

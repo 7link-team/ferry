@@ -729,6 +729,7 @@ mod tests {
         let (dir, db) = crate::lock::tests::database().await;
         for id in [1i64, 2] {
             crate::entities::workspaces::Entity::insert(crate::entities::workspaces::ActiveModel {
+                timezone: Set(None),
                 id: Set(id),
                 slug: Set(format!("test-{id}")),
                 name: Set(format!("Test {id}")),

@@ -11,6 +11,8 @@ test('manifest maps signed artifacts, escapes URLs and rejects incomplete sets',
   const signature = Buffer.from('untrusted comment: fixture\nfixture\ntrusted comment: fixture\nfixture').toString('base64');
   try {
     for (const file of files) { writeFileSync(join(dir, file), 'payload'); writeFileSync(join(dir, file+'.sig'), signature); }
+    // The shared release collector also contains mobile packages, never desktop updates.
+    for (const file of ['Client-0.1.0-alpha.2-android-arm64.apk', 'Client-0.1.0-alpha.2-ios-unsigned.ipa', 'Client-0.1.0-alpha.2-ios-simulator.app.zip']) writeFileSync(join(dir, file), 'mobile payload');
     const result = generate(dir, '0.1.0-alpha.2', 'example/app');
     assert.equal(Object.keys(result.platforms).length, 5);
     assert.equal(result.platforms['windows-x86_64'].signature, signature);

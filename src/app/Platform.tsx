@@ -1,3 +1,5 @@
+import { detectedTimezone, formatDate } from "../shared/timezone";
+import { workspaceTimezoneField } from "../features/workspaces/resource-config";
 import { PlatformResourceLimits } from "./PlatformResourceLimits";
 import { ChevronDown, LogIn } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../shared/ui/dropdown-menu";
@@ -24,7 +26,7 @@ import {InlineAlert} from "../shared/ui/inline-alert";
 import { href,navigate,useRoute } from "./router";
 import { platformMarketplaceForm, platformMarketplaceList } from "../features/marketplace/platform-sources";
 
-type Row = Record<string, unknown> & { id: string; name: string; email: string; slug: string; active: boolean; is_superadmin: boolean; relation?: string; my_role?: string; last_login_at?:number|null;last_login_ip?:string|null;created_at?:number };
+type Row = Record<string, unknown> & { id: string; name: string; email: string; slug: string; active: boolean; is_superadmin: boolean; relation?: string; my_role?: string; last_login_at?:number|null;last_login_ip?:string|null;created_at?:number; timezone?:string|null };
 /** Whether the user created the workspace, joined it, or only reaches it as a platform administrator. */
 export const myRole = (relation: string | undefined, role: string | undefined) =>
   relation === "owner" ? commonText("resource-domain:platform.ownerSelf") : relation === "member" ? commonText("resource-domain:platform.joined", { role }) : commonText("resource-domain:platform.notMember");
@@ -36,8 +38,8 @@ function WorkspaceOverview({draft}:{draft:Partial<Row>}) {
   const values: [string, ReactNode][] = [
     ["workspaceId",draft.id], ["workspaceOwner",String(draft.owner_name??"—")],
     ["myRole",myRole(draft.relation,draft.my_role)],
-    ["workspaceCreated",draft.created_at?new Date(draft.created_at).toLocaleString():"—"],
-    ["workspaceUpdated",draft.version?new Date(Number(draft.version)).toLocaleString():"—"],
+    ["workspaceCreated",draft.created_at?formatDate(draft.created_at, draft.timezone ?? null):"—"],
+    ["workspaceUpdated",draft.version?formatDate(Number(draft.version), draft.timezone ?? null):"—"],
   ];
   const counts=draft.resource_counts as Record<string,number>|undefined;
   return <div className="min-w-0 space-y-6"><dl className="grid gap-4 sm:grid-cols-2">{values.map(([key,value])=><div key={key} className="min-w-0"><dt className="text-sm text-muted-foreground">{commonText(`resource-domain:platform.${key}`)}</dt><dd className="mt-1 break-words text-sm">{value}</dd></div>)}</dl>
@@ -84,7 +86,8 @@ const forms: Record<string, FormConfig<Row>> = {
     { key: "active", label: "启用账号", labelKey: "resource-domain:platform.enableAccount", type: "switch", help: "停用后该账号的所有会话立即失效。", helpKey: "resource-domain:platform.disableHelp" },
     { key: "is_superadmin", label: "平台超级管理员", labelKey: "resource-domain:platform.platformAdmin", type: "switch", help: "可管理平台及全部工作空间。变更后需要重新登录；必须保留一名启用的超管。", helpKey: "resource-domain:platform.adminHelp" },
   ] }] },
-  workspaces: { resource: "workspaces", endpoint: "/platform/workspaces", heading: r => r.name, blank: { name: "", slug: "" }, sections: [{ fields: [
+  workspaces: { resource: "workspaces", endpoint: "/platform/workspaces", heading: r => r.name, blank: { name: "", slug: "", timezone: detectedTimezone() }, sections: [{ fields: [
+    workspaceTimezoneField(),
     { key: "name", label: "名称", labelKey: "common-domain:common.name", type: "text", required: true },
     { key: "slug", label: "标识", labelKey: "common-domain:auth.slug", type: "text", required: true, immutable: true, help: "2–40 位小写字母、数字、中划线；创建后不可修改。", helpKey: "resource-domain:platform.slugHelp" },
   ] }, {title:"空间信息",titleKey:"resource-domain:platform.workspaceInfo",fields:[{key:"workspace_overview",label:"空间信息",labelKey:"resource-domain:platform.workspaceInfo",type:"custom",span:2,when:d=>!!d.id,render:({draft})=><WorkspaceOverview draft={draft}/>}]}] },

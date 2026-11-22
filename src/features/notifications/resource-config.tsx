@@ -1,3 +1,4 @@
+import { useWorkspaceTimezone, formatDate } from "../../shared/timezone";
 import { AutoField } from "../../shared/forms/auto-form";
 import { randomUUID } from "../../shared/uuid";
 import { api } from "../../shared/api/api";
@@ -69,10 +70,11 @@ function testAction(workspace: string, navigate: ResourceConfigContext["navigate
   };
 }
 /** "Not tested yet", or when the last test ran and whether it arrived. */
-function lastTest(row: AnyRow): string {
+function LastTest({ row }: { row: AnyRow }) {
+  const timezone = useWorkspaceTimezone();
   const test = row.last_test as { state: string; at: number; result?: string } | null | undefined;
   if (!test) return t(key("notTested"));
-  const at = new Date(test.at).toLocaleString();
+  const at = formatDate(test.at, timezone);
   return test.state === "succeeded" ? t(key("testSucceeded"), { at }) : t(key("testFailed"), { at, reason: test.result || t(key(test.state)) });
 }
 export function notificationLists({ workspace, navigate }: ResourceConfigContext): Record<string, ListConfig<AnyRow>> {
@@ -84,7 +86,7 @@ export function notificationLists({ workspace, navigate }: ResourceConfigContext
   const configs: Record<string, ListConfig<AnyRow>> = {
     "notification-channels": list<AnyRow>({ resource: "notification-channels", permissionResource: "notifications", rowKey: r => r.id,
       filters: [{ key: "q", label: "", labelKey: key("name"), type: "text" }, { key: "provider", label: "", labelKey: key("provider"), type: "select", options: notificationProviders }],
-      columns: [{ key: "name", label: "", labelKey: key("name"), sortable: true }, { key: "provider", label: "", labelKey: key("provider") }, { key: "enabled", label: "", labelKey: key("enabled"), render: r => t(r.enabled ? "common-domain:common.yes" : "common-domain:common.no") }, { key: "created_at", label: "", labelKey: key("created_at"), sortable: true, render: r => cronDate(r.created_at) }, { key: "last_test", label: "", labelKey: key("lastTest"), render: lastTest }],
+      columns: [{ key: "name", label: "", labelKey: key("name"), sortable: true }, { key: "provider", label: "", labelKey: key("provider") }, { key: "enabled", label: "", labelKey: key("enabled"), render: r => t(r.enabled ? "common-domain:common.yes" : "common-domain:common.no") }, { key: "created_at", label: "", labelKey: key("created_at"), sortable: true, render: r => cronDate(r.created_at) }, { key: "last_test", label: "", labelKey: key("lastTest"), render: row => <LastTest row={row} /> }],
       actions: [sendAction(workspace, navigate), testAction(workspace, navigate), ...actions("notification-channels")], toolbar: { create: true },
     }),
     "notification-templates": list<AnyRow>({ resource: "notification-templates", permissionResource: "notifications", rowKey: r => r.id,
@@ -119,7 +121,7 @@ export function notificationForms({ workspace, navigate, permissions }: Resource
         when: d => !!d.enabled && !isSms(String(d.provider ?? "")), run: row => testAction(workspace, navigate).action!(row) },
       sections: [{ titleKey: key("basics"), fields: [field("name", "text", { required: true, max: 120 }), field("enabled", "switch"), field("provider", "select", { required: true, options: notificationProviders, resetOnChange: ["webhook", "signing_secret", "bot_token", "bearer_token", "chat_id", "thread_id"] }), field("description", "textarea", { span: 2, max: 2048 })] },
         { titleKey: key("connection"), fields: [
-          field("last_test", "custom", { when: r => !!r.id && !isSms(String(r.provider ?? "")), span: 2, render: ({ draft }) => <AutoField label={t(key("lastTest"))}><p role="status" className="text-sm text-muted-foreground">{lastTest(draft)}</p></AutoField> }),
+          field("last_test", "custom", { when: r => !!r.id && !isSms(String(r.provider ?? "")), span: 2, render: ({ draft }) => <AutoField label={t(key("lastTest"))}><p role="status" className="text-sm text-muted-foreground">{<LastTest row={draft} />}</p></AutoField> }),
           field("webhook", "custom", { when: r => notSmtp(r) && r.provider !== "Telegram", width: "full", span: 2, render: (p) => <WebhookAddress {...p} canReveal={!!permissions?.has("notifications.update")} /> }),
           field("bot_token", "password", { when: r => r.provider === "Telegram", stored: "has_secret" }), field("chat_id", "text", { when: r => r.provider === "Telegram", required: true }), field("thread_id", "text", { when: r => r.provider === "Telegram" }),
           field("signing_secret", "password", { when: r => ["DingTalk", "Feishu", "Lark"].includes(r.provider), stored: "has_secret" }), field("bearer_token", "password", { when: r => r.provider === "Webhook", stored: "has_secret" }),

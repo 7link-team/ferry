@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { useEffect, useId, useState } from "react";
 import { api, errorText } from "../../shared/api/api";
 import { named } from "../../shared/api/resource";
@@ -12,7 +13,7 @@ import { RetryButton, InlineAlert } from "../../shared/ui/inline-alert";
 
 const t = (key: string, values?: Record<string, unknown>) => commonText(`resource-domain:failover.${key}`, values);
 const touch = "min-h-11 lg:min-h-9";
-const date = (value: number) => value ? new Date(value).toLocaleString(currentLocale()) : "—";
+const date = (value: number) => value ? <WorkspaceDate value={value} locale={currentLocale()} /> : "—";
 const kinds = new Set(["hostSuspected", "hostConfirmedDown", "peerVeto", "fenced", "replaceStarted", "revisionQueued", "replaceSucceeded", "replaceFailed", "hookOutput", "needsAttention", "unfenced", "alertOnly", "acknowledged"]);
 
 export function FailoverTimeline({ workspace, deployment }: { workspace: string; deployment: Deployment }) {

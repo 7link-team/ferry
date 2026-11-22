@@ -69,8 +69,59 @@ pub struct Body {
 fn retry_delay() -> u64 {
     30
 }
+#[cfg(test)]
 fn next(body: &Body, after: i64) -> Result<i64> {
     next_schedule(&body.schedule, &body.timezone, after)
+}
+
+async fn next_in_workspace(
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+    body: &Body,
+    after: i64,
+) -> Result<i64> {
+    let zone = crate::accounts::workspace::business_timezone(conn, workspace).await?;
+    next_schedule(
+        &body.schedule,
+        zone.as_ref()
+            .map(|zone| zone.name())
+            .unwrap_or(&body.timezone),
+        after,
+    )
+}
+
+/// Called inside the workspace settings transaction, under its workspace lock.
+/// Existing queued/running occurrences and historical configurations are retained.
+pub(crate) async fn recompute_workspace_schedules(
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+    zone: chrono_tz::Tz,
+    now: i64,
+) -> Result<()> {
+    for job in jobs::Entity::find()
+        .filter(jobs::Column::WorkspaceId.eq(workspace))
+        .all(conn)
+        .await?
+    {
+        let body: Body = serde_json::from_str(&job.config).map_err(|_| {
+            ApiError::localized(StatusCode::BAD_REQUEST, Message::new("cron.configCorrupt"))
+        })?;
+        let next = if job.enabled != 0 {
+            next_schedule(&body.schedule, zone.name(), now)?
+        } else {
+            0
+        };
+        jobs::Entity::update_many()
+            .col_expr(jobs::Column::NextRunAt, Expr::value(next))
+            .filter(jobs::Column::WorkspaceId.eq(workspace))
+            .filter(jobs::Column::Id.eq(job.id))
+            .exec(conn)
+            .await?;
+    }
+    crate::repositories::analysis::insights::recompute_workspace_schedules(
+        conn, workspace, zone, now,
+    )
+    .await
 }
 
 pub(crate) fn next_schedule(schedule: &str, timezone: &str, after: i64) -> Result<i64> {
@@ -142,7 +193,7 @@ async fn validate(
         ));
     }
     if schedule {
-        next(b, db::now())?;
+        next_in_workspace(conn, scope.workspace_id, b, db::now()).await?;
     }
     scope.require("cron-jobs.run")?;
     let id = Id::reference(&b.target_ref)?;
@@ -332,7 +383,11 @@ pub(crate) async fn create_in(
         enabled: Set(i64::from(b.enabled)),
         run_as: Set(scope.user.id.into()),
         run_as_name: Set(scope.user.name.clone()),
-        next_run_at: Set(if b.enabled { next(&b, now)? } else { 0 }),
+        next_run_at: Set(if b.enabled {
+            next_in_workspace(tx, scope.workspace_id, &b, now).await?
+        } else {
+            0
+        }),
         version: Set(1),
         created_at: Set(now),
         updated_at: Set(now),
@@ -390,7 +445,11 @@ pub async fn update(
         )
         .col_expr(
             jobs::Column::NextRunAt,
-            Expr::value(if b.enabled { next(&b, db::now())? } else { 0 }),
+            Expr::value(if b.enabled {
+                next_in_workspace(&tx, scope.workspace_id, &b, db::now()).await?
+            } else {
+                0
+            }),
         )
         .col_expr(
             jobs::Column::Version,
@@ -670,8 +729,18 @@ async fn due(s: &AppState, recovery: bool) -> Result<()> {
                     crate::i18n::Message::new("cron.configCorrupt"),
                 )
             })?;
-            let future = next(&b, now).unwrap_or(0);
             let tx = crate::variables::transaction(s, job.workspace_id.into()).await?;
+            let timezone =
+                crate::accounts::workspace::business_timezone(&tx, job.workspace_id.into()).await?;
+            let future = next_schedule(
+                &b.schedule,
+                timezone
+                    .as_ref()
+                    .map(|zone| zone.name())
+                    .unwrap_or(&b.timezone),
+                now,
+            )
+            .unwrap_or(0);
             let n = jobs::Entity::update_many()
                 .col_expr(jobs::Column::NextRunAt, Expr::value(future))
                 .col_expr(jobs::Column::Enabled, Expr::value(i64::from(future > 0)))
@@ -1631,6 +1700,7 @@ mod tests {
             join_code: Set("cron-locale-test".into()),
             pipeline_run_number: Set(0),
             workflow_execution_number: Set(0),
+            timezone: Set(None),
             created_at: Set(0),
             updated_at: Set(0),
         })
@@ -1793,6 +1863,66 @@ mod tests {
             )));
         }
     }
+    #[tokio::test]
+    async fn confirmed_workspace_schedules_override_saved_zone_and_recompute_pending_only() {
+        use crate::entities::workspaces;
+        use sea_orm::{IntoActiveModel, PaginatorTrait};
+        let (_dir, s) = crate::platform_tools::tests::setup().await;
+        hosts::Entity::insert(
+            crate::hosts::fake::host_row(1, 900, "cron-zone", "online").into_active_model(),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+        let mut b = body("0 9 * * *", "UTC");
+        b.target_ref = "900".into();
+        let after = millis("2026-01-01T00:59:59Z");
+        assert_eq!(
+            next_in_workspace(&s.db, 1.into(), &b, after).await.unwrap(),
+            millis("2026-01-01T09:00:00Z")
+        );
+        workspaces::Entity::update_many()
+            .col_expr(
+                workspaces::Column::Timezone,
+                Expr::value(Some("Asia/Kuala_Lumpur")),
+            )
+            .filter(workspaces::Column::Id.eq(1))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        assert_eq!(
+            next_in_workspace(&s.db, 1.into(), &b, after).await.unwrap(),
+            millis("2026-01-01T01:00:00Z")
+        );
+        let (_, Json(created)) = create(State(s.clone()), crate::agents::tests::admin(1), Json(b))
+            .await
+            .unwrap();
+        let id: Id = serde_json::from_value(created["id"].clone()).unwrap();
+        let saved = jobs::Entity::find_by_id(i64::from(id))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&saved.config).unwrap()["timezone"],
+            "UTC"
+        );
+        let tx = crate::variables::transaction(&s, 1.into()).await.unwrap();
+        recompute_workspace_schedules(&tx, 1.into(), chrono_tz::America::New_York, after)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let changed = jobs::Entity::find_by_id(i64::from(id))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(changed.next_run_at, millis("2026-01-01T14:00:00Z"));
+        assert_eq!(changed.config, saved.config);
+        assert_eq!(changed.version, saved.version);
+        assert_eq!(runs::Entity::find().count(&s.db).await.unwrap(), 0);
+    }
+
     fn body(schedule: &str, timezone: &str) -> Body {
         Body {
             name: "test".into(),

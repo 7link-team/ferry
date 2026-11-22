@@ -7,6 +7,62 @@ use std::sync::{Arc, Mutex};
 type Requests = Arc<Mutex<Vec<(String, String, String)>>>;
 
 #[tokio::test]
+async fn definition_help_provides_executable_preview_and_batch_input_rules() {
+    let Json(help) = definition_format(crate::agents::tests::admin(1), Path("1".into()))
+        .await
+        .unwrap();
+    assert_eq!(help["example"]["settings"]["timezone"], "UTC");
+    let request = &help["requests"]["preview_expressions"];
+    assert_eq!(request["method"], "POST");
+    let body: super::super::Preview = serde_json::from_value(request["body"].clone()).unwrap();
+    let example = definition_example();
+    assert_eq!(
+        super::super::graph::node_at(&example, &body.node_path).unwrap()["id"],
+        "analyze"
+    );
+    assert_eq!(body.selections, vec![None]);
+    assert!(body.data.upstream.is_empty());
+    assert!(
+        help["execution_support"]["expressions"]
+            .as_str()
+            .unwrap()
+            .contains("$input.all()")
+    );
+}
+
+#[tokio::test]
+async fn definition_example_agent_prompt_resolves_with_real_batch_inputs() {
+    let graph = definition_example();
+    let params = super::super::graph::resolve(
+        &graph["nodes"][2],
+        "/nodes/2",
+        ferry_protocol::sandbox::InputData {
+            items: vec![Item {
+                json: json!({"commits":152,"text":"x".repeat(106_000)})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                binary: Default::default(),
+                paired: vec![],
+            }],
+            upstream: vec![],
+        },
+        &[None],
+        json!({}),
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(params.len(), 1);
+    assert!(
+        params[0]["prompt"]
+            .as_str()
+            .unwrap()
+            .contains("provided data")
+    );
+}
+
+#[tokio::test]
 async fn node_catalog_preserves_browser_contract_and_validates_page_filters() {
     let Json(full) = node_catalog(
         crate::agents::tests::admin(1),

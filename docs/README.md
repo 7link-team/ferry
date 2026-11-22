@@ -10,7 +10,8 @@ Start here to find the canonical document for a topic. Directory and file names 
 
 ## Start here
 
-- [0.10.7-alpha release notes](releases/v0.10.7-alpha.md): upgrade compatibility and distribution boundaries; publication status must be checked on the actual release.
+- [0.10.8-alpha release notes](releases/v0.10.8-alpha.md): workspace business time, workflow diagnostics and mobile release assets; publication status must be checked on the actual release.
+- [0.10.7-alpha release notes](releases/v0.10.7-alpha.md): upgrade compatibility and distribution boundaries.
 
 - [Platform product and technical design](architecture/platform-product-and-technical-design.md): authoritative resource, list and form contracts.
 - [Compose deployment guide](guides/compose-quickstart.md): installation and operation.

@@ -15,7 +15,14 @@ fn dispatch_future_keeps_executor_state_off_the_scheduler_stack() {
     }
     let inner = future_bytes(dispatch_inner);
     let outer = future_bytes(dispatch);
-    println!("Workflow future bytes: inner={inner}, dispatch={outer}");
+    let scoped = future_bytes(|s, backend, lease, stop| {
+        crate::hosts::channel::with_timezone(None, dispatch_inner(s, backend, lease, stop))
+    });
+    println!("Workflow future bytes: inner={inner}, dispatch={outer}, timezone_scope={scoped}");
+    assert!(
+        scoped < 1024,
+        "task-local scope must box executor state before storing it"
+    );
     assert!(
         outer < 64 * 1024,
         "scheduler must not embed the complete executor state"
@@ -1090,4 +1097,100 @@ fn no_code_or_catalogue_uses_the_old_internal_execution_message() {
         }
     }
     assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn workspace_timezone_is_optional_in_historical_start_packets_and_persists_when_confirmed() {
+    let legacy = json!({"version":1,"revision_id":15,
+        "plan":{"version":1,"entry_node_id":"start","nodes":[]},"inputs":{},"vars":{}});
+    let mut start: Start = serde_json::from_value(legacy.clone()).unwrap();
+    assert_eq!(start.timezone, None);
+    assert_eq!(serde_json::to_value(&start).unwrap(), legacy);
+    start.timezone = Some("Asia/Kuala_Lumpur".into());
+    let restored: Start = serde_json::from_str(&serde_json::to_string(&start).unwrap()).unwrap();
+    assert_eq!(restored.timezone.as_deref(), Some("Asia/Kuala_Lumpur"));
+}
+
+#[tokio::test]
+async fn ordinary_workflow_commands_keep_the_start_timezone_after_workspace_changes() {
+    use crate::{agents::tests::admin, entities::workspaces, hosts::fake};
+    let (_dir, s) = crate::platform_tools::tests::setup().await;
+    let host = s.next_id().unwrap();
+    crate::entities::hosts::Entity::insert(
+        fake::host_row(1, host.into(), "frozen-command", "online").into_active_model(),
+    )
+    .exec(&s.db)
+    .await
+    .unwrap();
+    let fake = fake::register(host.into());
+    fake.stream_commands
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let graph = json!({"engine":"ferry-graph","schema":1,"settings":{"timezone":"UTC"},"nodes":[
+        {"id":"start","name":"Start","type":"core.trigger.manual","type_version":1,"params":{"input_schema":{"type":"object"}},"position":[0,0]},
+        {"id":"command","name":"Command","type":"host.command","type_version":1,
+         "settings":{"runtime":"host","target_kind":"host","target_ref":host.to_string()},
+         "params":{"shell":"sh","command":"date","input_env":{},"input_assets":{}},"position":[300,0]}
+    ],"connections":[{"from":{"node":"start","port":"main","index":0},"to":{"node":"command","port":"main","index":0}}]});
+    let (_, Json(workflow)) = super::super::create(
+        State(s.clone()),
+        admin(1),
+        Json(
+            serde_json::from_value(json!({"name":"Frozen command","definition":graph.to_string()}))
+                .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    let id: Id = serde_json::from_value(workflow["id"].clone()).unwrap();
+    let backend = ArtifactStore::for_state(&s).await.unwrap();
+    let (_stop, stop) = tokio::sync::watch::channel(false);
+    for saved_zone in [None, Some("Asia/Kuala_Lumpur")] {
+        workspaces::Entity::update_many()
+            .col_expr(workspaces::Column::Timezone, Expr::value(saved_zone))
+            .filter(workspaces::Column::Id.eq(1))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let (_, Json(created)) = create(
+            State(s.clone()),
+            admin(1),
+            Path(("1".into(), id)),
+            Json(
+                serde_json::from_value(
+                    json!({"mode":"manual","revision":"draft","version":1,"entry_node_id":"start"}),
+                )
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let execution: Id = serde_json::from_value(created["id"].clone()).unwrap();
+        workspaces::Entity::update_many()
+            .col_expr(
+                workspaces::Column::Timezone,
+                Expr::value(Some("America/New_York")),
+            )
+            .filter(workspaces::Column::Id.eq(1))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        fake.process_timezones.lock().unwrap().clear();
+        let lease = claim(&s, "timezone-command").await.unwrap().unwrap();
+        assert_eq!(lease.execution().id, i64::from(execution));
+        dispatch(&s, &backend, &lease, &stop).await.unwrap();
+        assert_eq!(
+            current(&s, execution.into()).await.unwrap().state,
+            "succeeded"
+        );
+        let seen = fake.process_timezones.lock().unwrap();
+        assert!(
+            seen.len() >= 2,
+            "private directory and command must both use a scoped channel"
+        );
+        assert!(
+            seen.iter().all(|zone| zone.as_deref() == saved_zone),
+            "{seen:?}"
+        );
+        assert!(crate::hosts::channel::execution_timezone().is_none());
+    }
 }

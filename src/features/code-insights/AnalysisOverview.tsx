@@ -1,8 +1,9 @@
+import { useWorkspaceTimezone } from "../../shared/timezone";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { errorText } from "../../shared/api/api";
 import { listResource, type Envelope } from "../../shared/api/resource";
-import { insightText } from "../../shared/i18n/i18n";
+import { commonText, insightText } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { metricClass } from "./AnalysisTooltip";
 import { AnalysisSummary, analysisDatePresets, analysisReport, overviewPeriods, overviewRanking, type Row } from "./analysis-config";
@@ -46,8 +47,9 @@ function PeriodCard({ workspace, connectionId, scope, period, day, conditions, r
   workspace: string; connectionId: string; scope: "connection" | "insight"; period: typeof overviewPeriods[number]; day: string;
   conditions: Record<string, string>; refreshKey: number; metric: string; onOpen: (kind: string, dates: Record<string, string>) => void;
 }) {
+  const timezone = useWorkspaceTimezone();
   const ranking = useMemo(() => overviewRanking(workspace, connectionId, period, new Date(`${day}T00:00:00Z`), scope), [workspace, connectionId, period, day, scope]);
-  const repositories = useMemo(() => ({ ...analysisReport(workspace, connectionId, "repositories", scope), fixed: ranking.fixed! }), [workspace, connectionId, scope, ranking]);
+  const repositories = useMemo(() => ({ ...analysisReport(workspace, connectionId, "repositories", scope, timezone), fixed: ranking.fixed! }), [workspace, connectionId, scope, ranking, timezone]);
   const authors = useReport(workspace, ranking, conditions, refreshKey);
   const repos = useReport(workspace, repositories, conditions, refreshKey);
   return <section className="min-w-0 rounded-xl border bg-card p-4" aria-label={insightText("periodRanking", { period: insightText(analysisDatePresets.find(([key]) => key === period)![1]) })}>
@@ -66,7 +68,8 @@ export function AnalysisOverview({ workspace, connectionId, scope, day, conditio
   onOpen: (kind: string, dates: Record<string, string>) => void;
 }) {
   const metric = "effectives";
-  const config = useMemo(() => analysisReport(workspace, connectionId, "overview", scope), [workspace, connectionId, scope]);
+  const timezone = useWorkspaceTimezone();
+  const config = useMemo(() => analysisReport(workspace, connectionId, "overview", scope, timezone), [workspace, connectionId, scope, timezone]);
   const state = useReport(workspace, config, conditions, refreshKey);
   const totals = state.data?.items[0];
   return <div className="space-y-6">
@@ -74,7 +77,7 @@ export function AnalysisOverview({ workspace, connectionId, scope, day, conditio
     <dl className="grid grid-cols-2 gap-3 lg:grid-cols-5">{["projects", ...metrics].map((key, index) => <div key={key} className="rounded-xl border bg-card px-4 py-4"><dt className="text-xs text-muted-foreground">{insightText(index ? metricLabels[index - 1]! : "参与仓库")}</dt><dd className={`mt-2 text-2xl font-semibold tabular-nums ${metricClass(key)}`}>{!state.data ? "—" : Number(totals?.[key] ?? 0).toLocaleString()}</dd></div>)}</dl>
     {state.data?.coverage !== undefined && <AnalysisSummary data={state.data} kind="overview" />}
     <section aria-label={insightText("六个周期贡献排名")} className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">{insightText("周期贡献排名（UTC）")}</h3><span className="text-xs text-muted-foreground">{insightText("有效变更")} · Top 10</span></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">{timezone ? commonText("resource-domain:workspace.periodRanking", { zone: timezone }) : insightText("周期贡献排名（UTC）")}</h3><span className="text-xs text-muted-foreground">{insightText("有效变更")} · Top 10</span></div>
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">{overviewPeriods.map(period => <PeriodCard key={period} {...{ workspace, connectionId, scope, period, day, conditions, refreshKey, metric, onOpen }} />)}</div>
     </section>
   </div>;

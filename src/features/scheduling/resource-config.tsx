@@ -1,3 +1,6 @@
+import { AutoField } from "../../shared/forms/auto-form";
+import { Input } from "../../shared/ui/input";
+import { EffectiveTimezone } from "../../shared/timezone";
 import { deleteResource, runItemAction } from "../../shared/api/resource";
 import { commonText } from "../../shared/i18n/i18n";
 import type { ResourceConfigContext } from "../../shared/resources/config";
@@ -137,6 +140,7 @@ export function schedulingLists({
           key: "timezone",
           label: "时区",
           labelKey: "resource-domain:cron.timezone",
+          render: row => <EffectiveTimezone>{row.timezone}</EffectiveTimezone>,
         },
         {
           key: "enabled",
@@ -342,8 +346,8 @@ export function schedulingForms({
               key: "timezone",
               label: "时区",
               labelKey: "resource-domain:cron.timezone",
-              type: "text",
-              required: true,
+              type: "custom",
+              render: ({ draft, readOnly, onPatch }) => <EffectiveTimezone><AutoField label={commonText("resource-domain:cron.timezone")}>{readOnly ? <p className="text-sm">{String(draft.timezone || "—")}</p> : <Input name="timezone" aria-label={commonText("resource-domain:cron.timezone")} required value={String(draft.timezone ?? "")} readOnly={readOnly} onChange={event => onPatch({ timezone: event.target.value })} />}</AutoField></EffectiveTimezone>,
               placeholder: "Asia/Shanghai",
               help: "必须明确填写 IANA 时区，例如 Asia/Shanghai、Asia/Singapore、UTC。",
               helpKey: "resource-domain:cron.timezoneHelp",

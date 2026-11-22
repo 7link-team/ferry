@@ -180,5 +180,6 @@
   "auth.sessionAutoRenewDisabled": "自動續期已關閉，存取憑證到期後請重新登入。",
   "mail.invitationUnavailable": "請先在平台設定中配置、啟用並測試郵件服務，再傳送邀請。",
   "mail.invitationSubject": "工作空間邀請",
-  "mail.invitationBody": "邀請你加入工作空間：{workspace}。\n邀請碼：{code}\n登入或註冊後，開啟「建立/加入工作空間」並輸入此邀請碼。"
+  "mail.invitationBody": "邀請你加入工作空間：{workspace}。\n邀請碼：{code}\n登入或註冊後，開啟「建立/加入工作空間」並輸入此邀請碼。",
+  "workspace.error.timezone_invalid": "請選擇有效的工作空間 IANA 時區。"
 }

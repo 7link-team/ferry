@@ -16,6 +16,7 @@ pub(super) async fn execute(
     validator: &jsonschema::Validator,
     max_calls: usize,
     timeout: Duration,
+    clock: Option<&Value>,
 ) -> Result<Map<String, Value>> {
     let policy = crate::accounts::resource_policy::load(&s.db).await?;
     let profile = crate::agents::model_profile(
@@ -42,7 +43,7 @@ pub(super) async fn execute(
         ));
     }
     let mut messages = vec![json!({"role":"user","content":compose(&agent.system_prompt,
-        params["prompt"].as_str().unwrap_or_default(), items, Some(&params["output_schema"]), false)?})];
+        params["prompt"].as_str().unwrap_or_default(), items, Some(&params["output_schema"]), false, clock)?})];
     let mut log = NodeLog::with_limit(policy.log_output_bytes);
     let node_log = (node_run > 0).then_some(node_run);
     let mut active_round = None;

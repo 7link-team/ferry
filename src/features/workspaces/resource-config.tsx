@@ -1,3 +1,6 @@
+import { TimezoneField } from "../../shared/forms/TimezoneField";
+import type { FormField } from "../../shared/resources/types";
+import { detectedTimezone } from "../../shared/timezone";
 import { api } from "../../shared/api/api";
 import type { AvatarValue } from "../../shared/api/api";
 import { IdentityAvatar } from "../../shared/ui/identity-avatar";
@@ -6,6 +9,10 @@ import { commonText } from "../../shared/i18n/i18n";
 import type { ResourceConfigContext } from "../../shared/resources/config";
 import { type AnyRow, form, list } from "../../shared/resources/config";
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
+
+export function workspaceTimezoneField(): FormField<AnyRow> {
+  return { key: "timezone", label: "", labelKey: "resource-domain:workspace.timezone", type: "custom", render: ({ draft, readOnly, onPatch, onValidityChange }) => <TimezoneField label={commonText("resource-domain:workspace.timezone")} value={String(draft.timezone ?? "")} required={!readOnly} emptyLabel={commonText("resource-domain:workspace.unconfirmed")} help={<>{commonText("resource-domain:workspace.timezoneHelp")} {commonText("resource-domain:workspace.detected", { zone: detectedTimezone() || "—" })}</>} readOnly={readOnly} onChange={timezone => onPatch({ timezone })} onValidityChange={onValidityChange} /> };
+}
 
 export interface Role {
   id: string;
@@ -178,6 +185,7 @@ export function workspacesForms({
   permissions,
 }: ResourceConfigContext): Record<string, FormConfig<AnyRow>> {
   return {
+    "workspace-settings": form({ resource: "workspace-settings", permissionResource: "settings", blank: {}, heading: () => commonText("resource-domain:workspace.settings"), sections: [{ fields: [workspaceTimezoneField()] }] }),
     members: form({
       resource: "members",
       heading: (r: Member) => r.name,

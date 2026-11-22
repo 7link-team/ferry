@@ -27,6 +27,7 @@ export function validTimeZone(zone: string): boolean {
 /** An optional IANA time zone: searchable list, free text checked, empty = `emptyLabel`. */
 export function TimezoneField({
   label,
+  required = false,
   value,
   emptyLabel,
   help,
@@ -36,6 +37,7 @@ export function TimezoneField({
   onValidityChange,
 }: {
   label: string;
+  required?: boolean;
   value: string;
   emptyLabel: string;
   help?: ReactNode;
@@ -45,26 +47,29 @@ export function TimezoneField({
   onValidityChange?: ((blocked: boolean) => void) | undefined;
 }) {
   const zones = useMemo(timeZoneNames, []);
-  const invalid = !validTimeZone(value.trim());
+  const invalid = (required && !value.trim()) || !validTimeZone(value.trim());
   useEffect(() => {
     onValidityChange?.(!readOnly && invalid);
   }, [readOnly, invalid, onValidityChange]);
   return (
     <AutoField
       label={label}
+      required={required}
       help={help}
       error={invalid ? commonText("resource-domain:timezone.invalid") : undefined}
     >
       {readOnly ? (
         <p className="break-words text-sm">{value || emptyLabel}</p>
       ) : (
-        <ComboInput
+        <div className="[&_button]:min-h-11"><ComboInput
+          className="min-h-11"
           aria-label={label}
+          required={required}
           options={zones}
           value={value}
           placeholder={emptyLabel}
           onValueChange={(zone) => onChange(zone.trim())}
-        />
+        /></div>
       )}
       {notes}
     </AutoField>

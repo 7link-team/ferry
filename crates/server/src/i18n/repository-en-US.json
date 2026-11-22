@@ -866,5 +866,6 @@
   "transfers.csvInvalid": "The CSV file cannot be read at line {row}; check quotes and the number of columns on that line.",
   "templates.documentInvalidAt": "The template is not valid JSON/YAML at line {line}, column {column}; check indentation there and quote string placeholders.",
   "maintenance.pipelineConcurrencyLegacyName": "Pipeline concurrency (legacy, inactive)",
-  "maintenance.pipelineConcurrencyLegacyHelp": "This workspace setting is retained for compatibility and does not control pipeline execution. Configure concurrent pipeline runs in Platform settings → Resource limits. Contact a platform administrator if you cannot access platform settings. The stored value and legacy default are not applied."
+  "maintenance.pipelineConcurrencyLegacyHelp": "This workspace setting is retained for compatibility and does not control pipeline execution. Configure concurrent pipeline runs in Platform settings → Resource limits. Contact a platform administrator if you cannot access platform settings. The stored value and legacy default are not applied.",
+  "channel.timezoneUnsupported": "The host did not accept the required process time zone {zone}. Configure SSH to accept TZ or use an up-to-date Runner."
 }

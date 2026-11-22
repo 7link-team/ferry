@@ -40,6 +40,7 @@ mod resource_policy;
 mod runner_timezones;
 mod session_policy;
 mod workflow_node_logs;
+mod workspace_timezones;
 
 // Keep names alongside builders for existence checks; no SQL parsing is needed.
 enum SchemaStatement {
@@ -99,6 +100,8 @@ impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         vec![
             Box::new(Initial),
+            // Old backfills can select the complete workspace entity.
+            Box::new(workspace_timezones::Migration),
             Box::new(HostResources),
             Box::new(RunnerEnrolment),
             Box::new(Credentials),

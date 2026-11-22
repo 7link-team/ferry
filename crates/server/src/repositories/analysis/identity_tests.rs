@@ -43,6 +43,7 @@ async fn fixture_at(legacy: bool) -> (tempfile::TempDir, AppState) {
         cluster: None,
     });
     let mut workspace = workspaces::Model {
+        timezone: None,
         id: 1,
         slug: "identity-test".into(),
         name: "Identity".into(),

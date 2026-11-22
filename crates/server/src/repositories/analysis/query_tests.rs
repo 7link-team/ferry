@@ -9,6 +9,294 @@ use crate::repositories::analysis::{
 use sea_orm::Statement;
 use std::sync::{Arc, Mutex};
 
+fn instant(value: &str) -> i64 {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .unwrap()
+        .timestamp_millis()
+}
+
+// Dense test input deliberately represents actual occupied UTC days; production
+// never generates this range from cohort min/max.
+fn calendar_range(
+    zone: chrono_tz::Tz,
+    period: &str,
+    min: i64,
+    max: i64,
+) -> Result<Vec<CalendarBucket>> {
+    chrono::DateTime::from_timestamp_millis(min).ok_or_else(date_error)?;
+    chrono::DateTime::from_timestamp_millis(max).ok_or_else(date_error)?;
+    let days = (min.div_euclid(86_400_000)..=max.div_euclid(86_400_000)).collect::<Vec<_>>();
+    Ok(calendar_buckets(zone, period, &days)?
+        .into_iter()
+        .filter(|bucket| bucket.start <= max && bucket.end > min)
+        .collect())
+}
+
+#[test]
+fn business_date_filters_use_complete_local_days_and_preserve_absolute_instants() {
+    let zone = Some(chrono_tz::America::New_York);
+    for (day, start, end) in [
+        (
+            "2026-03-08",
+            "2026-03-08T05:00:00Z",
+            "2026-03-09T03:59:59.999Z",
+        ),
+        (
+            "2026-11-01",
+            "2026-11-01T04:00:00Z",
+            "2026-11-02T04:59:59.999Z",
+        ),
+    ] {
+        assert_eq!(date_in_zone(day, false, zone).unwrap(), instant(start));
+        assert_eq!(date_in_zone(day, true, zone).unwrap(), instant(end));
+    }
+    assert_eq!(
+        date_in_zone("2026-03-08", false, None).unwrap(),
+        instant("2026-03-08T00:00:00Z")
+    );
+    for end in [false, true] {
+        assert_eq!(
+            date_in_zone("2026-03-08T01:30:00+08:00", end, zone).unwrap(),
+            instant("2026-03-08T01:30:00+08:00")
+        );
+    }
+    // Midnight is skipped in Sao Paulo; Apia skips an entire calendar date.
+    assert_eq!(
+        date_in_zone("2018-11-04", false, Some(chrono_tz::America::Sao_Paulo)).unwrap(),
+        instant("2018-11-04T03:00:00Z")
+    );
+    let skipped = Some(chrono_tz::Pacific::Apia);
+    assert_eq!(
+        date_in_zone("2011-12-30", false, skipped).unwrap(),
+        date_in_zone("2011-12-30", true, skipped).unwrap() + 1
+    );
+    assert_eq!(
+        date_in_zone("2026-11-01", false, Some(chrono_tz::America::Havana)).unwrap(),
+        instant("2026-11-01T04:00:00Z"),
+        "repeated midnight starts at its earliest instant"
+    );
+    assert!(date_in_zone("invalid", false, zone).is_err());
+    assert!(calendar_range(chrono_tz::UTC, "day", i64::MIN, i64::MAX).is_err());
+}
+
+#[test]
+fn calendar_ranges_cover_dst_midnight_week_and_month_without_utc_rebucketing() {
+    let zone = chrono_tz::America::New_York;
+    let daily = calendar_range(
+        zone,
+        "day",
+        instant("2026-03-08T04:30:00Z"),
+        instant("2026-03-09T04:30:00Z"),
+    )
+    .unwrap();
+    assert_eq!(
+        daily.iter().map(|b| b.label.as_str()).collect::<Vec<_>>(),
+        ["2026-03-07", "2026-03-08", "2026-03-09"]
+    );
+    assert_eq!(daily[1].end - daily[1].start, 23 * 3_600_000);
+    let weekly = calendar_range(
+        zone,
+        "week",
+        instant("2026-11-02T04:30:00Z"),
+        instant("2026-11-02T05:30:00Z"),
+    )
+    .unwrap();
+    assert_eq!(
+        weekly.iter().map(|b| b.label.as_str()).collect::<Vec<_>>(),
+        ["2026-11-01", "2026-11-08"]
+    );
+    assert_eq!(weekly[0].end - weekly[0].start, (7 * 24 + 1) * 3_600_000);
+    let monthly = calendar_range(
+        chrono_tz::Asia::Kuala_Lumpur,
+        "month",
+        instant("2026-10-31T15:59:59Z"),
+        instant("2026-10-31T16:00:00Z"),
+    )
+    .unwrap();
+    assert_eq!(
+        monthly.iter().map(|b| b.label.as_str()).collect::<Vec<_>>(),
+        ["2026-10", "2026-11"]
+    );
+}
+
+#[tokio::test]
+async fn local_midnight_metadata_and_sparse_extreme_dates_keep_all_authors_and_counts() {
+    let (_dir, s) = fixture().await;
+    let claim = claimed(&s).await;
+    let mut ids = Vec::new();
+    let ancient = chrono::NaiveDate::from_ymd_opt(-1, 1, 1)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc()
+        .timestamp_millis();
+    let distant = chrono::NaiveDate::from_ymd_opt(100_000, 1, 1)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc()
+        .timestamp_millis();
+    for (sha, authored, name, email) in [
+        ('a', ancient, "Ancient", "ancient@example.test"),
+        ('b', 0, "Epoch", "epoch@example.test"),
+        (
+            'c',
+            instant("2026-01-31T23:30:00Z"),
+            "Midnight",
+            "midnight@example.test",
+        ),
+        ('d', distant, "Distant", "distant@example.test"),
+    ] {
+        let mut value = commit(sha);
+        value.author_date = authored;
+        value.committer_date = instant("2026-02-01T12:00:00Z");
+        value.author_name = name.into();
+        value.author_email = email.into();
+        ids.push(store(&s, &claim, value).await.unwrap().id);
+    }
+    publish_branches(&s, &claim, &[("main", &"d".repeat(40), &ids)]).await;
+    identity::backfill(&s).await.unwrap();
+    s.db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "UPDATE workspaces SET timezone = ? WHERE id = ?",
+        vec!["Asia/Kuala_Lumpur".into(), 1_i64.into()],
+    ))
+    .await
+    .unwrap();
+    let rendered = read(&s, "heatmap", &[]).await;
+    assert_eq!(rendered["total"], 4);
+    let series = rendered["series"].as_array().unwrap();
+    for (label, name, email) in [
+        ("-0001-01-01", "Ancient", "ancient@example.test"),
+        ("1970-01-01", "Epoch", "epoch@example.test"),
+        ("2026-02-01", "Midnight", "midnight@example.test"),
+        ("+100000-01-01", "Distant", "distant@example.test"),
+    ] {
+        let day = series.iter().find(|row| row["period"] == label).unwrap();
+        assert_eq!(day["commits"], 1);
+        assert_eq!(day["name"], name);
+        assert_eq!(day["email"], email);
+        assert_eq!(day["authors"][0]["name"], name);
+        assert_eq!(day["authors"][0]["email"], email);
+    }
+    for period in ["day", "week", "month"] {
+        let mut cohort = FactCohort::with_timezone_projection(
+            1,
+            vec![7],
+            &HashMap::new(),
+            Projection::Legacy(1),
+            Some(chrono_tz::Asia::Kuala_Lumpur),
+        )
+        .unwrap();
+        cohort
+            .prepare_calendar(&s, chrono_tz::Asia::Kuala_Lumpur, period)
+            .await
+            .unwrap();
+        assert!(cohort.calendar.as_ref().unwrap().len() < 32);
+        let grouped = grouped(&cohort, DbBackend::Sqlite, period, true).unwrap();
+        let values = rows::<Aggregate>(&s, &grouped).await.unwrap();
+        assert_eq!(values.iter().map(|row| row.commits).sum::<i64>(), 4);
+        assert_eq!(count(&s, grouped).await.unwrap(), 4);
+        for backend in [DbBackend::Sqlite, DbBackend::Postgres, DbBackend::MySql] {
+            let projection = backend.build(&occupied_day_query(&cohort, backend));
+            assert!(projection.sql.contains("DISTINCT"));
+            assert!(projection.sql.contains("utc_day"));
+            assert!(!projection.sql.contains("MIN("));
+            let statement = backend.build(&super::grouped(&cohort, backend, period, true).unwrap());
+            assert!(statement.sql.matches(" WHEN ").count() < 64);
+            assert!(statement.sql.len() < 15_000);
+        }
+    }
+}
+
+#[tokio::test]
+async fn calendar_case_is_portable_and_keeps_sql_aggregation_count_and_pagination() {
+    let (_dir, s) = fixture().await;
+    let claim = claimed(&s).await;
+    let mut ids = Vec::new();
+    for (sha, authored) in [
+        ('a', "2026-03-08T04:30:00Z"),
+        ('b', "2026-03-08T05:30:00Z"),
+        ('c', "2026-03-09T03:30:00Z"),
+    ] {
+        let mut value = commit(sha);
+        value.author_date = instant(authored);
+        value.committer_date = instant("2026-03-09T05:30:00Z");
+        ids.push(store(&s, &claim, value).await.unwrap().id);
+    }
+    publish_branches(&s, &claim, &[("main", &"c".repeat(40), &ids)]).await;
+    identity::backfill(&s).await.unwrap();
+    let raw = HashMap::from([
+        ("since".into(), "2026-03-09".into()),
+        ("until".into(), "2026-03-09".into()),
+    ]);
+    let zone = chrono_tz::America::New_York;
+    let mut cohort =
+        FactCohort::with_timezone_projection(1, vec![7], &raw, Projection::Legacy(1), Some(zone))
+            .unwrap();
+    cohort.prepare_calendar(&s, zone, "day").await.unwrap();
+    let q = grouped(&cohort, DbBackend::Sqlite, "day", true).unwrap();
+    assert_eq!(count(&s, q.clone()).await.unwrap(), 2);
+    let mut page = q;
+    page.order_by(a("period"), Order::Asc).limit(1).offset(1);
+    let selected = rows::<Aggregate>(&s, &page).await.unwrap();
+    assert_eq!(selected[0].period, "2026-03-08");
+    assert_eq!(selected[0].commits, 2);
+    let metadata = aggregate_items(&s, &cohort, "day", true, selected)
+        .await
+        .unwrap();
+    assert_eq!(metadata[0]["commits"], 2);
+    s.db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "UPDATE workspaces SET timezone = ? WHERE id = ?",
+        vec!["America/New_York".into(), 1_i64.into()],
+    ))
+    .await
+    .unwrap();
+    let rendered = read(
+        &s,
+        "heatmap",
+        &[("since", "2026-03-09"), ("until", "2026-03-09")],
+    )
+    .await;
+    assert_eq!(rendered["coverage"]["timezone"], "America/New_York");
+    assert_eq!(rendered["total"], 2);
+    assert_eq!(rendered["series"][0]["period"], "2026-03-07");
+    assert_eq!(rendered["series"][1]["commits"], 2);
+    assert_eq!(rendered["series"][1]["authors"][0]["commits"], 2);
+    for backend in [DbBackend::Sqlite, DbBackend::Postgres, DbBackend::MySql] {
+        let mut query = grouped(&cohort, backend, "day", false).unwrap();
+        query.limit(1).offset(1);
+        let statement = backend.build(&query);
+        assert!(statement.sql.contains("CASE WHEN"));
+        assert!(statement.sql.contains("GROUP BY"));
+        assert!(statement.sql.contains("LIMIT"));
+        assert!(!statement.sql.contains("CONVERT_TZ"));
+        assert!(!statement.sql.contains("AT TIME ZONE"));
+        assert!(statement.sql.len() < 10_000);
+    }
+    // Full-history charts must not hit bind limits or nested-expression depth
+    // limits merely because ten years of calendar dates are represented.
+    cohort.calendar = Some(
+        calendar_range(
+            zone,
+            "day",
+            instant("2020-01-01T00:00:00Z"),
+            instant("2030-01-01T00:00:00Z"),
+        )
+        .unwrap(),
+    );
+    let decade = grouped(&cohort, DbBackend::Sqlite, "day", true).unwrap();
+    let decade_rows = rows::<Aggregate>(&s, &decade).await.unwrap();
+    assert_eq!(decade_rows.len(), 2);
+    assert_eq!(decade_rows.iter().map(|row| row.commits).sum::<i64>(), 3);
+    for backend in [DbBackend::Sqlite, DbBackend::Postgres, DbBackend::MySql] {
+        let statement = backend.build(&grouped(&cohort, backend, "day", true).unwrap());
+        assert!(statement.sql.len() < 1_000_000);
+        assert!(statement.values.unwrap().0.len() < 100);
+    }
+}
+
 #[test]
 fn insight_projection_is_scoped_and_bound_for_every_database() {
     let cohort = FactCohort::with_projection(

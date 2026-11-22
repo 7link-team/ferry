@@ -1,3 +1,4 @@
+import { useWorkspaceTimezone, localDateTime } from "../../shared/timezone";
 import { useQueryValue, useScrollSync } from "../router";
 import { ResourceHeading } from "../../shared/ui/resource-heading";
 import { ConfigurationSection, ScrollFormSections } from "../../shared/ui/scroll-form-sections";
@@ -138,12 +139,14 @@ export function ResourceForm<T extends Record<string, unknown>>({
   const [queryPresets] = useState(() => creating && !createInPlace
     ? Object.fromEntries((config.queryDefaults ?? []).map(key => [key, new URLSearchParams(location.search).get(key) ?? ""]).filter(([, value]) => value))
     : {});
+  const timezone = useWorkspaceTimezone();
   const [defaultWorkflowName] = useState(() => {
     if (!["workflows", "pipelines"].includes(config.resource)) return "";
     const now = new Date();
     const pad = (value: number) => String(value).padStart(2, "0");
+    const stamp = timezone ? localDateTime(now.toISOString(), timezone).replaceAll("-", "").replaceAll(":", "").replace("T", "-") + pad(Number(new Intl.DateTimeFormat("en-US", { timeZone: timezone, second: "2-digit" }).format(now))) : `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
     const suffix = Array.from(crypto.getRandomValues(new Uint8Array(3)), value => value.toString(16).padStart(2,"0")).join("");
-    return `${workflowText("newWorkflow")}-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-${suffix}`;
+    return `${workflowText("newWorkflow")}-${stamp}-${suffix}`;
   });
   const presetBlankDraft = { ...baseBlankDraft, ...queryPresets } as Partial<T>;
   const blankDraft = creating && ["workflows", "pipelines"].includes(config.resource)
@@ -727,7 +730,7 @@ function Field<T>({
 
   if (asText) {
     const shown = field.display ? field.display(draft as Partial<T>) : text;
-    const href = field.link && /^https?:\/\//i.test(shown) ? shown : undefined;
+    const href = field.link && typeof shown === "string" && /^https?:\/\//i.test(shown) ? shown : undefined;
     return (
       <Wrapper field={field}>
         {label}

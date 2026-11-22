@@ -180,5 +180,6 @@
   "auth.sessionAutoRenewDisabled": "Pembaharuan sesi automatik dimatikan. Log masuk semula selepas akses tamat.",
   "mail.invitationUnavailable": "Konfigurasikan, aktifkan dan uji perkhidmatan e-mel dalam tetapan platform sebelum menghantar jemputan.",
   "mail.invitationSubject": "Jemputan ruang kerja",
-  "mail.invitationBody": "Anda dijemput menyertai {workspace}.\nKod jemputan: {code}\nLog masuk atau daftar akaun, kemudian buka Cipta/sertai ruang kerja dan masukkan kod ini."
+  "mail.invitationBody": "Anda dijemput menyertai {workspace}.\nKod jemputan: {code}\nLog masuk atau daftar akaun, kemudian buka Cipta/sertai ruang kerja dan masukkan kod ini.",
+  "workspace.error.timezone_invalid": "Pilih zon waktu IANA yang sah untuk ruang kerja ini."
 }

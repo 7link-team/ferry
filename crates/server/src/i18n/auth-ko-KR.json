@@ -180,5 +180,6 @@
   "auth.sessionAutoRenewDisabled": "세션 자동 갱신이 꺼져 있습니다. 접근 만료 후 다시 로그인하세요.",
   "mail.invitationUnavailable": "초대를 보내기 전에 플랫폼 설정에서 이메일 서비스를 구성하고 활성화한 후 테스트하세요.",
   "mail.invitationSubject": "워크스페이스 초대",
-  "mail.invitationBody": "{workspace}에 초대되었습니다.\n초대 코드: {code}\n로그인하거나 가입한 후 워크스페이스 만들기/참가에서 이 코드를 입력하세요."
+  "mail.invitationBody": "{workspace}에 초대되었습니다.\n초대 코드: {code}\n로그인하거나 가입한 후 워크스페이스 만들기/참가에서 이 코드를 입력하세요.",
+  "workspace.error.timezone_invalid": "이 작업 공간에 유효한 IANA 시간대를 선택하세요."
 }

@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { useEffect, useMemo, useState } from "react";
 import { i18n } from "../../shared/i18n/i18n";
 import { conversationText as t } from "./resource-config";
@@ -89,7 +90,7 @@ export function MemberActivity({ turns, items, files, onJump }: {
                       <span className={turn.state === "completed" ? "" : "text-destructive"}>{t(turn.state)}</span>
                       {turn.created_at && (
                         <span className="text-xs text-muted-foreground">
-                          {new Date(turn.created_at).toLocaleString(i18n.language, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          {<WorkspaceDate value={turn.created_at} locale={i18n.language} options={{ month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }} />}
                         </span>
                       )}
                       {turn.created_at && turn.updated_at && (

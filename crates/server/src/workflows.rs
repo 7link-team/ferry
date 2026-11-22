@@ -153,6 +153,12 @@ pub struct Preview {
 
 /// Pure editor preview over caller-supplied samples. No node executor, asset
 /// downloader or credential client is invoked, and no revision/run is created.
+/// node_path is a zero-based JSON Pointer into the saved draft, e.g. /nodes/2
+/// (not the node id analyze). Nested loops use /nodes/1/params/body/nodes/0.
+/// Body example: {"version":1,"node_path":"/nodes/2","data":{"items":[{"json":{}}],"upstream":[]},"selections":[null]}.
+/// Use the actual current workflow version. Batch nodes use [null] and
+/// $input.all(); per-item nodes use [0,1,...]. data.sources is not accepted.
+/// For full request examples and expression rules GET /workflow-definition-format.
 pub async fn preview(
     State(s): State<AppState>,
     scope: Scope,
@@ -176,7 +182,12 @@ pub async fn preview(
         node["params"] = params;
     }
     let vars = crate::variables::snapshot_for_workflow(&s, &tx, scope.workspace_id).await?;
-    let (now, today) = expression::clock(&definition["settings"], db::now())?;
+    let timezone = crate::accounts::workspace::business_timezone(&tx, scope.workspace_id).await?;
+    let (now, today) = expression::clock_with_timezone(
+        &definition["settings"],
+        timezone.as_ref().map(|zone| zone.name()),
+        db::now(),
+    )?;
     let context = json!({"$vars":vars,"$node":{"id":node["id"],"name":node["name"],"type":node["type"]},
         "$workflow":{"id":id,"name":row.name},"$execution":{"mode":"preview"},"$now":now,"$today":today});
     tx.commit().await?;

@@ -396,6 +396,7 @@ mod tests {
             cluster: None,
         });
         crate::entities::workspaces::Entity::insert(crate::entities::workspaces::ActiveModel {
+            timezone: Set(None),
             id: Set(1),
             slug: Set("monitor-test".into()),
             name: Set("Monitor".into()),

@@ -1,3 +1,8 @@
+import { AutoField } from "../../shared/forms/auto-form";
+import { Input } from "../../shared/ui/input";
+import { commonText } from "../../shared/i18n/i18n";
+import { EffectiveTimezone } from "../../shared/timezone";
+import { WorkspaceDate, formatDate } from "../../shared/timezone";
 import {
   deleteResource,
 } from "../../shared/api/resource";
@@ -7,13 +12,13 @@ import type { FormConfig, ListConfig } from "../../shared/resources/types";
 
 export type Row = Record<string, unknown>;
 
-export const time = (value: unknown) =>
+export const time = (value: unknown, timezone: string | null = null) =>
   typeof value === "number" && value > 0
-    ? new Date(value).toLocaleString(currentLocale())
+    ? formatDate(value, timezone, "datetime", currentLocale())
     : "—";
 
 export const coverage = (value: unknown) =>
-  value === 0 ? insightText("完整历史") : time(value);
+  value === 0 ? insightText("完整历史") : typeof value === "number" && value > 0 ? <WorkspaceDate value={value} locale={currentLocale()} /> : "—";
 
 export const updateMode = (value: unknown) =>
   value === "event" ? insightText("事件更新") : insightText("定时更新");
@@ -188,7 +193,8 @@ export function codeInsightForm(_workspace: string): FormConfig<Row> {
             key: "timezone",
             label: "时区",
             labelKey: "insight-domain:时区",
-            type: "text",
+            type: "custom",
+              render: ({ draft, readOnly, onPatch }) => <EffectiveTimezone><AutoField label={commonText("resource-domain:cron.timezone")}>{readOnly ? <p className="text-sm">{String(draft.timezone || "—")}</p> : <Input name="timezone" aria-label={commonText("resource-domain:cron.timezone")} value={String(draft.timezone ?? "")} readOnly={readOnly} onChange={event => onPatch({ timezone: event.target.value })} />}</AutoField></EffectiveTimezone>,
             placeholder: "UTC",
             when: (row) => row.update_mode === "scheduled",
             help: "留空按 UTC；Cron 按所选时区执行。可填写 IANA 时区，例如 Asia/Shanghai、Asia/Singapore。",

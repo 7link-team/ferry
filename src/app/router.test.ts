@@ -6,6 +6,10 @@ import { nav } from "./nav";
 beforeEach(() => { localStorage.clear(); history.replaceState({}, "", "/en-US/"); setLocale("en-US", false); });
 
 const workspace = "109124796398174208";
+it("routes a workspace-settings list destination to its read-only singleton", () => {
+  expect(parse(`/en-US/workspaces/${workspace}/workspace-settings`)).toMatchObject({ workspace, item: "workspace-settings", id: "1", mode: "view" });
+  expect(parse(`/en-US/workspaces/${workspace}/workspace-settings/1/edit`)).toMatchObject({ workspace, item: "workspace-settings", id: "1", mode: "edit" });
+});
 it("uses an explicit login URL and preserves deep-link query and hash only for reauthentication", () => {
   const target = `/en-US/workspaces/${workspace}/code-connections/42?tab=events&page=2#latest`;
   history.replaceState({}, "", target);

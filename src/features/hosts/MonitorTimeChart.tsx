@@ -1,3 +1,4 @@
+import { useWorkspaceTimezone, formatDate } from "../../shared/timezone";
 import { useState } from "react";
 import { hostRepositoryText,useCommonTranslation } from "../../shared/i18n/i18n";
 import { currentLocale } from "../../shared/i18n/locale";
@@ -5,7 +6,7 @@ import { currentLocale } from "../../shared/i18n/locale";
 export type MonitorPoint = { at: number; value: number | null };
 export type MonitorSeries = { name: string; points: MonitorPoint[]; secondary?: boolean };
 
-const clock = (at: number, seconds: boolean) => new Date(at).toLocaleTimeString(currentLocale(), {
+const clock = (at: number, seconds: boolean, timezone: string | null) => formatDate(at, timezone, "time", currentLocale(), {
   hour: "2-digit", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}), hour12: false,
 });
 
@@ -15,6 +16,7 @@ export function MonitorTimeChart({ label, series, start, end, step, ceiling, for
   ceiling?: number; format: (value: number) => string;
 }) {
   useCommonTranslation();
+  const timezone = useWorkspaceTimezone();
   const [selected, setSelected] = useState<number>();
   const points = series[0]?.points ?? [];
   const max = ceiling ?? Math.max(1, ...series.flatMap(item => item.points.map(point => point.value ?? 0))) * 1.1;
@@ -46,7 +48,7 @@ export function MonitorTimeChart({ label, series, start, end, step, ceiling, for
       <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 flex w-11 flex-col justify-between pr-1 text-right text-xs tabular-nums text-muted-foreground">
         <span>{format(max)}</span><span>{format(max / 2)}</span><span>{format(0)}</span>
       </div>
-      <svg role="img" aria-label={hostRepositoryText("host-chart.001", {value1: label, value2: clock(start, true), value3: clock(end, true), value4: points.filter(point => visible(point) && point.value !== null).length})}
+      <svg role="img" aria-label={hostRepositoryText("host-chart.001", {value1: label, value2: clock(start, true, timezone), value3: clock(end, true, timezone), value4: points.filter(point => visible(point) && point.value !== null).length})}
         tabIndex={0} viewBox="0 0 600 120" preserveAspectRatio="none"
         className="h-32 w-full rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onFocus={() => { if (points.length) setSelected(points.length - 1); }}
@@ -77,12 +79,12 @@ export function MonitorTimeChart({ label, series, start, end, step, ceiling, for
       </svg>
       {!hasValues && <span className="pointer-events-none absolute inset-0 flex items-center justify-center pl-12 text-xs text-muted-foreground">{hostRepositoryText("host-chart.002")}</span>}
       {active && <div role="tooltip" className="pointer-events-none absolute right-2 top-1 z-10 rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-sm">
-        <div className="mb-1 font-medium tabular-nums">{new Date(active.at).toLocaleString(currentLocale(), { hour12: false })}</div>
+        <div className="mb-1 font-medium tabular-nums">{formatDate(active.at, timezone, "datetime", currentLocale(), { hour12: false })}</div>
         {series.map(item => <div key={item.name} className="flex justify-between gap-4"><span>{item.name}</span><span className="tabular-nums">{item.points[selected!]?.value == null ? "—" : format(item.points[selected!]!.value!)}</span></div>)}
       </div>}
     </div>
     <div aria-hidden="true" className="ml-12 flex justify-between pr-2 text-xs tabular-nums text-muted-foreground">
-      {[0, 1, 2, 3, 4].map(index => <span key={index} className={index % 2 ? "hidden sm:inline" : undefined}>{clock(start + (end - start) * index / 4, showSeconds)}</span>)}
+      {[0, 1, 2, 3, 4].map(index => <span key={index} className={index % 2 ? "hidden sm:inline" : undefined}>{clock(start + (end - start) * index / 4, showSeconds, timezone)}</span>)}
     </div>
     {series.length > 1 && <div className="ml-12 flex gap-4 text-xs text-muted-foreground">{series.map(item => <span key={item.name} className="inline-flex items-center gap-1.5"><span className={`inline-block w-4 border-t-2 ${item.secondary ? "border-dashed border-success" : "border-primary"}`} />{item.name}</span>)}</div>}
   </div>;

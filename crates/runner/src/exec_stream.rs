@@ -32,13 +32,27 @@ impl Drop for ProcessGroup {
 
 /// Output stays as bytes until the server's per-stream decoder/redactor consumes it.
 /// Closing the consumer/cancellation channel terminates the owned process group.
+#[cfg(test)]
 pub async fn run(
     command: &str,
     seconds: u64,
     output: mpsc::Sender<Chunk>,
-    mut cancel: watch::Receiver<bool>,
+    cancel: watch::Receiver<bool>,
 ) -> anyhow::Result<i32> {
-    let mut process = crate::session::shell_command(command);
+    run_with_timezone(command, seconds, output, cancel, None).await
+}
+
+pub(crate) async fn run_with_timezone(
+    command: &str,
+    seconds: u64,
+    output: mpsc::Sender<Chunk>,
+    mut cancel: watch::Receiver<bool>,
+    timezone: Option<&str>,
+) -> anyhow::Result<i32> {
+    if let Some(zone) = timezone {
+        anyhow::ensure!(crate::timezone::valid(zone), "invalid process timezone");
+    }
+    let mut process = crate::session::shell_command_with_timezone(command, timezone);
     process
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

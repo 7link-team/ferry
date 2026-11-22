@@ -9,7 +9,7 @@ import { App } from "./App";
 import { defaultSiteSettings, SiteSettingsContext } from "../shared/site/settings";
 import { Entry } from "./Entry";
 import { RepositoryMonitor,repositoryEventList } from "./pages/RepositoryMonitor";
-import { navigate } from "./router";
+import { navigate, parse } from "./router";
 
 vi.mock("../features/pipelines/YamlEditor", () => ({
   YamlEditor: ({ value }: { value: string }) => <textarea aria-label="GitHub Actions YAML" value={value} readOnly />,
@@ -730,4 +730,35 @@ it("redirects old group pages to the corresponding directory", async () => {
   await act(async () => root.render(<App />));
   expect(location.pathname).toBe("/zh-CN/workspaces/2/nodes");
   expect(location.search).toContain("group_id=42");
+});
+
+it("keeps workspace settings usable after save and gives Cancel a read-only singleton destination", async () => {
+  required = false;
+  permissions = ["settings.read", "settings.update"];
+  history.replaceState({}, "", "/zh-CN/workspaces/2/workspace-settings/1/edit");
+  let timezone: string | null = null;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => ({ ok: true, status: 200, json: async () => {
+    if (url === "/api/setup") return { required: false, has_users: true };
+    if (url === "/api/me") return { user: { id: "1", name: "Owner", email: "owner@example.invalid", is_superadmin: false }, workspaces: [{ id: "2", name: "Workspace", slug: "ops", role_name: "Owner", permissions, timezone }] };
+    if (url.endsWith("/preferences")) return { default_page_size: 20, dictionaries: {} };
+    if (url.endsWith("/workspace-settings/1")) {
+      if (init.method === "PATCH") timezone = JSON.parse(String(init.body)).timezone;
+      return { id: "1", name: "Workspace", timezone, version: 7 };
+    }
+    return { items: [], total: 0, page: 1, page_size: 20 };
+  } })));
+  await act(async () => root.render(<App />));
+  const picker = host.querySelector<HTMLInputElement>('[role="combobox"]')!;
+  const cancel = [...host.querySelectorAll("a")].find(link => link.textContent === commonText("common.cancel"))!;
+  expect(parse(new URL(cancel.href).pathname)).toMatchObject({ item: "workspace-settings", id: "1", mode: "view" });
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(picker, "Asia/Kuala_Lumpur");
+    picker.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(parse()).toMatchObject({ item: "workspace-settings", id: "1", mode: "view" });
+  expect(host.textContent).toContain("Asia/Kuala_Lumpur");
+  expect(host.textContent).not.toContain(commonText("shell.unavailable"));
+  expect(host.querySelector('[role="combobox"]')).toBeNull();
+  expect([...host.querySelectorAll("a")].some(link => link.textContent === commonText("common.edit") && link.getAttribute("href")?.endsWith("/workspace-settings/1/edit"))).toBe(true);
 });

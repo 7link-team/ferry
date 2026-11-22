@@ -497,6 +497,7 @@ mod tests {
                 supports_agent_probe: false,
                 supports_forward: false,
                 supports_timezone: false,
+                supports_process_timezone: false,
                 supports_resource_policy: false,
                 timezone: String::new(),
             })
@@ -588,6 +589,7 @@ mod tests {
             supports_agent_probe: false,
             supports_forward: false,
             supports_timezone: false,
+            supports_process_timezone: false,
             supports_resource_policy: false,
             timezone: String::new(),
         })

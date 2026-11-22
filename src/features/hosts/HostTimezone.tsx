@@ -1,3 +1,4 @@
+import { EffectiveTimezone } from "../../shared/timezone";
 import { commonText } from "../../shared/i18n/i18n";
 import { TimezoneField } from "../../shared/forms/TimezoneField";
 /** The host fields this control reads (kept local to avoid an import cycle). */
@@ -23,7 +24,7 @@ export function HostTimezone({
   const enrolled = !!host.id && !!host.agent_version;
   const windows = (host.os ?? "").toLowerCase().includes("windows");
   return (
-    <TimezoneField
+    <EffectiveTimezone onValidityChange={onValidityChange}><TimezoneField
       label={t("label")}
       value={host.timezone ?? ""}
       emptyLabel={detected ? t("auto", { zone: detected }) : t("autoUnknown")}
@@ -43,6 +44,6 @@ export function HostTimezone({
           </div>
         ) : null
       }
-    />
+    /></EffectiveTimezone>
   );
 }

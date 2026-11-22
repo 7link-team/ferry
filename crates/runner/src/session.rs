@@ -61,28 +61,34 @@ async fn dispatch_with_policy(
     policy: &ResourcePolicy,
 ) -> anyhow::Result<()> {
     match request {
-        wire::Session::TerminalStart { cols, rows } => terminal(socket, cols, rows).await,
+        wire::Session::TerminalStart {
+            cols,
+            rows,
+            timezone,
+        } => terminal(socket, cols, rows, timezone.as_deref()).await,
         wire::Session::ExecStart {
             command,
             timeout_seconds,
+            timezone,
         } => {
             let _ = timeout_seconds; // Legacy wire value is no longer a quota.
             anyhow::ensure!(
                 allows(policy.command_bytes, command.len()),
                 "command exceeds size limit"
             );
-            exec(socket, &command, policy).await
+            exec(socket, &command, policy, timezone.as_deref()).await
         }
         wire::Session::ExecStreamStart {
             command,
             timeout_seconds,
+            timezone,
         } => {
             let _ = timeout_seconds;
             anyhow::ensure!(
                 allows(policy.command_bytes, command.len()),
                 "command exceeds size limit"
             );
-            exec_stream(socket, &command, policy).await
+            exec_stream(socket, &command, policy, timezone.as_deref()).await
         }
         wire::Session::ReadFile { path } => read_file(socket, &path).await,
         wire::Session::WriteFile { path, mode } => write_file(socket, &path, mode, policy).await,
@@ -372,7 +378,15 @@ async fn create_dir(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
 
 // ------------------------------------------------------------------ 命令
 
+#[cfg(test)]
 pub(crate) fn shell_command(command: &str) -> tokio::process::Command {
+    shell_command_with_timezone(command, None)
+}
+
+pub(crate) fn shell_command_with_timezone(
+    command: &str,
+    timezone: Option<&str>,
+) -> tokio::process::Command {
     #[cfg(windows)]
     let mut process = {
         use std::os::windows::process::CommandExt;
@@ -397,7 +411,7 @@ pub(crate) fn shell_command(command: &str) -> tokio::process::Command {
         process
     };
     process.stdin(std::process::Stdio::null());
-    crate::timezone::apply(&mut process, None);
+    crate::timezone::apply(&mut process, timezone);
     process
 }
 
@@ -405,10 +419,18 @@ fn capped(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-async fn exec(socket: &mut Socket, command: &str, policy: &ResourcePolicy) -> anyhow::Result<()> {
+async fn exec(
+    socket: &mut Socket,
+    command: &str,
+    policy: &ResourcePolicy,
+    timezone: Option<&str>,
+) -> anyhow::Result<()> {
     use std::process::Stdio;
     use tokio::io::AsyncReadExt;
-    let mut process = shell_command(command);
+    if let Some(zone) = timezone {
+        anyhow::ensure!(crate::timezone::valid(zone), "invalid process timezone");
+    }
+    let mut process = shell_command_with_timezone(command, timezone);
     process
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -488,14 +510,16 @@ async fn exec_stream(
     socket: &mut Socket,
     command: &str,
     policy: &ResourcePolicy,
+    timezone: Option<&str>,
 ) -> anyhow::Result<()> {
     let (output, mut chunks) = tokio::sync::mpsc::channel(16);
     let (stop, cancelled) = tokio::sync::watch::channel(false);
-    let execution = crate::exec_stream::run(
+    let execution = crate::exec_stream::run_with_timezone(
         command,
         policy.task_timeout_seconds.unwrap_or(0),
         output,
         cancelled,
+        timezone,
     );
     let (mut sink, mut source) = socket.split();
     let (outbound, mut messages) = tokio::sync::mpsc::channel::<wire::Session>(1);
@@ -814,15 +838,29 @@ fn terminal_directory() -> std::path::PathBuf {
         })
 }
 
-async fn terminal(socket: &mut Socket, cols: u16, rows: u16) -> anyhow::Result<()> {
+fn terminal_command(timezone: Option<&str>) -> anyhow::Result<portable_pty::CommandBuilder> {
+    let mut command = portable_pty::CommandBuilder::new(login_shell());
+    command.env("TERM", "xterm-256color");
+    if let Some(zone) = timezone {
+        anyhow::ensure!(crate::timezone::valid(zone), "invalid process timezone");
+        crate::timezone::apply_pty(&mut command, Some(zone));
+    }
+    #[cfg(windows)]
+    command.cwd(terminal_directory());
+    Ok(command)
+}
+
+async fn terminal(
+    socket: &mut Socket,
+    cols: u16,
+    rows: u16,
+    timezone: Option<&str>,
+) -> anyhow::Result<()> {
     use std::io::{Read, Write};
     let pty = portable_pty::native_pty_system()
         .openpty(pty_size(cols, rows))
         .context("无法分配伪终端")?;
-    let mut command = portable_pty::CommandBuilder::new(login_shell());
-    command.env("TERM", "xterm-256color");
-    #[cfg(windows)]
-    command.cwd(terminal_directory());
+    let command = terminal_command(timezone)?;
     let mut child = pty.slave.spawn_command(command).context("无法启动 shell")?;
     // Dropping the slave is what lets the reader see EOF when the shell exits.
     drop(pty.slave);
@@ -948,6 +986,7 @@ mod tests {
             &wire::Session::ExecStart {
                 command,
                 timeout_seconds: 0,
+                timezone: None,
             },
         )
         .await
@@ -1029,6 +1068,7 @@ setTimeout(()=>process.exit(0),2500);
             &wire::Session::ExecStart {
                 command,
                 timeout_seconds: 0,
+                timezone: None,
             },
         )
         .await
@@ -1294,6 +1334,7 @@ setTimeout(()=>process.exit(0),2500);
             &wire::Session::ExecStreamStart {
                 command: "printf ready; sleep 120".into(),
                 timeout_seconds: 30,
+                timezone: None,
             },
         )
         .await
@@ -1606,5 +1647,79 @@ setTimeout(()=>process.exit(0),2500);
     async fn forward_rejects_port_zero() {
         let (_client, served) = forward_session(0).await;
         assert!(served.await.unwrap().is_err());
+    }
+}
+
+#[cfg(test)]
+mod process_timezone_tests {
+    use super::*;
+    #[tokio::test]
+    async fn ordinary_process_timezone_is_child_only_and_streaming_matches() {
+        let _serial = crate::timezone::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        crate::timezone::pin(None);
+        let parent = std::env::var_os("TZ");
+        let zone = if crate::timezone::detected() == "Pacific/Chatham" {
+            "Asia/Kathmandu"
+        } else {
+            "Pacific/Chatham"
+        };
+        let command = "node -p process.env.TZ";
+        let output = shell_command_with_timezone(command, Some(zone))
+            .output()
+            .await
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), zone);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let (_stop, cancelled) = tokio::sync::watch::channel(false);
+        let (result, stdout) = tokio::join!(
+            crate::exec_stream::run_with_timezone(command, 10, tx, cancelled, Some(zone)),
+            async {
+                let mut bytes = Vec::new();
+                while let Some((kind, chunk)) = rx.recv().await {
+                    if kind == "stdout" {
+                        bytes.extend(chunk)
+                    }
+                }
+                bytes
+            }
+        );
+        assert_eq!(result.unwrap(), 0);
+        assert_eq!(String::from_utf8(stdout).unwrap().trim(), zone);
+        assert_eq!(std::env::var_os("TZ"), parent);
+        assert_eq!(
+            terminal_command(Some(zone)).unwrap().get_env("TZ"),
+            Some(std::ffi::OsStr::new(zone))
+        );
+        let custom = if cfg!(windows) {
+            "set TZ=UTC&& node -p process.env.TZ"
+        } else {
+            "TZ=UTC node -p process.env.TZ"
+        };
+        let overridden = shell_command_with_timezone(custom, Some(zone))
+            .output()
+            .await
+            .unwrap();
+        assert_eq!(String::from_utf8(overridden.stdout).unwrap().trim(), "UTC");
+        let mut inherited = shell_command(command);
+        assert!(
+            !inherited
+                .as_std_mut()
+                .get_envs()
+                .any(|(key, _)| key == "TZ")
+        );
+        assert!(
+            crate::exec_stream::run_with_timezone(
+                command,
+                10,
+                tokio::sync::mpsc::channel(1).0,
+                tokio::sync::watch::channel(false).1,
+                Some("UTC;echo unsafe")
+            )
+            .await
+            .is_err()
+        );
     }
 }

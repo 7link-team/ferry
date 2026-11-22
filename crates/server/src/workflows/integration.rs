@@ -1045,6 +1045,8 @@ async fn definition_format(scope: Scope, Path(_): Path<String>) -> Result<Json<V
             "placement":"Execution is per node, not per workflow. CLI nodes use an explicit node target, otherwise a compatible workflow default, otherwise their model's candidate Runner hosts. Different nodes may use different hosts. Pass data and file artifacts through node outputs; local filesystem paths are not shared across hosts.",
             "api_agents":"ai.agent.run also accepts enabled API-model Agents. The server calls that model's configured provider, without a Runner, ignoring CLI host targets. The same GET-only platform tools, live user/Agent permission checks and output_schema apply. files.enabled requires a supported CLI: use structured API output followed by report.render for PDF files. max_tokens is an explicit provider request parameter. OpenAI-compatible requests omit it when absent; Anthropic requires a positive value before execution.",
             "metering":"No per-call or monthly monetary limit is enforced. Legacy max_cost_micros and monthly_limit_micros fields are accepted for compatibility but ignored for admission. Configured prices calculate recorded costs; absent prices do not block calls. Administrator-configured provider request rate and concurrency limits apply; legacy provider qps/concurrency values are retained but ignored. Uncertain calls are recorded and never automatically resent.",
+            "expressions":"node_path is a zero-based JSON Pointer into the saved definition, e.g. /nodes/2, not a node id such as analyze or /nodes/analyze. Nested loop example: /nodes/1/params/body/nodes/0. Preview data contains items and upstream, never sources. Each item has json, optional binary and paired. Batch nodes such as ai.agent.run use selections=[null]; there is no current $json or $input.item. Use $input.all().map(item => item.json) for all batch inputs. Agent input items are already included automatically in its prompt; a literal task prompt avoids duplicating large data in an expression. Per-item nodes use selections=[0,1,...] for the supplied item indices. Preview runs expressions only and sends no reports or notifications. It uses the current draft and requires its current version and workflows.update permission. Read the saved definition and locate the array index before retrying a 404.",
+            "time":"Read GET /workspace-settings/1 to inspect the workspace timezone. A confirmed workspace timezone governs business calendars, workflow clocks and schedules, overriding legacy resource-specific timezone fields. NULL means the administrator has not confirmed the legacy workspace: retain its historical settings rather than guessing a timezone. UTC in these examples is illustrative, not a business default. Workflow expression $now and $today are frozen per node attempt and persisted for recovery; the effective workspace zone is frozen for the execution. Agent runtime context carries that saved clock. Stored/API timestamps remain UTC instants; the UI displays them in the confirmed workspace zone. Do not hardcode a timezone or ask the model to guess the current date from training knowledge.",
             "recovery":"A schema-valid draft can contain settings this runtime cannot execute. On a run/publication rejection, inspect the exact path and reason. Do not attribute /settings failures to Runner availability. Remove unsupported optional settings only when their semantics are not required; otherwise explain the missing capability and ask the user. Inspect the current version before PATCH, then retry the draft before publishing or scheduling."
         },
         "requests": {
@@ -1069,6 +1071,9 @@ async fn definition_format(scope: Scope, Path(_): Path<String>) -> Result<Json<V
             "run_schedule":{"method":"POST","path":"/cron-jobs/{job_id}/runs"},
             "inspect_execution":{"method":"GET","path":"/workflow-executions/{execution_id}"},
             "inspect_nodes":{"method":"GET","path":"/workflow-executions/{execution_id}/node-runs"}
+            ,"preview_expressions":{"method":"POST","path":"/workflows/{workflow_id}/expression-previews",
+                "body":{"version":1,"node_path":"/nodes/2",
+                    "data":{"items":[{"json":{"contributors":[]}}],"upstream":[]},"selections":[null]}}
         },
         "rules": [
             "All requests use ferry_request. Replace every {path_placeholder} and <value_placeholder> using actual prior API results; version must be a JSON integer, IDs are strings. create_minimal is executable as-is but is only a manual trigger: extend it with real nodes for the user's task.",
@@ -1095,7 +1100,7 @@ pub(crate) fn definition_example() -> Value {
     json!({
         "engine": "ferry-graph",
         "schema": 1,
-        "settings": {"timezone": "Asia/Shanghai"},
+        "settings": {"timezone": "UTC"},
         "nodes": [
             {"id":"start","name":"Start","type":"core.trigger.manual","type_version":1,"position":[0,0],
              "params":{"input_schema":{"type":"object"}}},
@@ -1103,7 +1108,7 @@ pub(crate) fn definition_example() -> Value {
              "params":{"operation":"/code-insights/{id}/reports/{kind}","path_params":{"id":"1","kind":"contributors"},
                        "query":{},"split_items":false,"all_pages":false,"max_pages":50}},
             {"id":"analyze","name":"Summarize contributors","type":"ai.agent.run","type_version":1,"position":[520,0],
-             "params":{"agent_id":"1","prompt":"=Summarize this contributors report using only the provided data: {{ JSON.stringify($json) }}",
+             "params":{"agent_id":"1","prompt":"Summarize this contributors report using only the provided data.",
                        "output_schema":{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"}},
                        "required":["title","summary"]}}},
             {"id":"report","name":"Render PDF","type":"report.render","type_version":1,"position":[780,0],

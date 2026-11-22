@@ -63,6 +63,9 @@ struct Start {
     plan: plan::Plan,
     inputs: Map<String, Value>,
     vars: BTreeMap<String, String>,
+    /// None preserves the revision/local semantics of historical executions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    timezone: Option<String>,
 }
 fn error(key: &'static str, path: &str) -> ApiError {
     ApiError::localized(
@@ -399,6 +402,9 @@ async fn create_as(
     let policy = crate::accounts::resource_policy::load(&tx).await?;
     input(entry, &body.inputs, &policy)?;
     let vars = crate::variables::snapshot_for_workflow(&s, &tx, scope.workspace_id).await?;
+    let timezone = crate::accounts::workspace::business_timezone(&tx, scope.workspace_id)
+        .await?
+        .map(|zone| zone.name().to_owned());
     tx.commit().await?;
     let execution: i64 = s.next_id()?.into();
     let _mode = body.mode;
@@ -408,6 +414,7 @@ async fn create_as(
         plan,
         inputs: body.inputs,
         vars,
+        timezone,
     };
     let plain = crate::definitions::canonical(
         &serde_json::to_string(&start).map_err(|_| ApiError::missing())?,
@@ -529,7 +536,11 @@ pub async fn get(
     let tx = access::snapshot(&s.db).await?;
     let run = authorized(&tx, &scope, id).await?;
     tx.commit().await?;
-    Ok(Json(summary(&run)))
+    let mut value = summary(&run);
+    if run.state == "failed" {
+        value["error"] = json!(super::journal::execution_failure(&s.vault, &run)?);
+    }
+    Ok(Json(value))
 }
 
 pub async fn cancel(
@@ -1170,6 +1181,7 @@ async fn dispatch_inner(
     }
     let start: Start = serde_json::from_str(&store.read(&s.db, run.workspace_id, asset).await?)
         .map_err(|_| ApiError::missing())?;
+    crate::hosts::channel::with_timezone(start.timezone.clone(), async {
     if start.version != 1
         || start.revision_id != run.revision_id
         || start.plan.version != 1
@@ -1314,7 +1326,11 @@ async fn dispatch_inner(
         } else if skipped || mode == "bypass" || pin.is_some() {
             vec![]
         } else {
-            let (clock, today) = super::expression::clock(&graph["settings"], now)?;
+            let (clock, today) = super::expression::clock_with_timezone(
+                &graph["settings"],
+                start.timezone.as_deref(),
+                now,
+            )?;
             let upstream = completed
                 .values()
                 .map(|(node, output)| NodeOutput {
@@ -1362,6 +1378,7 @@ async fn dispatch_inner(
                     redo_round: 0,
                     params,
                     frozen_at_ms: now,
+                    timezone: start.timezone.clone(),
                     sources,
                     seed: None,
                 },
@@ -1432,6 +1449,8 @@ async fn dispatch_inner(
                         spec,
                         &items[..selected],
                         &active.snapshot.params,
+                        json!({"$now":active.snapshot.now,"$today":active.snapshot.today,
+                            "frozen_at_ms":active.snapshot.frozen_at_ms,"timezone":start.timezone}),
                     ))
                     .await?
                 }
@@ -1448,8 +1467,6 @@ async fn dispatch_inner(
                     .await?
                 }
                 _ if super::report::supports(spec) => {
-                    let (clock, _) =
-                        super::expression::clock(&graph["settings"], active.snapshot.frozen_at_ms)?;
                     super::host::while_active(
                         s,
                         &run,
@@ -1462,7 +1479,7 @@ async fn dispatch_inner(
                                 execution: run.id,
                                 node: spec["id"].as_str().unwrap(),
                             },
-                            &clock,
+                            &active.snapshot.now,
                             &items[..selected],
                             &active.snapshot.params,
                         ),
@@ -1608,6 +1625,7 @@ async fn dispatch_inner(
         return Err(error("workflow.runMissingInput", "/plan"));
     }
     Ok(())
+    }).await
 }
 fn successful_output(spec: &Value, skipped: bool, mut items: Vec<Item>) -> Vec<Item> {
     if !skipped
@@ -1702,6 +1720,13 @@ pub(crate) async fn scheduler(
                             if let Err(error) = dispatch(&s, &backend, &token, &stop).await {
                                 tracing::warn!(execution=token.execution().id,%error,"workflow execution stopped");
                                 if !*stop.borrow() {
+                                    let journal = super::journal::Journal {
+                                        db:&s.db, vault:&s.vault, lease:&token,
+                                        assets:None, authority:None,
+                                    };
+                                    if let Err(failure) = journal.record_execution_failure(&error.stored()).await {
+                                        tracing::warn!(execution=token.execution().id,%failure,"workflow diagnostic could not be persisted");
+                                    }
                                     record_failure(&s.db, token.execution().id, &error.to_string()).await;
                                     finish(&s.db, &token, "failed", failure_reason(&error)).await?;
                                 }

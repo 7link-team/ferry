@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../timezone";
 import type { ReactNode } from "react";
 import { listResource } from "../api/resource";
 import { api } from "../api/api";
@@ -59,7 +60,7 @@ export const dictionaryOptions = (workspace: string, key: string) => async (): P
 };
 
 export const cronDate = (value: number) =>
-  value ? new Date(value).toLocaleString(currentLocale()) : "—";
+  value ? <WorkspaceDate value={value} locale={currentLocale()} /> : "—";
 
 export type ResourceConfigContext = {
   renderTable?: (config: ListConfig<Record<string, unknown>>, refreshKey?: number) => ReactNode;

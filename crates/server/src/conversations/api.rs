@@ -407,6 +407,9 @@ async fn work(
         let config: Configuration = serde_json::from_str(&c.config).map_err(|_| invalid())?;
         let policy = crate::accounts::conversation_policy::Configuration::load(&s.db).await?;
         let mut prompt = super::introductions::prompt(s, row, c, &scope, &policy, &config).await?;
+        let clock =
+            super::run::workspace_clock_context(&s.db, scope.workspace_id, db::now()).await?;
+        prompt = format!("{clock}{prompt}");
         let quote = messages::reply_context(&s.db, row, usize::MAX).await?;
         if !quote.is_empty() {
             prompt = format!("{quote}{prompt}");

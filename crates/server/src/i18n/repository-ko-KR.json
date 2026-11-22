@@ -866,5 +866,6 @@
   "transfers.csvInvalid": "CSV 파일의 {row}번째 줄을 읽을 수 없습니다. 해당 줄의 따옴표와 열 개수를 확인하세요.",
   "templates.documentInvalidAt": "템플릿의 {line}행 {column}열이 올바른 JSON/YAML이 아닙니다. 해당 위치의 들여쓰기를 확인하고 문자열 자리표시자는 따옴표로 감싸세요.",
   "maintenance.pipelineConcurrencyLegacyName": "파이프라인 동시 실행 수(이전 설정, 비활성)",
-  "maintenance.pipelineConcurrencyLegacyHelp": "이 워크스페이스 설정은 호환성을 위해 보존되며 파이프라인 실행을 제어하지 않습니다. 플랫폼 설정 → 리소스 제한에서 파이프라인 동시 실행 수를 설정하세요. 플랫폼 설정에 접근할 수 없다면 플랫폼 관리자에게 문의하세요. 저장된 값과 이전 기본값은 적용되지 않습니다."
+  "maintenance.pipelineConcurrencyLegacyHelp": "이 워크스페이스 설정은 호환성을 위해 보존되며 파이프라인 실행을 제어하지 않습니다. 플랫폼 설정 → 리소스 제한에서 파이프라인 동시 실행 수를 설정하세요. 플랫폼 설정에 접근할 수 없다면 플랫폼 관리자에게 문의하세요. 저장된 값과 이전 기본값은 적용되지 않습니다.",
+  "channel.timezoneUnsupported": "호스트가 필수 프로세스 시간대 {zone}을 허용하지 않았습니다. SSH에서 TZ를 허용하거나 최신 Runner를 사용하세요."
 }

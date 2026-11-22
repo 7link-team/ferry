@@ -402,6 +402,13 @@ const STORAGE_GUIDANCE: &str = "File storage failed. Check File storage health i
 
 fn call_guidance(call: &Call, status: u16) -> &'static str {
     let path = call.path.split('?').next().unwrap_or("");
+    if matches!(status, 400 | 404 | 422)
+        && call.method == "POST"
+        && path.starts_with("/workflows/")
+        && path.ends_with("/expression-previews")
+    {
+        return "Expression preview did not execute any workflow node. GET the workflow's current definition and version, then locate the node's zero-based array position. node_path must be a JSON Pointer such as /nodes/3, not analyze or /nodes/analyze. Nested loop paths include /params/body/nodes/. data must contain items and upstream (not sources). Batch ai.agent.run uses selections=[null] and $input.all(), not current-item $json. GET /workflow-definition-format for requests.preview_expressions and execution_support.expressions. A 403 still means permission denied; do not bypass workspace or ownership checks.";
+    }
     let definition_write = (call.method == "POST" && path == "/workflows")
         || (call.method == "PATCH"
             && path

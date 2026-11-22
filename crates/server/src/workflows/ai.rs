@@ -581,10 +581,17 @@ async fn reserve(
         output_micros: 0,
         unit_size: 1,
     });
-    let tz = row
-        .timezone
-        .parse::<chrono_tz::Tz>()
-        .map_err(|_| invalid())?;
+    // Existing reservations return above with their frozen period and identity.
+    // Only a new reservation adopts a confirmed workspace business month.
+    let tz = match crate::accounts::workspace::business_timezone(&tx, origin.workspace_id.into())
+        .await?
+    {
+        Some(zone) => zone,
+        None => row
+            .timezone
+            .parse::<chrono_tz::Tz>()
+            .map_err(|_| invalid())?,
+    };
     let period = chrono::DateTime::from_timestamp_millis(now)
         .ok_or_else(invalid)?
         .with_timezone(&tz)

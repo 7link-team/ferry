@@ -196,7 +196,7 @@ export interface FormField<T> {
   /** Static selects size to their labels; use full for long directory/name pickers. */
   width?: "auto" | "full";
   /** Read-only text shown instead of the raw value, e.g. a formatted time. */
-  display?: (row: Partial<T>) => string;
+  display?: (row: Partial<T>) => ReactNode;
   /** Render an http(s) value as an external link on detail pages. */
   link?: boolean;
   /** Copy a public field value beside its control or detail text. */

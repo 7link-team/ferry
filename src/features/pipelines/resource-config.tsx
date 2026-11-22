@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { pipelineExecutorOptions } from "./executor-options";
 import { TagBadge } from "../tags/TagBadge";
 import {
@@ -462,7 +463,7 @@ export function pipelinesLists({
           labelKey: "resource-domain:execution.startedAt",
           render: (r) =>
             r.started_at
-              ? new Date(r.started_at).toLocaleString(currentLocale())
+              ? <WorkspaceDate value={r.started_at} locale={currentLocale()} />
               : "—",
         },
       ],

@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { currentLocale } from "../../shared/i18n/locale";
 import { commonText } from "../../shared/i18n/i18n";
 import type { ResourceConfigContext } from "../../shared/resources/config";
@@ -158,7 +159,7 @@ function ActivityDetails({ row }: { row: Activity }) {
   const raw = JSON.stringify(row, null, 2);
   const metadata = [
     [commonText("resource-domain:activity.actor"), row.actor_name || "—"],
-    [commonText("resource-domain:activity.time"), Number.isFinite(row.created_at) ? new Date(row.created_at).toLocaleString(currentLocale()) : "—"],
+    [commonText("resource-domain:activity.time"), Number.isFinite(row.created_at) ? <WorkspaceDate value={row.created_at} locale={currentLocale()} /> : "—"],
     [commonText("resource-domain:resource.action"), actionLabel(row)],
     [commonText("resource-domain:activity.resource"), resourceLabel(row)],
     [commonText("resource-domain:activity.resourceId"), row.resource_id || "—"],
@@ -186,7 +187,7 @@ function ActivityDetails({ row }: { row: Activity }) {
             </TabsList>
             <TabsContent value="overview" className="dialog-body space-y-5">
               <dl className="grid grid-cols-1 gap-4 rounded-lg border bg-muted/30 p-4 sm:grid-cols-2">
-                {metadata.map(([label, value]) => <div key={label} className="min-w-0 space-y-1"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="break-words text-sm font-medium">{value}</dd></div>)}
+                {metadata.map(([label, value]) => <div key={String(label)} className="min-w-0 space-y-1"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="break-words text-sm font-medium">{value}</dd></div>)}
               </dl>
               <section className="space-y-3"><h3 className="text-sm font-semibold">{commonText(`resource-domain:activity.${details.changes ? "changeDetails" : "recordedDetails"}`)}</h3>{activityDescription(row)}</section>
             </TabsContent>
@@ -257,7 +258,7 @@ export function activityList(): ListConfig<AnyRow> {
           width: 180,
           sortable: true,
           render: (row: Activity) =>
-            new Date(row.created_at).toLocaleString(currentLocale()),
+            <WorkspaceDate value={row.created_at} locale={currentLocale()} />,
         },
         {
           key: "actor_name",

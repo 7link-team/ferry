@@ -1,3 +1,4 @@
+import { dayKey, useWorkspaceTimezone, WorkspaceDate } from "../../shared/timezone";
 import { Tooltip } from "radix-ui";
 import { AnalysisTooltip, metricClass } from "./AnalysisTooltip";
 import { Pencil } from "lucide-react";
@@ -33,7 +34,7 @@ export const analysisReports = [
 
 export const timestamp = (value: unknown) =>
   typeof value === "number" && value > 0
-    ? new Date(value).toLocaleString(currentLocale())
+    ? <WorkspaceDate value={value} locale={currentLocale()} />
     : "—";
 
 export const coverage = (value: unknown) =>
@@ -79,11 +80,66 @@ export type DatePreset = (typeof analysisDatePresets)[number][0];
 
 export const dayMs = 86400000;
 
+/** Date-only calendar carrier. Date.parse does not reliably parse expanded years as UTC. */
+function calendarInstant(key: string): number | null {
+  const parts = /^([+-]?\d{4,6})-(\d{2})(?:-(\d{2}))?$/.exec(key);
+  if (!parts) return null;
+  const year = Number(parts[1]), month = Number(parts[2]) - 1, day = Number(parts[3] ?? 1);
+  const date = new Date(0);
+  date.setUTCFullYear(year, month, day);
+  date.setUTCHours(0, 0, 0, 0);
+  return Number.isFinite(date.getTime()) && date.getUTCFullYear() === year && date.getUTCMonth() === month && date.getUTCDate() === day ? date.getTime() : null;
+}
+
+/** Match chrono %Y-%m-%d, including signed expanded years, without truncating a key. */
+function calendarKey(at: number): string {
+  const date = new Date(at), year = date.getUTCFullYear();
+  const yearText = year < 0 ? `-${String(-year).padStart(4, "0")}` : year > 9999 ? `+${year}` : String(year).padStart(4, "0");
+  return `${yearText}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+type HeatmapColumn = { kind: "week"; start: number; days: number } | { kind: "gap"; from: string; to: string };
+function heatmapCalendar(keys: string[]) {
+  const sourceKeys = new Map<number, string>();
+  const weeks = new Set<number>();
+  let first = Infinity;
+  let last = -Infinity;
+  for (const key of keys) {
+    const at = calendarInstant(key);
+    if (at === null) continue;
+    sourceKeys.set(at, key);
+    first = Math.min(first, at);
+    last = Math.max(last, at);
+    weeks.add(at - ((new Date(at).getUTCDay() + 6) % 7) * dayMs);
+  }
+  const columns: HeatmapColumn[] = [];
+  let previous: number | undefined;
+  for (const start of [...weeks].sort((a, b) => a - b)) {
+    if (previous !== undefined && start > previous + 7 * dayMs) {
+      columns.push({ kind: "gap", from: calendarKey(previous + 7 * dayMs), to: calendarKey(start - dayMs) });
+    }
+    columns.push({ kind: "week", start, days: Math.min(7, Math.floor((last - start) / dayMs) + 1) });
+    previous = start;
+  }
+  const labels: { column: number; date: Date }[] = [];
+  columns.forEach((column, index) => {
+    if (column.kind !== "week") return;
+    const date = new Date(Math.max(first, column.start));
+    const previous = labels.at(-1);
+    if (previous && previous.date.getUTCMonth() === date.getUTCMonth() && previous.date.getUTCFullYear() === date.getUTCFullYear()) return;
+    if (previous && (index - previous.column) * 16 < 40) labels.pop();
+    labels.push({ column: index, date });
+  });
+  return { columns, labels, sourceKeys };
+}
+
 export function analysisDateRange(
   key: DatePreset,
   now = new Date(),
+  timezone: string | null = null,
 ): Record<string, string> {
   if (key === "default" || key === "all") return { since: "", until: "" };
+  if (timezone) now = new Date(`${dayKey(now, timezone)}T00:00:00Z`);
   const today = Date.UTC(
     now.getUTCFullYear(),
     now.getUTCMonth(),
@@ -122,6 +178,7 @@ export function AnalysisSummary({
   kind: string;
 }) {
   useTranslation("insight-domain");
+  const timezone = useWorkspaceTimezone();
   const reportCoverage = data.coverage as
     { complete?: boolean; start?: number; sources?: Row[] } | undefined;
   const totals = new Map<string, { commits: number; effectives: number }>();
@@ -134,7 +191,10 @@ export function AnalysisSummary({
     });
   }
   const seriesByDate = new Map((data.series ?? []).map(row => [String(row.period ?? row.date ?? ""), row]));
-  const points = [...totals].sort(([a], [b]) => a.localeCompare(b));
+  const points = [...totals].sort(([a], [b]) => {
+    const first = calendarInstant(a), second = calendarInstant(b);
+    return first !== null && second !== null ? first - second : a < b ? -1 : a > b ? 1 : 0;
+  });
   const authorName = (row: Row) =>
     String(row.nickname ?? row.name ?? insightText("未命名作者"));
   const authorKey = (row: Row) =>
@@ -189,25 +249,7 @@ export function AnalysisSummary({
           [...author.values.values()].map((value) => value.effectives),
         )),
   );
-  const first = points.length ? Date.parse(points[0]![0]) : NaN;
-  const last = points.length ? Date.parse(points[points.length - 1]![0]) : NaN;
-  const start = Number.isFinite(first)
-    ? first - ((new Date(first).getUTCDay() + 6) % 7) * 86400000
-    : NaN;
-  const days =
-    Number.isFinite(last) && Number.isFinite(start)
-      ? Math.floor((last - start) / 86400000) + 1
-      : 0;
-  const monthLabels: { week: number; date: Date }[] = [];
-  for (let week = 0; week < Math.ceil(days / 7); week++) {
-    const date = new Date(Math.max(first, start + week * 7 * dayMs));
-    const previous = monthLabels.at(-1);
-    if (previous && previous.date.getUTCMonth() === date.getUTCMonth()
-      && previous.date.getUTCFullYear() === date.getUTCFullYear()) continue;
-    // A short partial month at the left edge must not collide with the next label.
-    if (previous && (week - previous.week) * 16 < 40) monthLabels.pop();
-    monthLabels.push({ week, date });
-  }
+  const heatmap = kind === "heatmap" ? heatmapCalendar(points.map(([key]) => key)) : undefined;
   return (
     <Tooltip.Provider delayDuration={100}><div className="space-y-3 rounded-md border p-3">
       {reportCoverage && (
@@ -228,7 +270,7 @@ export function AnalysisSummary({
           <figure className="space-y-2">
             <figcaption className="text-sm font-medium">
               {kind === "heatmap"
-                ? insightText("每日提交热力图（UTC，周一至周日）")
+                ? timezone ? commonText("resource-domain:workspace.heatmap", { zone: timezone }) : insightText("每日提交热力图（UTC，周一至周日）")
                 : insightText("每位作者的有效变更趋势")}
             </figcaption>
             <div className="overflow-x-auto">
@@ -238,25 +280,31 @@ export function AnalysisSummary({
                   aria-label={insightText(
                     "每日提交热力图，深色表示更多提交，下方表格提供精确数值",
                   )}
-                  width={Math.max(340, 92 + Math.ceil(days / 7) * 16)}
+                  width={Math.max(340, 92 + heatmap!.columns.length * 16)}
                   height="156"
                   className="text-primary"
                 >
                   {Array.from({ length: 7 }, (_, index) => <text key={index} x="0" y={34 + index * 16} fill="var(--foreground)" fontSize="11">{new Intl.DateTimeFormat(currentLocale(), { weekday: "short", timeZone: "UTC" }).format(Date.UTC(2024, 0, 1 + index))}</text>)}
-                  {monthLabels.map(({ week, date }) => <text key={week} x={60 + week * 16} y="14" fill="var(--foreground)" fontSize="11"
+                  {heatmap!.labels.map(({ column, date }) => <text key={column} x={60 + column * 16} y="14" fill="var(--foreground)" fontSize="11"
                     aria-label={new Intl.DateTimeFormat(currentLocale(), { month: "long", year: "numeric", timeZone: "UTC" }).format(date)}
-                  >{date.toISOString().slice(2, 7)}</text>)}
-                  {Array.from({ length: days }, (_, index) => {
-                    const date = new Date(start + index * 86400000)
-                      .toISOString()
-                      .slice(0, 10);
+                  >{date.getUTCFullYear() < 0 || date.getUTCFullYear() > 9999 ? calendarKey(date.getTime()).replace(/-\d{2}$/, "") : `${String(date.getUTCFullYear()).padStart(4, "0").slice(-2)}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`}</text>)}
+                  {heatmap!.columns.map((column, columnIndex) => {
+                    if (column.kind === "gap") {
+                      const label = commonText("resource-domain:workspace.calendarGap", { from: column.from, to: column.to });
+                      return <Tooltip.Root key={`gap:${column.from}`}><Tooltip.Trigger asChild><g data-calendar-gap role="img" tabIndex={0} aria-label={label}>
+                        <title>{label}</title><text x={60 + columnIndex * 16 + 6} y="80" textAnchor="middle" fill="var(--muted-foreground)" fontSize="12">//</text>
+                      </g></Tooltip.Trigger><Tooltip.Portal><Tooltip.Content sideOffset={8} className="z-50 max-w-72 break-words rounded-md border bg-popover p-3 text-xs text-popover-foreground shadow-md">{label}</Tooltip.Content></Tooltip.Portal></Tooltip.Root>;
+                    }
+                    return Array.from({ length: column.days }, (_, dayIndex) => {
+                    const at = column.start + dayIndex * dayMs;
+                    const date = heatmap!.sourceKeys.get(at) ?? calendarKey(at);
                     const commits = totals.get(date)?.commits ?? 0;
                     return (
                       <AnalysisTooltip key={date} date={date} row={seriesByDate.get(date) ?? {}}><rect
                         tabIndex={0}
                         aria-label={date}
-                        x={60 + Math.floor(index / 7) * 16}
-                        y={24 + (index % 7) * 16}
+                        x={60 + columnIndex * 16}
+                        y={24 + dayIndex * 16}
                         width="12"
                         height="12"
                         rx="2"
@@ -268,6 +316,7 @@ export function AnalysisSummary({
                         </title>
                       </rect></AnalysisTooltip>
                     );
+                    });
                   })}
                 </svg>
               ) : (
@@ -745,6 +794,7 @@ export function analysisReport(
   connectionId: string,
   kind: string,
   scope: "connection" | "insight" = "connection",
+  timezone: string | null = null,
 ): ListConfig<Row> {
   const metrics = [
     { key: "commits", label: "提交数", labelKey: "insight-domain:提交数" },
@@ -769,12 +819,12 @@ export function analysisReport(
     summary: (data) => <AnalysisSummary data={data} kind={kind} />,
     filterPresets: [
       {
-        label: "日期快捷条件（UTC）",
-        labelKey: "insight-domain:日期快捷条件（UTC）",
+        label: timezone ? commonText("resource-domain:workspace.dateRange", { zone: timezone }) : "日期快捷条件（UTC）",
+        ...(timezone ? {} : { labelKey: "insight-domain:日期快捷条件（UTC）" }),
         presets: analysisDatePresets.map(([key, label]) => ({
           label,
           labelKey: `insight-domain:${label}`,
-          values: () => analysisDateRange(key),
+          values: () => analysisDateRange(key, new Date(), timezone),
         })),
       },
       ...(kind === "heatmap"
@@ -809,7 +859,7 @@ export function analysisReport(
         : []),
     ],
     filters: [
-      ...analysisFilters,
+      ...analysisFilters.map(filter => timezone && ["since", "until"].includes(filter.key) ? { ...filter, label: commonText(`resource-domain:workspace.${filter.key}`, { zone: timezone }), labelKey: undefined } : filter),
       ...(kind === "period"
         ? [
             {
@@ -939,8 +989,8 @@ export function analysisReport(
                 ? [
                     {
                       key: "period",
-                      label: "日期 / 周期（UTC）",
-                      labelKey: "insight-domain:日期 / 周期（UTC）",
+                      label: timezone ? commonText("resource-domain:workspace.dateRange", { zone: timezone }) : "日期 / 周期（UTC）",
+                      ...(timezone ? {} : { labelKey: "insight-domain:日期 / 周期（UTC）" }),
                     },
                   ]
                 : []),

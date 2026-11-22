@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { useEffect,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
@@ -102,7 +103,7 @@ export function Dashboard({ workspace }: { workspace: string }) {
         </Button>
         {data && (
           <span className="text-xs text-muted-foreground">
-            {commonText("dashboard.updated", { time: new Date(data.as_of).toLocaleString(currentLocale()) })}
+            {commonText("dashboard.updated", { time: <WorkspaceDate value={data.as_of} locale={currentLocale()} /> })}
           </span>
         )}
       </div>
@@ -201,7 +202,7 @@ export function Dashboard({ workspace }: { workspace: string }) {
                         {a.actor_name} · {label(a.action)} · {label(a.resource)}
                       </span>
                       <time className="text-muted-foreground">
-                        {new Date(a.created_at).toLocaleString(currentLocale())}
+                        {<WorkspaceDate value={a.created_at} locale={currentLocale()} />}
                       </time>
                     </li>
                   ))}

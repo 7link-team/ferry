@@ -43,6 +43,31 @@ async fn renewing<T>(
 #[cfg(test)]
 mod platform_tests;
 
+/// Both conversation engines receive the workspace business clock. This only
+/// supplies prompt context and never changes the server or host operating system.
+pub(super) async fn workspace_clock_context(
+    conn: &impl sea_orm::ConnectionTrait,
+    workspace: Id,
+    at: i64,
+) -> Result<String> {
+    clock_context(
+        crate::accounts::workspace::business_timezone(conn, workspace).await?,
+        at,
+    )
+}
+
+fn clock_context(zone: Option<chrono_tz::Tz>, at: i64) -> Result<String> {
+    let Some(zone) = zone else {
+        return Ok(String::new());
+    };
+    let (now, today) =
+        crate::workflows::expression::clock_with_timezone(&json!({}), Some(zone.name()), at)?;
+    Ok(format!(
+        "<workspace_runtime_context source=\"workspace business clock\">\n{}\n</workspace_runtime_context>\n\n",
+        json!({"$now":now,"$today":today,"frozen_at_ms":at,"timezone":zone.name()})
+    ))
+}
+
 /// One turn's text: platform rules, then the Agent's configured instructions and
 /// the user's message, each delimited and labelled so the model never mistakes
 /// the configuration (set by an administrator) for the user's own words.
@@ -717,11 +742,21 @@ pub(super) async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>
         } else {
             row.native_session_id.clone()
         };
-        let timezone =
-            crate::models::cli_timezone(&s, scope.workspace_id, c.agent_id, &host).await?;
+        let business_timezone =
+            crate::accounts::workspace::business_timezone(&s.db, scope.workspace_id).await?;
+        let timezone = crate::models::cli_timezone_at(
+            &s,
+            scope.workspace_id,
+            c.agent_id,
+            &host,
+            business_timezone.as_ref().map(|zone| zone.name()),
+        )
+        .await?;
         let policy = crate::accounts::conversation_policy::Configuration::load(&s.db).await?;
         let mut prompt =
             super::introductions::prompt(&s, &row, &c, &scope, &policy, &config).await?;
+        let clock = clock_context(business_timezone, db::now())?;
+        prompt = format!("{clock}{prompt}");
         let resources = crate::accounts::resource_policy::load(&s.db).await?;
         let prompt_limit = ferry_protocol::resources::byte_limit(resources.agent_prompt_bytes);
         if !ferry_protocol::resources::allows(resources.agent_prompt_bytes, prompt.len()) {

@@ -1,3 +1,4 @@
+import { useWorkspaceTimezone, formatDate } from "../../../shared/timezone";
 import { LoadingSkeleton } from "../../../shared/ui/loading-skeleton";
 import { useCallback, useEffect, useState } from "react";
 import { listResource, named } from "../../../shared/api/resource";
@@ -84,9 +85,10 @@ export function RunPicker({
   onChange: (value: string) => void;
 }) {
   const { i18n } = useCommonTranslation();
+  const timezone = useWorkspaceTimezone();
   const load = useCallback(
-    () => runChoices(workspace, pipeline),
-    [workspace, pipeline, i18n.resolvedLanguage],
+    () => runChoices(workspace, pipeline, timezone),
+    [workspace, pipeline, timezone, i18n.resolvedLanguage],
   );
   return (
     <ReferencePicker
@@ -123,6 +125,7 @@ export async function pipelineChoices(workspace: string): Promise<Choice[]> {
 export async function runChoices(
   workspace: string,
   pipeline: string,
+  timezone: string | null = null,
 ): Promise<Choice[]> {
   if (!pipeline || pipeline === "0") return [];
   const result = await listResource<{
@@ -137,6 +140,6 @@ export async function runChoices(
   });
   return result.items.map((run) => ({
     value: run.id,
-    label: `#${run.number} · ${run.finished_at > 0 && Number.isFinite(run.finished_at) ? new Date(run.finished_at).toLocaleString(currentLocale()) : "—"}`,
+    label: `#${run.number} · ${run.finished_at > 0 && Number.isFinite(run.finished_at) ? formatDate(run.finished_at, timezone, "datetime", currentLocale()) : "—"}`,
   }));
 }

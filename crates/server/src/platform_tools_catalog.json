@@ -1228,7 +1228,7 @@
       "code-insights.read",
       "repositories.read"
     ],
-    "documentation": "Report kinds: overview, contributors, ranking, repositories, branches, commits, heatmap, period.\nQuery: since/until (YYYY-MM-DD inclusive UTC dates or RFC3339 timestamps), page/page_size\n(page_size 1..500), repos (comma-separated repository paths, URLs or IDs), authors\n(comma-separated contributor IDs, nicknames or emails), branches (comma-separated refs).\nMerge commits are excluded by default; isMerge=0,1 includes both. Read coverage before\nclaiming complete results. Count total, paginate items, and query contributors with repos\nto obtain each person's contribution per repository. additions, deletions and effectives\nare distinct recorded metrics; do not equate effectives with additions minus deletions.",
+    "documentation": "Report kinds: overview, contributors, ranking, repositories, branches, commits, heatmap, period.\nQuery: since/until (inclusive workspace calendar dates, UTC until confirmed,\nor absolute RFC3339 timestamps), page/page_size\n(page_size 1..500), repos (comma-separated repository paths, URLs or IDs), authors\n(comma-separated contributor IDs, nicknames or emails), branches (comma-separated refs).\nMerge commits are excluded by default; isMerge=0,1 includes both. Read coverage before\nclaiming complete results. Count total, paginate items, and query contributors with repos\nto obtain each person's contribution per repository. additions, deletions and effectives\nare distinct recorded metrics; do not equate effectives with additions minus deletions.",
     "permission": "code-insights.read",
     "query": [
       {
@@ -5797,7 +5797,7 @@
     "permission_checks": [
       "workflows.update"
     ],
-    "documentation": "Pure editor preview over caller-supplied samples. No node executor, asset\ndownloader or credential client is invoked, and no revision/run is created.",
+    "documentation": "Pure editor preview over caller-supplied samples. No node executor, asset\ndownloader or credential client is invoked, and no revision/run is created.\nnode_path is a zero-based JSON Pointer into the saved draft, e.g. /nodes/2\n(not the node id analyze). Nested loops use /nodes/1/params/body/nodes/0.\nBody example: {\"version\":1,\"node_path\":\"/nodes/2\",\"data\":{\"items\":[{\"json\":{}}],\"upstream\":[]},\"selections\":[null]}.\nUse the actual current workflow version. Batch nodes use [null] and\n$input.all(); per-item nodes use [0,1,...]. data.sources is not accepted.\nFor full request examples and expression rules GET /workflow-definition-format.",
     "permission": "workflows.update"
   },
   {
@@ -5942,5 +5942,28 @@
     "permission_checks": [
       "workflows.update"
     ]
+  },
+  {
+    "path": "/workspace-settings/{id}",
+    "method": "GET",
+    "handler": "accounts::workspace::timezone::read",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn read(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": []
+  },
+  {
+    "path": "/workspace-settings/{id}",
+    "method": "PATCH",
+    "handler": "accounts::workspace::timezone::update",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Update>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct Update {\n    timezone: String,\n    version: i64,\n    // Shared resource forms resend these read-only fields. Neither chooses the tenant.\n    #[serde(rename = \"id\")]\n    _id: Option<Id>,\n    #[serde(rename = \"name\")]\n    _name: Option<String>,\n}"
+    ],
+    "permission_checks": [
+      "settings.update"
+    ],
+    "documentation": "Changes workspace wall-clock semantics and recomputes future schedules atomically."
   }
 ]

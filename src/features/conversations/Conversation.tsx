@@ -1,3 +1,4 @@
+import { useWorkspaceTimezone, formatDate, dayKey } from "../../shared/timezone";
 import { ConversationMembers, type ConversationMember } from "./ConversationMembers";
 import { InlineAlert } from "../../shared/ui/inline-alert";
 import { cliToolLabel } from "../../shared/forms/cli-tools";
@@ -215,6 +216,7 @@ export function Conversation({
   onPendingChange?: (id: string, count: number) => void;
 }) {
   useCommonTranslation();
+  const timezone = useWorkspaceTimezone();
   const endpoint = `${base(workspace, "conversations")}/${encodeURIComponent(id)}`;
   const [data, setData] = useState<ConversationData>();
   // Invalidate reads started before a decision write completed.
@@ -941,8 +943,8 @@ export function Conversation({
               const newDay =
                 date &&
                 (!previous ||
-                  new Date(previous.created_at).toDateString() !==
-                    date.toDateString());
+                  dayKey(previous.created_at, timezone, "device") !==
+                    dayKey(date, timezone, "device"));
               const reply = m?.role === "assistant" ? m : undefined;
               const items =
                 (m?.role !== "user" && turn ? turnItems.get(turn.id) : undefined) ?? NO_ITEMS;
@@ -958,7 +960,7 @@ export function Conversation({
                         className="shrink-0 rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground"
                         dateTime={date.toISOString()}
                       >
-                        {date.toLocaleDateString(i18n.language, {
+                        {formatDate(date, timezone, "date", i18n.language, {
                           year: "numeric",
                           month: "long",
                           day: "numeric",
@@ -991,10 +993,10 @@ export function Conversation({
                         {!!m?.edited_at && <span>{t("edited")}</span>}
                         {date && (
                           <time
-                            title={date.toLocaleString(i18n.language)}
+                            title={formatDate(date, timezone, "datetime", i18n.language)}
                             dateTime={date.toISOString()}
                           >
-                            {date.toLocaleTimeString(i18n.language, {
+                            {formatDate(date, timezone, "time", i18n.language, {
                               hour: "2-digit",
                               minute: "2-digit",
                             })}

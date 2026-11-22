@@ -1,3 +1,5 @@
+import { detectedTimezone } from "../shared/timezone";
+import { TimezoneField, validTimeZone } from "../shared/forms/TimezoneField";
 import { AutoField,AutoForm } from "../shared/forms/auto-form";
 import { commonText,i18n,useCommonTranslation } from "../shared/i18n/i18n";
 import { useSiteSettings } from "../shared/site/settings";
@@ -30,6 +32,7 @@ if (desktopSetupToken) history.replaceState(history.state, "", location.pathname
 export function Entry({ onReady, error: outerError, signedIn = false, initialize = false }: { onReady: () => void; error: string; signedIn?: boolean; initialize?: boolean }) {
   useCommonTranslation();
   const site = useSiteSettings();
+  const [timezone, setTimezone] = useState(detectedTimezone);
   const route = useRoute();
   const [step, setStepState] = useState<Step>(initialize || route.workspace === "_initialize" ? "setup" : signedIn ? "workspace" : route.workspace === "_register" ? "register" : "sign-in");
   const setStep = (value: Step) => {
@@ -290,9 +293,10 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
                 event.preventDefault();
                 const body = fields(event.currentTarget);
                 void run(async () => {
+                  if (!timezone || !validTimeZone(timezone)) return;
                   const created = await api<{ id: string }>("/workspaces", {
                     method: "POST",
-                    body: JSON.stringify(body),
+                    body: JSON.stringify({ name: body.name, slug: body.slug, timezone }),
                   });
                   enter(created.id);
                   onReady();
@@ -300,6 +304,7 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
               }}
             >
               <p className="text-sm font-medium">{commonText("auth.createWorkspace")}</p>
+              <TimezoneField label={commonText("resource-domain:workspace.timezone")} value={timezone} required emptyLabel={commonText("resource-domain:workspace.chooseTimezone")} help={commonText("resource-domain:workspace.detected", { zone: detectedTimezone() || "—" })} readOnly={false} onChange={setTimezone} />
               <AutoField label={commonText("common.name")} name="name" required><Input name="name" placeholder={commonText("auth.workspaceNamePlaceholder")} required /></AutoField>
               <AutoField label={commonText("auth.slug")} name="slug" required help={commonText("auth.slugHelp")}><Input
                 name="slug"

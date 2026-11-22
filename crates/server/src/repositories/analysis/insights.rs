@@ -84,15 +84,17 @@ pub(crate) fn decode(row: &insights::Model) -> Result<InsightConfig> {
     })
 }
 
-fn next_run(config: &InsightConfig, after: i64) -> Result<i64> {
+fn next_run(config: &InsightConfig, zone: Option<chrono_tz::Tz>, after: i64) -> Result<i64> {
     match config.update_mode.as_str() {
         "event" => Ok(0),
         "scheduled" => {
-            let timezone = if config.timezone.trim().is_empty() {
-                "UTC"
-            } else {
-                config.timezone.trim()
-            };
+            let timezone = zone.as_ref().map(|zone| zone.name()).unwrap_or_else(|| {
+                if config.timezone.trim().is_empty() {
+                    "UTC"
+                } else {
+                    config.timezone.trim()
+                }
+            });
             let next = crate::cron_jobs::next_schedule(&config.schedule, timezone, after)?;
             Ok(if config.enabled { next } else { 0 })
         }
@@ -102,6 +104,29 @@ fn next_run(config: &InsightConfig, after: i64) -> Result<i64> {
         )),
     }
 }
+/// Recompute pending calendar schedules only; collector state and history are unchanged.
+pub(crate) async fn recompute_workspace_schedules(
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+    zone: chrono_tz::Tz,
+    now: i64,
+) -> Result<()> {
+    for row in insights::Entity::find()
+        .filter(insights::Column::WorkspaceId.eq(workspace))
+        .all(conn)
+        .await?
+    {
+        let next = next_run(&decode(&row)?, Some(zone), now)?;
+        insights::Entity::update_many()
+            .col_expr(insights::Column::NextRunAt, Expr::value(next))
+            .filter(insights::Column::WorkspaceId.eq(workspace))
+            .filter(insights::Column::Id.eq(row.id))
+            .exec(conn)
+            .await?;
+    }
+    Ok(())
+}
+
 pub(crate) async fn owned(
     tx: &impl ConnectionTrait,
     scope: &Scope,
@@ -584,7 +609,8 @@ async fn save(
         ));
     }
     let previous = old.as_ref().map(decode).transpose()?.unwrap_or_default();
-    let planned_next = next_run(&body.config, db::now())?;
+    let timezone = crate::accounts::workspace::business_timezone(&tx, scope.workspace_id).await?;
+    let planned_next = next_run(&body.config, timezone, db::now())?;
     let schedule_changed = creating
         || previous.enabled != body.config.enabled
         || previous.update_mode != body.config.update_mode
@@ -1143,7 +1169,9 @@ pub(super) async fn schedule_due(s: &AppState) -> Result<()> {
             continue;
         }
         let mut config = decode(&row)?;
-        let next = next_run(&config, now)?;
+        let timezone =
+            crate::accounts::workspace::business_timezone(&tx, row.workspace_id.into()).await?;
+        let next = next_run(&config, timezone, now)?;
         let outcome = if config.enabled && config.update_mode == "scheduled" {
             enqueue_scheduled(s, &tx, &row, &mut queued).await
         } else {

@@ -10,6 +10,7 @@ test('catalog binds each target to its exact bytes and version', () => {
   const dir = mkdtempSync(join(tmpdir(), 'runner-manifest-'));
   try {
     for (const [target, file] of Object.entries(targets)) writeFileSync(join(dir, file), target);
+    for (const file of ['Client-0.1.0-alpha.12-android-arm64.apk', 'Client-0.1.0-alpha.12-ios-unsigned.ipa', 'Client-0.1.0-alpha.12-ios-simulator.app.zip']) writeFileSync(join(dir, file), 'mobile payload');
     const catalog = generate(dir, '0.1.0-alpha.12', 'owner/project', 1);
     assert.equal(catalog.version, '0.1.0-alpha.12');
     assert.equal(catalog.schema, 1);

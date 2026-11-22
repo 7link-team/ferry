@@ -73,6 +73,7 @@ async fn fixture_in(
     .unwrap();
     workspaces::Entity::insert(
         workspaces::Model {
+            timezone: None,
             id: 1,
             slug: "analysis-test".into(),
             name: "Analysis".into(),
@@ -1038,6 +1039,7 @@ pub(crate) async fn queued_repository(
     {
         workspaces::Entity::insert(
             workspaces::Model {
+                timezone: None,
                 id: workspace,
                 slug: format!("workspace-{workspace}"),
                 name: "Other workspace".into(),

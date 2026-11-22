@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { Activity,HardDrive,MemoryStick,Network } from "lucide-react";
 import { useCallback,useEffect,useState } from "react";
@@ -130,11 +131,11 @@ export function HostMonitor({ workspace, hostId }: { workspace: string; hostId: 
       <div className="flex items-center gap-2"><Activity className="size-4 text-primary" /><h2 className="text-sm font-semibold">{hostRepositoryText("host.015")}</h2></div>
       <AutoField label={hostRepositoryText("host.016")} className="!flex-row shrink-0 items-center gap-2 whitespace-nowrap text-xs text-muted-foreground"><select aria-label={hostRepositoryText("host.017")} className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground" value={rangeSeconds} onChange={event => setRangeSeconds(Number(event.target.value))}><option value={300}>{hostRepositoryText("host.018")}</option><option value={900}>{hostRepositoryText("host.019")}</option><option value={3600}>{hostRepositoryText("host.020")}</option></select></AutoField>
       <span className="flex-1" />
-      {updatedAt > 0 && <span className="text-xs tabular-nums text-muted-foreground">{hostRepositoryText("host.021")}{" "}{new Date(updatedAt).toLocaleTimeString(currentLocale())}</span>}
+      {updatedAt > 0 && <span className="text-xs tabular-nums text-muted-foreground">{hostRepositoryText("host.021")}{" "}{<WorkspaceDate value={updatedAt} kind="time" locale={currentLocale()} />}</span>}
       <RefreshControl loading={pending} interval={interval} remaining={remaining} onRefresh={refreshMonitor} onIntervalChange={setIntervalSeconds} />
 
     </div>
-    <p className="text-xs leading-5 tabular-nums text-muted-foreground">{new Date(chart.start).toLocaleTimeString(currentLocale(), { hour12: false })} — {new Date(chart.end).toLocaleTimeString(currentLocale(), { hour12: false })} · {hostRepositoryText("host.053", {collection: collectionSeconds, step: interval || 30, refresh: interval ? hostRepositoryText("host.052", {value1: interval}) : hostRepositoryText("host.030"), count: samples.length})}</p>
+    <p className="text-xs leading-5 tabular-nums text-muted-foreground">{<WorkspaceDate value={chart.start} kind="time" locale={currentLocale()} options={{ hour12: false }} />} — {<WorkspaceDate value={chart.end} kind="time" locale={currentLocale()} options={{ hour12: false }} />} · {hostRepositoryText("host.053", {collection: collectionSeconds, step: interval || 30, refresh: interval ? hostRepositoryText("host.052", {value1: interval}) : hostRepositoryText("host.030"), count: samples.length})}</p>
     {error && <p role="alert" className="border-l-2 border-destructive bg-destructive/5 px-3 py-2 text-sm text-destructive">{hostRepositoryText("host.031")}{" "}{error}</p>}
     {!monitor && !error && (collecting ? <p role="status" className="py-8 text-sm text-muted-foreground">{hostRepositoryText("host.032")}</p> : <div className="grid gap-4 md:grid-cols-2">{[0, 1].map(index => <LoadingSkeleton key={index} variant="editor" label={hostRepositoryText("host.033")} />)}</div>)}
     {monitor && <>

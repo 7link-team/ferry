@@ -844,3 +844,47 @@ fn max_output_tokens_round_trips_as_optional_api_model_parameter_and_rejects_inv
     assert!(cli.check_fields().is_err());
     body().check_fields().unwrap();
 }
+
+#[tokio::test]
+async fn confirmed_workspace_zone_controls_cli_and_frozen_legacy_does_not_follow_changes() {
+    use crate::entities::workspaces;
+    use sea_orm::sea_query::Expr;
+    let (_dir, s) = setup().await;
+    let runner = host("linux", "UTC", true);
+    assert_eq!(cli_timezone(&s, 1.into(), 0, &runner).await.unwrap(), None);
+    workspaces::Entity::update_many()
+        .col_expr(
+            workspaces::Column::Timezone,
+            Expr::value(Some("Asia/Kuala_Lumpur")),
+        )
+        .filter(workspaces::Column::Id.eq(1))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        cli_timezone(&s, 1.into(), 0, &runner)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("Asia/Kuala_Lumpur")
+    );
+    assert_eq!(
+        cli_timezone_at(&s, 1.into(), 0, &runner, None)
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        cli_timezone_at(&s, 1.into(), 0, &runner, Some("America/New_York"))
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("America/New_York")
+    );
+    assert!(
+        cli_timezone(&s, 1.into(), 0, &host("linux", "UTC", false))
+            .await
+            .is_err()
+    );
+    assert_eq!(cli_timezone(&s, 2.into(), 0, &runner).await.unwrap(), None);
+}

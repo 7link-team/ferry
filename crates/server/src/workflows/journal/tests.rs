@@ -14,6 +14,48 @@ pub(crate) struct Fixture {
     vault: Vault,
     pub(crate) lease: Lease,
 }
+
+#[tokio::test]
+async fn failure_before_activation_survives_without_inventing_a_node_attempt() {
+    let fixture = Fixture::new().await;
+    let journal = fixture.journal();
+    let error = ApiError::localized(
+        StatusCode::BAD_REQUEST,
+        Message::new("workflow.expressionFailed").with("path", "/nodes/3/params/prompt"),
+    );
+    journal
+        .record_execution_failure(&error.stored())
+        .await
+        .unwrap();
+    let run = fixture.run().await;
+    assert!(
+        run.context
+            .as_deref()
+            .is_some_and(|value| !value.contains("/nodes/3/params/prompt"))
+    );
+    assert_eq!(nodes::Entity::find().count(&fixture.db).await.unwrap(), 0);
+    for locale in [
+        crate::i18n::Locale::EnUs,
+        crate::i18n::Locale::ZhCn,
+        crate::i18n::Locale::MsMy,
+    ] {
+        let message = crate::i18n::with_locale(locale, async {
+            execution_failure(&fixture.vault, &run).unwrap().unwrap()
+        })
+        .await;
+        assert_eq!(message, error.render(locale));
+        assert!(message.contains("/nodes/3/params/prompt"));
+    }
+    let before = run.context;
+    fixture.lease.invalidate();
+    assert!(
+        journal
+            .record_execution_failure("stale owner")
+            .await
+            .is_err()
+    );
+    assert_eq!(fixture.run().await.context, before);
+}
 impl Fixture {
     pub(crate) async fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
@@ -141,6 +183,7 @@ pub(crate) fn activation(id: i64, path: &str) -> Activation {
         redo_round: 0,
         params: vec![params("PRIVATE_FROZEN_VALUE")],
         frozen_at_ms: 1793550612345,
+        timezone: None,
         sources: vec![],
         seed: Some(42),
     }
@@ -1542,4 +1585,33 @@ fn oversized_outputs_name_the_limit_and_broken_packets_are_internal_faults() {
     .unwrap_err();
     assert_eq!(broken.0, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(key_of(broken), "error.internalFault");
+}
+
+#[tokio::test]
+async fn workspace_zone_is_frozen_into_snapshot_and_activation_replay_keeps_it() {
+    let fixture = Fixture::new().await;
+    let mut request = activation(31, "/nodes/0");
+    request.timezone = Some("America/New_York".into());
+    let expected = super::super::expression::clock_with_timezone(
+        &json!({}),
+        request.timezone.as_deref(),
+        request.frozen_at_ms,
+    )
+    .unwrap();
+    let active = fixture
+        .journal()
+        .activate(fixture.run().await.version, request)
+        .await
+        .unwrap();
+    assert_eq!(active.snapshot.now, expected.0);
+    assert_eq!(active.snapshot.today, expected.1);
+    let mut replay = activation(31, "/nodes/0");
+    replay.timezone = Some("Asia/Tokyo".into());
+    let restored = fixture
+        .journal()
+        .activate(fixture.run().await.version, replay)
+        .await
+        .unwrap();
+    assert_eq!(restored.snapshot.now, active.snapshot.now);
+    assert_eq!(restored.snapshot.today, active.snapshot.today);
 }

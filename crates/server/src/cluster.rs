@@ -87,6 +87,8 @@ pub struct Owner {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RunnerInfo {
     #[serde(default)]
+    pub supports_process_timezone: bool,
+    #[serde(default)]
     pub supports_resource_policy: bool,
     pub managed: bool,
     #[serde(default)]
@@ -112,6 +114,8 @@ pub enum Request {
         kind: ferry_protocol::SessionKind,
         #[serde(default)]
         resource_policy: Option<ferry_protocol::resources::ResourcePolicy>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timezone: Option<String>,
     },
     Monitor {
         workspace: Id,
@@ -869,13 +873,21 @@ impl Cluster {
                 session,
                 kind,
                 resource_policy,
+                timezone,
             } => {
                 let owner = self.owner(&host).await?.ok_or_else(unavailable)?;
                 if owner.node != self.node || owner.fence != fence {
                     diagnostic("nats", "open", "ownership_changed");
                     return Err(unavailable());
                 }
-                crate::hosts::runner::cluster_open(&host, &session, kind, resource_policy).await?;
+                crate::hosts::runner::cluster_open(
+                    &host,
+                    &session,
+                    kind,
+                    resource_policy,
+                    timezone.as_deref(),
+                )
+                .await?;
                 Ok(Value::Null)
             }
             Request::Monitor {
@@ -1676,6 +1688,7 @@ mod tests {
             session: "x".repeat(size),
             kind: ferry_protocol::SessionKind::Agent,
             resource_policy: None,
+            timezone: None,
         };
         // The real server reaches dispatch (503 for a missing owner), rather
         // than rejecting the multi-frame JSON request as malformed (400).

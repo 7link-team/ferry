@@ -1982,3 +1982,40 @@ async fn message_admission_has_no_hidden_63kib_ceiling_and_honors_resource_polic
     .unwrap_err();
     assert_eq!(rejected.0, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn both_engines_business_clock_context_is_workspace_scoped_and_legacy_stays_empty() {
+    use crate::entities::workspaces;
+    use sea_orm::sea_query::Expr;
+    let (_dir, s) = setup().await;
+    let at = chrono::DateTime::parse_from_rfc3339("2026-11-01T16:30:12.345Z")
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(
+        run::workspace_clock_context(&s.db, 1.into(), at)
+            .await
+            .unwrap(),
+        ""
+    );
+    workspaces::Entity::update_many()
+        .col_expr(
+            workspaces::Column::Timezone,
+            Expr::value(Some("Asia/Kuala_Lumpur")),
+        )
+        .filter(workspaces::Column::Id.eq(1))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let context = run::workspace_clock_context(&s.db, 1.into(), at)
+        .await
+        .unwrap();
+    assert!(context.contains("2026-11-02T00:30:12.345+08:00"));
+    assert!(context.contains("2026-11-02T00:00:00.000+08:00"));
+    assert!(context.contains("Asia/Kuala_Lumpur"));
+    assert_eq!(
+        run::workspace_clock_context(&s.db, 2.into(), at)
+            .await
+            .unwrap(),
+        ""
+    );
+}

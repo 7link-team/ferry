@@ -69,6 +69,7 @@ async fn a_reported_rollback_reason_is_kept_with_the_failed_version() {
         supports_agent_probe: false,
         supports_forward: false,
         supports_timezone: true,
+        supports_process_timezone: false,
         supports_resource_policy: false,
         timezone: String::new(),
     };

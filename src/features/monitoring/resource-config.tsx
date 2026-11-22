@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { Eye, History, BellPlus, Trash2, Settings2 } from "lucide-react";
 import { deploymentState } from "../deployments/deployment";
 import { deleteResource } from "../../shared/api/resource";
@@ -8,7 +9,7 @@ import type { FormConfig, FormField, ListConfig } from "../../shared/resources/t
 
 const text = (key: string) => commonText(`monitoring:${key}`);
 const option = (value: string) => ({ value, label: value, labelKey: `monitoring:${value}` });
-const date = (value: unknown) => typeof value === "number" && value > 0 ? new Date(value).toLocaleString(currentLocale()) : "—";
+const date = (value: unknown) => typeof value === "number" && value > 0 ? <WorkspaceDate value={value} locale={currentLocale()} /> : "—";
 export const healthState = (value: unknown) => typeof value === "string" ? text(value) : text("unknown");
 const status = (value: unknown) => <span className="inline-flex min-h-6 items-center gap-1.5"><span aria-hidden className={`size-2 shrink-0 rounded-full ${value === "up" ? "bg-emerald-600" : value === "down" ? "bg-destructive" : value === "degraded" ? "bg-amber-600" : "bg-muted-foreground"}`} />{healthState(value)}</span>;
 const reason = (value: unknown) => typeof value === "string" && value.startsWith("monitoring.") ? text(value.slice(11)) : "—";

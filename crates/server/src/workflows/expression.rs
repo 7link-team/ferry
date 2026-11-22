@@ -35,7 +35,18 @@ pub(crate) fn clock(
     settings: &serde_json::Value,
     at_ms: i64,
 ) -> Result<(serde_json::Value, serde_json::Value)> {
+    clock_with_timezone(settings, None, at_ms)
+}
+
+/// A confirmed workspace zone is captured by the execution, never looked up on replay.
+pub(crate) fn clock_with_timezone(
+    settings: &serde_json::Value,
+    workspace_timezone: Option<&str>,
+    at_ms: i64,
+) -> Result<(serde_json::Value, serde_json::Value)> {
     use chrono::{DateTime, Local, Utc};
+    let override_settings = workspace_timezone.map(|zone| json!({"timezone":zone}));
+    let settings = override_settings.as_ref().unwrap_or(settings);
     let invalid = || error(ErrorCode::Evaluation, "$now");
     let instant = DateTime::<Utc>::from_timestamp_millis(at_ms).ok_or_else(invalid)?;
     match timezone(settings, "/settings/timezone")? {
@@ -336,6 +347,22 @@ mod tests {
         let (now, today) = clock(&json!({}), 0).unwrap();
         assert_eq!(now["zone"], "local");
         assert_eq!(today["zone"], "local");
+    }
+    #[test]
+    fn confirmed_workspace_clock_overrides_definition_and_legacy_keeps_it() {
+        let settings = json!({"timezone":"UTC"});
+        let at = chrono::DateTime::parse_from_rfc3339("2026-11-01T16:30:12.345Z")
+            .unwrap()
+            .timestamp_millis();
+        let (now, today) = clock_with_timezone(&settings, Some("Asia/Kuala_Lumpur"), at).unwrap();
+        assert_eq!(now["iso"], "2026-11-02T00:30:12.345+08:00");
+        assert_eq!(today["iso"], "2026-11-02T00:00:00.000+08:00");
+        assert_eq!(now["zone"], "Asia/Kuala_Lumpur");
+        assert_eq!(
+            clock_with_timezone(&settings, None, at).unwrap(),
+            clock(&settings, at).unwrap()
+        );
+        assert!(clock_with_timezone(&settings, Some("Mars/Unknown"), at).is_err());
     }
     #[test]
     fn corrupt_worker_replies_cannot_supply_another_protocol_or_partial_batch() {

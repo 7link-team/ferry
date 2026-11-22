@@ -866,5 +866,6 @@
   "transfers.csvInvalid": "CSV 檔案第 {row} 行無法解析；請檢查該行的引號和欄數。",
   "templates.documentInvalidAt": "範本在第 {line} 行第 {column} 欄不是有效的 JSON/YAML；請檢查該處縮排，字串佔位符需加引號。",
   "maintenance.pipelineConcurrencyLegacyName": "流水線並行數（舊設定，已停用）",
-  "maintenance.pipelineConcurrencyLegacyHelp": "此工作空間設定僅為相容性保留，不再控制流水線執行。請在平臺設定 → 資源限制中設定流水線並行數；沒有平臺設定權限時請聯絡平臺管理員。此處儲存的值與舊預設值均不生效。"
+  "maintenance.pipelineConcurrencyLegacyHelp": "此工作空間設定僅為相容性保留，不再控制流水線執行。請在平臺設定 → 資源限制中設定流水線並行數；沒有平臺設定權限時請聯絡平臺管理員。此處儲存的值與舊預設值均不生效。",
+  "channel.timezoneUnsupported": "主機未接受必要的處理程序時區 {zone}。請設定 SSH 接受 TZ 環境變數，或使用最新 Runner。"
 }

@@ -180,5 +180,6 @@
   "auth.sessionAutoRenewDisabled": "セッションの自動更新は無効です。アクセス期限後に再ログインしてください。",
   "mail.invitationUnavailable": "招待する前に、プラットフォーム設定でメールサービスを設定、有効化してテストしてください。",
   "mail.invitationSubject": "ワークスペースへの招待",
-  "mail.invitationBody": "{workspace} への参加に招待されました。\n招待コード：{code}\nログインまたは登録してから、ワークスペースの作成・参加画面でこのコードを入力してください。"
+  "mail.invitationBody": "{workspace} への参加に招待されました。\n招待コード：{code}\nログインまたは登録してから、ワークスペースの作成・参加画面でこのコードを入力してください。",
+  "workspace.error.timezone_invalid": "このワークスペースに有効な IANA タイムゾーンを選択してください。"
 }

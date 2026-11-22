@@ -857,6 +857,7 @@ mod tests {
         .await
         .unwrap();
         workspaces::Entity::insert(workspaces::ActiveModel {
+            timezone: Set(None),
             id: Set(11),
             slug: Set("host-wait".into()),
             name: Set("Host wait".into()),

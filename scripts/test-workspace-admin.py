@@ -44,7 +44,8 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
     anonymous = client()
     log = open(data / 'server.log', 'wb')
     def launch():
-        proc = subprocess.Popen([binary], env=env, stdout=log, stderr=log)
+        proc = subprocess.Popen([binary], env=env, stdout=log, stderr=log,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
         for _ in range(600):  # fresh MySQL/PostgreSQL migrations can exceed 15s on CI
             if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text())
             try:
@@ -154,6 +155,63 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(owner, root+'/nodes', {'ids':[removable]}, method='DELETE')
         request(owner, root+'/nodes/'+removable, expected=404)
         check(True, 'DELETE node collection removes only the selected node')
+        settings_path = root + '/workspace-settings/1'
+        initial_zone = request(owner, settings_path)
+        check(initial_zone['timezone'] is None, 'legacy workspace remains explicitly unconfirmed')
+        request(outsider, settings_path, expected=404)
+        request(owner, settings_path, dict(initial_zone, timezone='system'), method='PATCH', expected=400)
+        saved_zone = request(owner, settings_path, dict(initial_zone, timezone='Asia/Kuala_Lumpur'), method='PATCH')
+        check(saved_zone['timezone'] == 'Asia/Kuala_Lumpur' and saved_zone['version'] > initial_zone['version'],
+              'actual scoped shared-form PATCH confirms the workspace timezone with a fresh version')
+        request(owner, settings_path, dict(initial_zone, timezone='UTC'), method='PATCH', expected=409)
+        identity_zone = next(row for row in request(owner, '/me')['workspaces'] if row['id'] == workspace_tenant)
+        check(identity_zone['timezone'] == 'Asia/Kuala_Lumpur', 'identity refresh returns the confirmed workspace zone')
+        confirmed = request(owner, '/workspaces', {'name':'Zoned workspace','slug':'zoned-workspace','timezone':'Pacific/Auckland'})
+        check(confirmed['timezone'] == 'Pacific/Auckland', 'creation persists an explicit editable IANA zone')
+        request(owner, '/workspaces', {'name':'Invalid zone','slug':'invalid-zone','timezone':''}, expected=400)
+        request(owner, settings_path, dict(saved_zone, timezone=''), method='PATCH', expected=400)
+        check(request(owner, settings_path)['timezone'] == 'Asia/Kuala_Lumpur', 'invalid and stale writes leave timezone unchanged')
+        # This additional integration requires the separately built, OS-confined sandbox.
+        if os.environ.get('FERRY_TEST_WORKFLOW_TIMEZONE') == '1':
+            clock_graph = {'engine':'ferry-graph','schema':1,'settings':{'timezone':'Asia/Tokyo'},'nodes':[
+                {'id':'start','name':'Start','type':'core.trigger.manual','type_version':1,'position':[0,0],
+                 'params':{'input_schema':{'type':'object'}}},
+                {'id':'wait','name':'Wait','type':'core.wait','type_version':1,'position':[200,0],
+                 'params':{'mode':'duration','duration_ms':1500}},
+                {'id':'clock','name':'Clock','type':'data.set','type_version':1,'position':[400,0],
+                 'params':{'fields':[{'path':'zone','value':'={{ $now.zoneName }}'}],'keep_other_fields':True}}],
+                'connections':[{'from':{'node':a,'port':'main','index':0},'to':{'node':b,'port':'main','index':0}}
+                               for a,b in [('start','wait'),('wait','clock')]]}
+            workflow = request(owner, root+'/workflows', {'name':'Workspace clock acceptance','definition':json.dumps(clock_graph)}, expected=201)
+            run_body = {'mode':'manual','revision':'draft','version':workflow['version'],'entry_node_id':'start','inputs':{}}
+            execution = request(owner, root+'/workflows/'+workflow['id']+'/executions', run_body, expected=201)
+            # The wait prevents the clock node finishing before this configuration change.
+            latest_zone = request(owner, settings_path)
+            request(owner, settings_path, dict(latest_zone,timezone='UTC'), method='PATCH')
+            def wait_execution(execution):
+                endpoint = root+'/workflow-executions/'+execution['id']
+                deadline = time.monotonic()+30
+                while time.monotonic()<deadline:
+                    result = request(owner,endpoint)
+                    if result['state'] in ('succeeded','failed','cancelled'): return result
+                    time.sleep(0.05)
+                raise AssertionError(('execution did not finish',execution['id']))
+            check(wait_execution(execution)['state']=='succeeded','actual workflow executes with the confirmed business clock')
+            execution_path = root+'/workflow-executions/'+execution['id']
+            clock_attempt = next(row for row in request(owner,execution_path+'/node-runs')['items'] if row['node_id']=='clock')
+            clock_output = request(owner,execution_path+'/node-runs/'+clock_attempt['id']+'/output')
+            check(clock_output['ports'][0]['items'][0]['json']['zone']=='Asia/Kuala_Lumpur',
+                  'running workflow retains its frozen workspace zone after a live timezone change')
+            clock_graph['nodes'] = [clock_graph['nodes'][0],clock_graph['nodes'][2]]
+            clock_graph['connections'] = [{'from':{'node':'start','port':'main','index':0},'to':{'node':'clock','port':'main','index':0}}]
+            clock_graph['nodes'][1]['params']['fields'][0]['value'] = '={{ missing.value }}'
+            bad = request(owner,root+'/workflows',{'name':'Expression diagnosis acceptance','definition':json.dumps(clock_graph)},expected=201)
+            failed = request(owner,root+'/workflows/'+bad['id']+'/executions',dict(run_body,version=bad['version']),expected=201)
+            diagnostic = wait_execution(failed)
+            check(diagnostic['state']=='failed' and '/nodes/1/params/fields/0/value' in diagnostic['error'],
+                  'pre-activation expression failure exposes its exact diagnostic through the authorized HTTP API')
+            attempts = request(owner,root+'/workflow-executions/'+failed['id']+'/node-runs')['items']
+            check(all(row['node_id']!='clock' for row in attempts),'failed expression diagnosis does not invent a node attempt')
         print(f'{checks} checks passed',flush=True)
     finally:
         proc.terminate(); proc.wait(timeout=20); log.close()

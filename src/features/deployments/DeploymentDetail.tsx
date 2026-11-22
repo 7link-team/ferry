@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { Tabs } from "radix-ui";
 import type { ReactNode } from "react";
@@ -139,9 +140,9 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
     {revision && <section className="space-y-3"><h3 className="font-semibold">{executionText("deployment.revisionTitle", { number: revision.number, action: revisionActionLabel(revision.action), state: stateLabel(revision.state) })}</h3>
       <dl className="grid gap-3 text-sm sm:grid-cols-3">{[
         [commonText("resource-domain:execution.triggeredBy"), named(revision.triggered_by_name, revision.triggered_by)],
-        [commonText("resource-domain:execution.startedAt"), revision.started_at ? new Date(revision.started_at).toLocaleString(currentLocale()) : "—"],
-        [commonText("resource-domain:deployment.finishedAt"), revision.finished_at ? new Date(revision.finished_at).toLocaleString(currentLocale()) : "—"],
-      ].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-all">{value}</dd></div>)}</dl>
+        [commonText("resource-domain:execution.startedAt"), revision.started_at ? <WorkspaceDate value={revision.started_at} locale={currentLocale()} /> : "—"],
+        [commonText("resource-domain:deployment.finishedAt"), revision.finished_at ? <WorkspaceDate value={revision.finished_at} locale={currentLocale()} /> : "—"],
+      ].map(([label, value]) => <div key={String(label)} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-all">{value}</dd></div>)}</dl>
       <pre aria-label={executionText("shared.resource.cron.output")} className="max-h-80 overflow-auto whitespace-pre-wrap rounded border bg-muted/30 p-4 text-xs">{revision.output || executionText("deployment.resultPending")}</pre>
       {!!revision.targets?.length && <section aria-label={executionText("deployment.perHostResults")} className="space-y-2"><h4 className="text-sm font-medium">{executionText("deployment.sequentialHosts")}</h4><ol className="space-y-2">{revision.targets.map((target) => <li key={target.id} className="rounded border p-3"><details><summary className="cursor-pointer text-sm">{executionText("deployment.hostNumber", { id: target.host_id })} · {deploymentState(target.state)}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-xs">{target.output || executionText("deployment.waiting")}</pre></details></li>)}</ol></section>}
       <details><summary className="cursor-pointer text-sm">{executionText("deployment.savedArtifact")}</summary><pre className="overflow-auto p-4 text-xs">{revision.artifact || executionText("deployment.artifactPending")}</pre></details>

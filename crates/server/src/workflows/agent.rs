@@ -220,6 +220,7 @@ fn compose(
     items: &[Item],
     schema: Option<&Value>,
     files: bool,
+    clock: Option<&Value>,
 ) -> Result<String> {
     let rows: Vec<_> = items.iter().map(|item| &item.json).collect();
     let mut text = String::new();
@@ -228,6 +229,11 @@ fn compose(
         text.push_str("<agent_instructions source=\"agent configuration set by a workspace administrator\">\n");
         text.push_str(system.trim_end());
         text.push_str("\n</agent_instructions>\n\n");
+    }
+    if let Some(clock) = clock {
+        text.push_str("<workflow_runtime_context source=\"persisted node-attempt clock; workflow timezone, independent of model or host timezone\">\n");
+        text.push_str(&serde_json::to_string(clock).map_err(|_| ApiError::missing())?);
+        text.push_str("\n</workflow_runtime_context>\n\n");
     }
     text.push_str("<workflow_task source=\"this workflow node's prompt\">\n");
     text.push_str(prompt);
@@ -592,6 +598,7 @@ impl Session<'_> {
 /// Execution limits; tests shorten the timeout below the contract's minimum.
 pub(super) struct Limits {
     pub timeout: Duration,
+    pub clock: Option<Value>,
 }
 
 pub(super) async fn execute(
@@ -601,6 +608,7 @@ pub(super) async fn execute(
     node: &Value,
     items: &[Item],
     params: &[Value],
+    clock: Value,
 ) -> Result<Vec<Item>> {
     let policy = crate::accounts::resource_policy::load(&s.db).await?;
     let timeout = policy.task_timeout_seconds.unwrap_or(0);
@@ -613,6 +621,7 @@ pub(super) async fn execute(
         params,
         Limits {
             timeout: Duration::from_secs(timeout),
+            clock: Some(clock),
         },
     )
     .await
@@ -674,6 +683,7 @@ pub(super) async fn execute_with(
             validator.as_ref().ok_or_else(ApiError::missing)?,
             max_calls,
             limits.timeout,
+            limits.clock.as_ref(),
         )
         .await?;
         return Ok(vec![Item {
@@ -693,6 +703,7 @@ pub(super) async fn execute_with(
             items,
             validator.as_ref().map(|_| &params["output_schema"]),
             files.is_some(),
+            limits.clock.as_ref(),
         )?,
         &policy,
     )?;
@@ -705,6 +716,10 @@ pub(super) async fn execute_with(
         .iter()
         .flat_map(|item| item.paired.iter().cloned())
         .collect();
+    let workspace_timezone = limits
+        .clock
+        .as_ref()
+        .and_then(|clock| clock["timezone"].as_str());
     let attempt = |target: (i64, bool)| {
         let prompt = prompt.clone();
         let (resolved, config, validator, files, node_name) = (
@@ -729,6 +744,7 @@ pub(super) async fn execute_with(
                 max_calls,
                 deadline,
                 limits.timeout,
+                workspace_timezone,
             )
             .await
         })
@@ -820,6 +836,7 @@ async fn on_runner(
     max_calls: usize,
     deadline: Option<Instant>,
     timeout: Duration,
+    workspace_timezone: Option<&str>,
 ) -> Result<OnHost> {
     let runtime = config.runtime.cli()?;
     // The resolved CLI (a model profile may select another one than the Agent row).
@@ -881,11 +898,18 @@ async fn on_runner(
     if provider.is_none() && !config.authentication_usable(&probe.authentication) {
         return unusable("workflow.agentLoginRequired");
     }
-    let timezone =
-        match crate::models::cli_timezone(s, Id::from(run.workspace_id), agent.id, &row).await {
-            Ok(timezone) => timezone,
-            Err(error) => return Ok(OnHost::Unusable(error)),
-        };
+    let timezone = match crate::models::cli_timezone_at(
+        s,
+        Id::from(run.workspace_id),
+        agent.id,
+        &row,
+        workspace_timezone,
+    )
+    .await
+    {
+        Ok(timezone) => timezone,
+        Err(error) => return Ok(OnHost::Unusable(error)),
+    };
     let binding = Binding {
         execution_user: probe.execution_user,
         execution_identity: probe.execution_identity,

@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { CheckCircle2,Copy,HelpCircle,Loader2,RotateCcw,Terminal,X } from "lucide-react";
 import { Dialog } from "radix-ui";
@@ -441,7 +442,7 @@ export function RunnerUpdateStatus({ workspace, hostId, canUpdate = false }: { w
       {offline ? <p role="status" className="text-amber-700 dark:text-amber-400">{commonText("resource-domain:runner.offlineNow", { version: status.agent_version || "—" })}</p>
         : <>
           {status.update && <div role="status" aria-live="polite"><p>{sentence(status.update)}</p>{status.update.message && status.update.state !== "rolled_back" && <p className="text-muted-foreground">{status.update.message}</p>}
-            {!!status.update.auto?.next_retry_at && <p>{commonText("resource-domain:runner.nextRetry")}{new Date(status.update.auto.next_retry_at).toLocaleString(currentLocale())}</p>}
+            {!!status.update.auto?.next_retry_at && <p>{commonText("resource-domain:runner.nextRetry")}{<WorkspaceDate value={status.update.auto.next_retry_at} locale={currentLocale()} />}</p>}
           </div>}
           {!status.ready && <p className="text-muted-foreground">{commonText("resource-domain:runner.waitHealthy")}</p>}
           {!status.supported && <p className="text-muted-foreground">{commonText("resource-domain:runner.unsupportedHelp")}</p>}

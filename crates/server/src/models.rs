@@ -687,15 +687,37 @@ pub(crate) async fn cli_hosts(
         .unwrap_or_default())
 }
 
-/// The time zone an Agent's CLI model requires on `host`, or None to follow
-/// the runner. A model that requires one refuses a runner that cannot apply
-/// it rather than silently running in another zone.
+/// A confirmed workspace zone controls CLI executions; unconfirmed workspaces
+/// retain their model/runner settings. A required zone refuses runners that
+/// cannot apply it rather than silently running in another zone.
 pub(crate) async fn cli_timezone(
     s: &AppState,
     workspace: Id,
     agent_id: i64,
     host: &crate::entities::hosts::Model,
 ) -> Result<Option<String>> {
+    let zone = crate::accounts::workspace::business_timezone(&s.db, workspace).await?;
+    cli_timezone_at(
+        s,
+        workspace,
+        agent_id,
+        host,
+        zone.as_ref().map(|zone| zone.name()),
+    )
+    .await
+}
+
+/// Workflow executions supply their frozen workspace zone, including None for legacy runs.
+pub(crate) async fn cli_timezone_at(
+    s: &AppState,
+    workspace: Id,
+    agent_id: i64,
+    host: &crate::entities::hosts::Model,
+    workspace_timezone: Option<&str>,
+) -> Result<Option<String>> {
+    if let Some(zone) = workspace_timezone {
+        return timezone_for(zone.to_owned(), host);
+    }
     let Some(agent) = crate::entities::ai_agents::Entity::find_by_id(agent_id)
         .filter(crate::entities::ai_agents::Column::WorkspaceId.eq(workspace))
         .one(&s.db)

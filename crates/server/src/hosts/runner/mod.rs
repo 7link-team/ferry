@@ -94,6 +94,7 @@ struct Live {
     supports_forward: bool,
     /// Understands `Control::Settings`; older runners reject unknown frames.
     supports_timezone: bool,
+    supports_process_timezone: bool,
     supports_resource_policy: bool,
     version: String,
     ready: std::sync::atomic::AtomicBool,

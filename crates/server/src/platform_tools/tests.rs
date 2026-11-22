@@ -7,6 +7,22 @@ use crate::{
 use axum::extract::State;
 use sea_orm::{ActiveModelTrait, IntoActiveModel};
 
+#[test]
+fn preview_failures_explain_node_paths_and_batch_inputs() {
+    let call = Call {
+        method: "POST".into(),
+        path: "/workflows/1/expression-previews".into(),
+        ..Default::default()
+    };
+    for status in [400, 404, 422] {
+        let guidance = call_guidance(&call, status);
+        assert!(guidance.contains("/nodes/3"));
+        assert!(guidance.contains("upstream"));
+        assert!(guidance.contains("$input.all()"));
+    }
+    assert!(!call_guidance(&call, 403).contains("/nodes/3"));
+}
+
 #[tokio::test]
 async fn storage_failure_is_classified_without_matching_localized_text_or_retrying_the_write() {
     use sea_orm::{PaginatorTrait, sea_query::Expr};

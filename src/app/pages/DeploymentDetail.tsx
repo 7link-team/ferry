@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { useMemo, type ComponentProps } from "react";
 import * as feature from "../../features/deployments/DeploymentDetail";
 import { monitoringForms } from "../../features/monitoring/resource-config";
@@ -23,7 +24,7 @@ export function DeploymentDetail(props: Omit<ComponentProps<typeof feature.Deplo
           { key: "name", label: "Name", labelKey: "common-domain:common.name", type: "text" },
           { key: "description", label: "Description", labelKey: "common-domain:common.description", type: "textarea", span: 2 },
           { key: "version", label: "Version", labelKey: "common-domain:common.version", type: "number" },
-          { key: "updated_at", label: "Updated", labelKey: "resource-domain:platform.workspaceUpdated", type: "text", display: row => row.updated_at ? new Date(Number(row.updated_at)).toLocaleString(currentLocale()) : "—" },
+          { key: "updated_at", label: "Updated", labelKey: "resource-domain:platform.workspaceUpdated", type: "text", display: row => row.updated_at ? <WorkspaceDate value={Number(row.updated_at)} locale={currentLocale()} /> : "—" },
           { key: "mode", label: "Driver", labelKey: "resource-domain:deployment.mode", type: "text" },
           { key: "target_ref", label: "Target", labelKey: "resource-domain:resource.target", type: "text", display: row => String(row.target_name || (row.target_kind === "blueprint" ? commonText("resource-domain:wizard.roles") : row.target_ref) || "—") },
           { key: "workdir", label: "Working directory", labelKey: "resource-domain:deployment.workdir", type: "text" },

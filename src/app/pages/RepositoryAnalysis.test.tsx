@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot,type Root } from "react-dom/client";
 import { afterEach,beforeEach,expect,it,vi } from "vitest";
-import { i18n } from "../../shared/i18n/i18n";
+import { i18n, insightText } from "../../shared/i18n/i18n";
 import { AnalysisSummary,RepositoryAnalysis,analysisConfig,analysisDateRange,analysisReport,analysisReports,overviewPeriods,overviewRanking } from "./RepositoryAnalysis";
 
 let root: Root;
@@ -188,4 +188,50 @@ it("links source commits only to safe URLs supplied by the platform", async () =
   expect(host.querySelector("a")!.getAttribute("rel")).toBe("noopener noreferrer");
   await act(async () => root.render(<>{column.render!({ commitHash: "abc", commitUrl: "javascript:alert(1)" })}</>));
   expect(host.querySelector("a")).toBeNull(); expect(host.textContent).toContain("abc");
+});
+
+it("compresses only empty heatmap weeks between distant dates without dropping facts", async () => {
+  const data = { items: [], total: 0, page: 1, page_size: 20, series: [{ period: "9999-12-31", commits: 5 }, { period: "1970-01-01", commits: 2 }] };
+  await act(async () => root.render(<AnalysisSummary data={data} kind="heatmap" />));
+  const cells = [...host.querySelectorAll<SVGRectElement>("svg rect")];
+  expect(cells.length).toBeLessThanOrEqual(14);
+  expect(cells.find(cell => cell.getAttribute("aria-label") === "1970-01-01")!.textContent).toContain(insightText("commitCount", { date: "1970-01-01", count: 2 }));
+  expect(cells.find(cell => cell.getAttribute("aria-label") === "9999-12-31")!.textContent).toContain(insightText("commitCount", { date: "9999-12-31", count: 5 }));
+  expect(cells.findIndex(cell => cell.getAttribute("aria-label") === "1970-01-01")).toBeLessThan(cells.findIndex(cell => cell.getAttribute("aria-label") === "9999-12-31"));
+  const gap = host.querySelector("[data-calendar-gap]")!;
+  expect(gap.getAttribute("aria-label")).toContain("1970-01-05");
+  expect(gap.getAttribute("aria-label")).toContain("9999-12-26");
+  expect(Number(host.querySelector("svg")!.getAttribute("width"))).toBeLessThan(500);
+});
+
+it("keeps adjacent occupied heatmap weeks contiguous and zero-filled", async () => {
+  const data = { items: [], total: 0, page: 1, page_size: 20, series: [{ period: "2026-01-01", commits: 2 }, { period: "2026-01-10", commits: 5 }] };
+  await act(async () => root.render(<AnalysisSummary data={data} kind="heatmap" />));
+  expect(host.querySelectorAll("svg rect")).toHaveLength(13);
+  expect(host.querySelector("[data-calendar-gap]")).toBeNull();
+  expect(host.querySelector('[aria-label="2026-01-02"]')!.textContent).toContain(insightText("commitCount", { date: "2026-01-02", count: 0 }));
+});
+
+it("orders signed expanded calendar years numerically and keeps complete date keys", async () => {
+  const keys = ["+100000-01-01", "1970-01-01", "-0001-01-01"];
+  const data = { items: [], total: 0, page: 1, page_size: 20, series: keys.map((period, index) => ({ period, commits: index + 1 })) };
+  await act(async () => root.render(<AnalysisSummary data={data} kind="heatmap" />));
+  const cells = [...host.querySelectorAll<SVGRectElement>("svg rect")];
+  expect(cells.length).toBeLessThanOrEqual(21);
+  const actual = cells.filter(cell => keys.includes(cell.getAttribute("aria-label")!));
+  expect(actual.map(cell => cell.getAttribute("aria-label"))).toEqual(["-0001-01-01", "1970-01-01", "+100000-01-01"]);
+  expect(actual[2]!.textContent).toContain(insightText("commitCount", { date: "+100000-01-01", count: 1 }));
+  expect(host.querySelectorAll("[data-calendar-gap]")).toHaveLength(2);
+  expect(host.querySelectorAll("[data-calendar-gap]")[1]!.getAttribute("aria-label")).toContain("+99999-");
+  expect(host.querySelector("svg")!.textContent).toContain("+100000-01");
+});
+
+it("does not construct a heatmap calendar for sparse period summaries", async () => {
+  const calendarWeek = vi.spyOn(Date.prototype, "getUTCDay");
+  const data = { items: [], total: 0, page: 1, page_size: 20, series: [{ period: "+100000-01", nickname: "A", effectives: 5 }, { period: "1970-01", nickname: "A", effectives: 2 }] };
+  await act(async () => root.render(<AnalysisSummary data={data} kind="period" />));
+  expect(calendarWeek).not.toHaveBeenCalled();
+  expect(host.querySelectorAll("svg circle")).toHaveLength(2);
+  expect([...host.querySelectorAll("svg circle")].map(cell => cell.getAttribute("aria-label"))).toEqual(["A 1970-01", "A +100000-01"]);
+  expect(host.querySelector("[data-calendar-gap]")).toBeNull();
 });

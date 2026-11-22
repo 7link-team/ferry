@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { base } from "../../shared/api/resource";
 import { selectDisplay } from "../../shared/forms/auto-form";
 import { commonText, hostRepositoryText } from "../../shared/i18n/i18n";
@@ -47,11 +48,11 @@ export const eventLabel = (value: unknown) =>
 export const time = (value: unknown) => {
   if (value == null || value === "" || value === 0 || value === "0") return "—";
   if (typeof value === "number" && value > 0)
-    return new Date(value).toLocaleString(currentLocale());
+    return <WorkspaceDate value={value} locale={currentLocale()} />;
   const parsed = typeof value === "string" && value ? Date.parse(value) : NaN;
   return Number.isNaN(parsed)
     ? String(value ?? "")
-    : new Date(parsed).toLocaleString(currentLocale());
+    : <WorkspaceDate value={parsed} locale={currentLocale()} />;
 };
 
 export const has = (key: string) => (row: Record<string, unknown>) =>

@@ -1,7 +1,7 @@
 //! Time zone for the processes this runner starts.
 //!
-//! Precedence: the CLI model's zone for an Agent turn, then the zone pinned on
-//! this host in the platform (`Control::Settings`), then the host's own zone.
+//! Precedence: the workspace execution's zone (or legacy CLI model zone), then
+//! the host setting from `Control::Settings`, then the host's own zone.
 //! It is applied as `TZ` on child processes only; the host is never changed,
 //! so nothing has to restart.
 //!
@@ -79,16 +79,125 @@ fn resolve(
     (!(windows && wanted == host)).then_some(wanted)
 }
 
-/// Sets `TZ` on a child process according to the precedence above.
-pub(crate) fn apply(command: &mut tokio::process::Command, model: Option<&str>) {
-    if let Some(zone) = resolve(model, pinned(), &detected(), cfg!(windows)) {
-        command.env("TZ", zone);
+/// Removing an inherited override is distinct from preserving legacy inheritance.
+#[derive(Debug, PartialEq, Eq)]
+enum ChildZone {
+    Inherit,
+    Set(String),
+    Remove,
+}
+
+fn resolve_child(
+    explicit: Option<&str>,
+    pinned: Option<String>,
+    host: &str,
+    windows: bool,
+) -> ChildZone {
+    if windows
+        && explicit
+            .filter(|zone| valid(zone))
+            .is_some_and(|zone| zone == host)
+    {
+        ChildZone::Remove
+    } else {
+        resolve(explicit, pinned, host, windows)
+            .map(ChildZone::Set)
+            .unwrap_or(ChildZone::Inherit)
     }
+}
+
+impl ChildZone {
+    fn apply(&self, command: &mut tokio::process::Command) {
+        match self {
+            Self::Inherit => {}
+            Self::Set(zone) => {
+                command.env("TZ", zone);
+            }
+            Self::Remove => {
+                command.env_remove("TZ");
+            }
+        }
+    }
+    fn apply_pty(&self, command: &mut portable_pty::CommandBuilder) {
+        match self {
+            Self::Inherit => {}
+            Self::Set(zone) => command.env("TZ", zone),
+            Self::Remove => command.env_remove("TZ"),
+        }
+    }
+}
+
+/// Sets or removes `TZ` on the child only; the Runner and host are unchanged.
+pub(crate) fn apply(command: &mut tokio::process::Command, explicit: Option<&str>) {
+    resolve_child(explicit, pinned(), &detected(), cfg!(windows)).apply(command);
+}
+
+pub(crate) fn apply_pty(command: &mut portable_pty::CommandBuilder, explicit: Option<&str>) {
+    resolve_child(explicit, pinned(), &detected(), cfg!(windows)).apply_pty(command);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_matching_windows_zone_removes_inheritance_without_changing_legacy_pins() {
+        let remove = resolve_child(
+            Some("Asia/Kuala_Lumpur"),
+            Some("Europe/Berlin".into()),
+            "Asia/Kuala_Lumpur",
+            true,
+        );
+        assert_eq!(remove, ChildZone::Remove);
+        let mut process = tokio::process::Command::new("node");
+        process.env("TZ", "UTC");
+        remove.apply(&mut process);
+        assert!(
+            process
+                .as_std()
+                .get_envs()
+                .any(|(key, value)| key == "TZ" && value.is_none())
+        );
+        let mut terminal = portable_pty::CommandBuilder::new("node");
+        terminal.env("TZ", "UTC");
+        remove.apply_pty(&mut terminal);
+        assert_eq!(terminal.get_env("TZ"), None);
+        for legacy in [
+            resolve_child(None, None, "Asia/Kuala_Lumpur", true),
+            resolve_child(
+                None,
+                Some("Asia/Kuala_Lumpur".into()),
+                "Asia/Kuala_Lumpur",
+                true,
+            ),
+        ] {
+            assert_eq!(legacy, ChildZone::Inherit);
+            process.env("TZ", "UTC");
+            terminal.env("TZ", "UTC");
+            legacy.apply(&mut process);
+            legacy.apply_pty(&mut terminal);
+            assert!(
+                process
+                    .as_std()
+                    .get_envs()
+                    .any(|(key, value)| key == "TZ" && value == Some(std::ffi::OsStr::new("UTC")))
+            );
+            assert_eq!(terminal.get_env("TZ"), Some(std::ffi::OsStr::new("UTC")));
+        }
+        assert_eq!(
+            resolve_child(Some("Asia/Kuala_Lumpur"), None, "Asia/Kuala_Lumpur", false),
+            ChildZone::Set("Asia/Kuala_Lumpur".into())
+        );
+        assert_eq!(
+            resolve_child(
+                None,
+                Some("Europe/Berlin".into()),
+                "Asia/Kuala_Lumpur",
+                true
+            ),
+            ChildZone::Set("Europe/Berlin".into())
+        );
+    }
 
     #[test]
     fn model_zone_wins_then_host_setting_then_nothing() {
@@ -182,3 +291,34 @@ mod tests {
 /// Tests that read or change the process-wide setting run one at a time.
 #[cfg(test)]
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(all(test, windows))]
+mod inherited_timezone_tests {
+    #[test]
+    fn explicit_os_zone_removes_an_existing_child_timezone_override() {
+        let detected = super::detected();
+        if detected.is_empty() {
+            eprintln!("OS timezone unavailable; deterministic branch test covers removal");
+            return;
+        }
+        let mut command = tokio::process::Command::new("node");
+        command.env("TZ", "UTC");
+        super::apply(&mut command, Some(&detected));
+        assert!(
+            command
+                .as_std()
+                .get_envs()
+                .any(|(key, value)| key == "TZ" && value.is_none())
+        );
+        let parent = std::env::var_os("TZ");
+        command.arg("-e").arg("const opts={year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false}; for(const at of ['2026-01-15T12:00:00Z','2026-07-15T12:00:00Z']){const d=new Date(at); if(new Intl.DateTimeFormat('en-US',opts).format(d)!==new Intl.DateTimeFormat('en-US',{...opts,timeZone:process.argv[1]}).format(d))process.exit(2);} if(process.env.TZ!==undefined)process.exit(3);")
+            .arg(&detected);
+        let output = command.as_std_mut().output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(std::env::var_os("TZ"), parent);
+    }
+}

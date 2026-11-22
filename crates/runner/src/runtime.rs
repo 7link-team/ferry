@@ -238,6 +238,7 @@ async fn hold_sampled(
             supports_agent_probe: true,
             supports_forward: true,
             supports_timezone: true,
+            supports_process_timezone: true,
             supports_resource_policy: true,
             timezone: crate::timezone::detected(),
         },
@@ -573,6 +574,7 @@ mod tests {
                 serde_json::to_string(&wire::Session::ExecStreamStart {
                     command: command.into(),
                     timeout_seconds: 15,
+                    timezone: None,
                 })
                 .unwrap()
                 .into(),

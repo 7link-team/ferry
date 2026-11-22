@@ -323,6 +323,7 @@ async fn workspace_workflow_number_allocation_serializes_and_rolls_back_with_its
     Migrator::up(&a, None).await.unwrap();
     let b = Database::connect(options).await.unwrap();
     workspaces::Entity::insert(workspaces::ActiveModel {
+        timezone: Set(None),
         id: Set(11),
         slug: Set("workflow".into()),
         name: Set("Workflow".into()),

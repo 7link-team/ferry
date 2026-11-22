@@ -117,6 +117,7 @@ export const nav: NavGroup[] = [
       { key: "cron-jobs", get label() { return commonText("nav.cronJobs"); }, resource: "cron-jobs", params: { scope: "host" }, permission: "cron-jobs.read", section: "nav.sections.hosts" },
       { key: "cron-runs", get label() { return commonText("nav.cronRuns"); }, resource: "cron-runs", params: {scope:"host"}, permission:"cron-jobs.read", hidden:true, section: "nav.sections.hosts" },
       { key: "variables", get label() { return commonText("nav.variables"); }, resource: "variables", params: { scope: "global" }, permission: "variables.read", section: "nav.sections.configuration" },
+      { key: "workspace-settings", get label() { return commonText("resource-domain:workspace.settings"); }, resource: "workspace-settings", permission: "settings.update", hidden: true, parent: "settings", section: "nav.sections.configuration" },
       { key: "settings", get label() { return commonText("nav.settings"); }, resource: "settings", permission: "settings.read", section: "nav.sections.configuration" },
       { key: "dictionaries", get label() { return commonText("nav.dictionaries"); }, resource: "dictionaries", permission: "dictionaries.read", section: "nav.sections.configuration" },
       { key: "activity", get label() { return commonText("nav.activity"); }, resource: "activity", permission: "activity.read", section: "nav.sections.configuration" },

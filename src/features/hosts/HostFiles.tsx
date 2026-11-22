@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { HostUpload } from "./HostUpload";
 import { HostPermissions } from "./HostPermissions";
 import { droppedFiles, type UploadSelection } from "./host-upload";
@@ -458,7 +459,7 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
                   {(entry.mode & 0o777).toString(8).padStart(3, "0")}
                 </> },
 { field: 'modified_at', name: hostRepositoryText("host-files.051"), width: "176px", render: (_value, entry) => <>
-                  {entry.modified_at ? new Date(entry.modified_at).toLocaleString(currentLocale()) : "—"}
+                  {entry.modified_at ? <WorkspaceDate value={entry.modified_at} locale={currentLocale()} /> : "—"}
                 </> }
         ]} actionWidth={virtualRoot ? 60 : 180} actionsContent={entry => <>
                   {canTerminal && entry.kind === "directory" && <Button type="button" variant="ghost" size="icon" className="size-7" aria-label={hostRepositoryText("host-files.042", {value1: entry.name})} title={virtualRoot ? hostRepositoryText("host-files.052") : hostRepositoryText("host-files.053")} onClick={() => openTerminal(entryPath(entry))}><SquareTerminal className="size-4" /></Button>}

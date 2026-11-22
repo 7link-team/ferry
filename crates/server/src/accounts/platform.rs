@@ -453,6 +453,7 @@ const WORKSPACE_SPEC: Spec = Spec {
 struct PublicWorkspace {
     id: i64,
     name: String,
+    timezone: Option<String>,
     slug: String,
     owner_id: i64,
     updated_at: i64,
@@ -460,13 +461,14 @@ struct PublicWorkspace {
 }
 impl PublicWorkspace {
     fn json(self) -> Value {
-        json!({"id": Id::from(self.id), "name": self.name, "slug": self.slug, "version": self.updated_at, "created_at": self.created_at})
+        json!({"id": Id::from(self.id), "name": self.name, "slug": self.slug, "timezone":self.timezone,"version": self.updated_at, "created_at": self.created_at})
     }
 }
 fn public_workspaces() -> sea_orm::Select<workspaces::Entity> {
     workspaces::Entity::find().select_only().columns([
         workspaces::Column::Id,
         workspaces::Column::Name,
+        workspaces::Column::Timezone,
         workspaces::Column::Slug,
         workspaces::Column::OwnerId,
         workspaces::Column::UpdatedAt,
@@ -628,7 +630,7 @@ pub async fn create_workspace(
         "create",
         "platform-workspaces",
         id,
-        json!({"name": value["name"], "slug": value["slug"]}),
+        json!({"name": value["name"], "slug": value["slug"],"timezone":value["timezone"]}),
     )
     .await?;
     tx.commit().await?;
@@ -638,6 +640,8 @@ pub async fn create_workspace(
 pub struct WorkspaceUpdate {
     name: String,
     version: i64,
+    #[serde(default)]
+    timezone: Option<String>,
 }
 pub async fn update_workspace(
     State(s): State<AppState>,
@@ -655,20 +659,16 @@ pub async fn update_workspace(
     let tx = s.db.begin().await?;
     lock(&tx).await?;
     check_admin(&tx, &admin).await?;
-    let version = std::cmp::max(db::now(), body.version.saturating_add(1));
-    let changed = workspaces::Entity::update_many()
-        .col_expr(workspaces::Column::Name, Expr::value(name))
-        .col_expr(workspaces::Column::UpdatedAt, Expr::value(version))
-        .filter(workspaces::Column::Id.eq(i64::from(id)))
-        .filter(workspaces::Column::UpdatedAt.eq(body.version))
-        .exec(&tx)
-        .await?;
-    if changed.rows_affected != 1 {
+    let row = super::workspace_admin::lock_workspace(&tx, id).await?;
+    if row.updated_at != body.version {
         return Err(ApiError::localized(
             axum::http::StatusCode::CONFLICT,
             crate::i18n::Message::new("platform.recordChangedOrDeleted"),
         ));
     }
+    let saved =
+        super::workspace::timezone::update_in(&tx, &row, name, body.timezone.as_deref()).await?;
+    let version = saved.updated_at;
     audit(
         &s,
         &tx,
@@ -676,7 +676,7 @@ pub async fn update_workspace(
         "update",
         "platform-workspaces",
         id,
-        json!({"name": name}),
+        json!({"name": name,"timezone":{"from":row.timezone,"to":saved.timezone}}),
     )
     .await?;
     tx.commit().await?;

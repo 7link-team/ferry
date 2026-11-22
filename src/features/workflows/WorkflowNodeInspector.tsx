@@ -1,3 +1,4 @@
+import { WorkspaceDate } from "../../shared/timezone";
 import { AutoField } from "../../shared/forms/auto-form";
 import { Switch } from "../../shared/ui/switch";
 import { FieldCaption } from "../../shared/forms/FieldHelp";
@@ -486,7 +487,7 @@ export function WorkflowNodeInspector({
             {data && (
               <span className="text-muted-foreground">
                 {t("inspector.frozenAt")}{" "}
-                {new Date(data.frozen_at).toLocaleString()}
+                {<WorkspaceDate value={data.frozen_at} />}
               </span>
             )}
             {pinned && (

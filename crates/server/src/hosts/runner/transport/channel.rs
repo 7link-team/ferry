@@ -40,10 +40,28 @@ fn require_resource_policy(kind: wire::SessionKind, supported: bool) -> Result<(
     Ok(())
 }
 
+fn require_process_timezone(
+    kind: wire::SessionKind,
+    zone: Option<&str>,
+    supported: bool,
+) -> Result<()> {
+    if !supported
+        && matches!(kind, wire::SessionKind::Exec | wire::SessionKind::Terminal)
+        && let Some(zone) = zone
+    {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("runner.timezoneUpgrade").with("timezone", zone),
+        ));
+    }
+    Ok(())
+}
+
 pub struct RunnerChannel {
     _lease: crate::hosts::runner::reservations::Lease,
     cluster: Option<Arc<crate::cluster::Cluster>>,
     host_id: String,
+    timezone: Option<String>,
     policy: wire::resources::ResourcePolicy,
     /// Only for error messages: an operator reads names, not ids.
     name: String,
@@ -54,6 +72,7 @@ pub(crate) async fn cluster_open(
     session: &str,
     kind: wire::SessionKind,
     resource_policy: Option<wire::resources::ResourcePolicy>,
+    timezone: Option<&str>,
 ) -> Result<()> {
     let registration = live().get(host).cloned().ok_or_else(|| {
         crate::cluster::diagnostic("websocket", "open", "registration_missing");
@@ -78,6 +97,7 @@ pub(crate) async fn cluster_open(
             crate::i18n::Message::new("runner.agentUpgrade"),
         ));
     }
+    require_process_timezone(kind, timezone, registration.supports_process_timezone)?;
     require_resource_policy(kind, registration.supports_resource_policy)?;
     if kind == wire::SessionKind::AgentProbe && !registration.supports_agent_probe {
         return Err(ApiError::localized(
@@ -127,11 +147,16 @@ pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
         policy: crate::accounts::resource_policy::load(&s.db).await?,
         cluster: s.cluster.clone(),
         host_id: host.id.to_string(),
+        timezone: None,
         name: host.name.clone(),
     }))
 }
 
 impl RunnerChannel {
+    fn require_process_timezone(&self, kind: wire::SessionKind, supported: bool) -> Result<()> {
+        require_process_timezone(kind, self.timezone.as_deref(), supported)
+    }
+
     /// Asks the runner to dial a dedicated connection and waits for it.
     #[tracing::instrument(skip(self), fields(host_id = %self.host_id))]
     async fn session(&self, kind: wire::SessionKind) -> Result<Socket> {
@@ -150,6 +175,13 @@ impl RunnerChannel {
                     crate::cluster::diagnostic("nats", "open", "owner_missing");
                     offline(&self.name)
                 })?;
+            self.require_process_timezone(
+                kind,
+                owner
+                    .info
+                    .as_ref()
+                    .is_some_and(|info| info.supports_process_timezone),
+            )?;
             let id = secret();
             require_resource_policy(
                 kind,
@@ -182,6 +214,7 @@ impl RunnerChannel {
                         session: id.clone(),
                         kind,
                         resource_policy: Some(self.policy.clone()),
+                        timezone: self.timezone.clone(),
                     },
                 )
                 .await
@@ -209,6 +242,7 @@ impl RunnerChannel {
                 crate::i18n::Message::new("runner.agentUpgrade"),
             ));
         }
+        self.require_process_timezone(kind, registration.supports_process_timezone)?;
         require_resource_policy(kind, registration.supports_resource_policy)?;
         if kind == wire::SessionKind::AgentProbe && !registration.supports_agent_probe {
             return Err(ApiError::localized(
@@ -283,6 +317,11 @@ impl RunnerChannel {
 
 #[async_trait::async_trait]
 impl HostChannel for RunnerChannel {
+    fn set_timezone(&mut self, timezone: Option<String>) -> Result<()> {
+        self.timezone = timezone;
+        Ok(())
+    }
+
     async fn agent(
         &self,
         request: wire::agent::Request,
@@ -422,6 +461,7 @@ impl HostChannel for RunnerChannel {
             .ask(
                 wire::SessionKind::Exec,
                 wire::Session::ExecStart {
+                    timezone: self.timezone.clone(),
                     command: command.to_owned(),
                     timeout_seconds: seconds,
                 },
@@ -459,6 +499,7 @@ impl HostChannel for RunnerChannel {
         send_frame(
             &mut socket,
             &wire::Session::ExecStreamStart {
+                timezone: self.timezone.clone(),
                 command: command.into(),
                 timeout_seconds: timeout.as_secs(),
             },
@@ -510,6 +551,7 @@ impl HostChannel for RunnerChannel {
         send_frame(
             &mut socket,
             &wire::Session::TerminalStart {
+                timezone: self.timezone.clone(),
                 cols: size.cols,
                 rows: size.rows,
             },
@@ -727,6 +769,7 @@ mod tests {
                 supports_agent_probe: false,
                 supports_forward: false,
                 supports_timezone: false,
+                supports_process_timezone: false,
                 supports_resource_policy: false,
                 version: "legacy".into(),
                 ready: std::sync::atomic::AtomicBool::new(true),
@@ -740,6 +783,7 @@ mod tests {
             _lease: crate::hosts::runner::reservations::lease(&host).await,
             cluster: None,
             host_id: host.clone(),
+            timezone: None,
             name: "fixture".into(),
         };
         let local = channel
@@ -747,13 +791,32 @@ mod tests {
             .await
             .err()
             .expect("legacy local runner must refuse Agent");
-        let remote = cluster_open(&host, "unused", wire::SessionKind::Agent, None)
+        let remote = cluster_open(&host, "unused", wire::SessionKind::Agent, None, None)
             .await
             .unwrap_err();
         assert!(
             commands.try_recv().is_err(),
             "unsupported work must never be dispatched"
         );
+        let mut scoped = channel;
+        scoped
+            .set_timezone(Some("Asia/Kuala_Lumpur".into()))
+            .unwrap();
+        for kind in [wire::SessionKind::Exec, wire::SessionKind::Terminal] {
+            let local = scoped
+                .session(kind)
+                .await
+                .err()
+                .expect("old Runner must reject process zone");
+            let peer = cluster_open(&host, "unused", kind, None, Some("Asia/Kuala_Lumpur"))
+                .await
+                .unwrap_err();
+            for error in [local, peer] {
+                assert_eq!(error.0, StatusCode::CONFLICT);
+                assert_eq!(error.2.unwrap().key, "runner.timezoneUpgrade");
+            }
+        }
+        assert!(commands.try_recv().is_err());
         live().remove(&host);
         for error in [local, remote] {
             assert_eq!(error.0, StatusCode::CONFLICT);
@@ -786,6 +849,7 @@ mod tests {
                 supports_agent_probe: false,
                 supports_forward: false,
                 supports_timezone: false,
+                supports_process_timezone: false,
                 supports_resource_policy: false,
                 version: "0.1.0-alpha.13".into(),
                 ready: std::sync::atomic::AtomicBool::new(true),
@@ -799,6 +863,7 @@ mod tests {
             _lease: crate::hosts::runner::reservations::lease(host_id).await,
             cluster: None,
             host_id: host_id.into(),
+            timezone: None,
             name: "旧版主机".into(),
         };
         let error = channel.monitor().await.unwrap_err();

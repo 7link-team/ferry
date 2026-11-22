@@ -543,6 +543,7 @@ pub mod workspaces {
         pub id: i64,
         pub slug: String,
         pub name: String,
+        pub timezone: Option<String>,
         pub owner_id: i64,
         pub join_code: String,
         pub pipeline_run_number: i64,

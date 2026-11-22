@@ -25,6 +25,20 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
+pub mod timezone;
+
+/// A confirmed business zone, independent of database/session and host clocks.
+pub(crate) async fn business_timezone(
+    conn: &impl sea_orm::ConnectionTrait,
+    workspace: Id,
+) -> Result<Option<chrono_tz::Tz>> {
+    let row = workspaces::Entity::find_by_id(i64::from(workspace))
+        .one(conn)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    row.timezone.as_deref().map(timezone::validate).transpose()
+}
+
 /// Every permission in the product, with translation keys for the role editor.
 /// `{resource}.{action}` where the resource is the REST resource name.
 pub const PERMISSIONS: &[(&str, &str, &str)] = &[
@@ -1114,6 +1128,9 @@ pub(crate) fn join_code() -> String {
 pub struct NewWorkspace {
     name: String,
     slug: String,
+    /// Older API clients can omit it and remain explicitly unconfirmed.
+    #[serde(default)]
+    timezone: Option<String>,
 }
 
 pub async fn create(
@@ -1136,6 +1153,12 @@ pub(crate) async fn create_in(
 ) -> Result<Value> {
     let slug = body.slug.trim().to_lowercase();
     let name = body.name.trim().to_owned();
+    let timezone = body
+        .timezone
+        .as_deref()
+        .map(timezone::validate)
+        .transpose()?
+        .map(|zone| zone.name().to_owned());
     if !valid_slug(&slug) {
         return Err(ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
@@ -1164,6 +1187,7 @@ pub(crate) async fn create_in(
         id: Set(i64::from(id)),
         slug: Set(slug.clone()),
         name: Set(name.clone()),
+        timezone: Set(timezone.clone()),
         owner_id: Set(i64::from(user_id)),
         join_code: Set(code.clone()),
         pipeline_run_number: Set(0),
@@ -1206,7 +1230,7 @@ pub(crate) async fn create_in(
     .await?;
     crate::maintenance::seed(s, conn, id).await?;
     crate::templates::seed_examples(s, conn, id).await?;
-    Ok(json!({"id": id, "slug": slug, "name": name, "join_code": code}))
+    Ok(json!({"id": id, "slug": slug, "name": name, "join_code": code, "timezone":timezone}))
 }
 
 #[derive(Deserialize)]
@@ -1319,6 +1343,7 @@ mod tests {
             cluster: None,
         });
         workspaces::Entity::insert(workspaces::ActiveModel {
+            timezone: Set(None),
             id: Set(10),
             slug: Set("legacy-permissions".into()),
             name: Set("Legacy workspace".into()),

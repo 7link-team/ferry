@@ -1,3 +1,4 @@
+import { EffectiveTimezone } from "../../shared/timezone";
 import { useEffect, useRef, useState } from "react";
 import { Eye, Pencil } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
@@ -454,7 +455,7 @@ export function modelsForms({
               // Only a CLI model runs on a Runner; an API model runs on the server.
               when: (r) => r.kind === "cli",
               render: ({ draft, readOnly, onPatch, onValidityChange }) => (
-                <TimezoneField
+                <EffectiveTimezone onValidityChange={onValidityChange}><TimezoneField
                   label={t("timezone")}
                   value={draft.timezone ?? ""}
                   emptyLabel={t("timezoneEmpty")}
@@ -462,7 +463,7 @@ export function modelsForms({
                   readOnly={readOnly}
                   onChange={(timezone) => onPatch({ timezone })}
                   onValidityChange={onValidityChange}
-                />
+                /></EffectiveTimezone>
               ),
             },
             {
