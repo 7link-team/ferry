@@ -22,6 +22,16 @@ case "\$url" in
         printf 'fixture release availability marker\n' > "\$out" ;;
     https://raw.githubusercontent.com/*)
         [ -z "\${EMPTY_DOWNLOAD:-}" ] || exit 0
+        case "\$url" in */"\${TRANSIENT_DOWNLOAD:-no-file}")
+            attempts=0
+            [ ! -f "$work/download-attempts" ] || attempts=\$(cat "$work/download-attempts")
+            attempts=\$((attempts + 1)); printf '%s\n' "\$attempts" > "$work/download-attempts"
+            code=\${DOWNLOAD_FAIL_CODE:-}
+            if [ -z "\$code" ] && [ "\$attempts" -le 2 ]; then
+                code=35; [ "\$attempts" -ne 2 ] || code=56
+            fi
+            [ -z "\$code" ] || { printf 'partial download' > "\$out"; exit "\$code"; } ;;
+        esac
         cp "$repo/\$(printf '%s' "\$url" | sed 's#^https://raw.githubusercontent.com/[^/]*/[^/]*/[^/]*/##')" "\$out"
         case "\$url" in */\${LEGACY_SECURITY_RELEASE:-no-version}/compose.production.yaml)
             sed '/^    security_opt:\$/ { N; N; d; }' "\$out" > "\$out.legacy"
@@ -38,7 +48,14 @@ case "\$*" in
     *" ps -q ferry") [ ! -f .test-running-image ] || echo ferry-container ;;
     "inspect --format "*) [ ! -f .test-running-image ] || printf '%s|running|%s\n' "\$(cat .test-running-image)" "\${RUNNING_HEALTH:-healthy}" ;;
     *" up -d "*) sed -n 's/^FERRY_IMAGE=//p' .env.production > .test-running-image ;;
-    *" pull") if [ -n "\${INTERRUPT_PULL:-}" ]; then kill -s "\$INTERRUPT_PULL" "\$PPID"; exit 143; fi ;;
+    *" pull")
+        if [ -n "\${INTERRUPT_PULL:-}" ]; then kill -s "\$INTERRUPT_PULL" "\$PPID"; exit 143; fi
+        if [ -n "\${TRANSIENT_PULL:-}" ]; then
+            attempts=0
+            [ ! -f "$work/pull-attempts" ] || attempts=\$(cat "$work/pull-attempts")
+            attempts=\$((attempts + 1)); printf '%s\n' "\$attempts" > "$work/pull-attempts"
+            [ "\$attempts" -gt 2 ] || { printf 'Error response from daemon: registry connection: EOF\n' >&2; exit 1; }
+        fi ;;
     *pg_dump*|*mysqldump*) [ -n "\${DUMP_DOWN:-}" ] || echo '-- dump' ;;
     *" ps -a -q redis") [ -z "\${REDIS_UP:-}" ] || echo redis-container ;;
     "ps -a --filter label=com.docker.compose.project=ferry --format"*) [ -z "\${OTHER_DEPLOYMENT:-}" ] || echo "\$OTHER_DEPLOYMENT" ;;
@@ -48,6 +65,8 @@ case "\$*" in
 esac
 EOF
 chmod +x "$work/bin/curl" "$work/bin/docker"
+printf '#!/bin/sh\nexit 0\n' > "$work/bin/sleep"
+chmod +x "$work/bin/sleep"
 PATH="$work/bin:$PATH"
 export PATH
 run() { (cd "$work" && sh "$repo/scripts/quickstart.sh" "$@"); }
@@ -66,6 +85,18 @@ output=$(run --port 4399)
 check '[ -f "$work/ferry/compose.production.yaml" ] && [ -f "$work/ferry/compose.postgres.yaml" ] && [ -f "$work/ferry/compose.mysql.yaml" ] && [ -f "$work/ferry/scripts/postgres-init.sh" ]' 'downloads every Compose file of the release into the deployment directory'
 check 'cmp -s "$work/ferry/compose.production.yaml" "$repo/compose.production.yaml" && [ ! -e "$work/ferry/compose.https.yaml" ] && [ ! -e "$work/ferry/caddy/Caddyfile" ]' 'downloaded files are the release files byte for byte; no HTTPS proxy without a domain'
 check 'cmp -s "$work/ferry/sandbox-seccomp.json" "$repo/sandbox-seccomp.json" && cmp -s "$work/ferry/sandbox-seccomp.LICENSE" "$repo/sandbox-seccomp.LICENSE"' 'downloads the version-matched sandbox policy and license'
+(export TRANSIENT_DOWNLOAD=sandbox-seccomp.LICENSE; run --dir transient-download --version v9.9.9 --init-only >/dev/null)
+check '[ "$(cat "$work/download-attempts")" = 3 ] && cmp -s "$work/transient-download/sandbox-seccomp.LICENSE" "$repo/sandbox-seccomp.LICENSE" && [ ! -e "$work/transient-download/sandbox-seccomp.LICENSE.download" ]' 'TLS and receive EOF retries overwrite partial files with the exact release file'
+rm "$work/download-attempts"
+if (export TRANSIENT_DOWNLOAD=compose.mysql.yaml DOWNLOAD_FAIL_CODE=22; run --dir missing-download --version v9.9.9 --init-only >/dev/null 2>&1); then echo 'FAIL permanent HTTP download reported success'; exit 1; fi
+check '[ "$(cat "$work/download-attempts")" = 1 ] && [ ! -e "$work/missing-download/compose.mysql.yaml.download" ]' 'permanent HTTP errors are not retried and partial files are removed'
+rm "$work/download-attempts"
+if (export TRANSIENT_DOWNLOAD=compose.mysql.yaml DOWNLOAD_FAIL_CODE=60; run --dir certificate-error --version v9.9.9 --init-only >/dev/null 2>&1); then echo 'FAIL invalid TLS certificate reported success'; exit 1; fi
+check '[ "$(cat "$work/download-attempts")" = 1 ]' 'certificate validation failures are not retried or bypassed'
+rm "$work/download-attempts"
+if (export TRANSIENT_DOWNLOAD=compose.mysql.yaml DOWNLOAD_FAIL_CODE=35; run --dir exhausted-download --version v9.9.9 --init-only >/dev/null 2>&1); then echo 'FAIL exhausted download reported success'; exit 1; fi
+check '[ "$(cat "$work/download-attempts")" = 4 ] && [ ! -e "$work/exhausted-download/compose.mysql.yaml.download" ] && [ ! -e "$work/exhausted-download/.env.production" ]' 'persistent network failure stops after four attempts before creating configuration'
+rm "$work/download-attempts"
 (export LEGACY_SECURITY_RELEASE=v8.0.0; run --dir legacy-security --version v8.0.0 --init-only >/dev/null)
 check '[ ! -e "$work/legacy-security/sandbox-seccomp.json" ] && ! grep -q "/v8.0.0/sandbox-seccomp" "$work/curl.log"' 'old releases without a sandbox policy remain installable without fetching nonexistent files'
 check 'has "$env" "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.9"' 'deploys the image of the latest published release, never a stale pin'
@@ -199,14 +230,22 @@ check '[ "$(cat "$backup/database.sql")" = "-- dump" ] && [ "$before" = "$(cat "
 check 'grep -q "exec -T postgres pg_dump -U postgres -d ferry" "$work/docker.log" && [ "$(grep -n -E "pg_dump| pull$|up -d --wait" "$work/docker.log" | cut -d: -f1 | tr "\n" " ")" = "$(grep -n -E "pg_dump| pull$|up -d --wait" "$work/docker.log" | cut -d: -f1 | sort -n | tr "\n" " ")" ] && grep -q "raw.githubusercontent.com/7link-team/ferry/v9.10.0/compose.production.yaml" "$work/curl.log"' 'dumps the database, then downloads the new release files, pulls and waits for health'
 check 'grep -q -- "--profile redis -f compose.storage.yaml pull" "$work/docker.log" && [ ! -e "$work/ferry/.upgrade" ] && printf "%s" "$output" | grep -q "Upgraded from v9.9.9 to v9.10.0" && printf "%s" "$output" | grep -q setup-token-123' 'keeps recorded Redis, leaves no staging files and prints the setup token'
 upgraded=$(cat "$env")
+cp -Rp "$work/ferry" "$work/network-upgrade"
+: > "$work/docker.log"
+output=$(export TRANSIENT_PULL=1; run --dir network-upgrade --upgrade --version v9.10.1)
+check '[ "$(cat "$work/pull-attempts")" = 3 ] && grep -qx "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.10.1" "$work/network-upgrade/.env.production" && [ "$(grep -c pg_dump "$work/docker.log")" = 1 ] && [ "$(grep -c " up -d " "$work/docker.log")" = 1 ]' 'registry EOF retries reuse cached layers and one backup, starting only after successful pull'
+: > "$work/docker.log"
 printf '\n' >> "$work/ferry/sandbox-seccomp.json"
 cp "$work/ferry/sandbox-seccomp.json" "$work/policy-before-failed-upgrade"
 if (export DOCKER_FAIL=pull; run --upgrade --version v9.11.0 >/dev/null 2>&1); then echo 'FAIL failed pull reported success'; exit 1; fi
 check '[ "$upgraded" = "$(cat "$env")" ]' 'a failed image pull restores the previous files'
 check 'cmp -s "$work/ferry/sandbox-seccomp.json" "$work/policy-before-failed-upgrade"' 'a failed image pull restores the exact previous sandbox policy'
+check '[ "$(grep -c " pull$" "$work/docker.log")" = 4 ] && ! grep -q " up -d " "$work/docker.log"' 'exhausted pull retries never start services'
 for signal in INT TERM; do
+    : > "$work/docker.log"
     if (export INTERRUPT_PULL=$signal; run --upgrade --version v9.11.0 >/dev/null 2>&1); then echo 'FAIL interrupted pull reported success'; exit 1; fi
     check '[ "$upgraded" = "$(cat "$env")" ]' "$signal during pull restores the previous configuration before any startup"
+    check '[ "$(grep -c " pull$" "$work/docker.log")" = 1 ]' "$signal during pull is never retried"
 done
 if (export DOCKER_FAIL='up -d'; run --upgrade --version v10.0.1 > /dev/null 2> "$work/err"); then echo 'FAIL unhealthy upgrade reported success'; exit 1; fi
 check 'grep -q "did not become healthy" "$work/err" && grep -q "psql -U postgres -d ferry" "$work/err" && grep -q "v9.10.0-to-v10.0.1/database.sql" "$work/err"' 'an unhealthy release prints the rollback commands with its backup'

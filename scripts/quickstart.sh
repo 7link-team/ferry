@@ -112,12 +112,34 @@ case "$repository$image_repository" in *[!A-Za-z0-9._/:-]*) fail "unsupported re
 
 fetch() { # URL DESTINATION
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --proto '=https' --retry 3 -o "$2" "$1"
+        fetch_attempt=0
+        while :; do
+            fetch_attempt=$((fetch_attempt + 1))
+            if curl -fsSL --proto '=https' --retry 3 -o "$2" "$1"; then return 0; else fetch_status=$?; fi
+            # curl's built-in retry does not cover TLS/receive EOF failures.
+            # Keep certificate, HTTP authorization and missing-file errors final.
+            case "$fetch_status" in 5|6|7|18|28|35|52|55|56|92) ;; *) return "$fetch_status" ;; esac
+            [ "$fetch_attempt" -lt 4 ] || return "$fetch_status"
+            printf 'Download connection interrupted; retry %s/3 in %ss: %s\n' "$fetch_attempt" "$fetch_attempt" "$1" >&2
+            sleep "$fetch_attempt"
+        done
     elif command -v wget >/dev/null 2>&1; then
         wget -q -O "$2" "$1"
     else
         fail "curl or wget is required"
     fi
+}
+pull_release_images() {
+    pull_attempt=0
+    while :; do
+        pull_attempt=$((pull_attempt + 1))
+        if $compose pull; then return 0; else pull_status=$?; fi
+        case "$pull_status" in 130|143) return "$pull_status" ;; esac
+        [ "$pull_attempt" -lt 4 ] || return "$pull_status"
+        # Pulls only populate Docker's cache; retry before starting any service.
+        printf 'Image pull failed; retry %s/3 in %ss; services are unchanged.\n' "$pull_attempt" "$pull_attempt" >&2
+        sleep "$pull_attempt"
+    done
 }
 random() { od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
 published_release() { # VERSION: Atom also contains tags without release assets.
@@ -568,7 +590,7 @@ if [ -n "$upgrade" ]; then
         storage_files
         compose_for
         $compose config --quiet || fail "the $version configuration is invalid; services untouched"
-        $compose pull || fail "cannot pull the $version images; rerun --upgrade to resume"
+        pull_release_images || fail "cannot pull the $version images; rerun --upgrade to resume"
         prepare_storage
         $compose up -d --wait --wait-timeout 300 \
             || fail "$version did not become healthy; inspect with: $compose logs ferry; existing backups are retained"
@@ -629,7 +651,7 @@ if [ -n "$upgrade" ]; then
 
     $compose config --quiet \
         || { restore; fail "the $version configuration is invalid for this deployment; previous files restored, services untouched"; }
-    $compose pull \
+    pull_release_images \
         || { restore; fail "cannot pull the $version images; previous files restored, services untouched"; }
     prepare_storage
     upgrade_restore_pending=

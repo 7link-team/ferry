@@ -2,9 +2,9 @@
 ## Objective
 Deliver the approved platform/resource/conversation/account/workspace changes, consolidate the repository and English documentation paths, provide Android/iOS remote clients, and finish v0.10.7-alpha publication.
 ## Current Phase
-ACCEPTANCE / COMPLETE
+TESTING / QUICKSTART NETWORK RECOVERY
 ## Current Step
-v0.10.7-alpha is published and independently checked. Final release source is 1aae286d13d5723efd34ae538e72827cc1ccaef0; immutable annotated tag was SSH-pushed after complete main and deployment gates passed. This MEMORY.md is the final bookkeeping record; no application source changed after the verified release.
+Published v0.10.7-alpha remains immutable at1aae286. User reports repeated DockerHub EOF and GitHub curl35 TLS EOF while upgrading /root/ferry on Debian192.168.0.4. SSH verified healthy0.10.6 and dependencies, no Docker proxy/mirrors; current direct endpoint probes succeed (registries401, rawGitHub200), so intermittent transport is evidenced. Root SSH shell4725 is pre-pulling images only; all4 images cached, Ferry OCI index matches released768ab0a4; network observed115KiB/s and layer retries. No service/config switch yet. Production quickstart.sh now retries curl transient transport codes (4 attempts, existing HTTP retry retained; permanent/certificate/signal codes final) and both upgrade Compose pulls (4 attempts,1/2/3s backoff;130/143 final). Regression first RED for TLS/license then RED for pull EOF; initial full GitBash suite GREEN; full Debian dash suite GREEN including exhaustion/certificate/signal assertions. Independent source reviewPASS, all67original check lines retained. No TLS bypass, mirror switch, daemon restart or release-tag change. Need finish tests, source review/commit SSHpush main, then use tested script to complete intended server upgrade and verify health/version. Read-only server SSH access established; earlier provided root credential must never be logged.
 ## Completed Delivery
 - Release: https://github.com/7link-team/ferry/releases/tag/v0.10.7-alpha (21 uploaded assets).
 - Main Build44984300170 and deployment44984300113: SUCCESS, exact release source; all6 deployment groups.
