@@ -249,6 +249,12 @@ def main():
                     assert schedule["update_mode"] == "scheduled"
                     assert schedule["schedule"] == "0 */4 * * *"
                     assert schedule["next_run_at"] > int(time.time() * 1000)
+                    # Keep idle observation independent of crossing a real four-hour
+                    # boundary. Only the persisted fixture clock is advanced below.
+                    future_run = int(time.time() * 1000) + 86_400_000
+                    with closing(sqlite3.connect(work / "ferry.sqlite", timeout=15)) as db, db:
+                        db.execute("UPDATE code_insights SET next_run_at=? WHERE id=?", (future_run, scheduled))
+                    schedule = wait(lambda: collected(scheduled), "pinned scheduled insight initialization")
                     generation = schedule["sources"][0]["job"]["generation"]
                     requests_before = fixture.calls[("github", "request")]
                     time.sleep(2.2)
@@ -261,8 +267,10 @@ def main():
                         return result if result and result["sources"][0]["job"]["generation"] > after else None
                     ran = wait(lambda: scheduled_run(generation), "real due scheduled collection")
                     assert ran["sources"][0]["job"]["generation"] == generation + 1
-                    next_run = ran["next_run_at"]
-                    assert next_run > int(time.time() * 1000)
+                    assert ran["next_run_at"] > int(time.time() * 1000)
+                    with closing(sqlite3.connect(work / "ferry.sqlite", timeout=15)) as db, db:
+                        db.execute("UPDATE code_insights SET next_run_at=? WHERE id=?", (future_run, scheduled))
+                    next_run = future_run
                     time.sleep(2.2)
                     assert detail(scheduled)["sources"][0]["job"]["generation"] == generation + 1
                     assert detail(scheduled)["next_run_at"] == next_run

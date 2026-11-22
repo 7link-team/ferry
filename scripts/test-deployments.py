@@ -1004,10 +1004,32 @@ RUN sed -i 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu
                 sample_project=f"deployment-{workspace['id']}-{sample}";projects.append(sample_project)
                 def nats_diagnostics():
                     output=[]
+                    monitoring=[]
                     def capture(args):
                         result=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=30)
                         output.append(result.stdout.decode(errors='replace')[-24000:].replace(token,'[REDACTED]'))
                         return result.stdout.decode(errors='replace').split()
+                    def observe(label,args):
+                        try:
+                            result=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=8)
+                            raw=result.stdout.decode(errors='replace')
+                            detail=f'exit={result.returncode}\n'+raw
+                            try:
+                                data=json.loads(raw)
+                                fields=['server_id','server_name','version','jetstream','config','memory','storage',
+                                        'reserved_memory','reserved_storage','accounts','ha_assets','api','meta_cluster','num_routes']
+                                summary={key:data[key] for key in fields if key in data}
+                                if 'routes' in data:
+                                    summary['routes']=[{key:route[key] for key in ['remote_id','name','ip','port','pending_size'] if key in route}
+                                                       for route in data['routes']]
+                                public=f'exit={result.returncode}\n'+json.dumps(summary,separators=(',',':'))
+                            except (ValueError,TypeError):
+                                public=f'exit={result.returncode}\n'+raw[:4000]
+                        except (OSError,subprocess.TimeoutExpired) as cause:
+                            detail=type(cause).__name__+': '+str(cause)
+                            public=detail
+                        monitoring.append((label+'\n'+detail).replace(token,'[REDACTED]'))
+                        return (label+'\n'+public).replace(token,'[REDACTED]')
                     try:
                         for node in (swarm_nodes if mode=='stack' else ['host']):
                             prefix=['docker','exec',name+'-'+node,'/usr/bin/docker'] if mode=='stack' else ['docker']
@@ -1016,12 +1038,23 @@ RUN sed -i 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu
                             for container in ids:
                                 capture(prefix+['inspect','--format','{{.Name}} {{json .State}}',container])
                                 capture(prefix+['logs','--tail','100',container])
+                                peer=[]
+                                for endpoint in ['varz','jsz?config=true&raft=true','routez']:
+                                    peer.append(observe(node+'/'+container+'/'+endpoint,prefix+['exec',container,'wget','-T','3','-q','-O','-',
+                                        'http://127.0.0.1:8222/'+endpoint]))
+                                peer.append(observe(node+'/'+container+'/data-disk',prefix+['exec',container,'df','-k','/data']))
+                                peer_path=work/('nats-'+kind+'-peer-'+str(len(monitoring))+'.log')
+                                peer_path.write_text('\n'.join(peer),encoding='utf8')
+                                report_log_tail(peer_path,'NATS '+kind+' '+node+'/'+container+' peer placement diagnostics')
                         if mode=='stack':
                             for member in ['nats-a','nats-b','nats-c']:
                                 capture(['docker','exec',name+'-manager','/usr/bin/docker','service','ps','--no-trunc',sample_project+'_'+member])
                     except Exception as cause: output.append('Diagnostic collection: '+type(cause).__name__)
                     (work/('nats-'+kind+'-diagnostics.log')).write_text('\n'.join(output),encoding='utf8')
                     print('\n'.join(output)[-6000:],flush=True)
+                    # Keep peer eligibility/capacity visible without requiring an artifact download.
+                    monitoring_path=work/('nats-'+kind+'-monitoring.log')
+                    monitoring_path.write_text('\n'.join(monitoring),encoding='utf8')
                 sample_revision=start(sample);sample_row=done(sample)
                 if sample_row['state']!='succeeded': nats_diagnostics()
                 check(kind+' NATS template deployment succeeds: '+sample_row['latest_revision']['output'],sample_row['state']=='succeeded')
