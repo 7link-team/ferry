@@ -326,7 +326,7 @@ export function ResourceTable<T>({
 
 
   return (
-    <div className={config.summary ? "grid min-h-min min-w-0 flex-1 grid-rows-[auto_minmax(16rem,1fr)] gap-3" : "grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-3"}>
+    <div className={config.minDataHeight !== undefined ? "grid min-h-min min-w-0 flex-1 grid-rows-[auto_minmax(min-content,1fr)] gap-3" : config.summary ? "grid min-h-min min-w-0 flex-1 grid-rows-[auto_minmax(16rem,1fr)] gap-3" : "grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-3"}>
       {/* ---------------------------------------------------- 搜索过滤 + 工具栏 */}
       {pendingAction&&<ResourceActionDialog action={pendingAction.action} row={pendingAction.row} workspace={workspace} permissions={permissions} onClose={()=>setPendingAction(undefined)} onDone={()=>{setPendingAction(undefined);reload();}} />}
       {pendingDelete && <DeleteConfirmDialog action={configText(pendingDelete.action, pendingDelete.actionKey)} target={pendingDelete.target} onClose={() => setPendingDelete(undefined)} onConfirm={pendingDelete.run} />}
@@ -416,12 +416,12 @@ export function ResourceTable<T>({
           ]}
           sticky={{ header: true }} rowClickable={entry => !entry.row} onRowClick={entry => { if (!entry.row) enterFolder(entry.path); }}
           onPageChange={setPage} onPageSizeChange={value => { setPageSize(value); setPage(1); }} pageSizeOptions={[...PAGE_SIZES]} onRetry={reload} empty={commonText("repository.emptyGroup")} />
-      </div> : <AutoTable<T> fill layout="auto" scrollRef={scrollRef} rowKey={config.rowKey}
+      </div> : <AutoTable<T> fill minDataHeight={config.minDataHeight} layout="auto" scrollRef={scrollRef} rowKey={config.rowKey}
         hiddenFields={hiddenColumns}
         columns={config.columns.map(column => ({ field: column.key, name: configText(column.label, column.labelKey), width: column.width ? `${column.width}px` : undefined, align: column.align, sortable: column.sortable, render: (_value, row) => column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "") }))}
         state={{ rows, total, query: { page, pageSize, filter: committed, sort: sort ? { field: sort.replace(/^-/, ""), direction: sort.startsWith("-") ? "desc" : "asc" } : undefined }, loading, error: rows.length ? undefined : error, selected }}
         showSequence selectable={!!visibleBulk.length} pagination={config.pagination} hasMore={!error && data?.has_more}
-        sticky={{ header: true, left: 1, right: visibleActions.length ? 1 : 0, pagination: true }}
+        sticky={{ header: true, left: 1, right: visibleActions.length ? 1 : 0, pagination: config.minDataHeight === undefined }}
         groupBy={grouped ? config.grouping!.key : undefined} empty={config.emptyKey ? commonText(config.emptyKey) : config.empty}
         onPageChange={setPage}
         onPageSizeChange={value => { setPageSize(value); setPage(1); }}

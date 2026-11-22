@@ -1,7 +1,7 @@
 ---
-documentation_revision: "1.0"
+documentation_revision: "1.1"
 organized_on: "2026-11-22"
-source_updated_on: "2026-11-18"
+source_updated_on: "2026-11-22"
 ---
 
 # Ferry：工作空间制运维平台 · 产品与技术方案
@@ -364,6 +364,8 @@ POST   /api/workspaces/{workspaceId}/nodes/imports/{id}/commit        确认写�
 export interface ListConfig<T> {
   /** REST 资源名，拼成 /api/workspaces/{workspaceId}/{resource} */
   resource: string;
+  /** 可选的数据滚动视口最小内容高度（px，不含边框）；配置后分页随页面滚动，避免遮挡数据；不填时保留默认布局 */
+  minDataHeight?: number;
   rowKey: (row: T) => string;
 
   /** 搜索过滤区。每项自动与 URL 同步，key 即查询参数名 */

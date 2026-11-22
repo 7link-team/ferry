@@ -181,6 +181,54 @@ try {
   await page.getByRole('button', { name: '查看邀请码', exact: true }).click();
   await page.getByRole('button', { name: '复制邀请码', exact: true }).waitFor();
   fills(await geometry(), 'expanded invitation');
+  // Use real registrations and invitation joins so member row sizing cannot
+  // regress to the full intrinsic height of every row.
+  const invitationResponse = await context.request.get(`${backend}/api/workspaces/${workspace_layout}/members/invitation`);
+  assert(invitationResponse.ok(), 'real invitation code fetch');
+  const invitation = await invitationResponse.json();
+  for(let index=0;index<32;index++){
+    const member=await browser.newContext();
+    const registration=await member.request.post(`${backend}/api/users`,{headers:{'X-Ferry-Request':'1'},data:{email:`layout-member-${index}@example.invalid`,name:`Layout member ${index}`,password:'temporary-layout-member-password'}});
+    assert(registration.ok(), await registration.text());
+    const membership=await member.request.post(`${backend}/api/workspace-memberships`,{headers:{'X-Ferry-Request':'1'},data:{code:invitation.code}});
+    assert(membership.ok(), await membership.text());
+    await member.close();
+  }
+  await openList(`/workspaces/${workspace_layout}/members?page_size=100`);
+  await page.getByRole('cell',{name:'layout-member-31@example.invalid',exact:true}).waitFor();
+  const manyMembers=await geometry();
+  fills(manyMembers,'many actual members');
+  assert(manyMembers.scrollHeight>manyMembers.clientHeight+500,'many actual members scroll inside data viewport');
+  await page.locator('table').evaluate(table=>table.parentElement.scrollTop=300);
+  await page.waitForTimeout(80);
+  const scrolledMembers=await geometry();
+  fills(scrolledMembers,'many actual members scrolled');
+  assert.equal(scrolledMembers.footer.top,manyMembers.footer.top,'member footer stays fixed while real rows scroll');
+  assert(await page.locator('table').evaluate(table=>table.parentElement.scrollTop>=300),'actual member data scroll offset changes');
+  console.log('PASS actual member rows scroll internally without moving or overlapping pagination');
+  const invitationLabels = JSON.parse(await readFile(new URL('../src/shared/i18n/locales/common-domain.json', import.meta.url), 'utf8'))['zh-CN'];
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openList(`/workspaces/${workspace_layout}/members?page_size=100`);
+  await page.getByRole('button', { name: invitationLabels['invitation.email'], exact: true }).click();
+  await page.getByRole('textbox', { name: invitationLabels['invitation.recipient'], exact: true }).fill('recipient@example.invalid');
+  const memberData = page.locator('table').locator('..');
+  await memberData.scrollIntoViewIfNeeded();
+  await page.locator('table').evaluate(table => { table.parentElement.scrollTop = 0; table.parentElement.scrollLeft = 0; });
+  const owner = page.getByRole('cell', { name: 'Layout Admin', exact: true });
+  await owner.scrollIntoViewIfNeeded();
+  assert(await page.locator('main').evaluate(main => main.scrollTop > 0), 'narrow expanded invitation exercises main scrolling');
+  assert(await memberData.evaluate(data => {
+    const box = data.getBoundingClientRect(), main = data.closest('main').getBoundingClientRect();
+    return data.clientHeight >= 160 && Math.min(box.bottom, main.bottom, innerHeight) - Math.max(box.top, main.top, 0) >= 160;
+  }), 'narrow expanded invitation retains 160px of actual member data');
+  assert(await owner.locator('span[aria-hidden="true"]').first().evaluate(avatar => {
+    const box = avatar.getBoundingClientRect();
+    return avatar.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+  }), 'narrow expanded invitation pagination cannot cover the member avatar');
+  await page.getByRole('navigation', { name: invitationLabels['table.pagination'], exact: true }).scrollIntoViewIfNeeded();
+  fills(await geometry(), 'narrow expanded actual members');
+  console.log('PASS expanded narrow invitation preserves visible member data and reachable pagination');
+  await page.setViewportSize({ width: 1280, height: 800 });
   await openList('/platform/users');
   fills(await geometry(), 'platform list', 20);
   // The heading renders before the settings request finishes, as on a busy CI runner.

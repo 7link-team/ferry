@@ -122,7 +122,7 @@ function AutoTableInner<T>(
         options.fill && "flex-1",
         options.className,
       )}
-      style={autoTableViewportStyle(options.fill, options.sticky?.maxHeight)}
+      style={{ ...autoTableViewportStyle(options.fill, options.sticky?.maxHeight), ...(options.minDataHeight !== undefined ? { minHeight: "min-content" } : {}) }}
       data-auto-table-root
     >
       {options.title && (
@@ -131,7 +131,7 @@ function AutoTableInner<T>(
       <div
         ref={options.scrollRef}
         className="min-h-0 min-w-0 flex-1 overflow-auto rounded-lg border border-border bg-background [contain:paint]"
-        style={{ containerType: "inline-size" }}
+        style={{ containerType: "inline-size", minHeight: options.minDataHeight, ...(options.minDataHeight !== undefined ? { contain: "size paint", boxSizing: "content-box" } : {}) }}
         aria-busy={loading}
       >
         <table

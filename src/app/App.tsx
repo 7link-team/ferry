@@ -385,7 +385,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
           </div>
           {!canVisit(item) ? <p role="alert">{commonText("shell.forbidden")}</p> : nodeCatalogPending ? nodeCatalogFeedback : route.mode === "list" ? (
             item.resource === "dashboard" ? <Dashboard key={current.id} workspace={current.id} /> : listConfig ? (
-              <div className={item.resource === "members" && permissions.has("members.create") ? "grid min-h-min min-w-0 grid-rows-[auto_minmax(40rem,1fr)]" : "flex min-h-0 min-w-0 flex-col"}>
+              <div className={item.resource === "members" && permissions.has("members.create") ? "grid min-h-min min-w-0 grid-rows-[auto_minmax(min-content,1fr)]" : "flex min-h-0 min-w-0 flex-col"}>
               {item.resource === "members" && permissions.has("members.create") && <Invitation key={current.id} workspace={current.id} />}
               {(preferences || preferencesError) ? item.resource === "pipelines" ? <PipelineList
                 key={current.id}

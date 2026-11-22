@@ -83,6 +83,8 @@ interface TableOptionsBase<T = unknown> {
   groupBy?: (row: T) => string;
   rowClickable?: (row: T) => boolean;
   scrollRef?: React.Ref<HTMLDivElement>;
+  /** Keep a readable data viewport when the owning page can scroll. */
+  minDataHeight?: number;
   minWidth?: number;
   /** Resource lists size columns to content; file lists reserve fixed metadata widths. */
   layout?: "auto" | "fixed";

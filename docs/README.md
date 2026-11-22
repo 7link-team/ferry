@@ -63,7 +63,7 @@ The revision below is the documentation revision, not an application release. Da
 | Document | Revision | Source updated |
 | --- | --- | --- |
 | [architecture/pipeline-v2.md](architecture/pipeline-v2.md) | 1.0 | 2026-11-02 |
-| [architecture/platform-product-and-technical-design.md](architecture/platform-product-and-technical-design.md) | 1.0 | 2026-11-18 |
+| [architecture/platform-product-and-technical-design.md](architecture/platform-product-and-technical-design.md) | 1.1 | 2026-11-22 |
 | [architecture/workflow-platform-v3.md](architecture/workflow-platform-v3.md) | 1.0 | 2026-11-05 |
 
 ### Guides

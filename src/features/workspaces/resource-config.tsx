@@ -37,6 +37,7 @@ export function workspacesLists({
   return {
     members: list({
       resource: "members",
+      minDataHeight: 160,
       rowKey: (r: Member) => r.id,
       filters: [
         {

@@ -98,6 +98,8 @@ export interface ListConfig<T> {
   resource: string;
   /** Explicit API path for global resources (without /api). */
   endpoint?: string;
+  /** Minimum data viewport height when the page owns additional scrolling content. */
+  minDataHeight?: number;
   defaultPageSize?: number;
   /** Remote providers expose a next page without a reliable total count. */
   pagination?: "next";
