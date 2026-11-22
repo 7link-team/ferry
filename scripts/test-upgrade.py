@@ -176,6 +176,10 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                         # Additive: whether the user created the workspace; this user created it.
                         assert migrated['relation'] == 'owner', migrated['relation']
                         original['relation']='owner'
+                        # Existing workspaces stay explicitly unconfirmed; the
+                        # additive projection must not guess a business zone.
+                        assert 'timezone' in migrated and migrated['timezone'] is None, migrated
+                        original['timezone'] = None
                 if path == '/workspaces/upgrade/pipeline-runs/'+run:
                     # New archive metadata is additive; old runs have no archived files.
                     assert after.get('artifacts') == []

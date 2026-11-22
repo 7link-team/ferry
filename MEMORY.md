@@ -51,3 +51,8 @@ Checkpoint:2026-11-22 final integration, before any .8 commit/tag/push.
 
 ## Final delivery checkpoint
 2026-11-22: Source and Git reconciled after recovery. Verified full workspace log and check completed successfully. Public GitHub Release still v0.10.7-alpha, 21 assets with no APK/IPA. Mobile collection fixed in .8 source, not yet delivered. Next: commit reviewed explicit deliverables, SSH push main, wait Build/deployment/mobile gates, tag .8 only after green, verify actual assets and images. No production/4291/live report mutations.
+
+## Delivery update 2026-11-23
+- Main abbc117 pushed via SSH. Exact-source mobile run 45039388917 PASS: Android split APKs, unsigned IPA and simulator assets staged/verified; deployment acceptance 45039388821 PASS. Build 45039389029 checks/preview PASS, backends FAIL at existing upgrade /me exact-equality assertion because additive workspace timezone:null was not declared in the fixture. No evidence of historical data mutation.
+- Minimal regression update asserts every migrated legacy workspace explicitly contains timezone:null, then includes only that declared additive value in the original expected projection. All other equality assertions remain. Real v0.1.0-alpha.1 binary built from immutable tag; scripts/test-upgrade.py old?new SQLite PASS including all conversion/history/reopen checks. POSIX successful-command comparison remains unavailable on Windows; all 3 DB CI gates will rerun. Evidence release-0108/upgrade-green.log.
+- No .8 tag yet. Next push this test-only correction, wait new Build plus deployment gates; mobile native source tree identical to passing abbc117. Do not publish on failed backend gate.
