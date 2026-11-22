@@ -172,10 +172,10 @@ jobs:
       - run: ./scripts/test-backends.sh
       - name: Contribution collection, independent insights and attachment persistence
         run: |
-          python3 -I scripts/test-contribution-analysis.py
-          python3 -I scripts/test-code-insights.py target/debug/ferry-server
-          python3 -I scripts/test-value-files.py
-          python3 -I scripts/test-i18n-http.py target/debug/ferry-server
+          python3 .github/scripts/annotate-failures.py --run python3 -I scripts/test-contribution-analysis.py
+          python3 .github/scripts/annotate-failures.py --run python3 -I scripts/test-code-insights.py target/debug/ferry-server
+          python3 .github/scripts/annotate-failures.py --run python3 -I scripts/test-value-files.py
+          python3 .github/scripts/annotate-failures.py --run python3 -I scripts/test-i18n-http.py target/debug/ferry-server
       - name: Contribution reports, identity and cluster queue on real SQL backends
         env:
           MYSQL_PWD: integration-only-password
