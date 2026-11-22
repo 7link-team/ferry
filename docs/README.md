@@ -10,6 +10,8 @@ Start here to find the canonical document for a topic. Directory and file names 
 
 ## Start here
 
+- [0.10.7-alpha release notes](releases/v0.10.7-alpha.md): upgrade compatibility and distribution boundaries; publication status must be checked on the actual release.
+
 - [Platform product and technical design](architecture/platform-product-and-technical-design.md): authoritative resource, list and form contracts.
 - [Compose deployment guide](guides/compose-quickstart.md): installation and operation.
 - [Workflow platform architecture](architecture/workflow-platform-v3.md), [requirements](prd/workflow-platform-prd.md), [data model](prd/workflow-platform-data-model.md), [review](prd/workflow-platform-design-review.md) and [machine-readable contract guide](prd/schemas/README.md).
@@ -28,6 +30,7 @@ Start here to find the canonical document for a topic. Directory and file names 
 | `research/` | Comparisons, source analysis and proposals |
 | `reference/` | Capability matrices, third-party catalogs and attribution |
 | `archive/` | Historical task records, validation evidence and handoffs |
+| `releases/` | Versioned release notes and upgrade compatibility |
 | `screenshots/` | Existing product screenshots referenced by documents |
 
 Keep one canonical path for a document. Use lowercase English kebab-case filenames, except conventional `README.md` and retained artifact names. Date-specific plans and evidence use `YYYY-MM-DD-...`; stable contracts keep stable filenames. Keep prototypes, screenshots and validators beside the documents that own them.

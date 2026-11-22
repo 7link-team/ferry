@@ -275,7 +275,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
     </div>;
 
   return (
-    <div className={cn("grid h-full min-h-0 min-w-0 grid-cols-1", item.resource === "conversations" ? "grid-rows-[min-content_minmax(min-content,1fr)_min-content] overflow-y-auto md:grid-rows-[min-content_minmax(min-content,1fr)]" : formConfig && route.mode !== "list" && !(item.resource === "code-insights" && route.mode === "view") ? "grid-rows-[auto_minmax(min-content,1fr)_auto] md:grid-rows-[auto_minmax(min-content,1fr)]" : "grid-rows-[auto_minmax(0,1fr)_auto] md:grid-rows-[auto_minmax(0,1fr)]")}>
+    <div className={cn("grid h-full min-h-0 min-w-0 grid-cols-1", item.resource === "conversations" ? "grid-rows-[min-content_minmax(min-content,1fr)_min-content] overflow-y-auto md:grid-rows-[min-content_minmax(min-content,1fr)]" : "grid-rows-[auto_minmax(0,1fr)_auto] md:grid-rows-[auto_minmax(0,1fr)]")}>
       <AppHeader home={to(nav[0]!.key, nav[0]!.items[0]!.key)} navigation={
         <nav className="hidden min-w-0 max-w-full gap-1 overflow-x-auto md:flex" aria-label={t("app.modules")}>
           {groups.map((g) => (
