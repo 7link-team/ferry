@@ -6,6 +6,8 @@ import {
 Fragment,
 forwardRef,
 useImperativeHandle,
+useLayoutEffect,
+useRef,
 useState,
 type ReactNode,
 } from "react";
@@ -45,6 +47,21 @@ function AutoTableInner<T>(
   const local = useAutoTable(options);
   const state = options.state;
   const rows = state?.rows ?? local.rows;
+  const tableRef = useRef<HTMLTableElement>(null);
+  const [rowMinimum, setRowMinimum] = useState(100);
+  useLayoutEffect(() => {
+    const table = tableRef.current;
+    const header = table?.tHead;
+    if (options.minDataHeight !== "row" || !table || !header) return;
+    const controls = [...(table.tBodies[0]?.rows[0]?.lastElementChild?.querySelectorAll<HTMLElement>("button,a") ?? [])];
+    const measure = () => setRowMinimum(Math.max(100, Math.ceil(header.getBoundingClientRect().height + Math.max(44, ...controls.map(control => control.getBoundingClientRect().height)))));
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
+    observer?.observe(header);
+    controls.forEach(control => observer?.observe(control));
+    return () => observer?.disconnect();
+  }, [options.minDataHeight, rows, options.actionWidth]);
+  const minimumDataHeight = options.minDataHeight === "row" ? rowMinimum : options.minDataHeight;
   const query = state?.query ?? local.query;
   const filtered = Object.values(query.filter ?? {}).some(value => value !== "" && value !== undefined && value !== null && value !== false);
   const total = state?.total ?? local.total;
@@ -131,10 +148,11 @@ function AutoTableInner<T>(
       <div
         ref={options.scrollRef}
         className="min-h-0 min-w-0 flex-1 overflow-auto rounded-lg border border-border bg-background [contain:paint]"
-        style={{ containerType: "inline-size", minHeight: options.minDataHeight, ...(options.minDataHeight !== undefined ? { contain: "size paint", boxSizing: "content-box" } : {}) }}
+        style={{ containerType: "inline-size", minHeight: minimumDataHeight, ...(options.minDataHeight !== undefined ? { contain: "size paint", boxSizing: "content-box" } : {}) }}
         aria-busy={loading}
       >
         <table
+          ref={tableRef}
           className={cn(
             "w-full border-separate border-spacing-0 text-sm",
             options.layout === "auto" ? "min-w-max table-auto" : "table-fixed",
@@ -437,7 +455,7 @@ function AutoTableInner<T>(
       </div>
       {pagination && (
         <div
-          className={cn("flex shrink-0 flex-wrap items-center gap-3 border-t bg-background py-3 text-sm", options.sticky?.pagination && "sticky bottom-0 z-20 shadow-[0_-4px_10px_-4px_var(--sticky-shadow-color)]")}
+          className={cn("flex min-w-0 max-w-full shrink-0 flex-wrap items-center gap-3 border-t bg-background py-3 text-sm", options.sticky?.pagination && "sticky bottom-0 z-20 shadow-[0_-4px_10px_-4px_var(--sticky-shadow-color)]")}
           data-auto-table-footer
         >
           {options.footerContent}
@@ -447,10 +465,10 @@ function AutoTableInner<T>(
               ? commonText("table.nextPageSummary", { page: query.page, count: rows.length })
               : commonText("table.totalSummary", { count: total, start: total ? (query.page - 1) * query.pageSize + 1 : 0, end: Math.min(query.page * query.pageSize, total) })}
           </span>
-          <nav className="flex items-center gap-2" aria-label={commonText("table.pagination")}>
+          <nav className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 sm:w-auto" aria-label={commonText("table.pagination")}>
             <select
               aria-label={commonText("table.pageSize")}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              className="h-8 min-w-0 max-w-full rounded-md border border-input bg-background px-2 text-sm"
               value={query.pageSize}
               onChange={(event) => setPageSize(Number(event.target.value))}
             >
@@ -473,7 +491,7 @@ function AutoTableInner<T>(
             >
               <ChevronLeft />
             </Button>
-            <span className="tabular-nums">
+            <span className="whitespace-nowrap tabular-nums">
               {options.pagination === "next"
                 ? query.page
                 : `${query.page} / ${pages}`}

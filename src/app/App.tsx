@@ -330,7 +330,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
 
         {/* Content keeps its scroll container; configuration forms retain a readable
             minimum and let the outer shell scroll when space is constrained. */}
-        <main className={cn("grid min-h-0 min-w-0 px-4 pt-3", item.resource === "members" && route.mode === "list" ? "grid-rows-[auto_minmax(min-content,1fr)] overflow-y-auto" : "grid-rows-[auto_1fr]")}>
+        <main className={cn("grid min-h-0 min-w-0 grid-cols-1 px-4 pt-3", route.mode === "list" ? "grid-rows-[auto_minmax(min-content,1fr)] overflow-x-hidden overflow-y-auto" : "grid-rows-[auto_1fr]")}>
           <div>
           {route.mode === "list" && visibleMenu.length > 1 && <div className="mb-2 md:hidden"><DropdownMenu key={route.item}><DropdownMenuTrigger asChild><Button variant="outline" className="min-h-11 w-full justify-between"><span className="min-w-0 truncate">{group.label} · {parentItem.label}</span><ChevronDown className="size-4 shrink-0" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" collisionPadding={8} className="max-h-[60dvh] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto">{visibleMenu.map(entry => <DropdownMenuItem asChild key={entry.key}><a {...to(group.key, menuTarget(group, entry).key, menuTarget(group, entry).params)} aria-current={entry.key === parentItem.key ? "page" : undefined} className="min-h-11 whitespace-normal break-words">{entry.section ? `${commonText(entry.section)} · ` : ""}{entry.label}</a></DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>}
           <nav aria-label={commonText("shell.breadcrumbs")}>
@@ -372,11 +372,13 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
               )}
             </ol>
           </nav>
-          {permissions.has("settings.update") && <p className="mb-2 break-words text-sm text-muted-foreground">{!current.timezone && <>{commonText("resource-domain:workspace.unconfirmedNotice")} </>}<a className="underline" href={href({ workspace: current.id, group: "ops", item: "workspace-settings", id: "1", mode: "edit" }, {})}>{commonText("resource-domain:workspace.settings")}</a></p>}
-          <h1 className="mt-1.5 mb-3 text-xl font-semibold">
+          <h1 className="mt-1.5 mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xl font-semibold">
+            <span>
             {item.label}
             {route.mode === "new" && (item.resource === "hosts" ? commonText("shell.addSuffix") : commonText("shell.createSuffix"))}
             {route.mode === "edit" && commonText("shell.editSuffix")}
+            </span>
+            {!current.timezone && permissions.has("settings.update") && <a className="text-sm font-normal text-muted-foreground underline" title={commonText("resource-domain:workspace.unconfirmedNotice")} aria-label={`${commonText("resource-domain:workspace.settings")}: ${commonText("resource-domain:workspace.unconfirmedNotice")}`} href={href({ workspace: current.id, group: "ops", item: "workspace-settings", id: "1", mode: "edit" }, {})}>{commonText("resource-domain:workspace.timezone")} · {commonText("resource-domain:workspace.unconfirmed")}</a>}
           </h1>
 
           {relatedItems.length > 1 && !["pipelines", "workflows", "credentials"].includes(parentItem.key) && <nav aria-label={commonText("shell.relatedPages", { name: notificationArea ? commonText("notifications:notification-channels") : parentItem.label })} className="mb-3 flex flex-wrap gap-3">
@@ -388,7 +390,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
           </div>
           {!canVisit(item) ? <p role="alert">{commonText("shell.forbidden")}</p> : nodeCatalogPending ? nodeCatalogFeedback : route.mode === "list" ? (
             item.resource === "dashboard" ? <Dashboard key={current.id} workspace={current.id} /> : listConfig ? (
-              <div className={item.resource === "members" && permissions.has("members.create") ? "grid min-h-min min-w-0 grid-rows-[auto_minmax(min-content,1fr)]" : "flex min-h-0 min-w-0 flex-col"}>
+              <div className={item.resource === "members" && permissions.has("members.create") ? "grid min-h-min min-w-0 grid-rows-[auto_minmax(min-content,1fr)]" : "flex min-h-min min-w-0 flex-col"}>
               {item.resource === "members" && permissions.has("members.create") && <Invitation key={current.id} workspace={current.id} />}
               {(preferences || preferencesError) ? item.resource === "pipelines" ? <PipelineList
                 key={current.id}

@@ -34,6 +34,11 @@ try {
     if (path === '/api/setup') return json({ required: false, has_users: true, registration_enabled: false });
     if (path === '/api/me') return json({ user: { id: '1', name: 'Layout reviewer', email: 'reviewer@example.invalid', is_superadmin: false }, workspaces: [{ id: '2', name: 'Layout workspace', slug: 'layout', role_name: 'Reviewer', permissions: ['dictionaries.read', 'deployments.read', 'deployments.create', ...(canEdit ? ['dictionaries.create', 'dictionaries.update', 'dictionaries.delete'] : [])] }] });
     if (path.endsWith('/preferences')) return json({ default_page_size: 20, dictionaries: {} });
+    if (path === '/api/workspaces/2/dictionaries/categories') {
+      const counts = new Map();
+      for (const row of rows) counts.set(row.category, (counts.get(row.category) || 0) + 1);
+      return json({items:[...counts].map(([category,count]) => ({category,count})),total:rows.length});
+    }
     const match = /^\/api\/workspaces\/2\/dictionaries(?:\/([^/]+))?$/.exec(path);
     if (match) {
       const id = match[1];

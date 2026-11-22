@@ -21,6 +21,39 @@ const rows = [
   { id: "1", name: "Alpha" },
   { id: "2", name: "Beta" },
 ];
+it("measures current action controls after equal-count row replacement and resizing", async () => {
+  let actionHeight = 44;
+  const callbacks: (() => void)[] = [];
+  vi.stubGlobal("ResizeObserver", class {
+    active = true;
+    constructor(callback: ResizeObserverCallback) {
+      callbacks.push(() => { if (this.active) callback([], this as unknown as ResizeObserver); });
+    }
+    observe() {}
+    disconnect() { this.active = false; }
+  });
+  const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const height = this.tagName === "THEAD" ? 60 : this.hasAttribute("data-measured-action") && this.isConnected ? actionHeight : 0;
+    return { x: 0, y: 0, width: 100, height, top: 0, left: 0, right: 100, bottom: height, toJSON: () => ({}) };
+  });
+  try {
+    const render = (items: typeof rows) => act(async () => root.render(<AutoTable
+      columns={[{field:"name",name:"Name"}]} rowKey={row => row.id}
+      state={{rows:items,total:items.length,query:{page:1,pageSize:20,filter:{}}}}
+      minDataHeight="row" actionWidth={80}
+      actionsContent={row => <button data-measured-action>{row.id}</button>}
+    />));
+    await render(rows.slice(0, 1));
+    expect(host.querySelector("table")!.parentElement!.style.minHeight).toBe("104px");
+    await render(rows.slice(1));
+    actionHeight = 88;
+    await act(async () => callbacks.forEach(callback => callback()));
+    expect(host.querySelector("table")!.parentElement!.style.minHeight).toBe("148px");
+  } finally {
+    bounds.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
 it("illustrates empty data and filtered results while preserving custom messages and errors", async () => {
   const render = async (filter: Record<string, unknown>, extra: Record<string, unknown> = {}) => act(async () => root.render(<AutoTable columns={[{field:"name",name:"Name"}]} state={{rows:[],total:0,query:{page:1,pageSize:20,filter}}} {...extra} />));
   await render({});

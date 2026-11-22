@@ -848,7 +848,9 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           notes="docs/releases/$RELEASE_TAG.md"
-          if [ -f "$notes" ]; then cat "$notes" > release-notes.md; else : > release-notes.md; fi
+          if [ -f "$notes" ]; then
+            python3 -c 'import pathlib,sys; text=pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"); print(text.split("\n---\n",1)[1].lstrip("\n") if text.startswith("---\n") else text,end="")' "$notes" > release-notes.md
+          else : > release-notes.md; fi
           printf '\n\n### Mobile packages\n\n' >> release-notes.md
           cat release-assets/*-mobile-SIGNING.txt >> release-notes.md
       - uses: softprops/action-gh-release@v2

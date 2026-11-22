@@ -223,6 +223,46 @@ try {
   await p.getByRole('button',{name:'保存',exact:true}).click();
   const configs=await get(root+'/config-templates');
   assert.equal(configs.items[0].content,'listen={{ .Values.port }}\n');
+  await p.getByRole('row').filter({hasText:'Runtime file'}).waitFor();
+  const configURL = p.url();
+  for (const [locale, width, fontScale = 1] of [['zh-CN',1440],['zh-CN',900],['zh-CN',320],['ms-MY',320],['ms-MY',320,2]]) {
+    await p.setViewportSize({width,height:960});
+    if (locale !== 'zh-CN') await p.goto(configURL.replace('/zh-CN/',`/${locale}/`));
+    await p.evaluate(scale => document.documentElement.style.fontSize = scale === 1 ? '' : `${scale * 100}%`, fontScale);
+    const row = p.getByRole('row').filter({hasText:'Runtime file'});
+    await row.waitFor();
+    await p.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const filters = p.locator('main form').first();
+    await filters.scrollIntoViewIfNeeded();
+    assert(await filters.locator('input,select,button').evaluateAll(elements => elements.every(element => {
+      const rect = element.getBoundingClientRect();
+      return rect.left >= -1 && rect.right <= innerWidth + 1;
+    })), `${locale} ${width}px ${fontScale}x font: filters and search actions stay in view`);
+    const room = await row.evaluate(row => {
+      const table = row.closest('table');
+      const action = row.querySelector('button');
+      return { available:table.parentElement.clientHeight, required:table.tHead.getBoundingClientRect().height + action.getBoundingClientRect().height };
+    });
+    assert(room.available >= room.required, `${locale} ${width}px: table must fit its header and an action target: ${JSON.stringify(room)}`);
+    assert(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${locale} ${width}px: no whole-page horizontal overflow`);
+    await row.getByRole('button').last().click();
+    await p.getByRole('dialog').waitFor();
+    await p.keyboard.press('Escape');
+    await p.getByRole('dialog').waitFor({state:'hidden'});
+    assert(await row.locator('td').last().locator('button,a').evaluateAll(elements => elements.every(element => {
+      const rect = element.getBoundingClientRect();
+      return rect.left >= -1 && rect.right <= innerWidth + 1;
+    })), `${locale} ${width}px ${fontScale}x font: all row actions stay in view`);
+    const footer = p.locator('[data-auto-table-footer]');
+    await footer.scrollIntoViewIfNeeded();
+    const controlBounds = await footer.locator('select,button').evaluateAll(elements => elements.map(element => {
+      const rect = element.getBoundingClientRect();
+      return {left:rect.left,right:rect.right,width:rect.width};
+    }));
+    if (process.env.FERRY_TEMPLATE_EVIDENCE) await p.screenshot({path:`${process.env.FERRY_TEMPLATE_EVIDENCE}-${locale}-${width}-font-${fontScale}.png`});
+    assert(controlBounds.every(rect => rect.left >= -1 && rect.right <= width + 1), `${locale} ${width}px ${fontScale}x font: pagination controls stay in view: ${JSON.stringify(controlBounds)}`);
+  }
+  await p.goto(configURL);
   await p.getByRole('row').filter({hasText:'Runtime file'}).getByRole('button',{name:'删除模板',exact:true}).click();
   await p.getByRole('dialog').getByRole('button',{name:'确认删除模板',exact:true}).click();
   await p.waitForFunction(()=>!document.body.innerText.includes('Runtime file'));

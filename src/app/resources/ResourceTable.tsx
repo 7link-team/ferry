@@ -326,11 +326,11 @@ export function ResourceTable<T>({
 
 
   return (
-    <div className={config.minDataHeight !== undefined ? "grid min-h-min min-w-0 flex-1 grid-rows-[auto_minmax(min-content,1fr)] gap-3" : config.summary ? "grid min-h-min min-w-0 flex-1 grid-rows-[auto_minmax(16rem,1fr)] gap-3" : "grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-3"}>
+    <div className={config.minDataHeight !== undefined ? "grid min-h-min min-w-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(min-content,1fr)] gap-3" : config.summary ? "grid min-h-min min-w-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(16rem,1fr)] gap-3" : "grid min-h-min min-w-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(min-content,1fr)] gap-3"}>
       {/* ---------------------------------------------------- 搜索过滤 + 工具栏 */}
       {pendingAction&&<ResourceActionDialog action={pendingAction.action} row={pendingAction.row} workspace={workspace} permissions={permissions} onClose={()=>setPendingAction(undefined)} onDone={()=>{setPendingAction(undefined);reload();}} />}
       {pendingDelete && <DeleteConfirmDialog action={configText(pendingDelete.action, pendingDelete.actionKey)} target={pendingDelete.target} onClose={() => setPendingDelete(undefined)} onConfirm={pendingDelete.run} />}
-      <div className="flex max-h-[30dvh] flex-col gap-3 overflow-y-auto sm:max-h-none sm:overflow-visible">
+      <div className="flex min-w-0 max-w-full max-h-[30dvh] flex-col gap-3 overflow-y-auto sm:max-h-none sm:overflow-visible">
         {error && !!rows.length && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
         {config.filterPresets?.map(group => <div key={group.label} role="group" aria-label={configText(group.label, group.labelKey)} className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-muted-foreground">{configText(group.label, group.labelKey)}</span>
@@ -340,13 +340,13 @@ export function ResourceTable<T>({
             setDraft(next); setCommitted(next); writeFilters(next, config.queryPrefix); setPage(1); setSelected(new Set());
           }}>{configText(preset.label, preset.labelKey)}</Button>)}
         </div>)}
-        <div data-list-toolbar className="flex flex-wrap items-end gap-3 rounded-md border bg-muted/30 p-3">
+        <div data-list-toolbar className="flex min-w-0 max-w-full flex-wrap items-end gap-3 rounded-md border bg-muted/30 p-3 [&_[data-slot=button]]:h-auto [&_[data-slot=button]]:min-h-8 [&_[data-slot=button]]:max-w-full [&_[data-slot=button]]:whitespace-normal [&_[data-slot=button]]:py-1 [&_[data-slot=button]]:[overflow-wrap:anywhere]">
           {!hideToolbar && config.grouping && <div role="group" aria-label={commonText("table.viewMode")} title={commonText("table.groupBy", { name: configText(config.grouping.label, config.grouping.labelKey) })} className="inline-flex rounded-md border p-0.5">
             {([["list", commonText("table.list"), List], ["groups", commonText("table.groups"), FolderTree]] as const).map(([value, label, Icon]) => <Button key={value} size="sm" variant={tableView === value ? "secondary" : "ghost"} aria-pressed={tableView === value} onClick={() => { setTableView(value); setPage(1); }}><Icon className="size-4" />{label}</Button>)}
           </div>}
         {!!config.filters?.length && (
           <AutoForm
-            className="flex flex-wrap items-end gap-3"
+            className="flex min-w-0 max-w-full flex-wrap items-end gap-3"
             onSubmit={(event) => {
               event.preventDefault();
               search();
@@ -360,7 +360,7 @@ export function ResourceTable<T>({
                 onChange={(value) => setDraft((d) => ({ ...d, [filter.key]: value }))}
               />
             ))}
-            <div className="flex gap-2">
+            <div className="flex max-w-full flex-wrap gap-2">
               <Button type="submit" size="sm">
                 <Search /> {commonText("common.search")}</Button>
               <Button type="button" size="sm" variant="outline" onClick={clear}>
@@ -369,7 +369,7 @@ export function ResourceTable<T>({
           </AutoForm>
         )}
 
-        {!hideToolbar && <div className="ml-auto flex flex-wrap items-center gap-2">
+        {!hideToolbar && <div className="ml-auto flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 sm:w-auto">
           <RefreshControl loading={loading} interval={refresh} remaining={remaining} onRefresh={reload} onIntervalChange={seconds => {
             setRefresh(seconds);
             try { localStorage.setItem(REFRESH_KEY(config.resource), String(seconds)); } catch { /* private storage */ }
@@ -416,12 +416,13 @@ export function ResourceTable<T>({
           ]}
           sticky={{ header: true }} rowClickable={entry => !entry.row} onRowClick={entry => { if (!entry.row) enterFolder(entry.path); }}
           onPageChange={setPage} onPageSizeChange={value => { setPageSize(value); setPage(1); }} pageSizeOptions={[...PAGE_SIZES]} onRetry={reload} empty={commonText("repository.emptyGroup")} />
-      </div> : <AutoTable<T> fill minDataHeight={config.minDataHeight} layout="auto" scrollRef={scrollRef} rowKey={config.rowKey}
+      </div> : <AutoTable<T> fill minDataHeight={config.minDataHeight ?? "row"} layout="auto" scrollRef={scrollRef} rowKey={config.rowKey}
+        className="[&_[data-auto-table-footer]]:shadow-[0_-4px_10px_-4px_var(--sticky-shadow-color)]"
         hiddenFields={hiddenColumns}
         columns={config.columns.map(column => ({ field: column.key, name: configText(column.label, column.labelKey), width: column.width ? `${column.width}px` : undefined, align: column.align, sortable: column.sortable, render: (_value, row) => column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "") }))}
         state={{ rows, total, query: { page, pageSize, filter: committed, sort: sort ? { field: sort.replace(/^-/, ""), direction: sort.startsWith("-") ? "desc" : "asc" } : undefined }, loading, error: rows.length ? undefined : error, selected }}
         showSequence selectable={!!visibleBulk.length} pagination={config.pagination} hasMore={!error && data?.has_more}
-        sticky={{ header: true, left: 1, right: visibleActions.length ? 1 : 0, pagination: config.minDataHeight === undefined }}
+        sticky={{ header: true, left: 1, right: visibleActions.length ? 1 : 0, pagination: false }}
         groupBy={grouped ? config.grouping!.key : undefined} empty={config.emptyKey ? commonText(config.emptyKey) : config.empty}
         onPageChange={setPage}
         onPageSizeChange={value => { setPageSize(value); setPage(1); }}
@@ -431,7 +432,7 @@ export function ResourceTable<T>({
         rowClickable={row => !!config.onRowClick || !!detailAction(row)}
         onRowClick={row => { if (config.onRowClick) { config.onRowClick(row); return; } const action = detailAction(row); if (action?.to) navigate({ ...route, ...action.to(row) }, action.query?.(row) ?? {}); }}
         actionWidth={Math.max(80, ...rows.map(row => visibleActions.filter(action => !action.when || action.when(row)).reduce((width, action) => width + (action.showLabel ? 120 : 36), 24)))}
-        actionsContent={visibleActions.length ? row => { const key = config.rowKey(row); return <>                          {visibleActions
+        actionsContent={visibleActions.length ? row => { const key = config.rowKey(row); return <div className="inline-flex w-max max-w-[calc(100cqw-2rem)] flex-wrap items-center justify-end">                          {visibleActions
                             .filter((action) => !action.when || action.when(row))
                             .map((action) => (
                               <RowActionButton
@@ -479,7 +480,7 @@ export function ResourceTable<T>({
                                     }
                                   : {})}
                               />
-                            ))}</>; } : undefined}
+                            ))}</div>; } : undefined}
         footerContent={<>{data && !loading && !error && config.footerSummary?.(data)}{!!selected.size && (
           <>
             <span className="text-muted-foreground">{commonText("table.selected", { count: selected.size })}</span>
@@ -597,11 +598,11 @@ export function FilterField({
   useCommonTranslation();
   const { options, error } = useOptions(filter.options);
   return (
-    <AutoField label={configText(filter.label, filter.labelKey)}>
+    <AutoField label={configText(filter.label, filter.labelKey)} className="max-w-full">
       {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
       {filter.type === "select" ? (
         <Select value={value || "__all__"} onValueChange={(v) => onChange(v === "__all__" ? "" : v)}>
-          <SelectTrigger aria-label={configText(filter.label, filter.labelKey)} size="sm" className="w-40">
+          <SelectTrigger aria-label={configText(filter.label, filter.labelKey)} size="sm" className="w-40 max-w-full">
             <SelectValue placeholder={commonText("group.all")} />
           </SelectTrigger>
           <SelectContent>
@@ -616,7 +617,7 @@ export function FilterField({
       ) : (
         <Input
           type={filter.type}
-          className="h-8 w-48"
+          className="h-8 w-48 max-w-full"
           value={value}
           placeholder={configText(filter.placeholder, filter.placeholderKey)}
           onChange={(event) => onChange(event.target.value)}
