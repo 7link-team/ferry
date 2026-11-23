@@ -91,7 +91,10 @@ Android emulator acceptance 14 PASS, including guarded native update commands
 and remote-page isolation. Four rendered viewport/locale cases PASS, including
 Malay 320px with enlarged fonts. Generator idempotence and optional signing
 configuration were exercised with a disposable keystore. iOS source checks and
-7 package fixtures PASS; actual new-source iOS build remains a macOS CI gate.
+7 package fixtures PASS. Actual new-source iOS simulator build, native iPhone
+interaction acceptance and unsigned device IPA build all passed in macOS CI.
+All 31 release jobs passed; published APK/IPA payloads and all 31 asset digests
+were verified against the same immutable source.
 This document does not assert physical-device or production-signed installation.
 
 Full candidate verification: `cargo test --workspace` 1429 PASS / 26 existing
