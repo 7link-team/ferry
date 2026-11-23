@@ -643,6 +643,8 @@ jobs:
       # ships that binary as its sidecar, so the real web build has to exist
       # before cargo runs — build.rs only creates an empty placeholder.
       - run: npm run build
+      - name: Build the native connection page before desktop tests
+        run: npm run build:launcher
       - name: Build the server, the runner and the bundled Actions workers
         shell: bash
         run: |
