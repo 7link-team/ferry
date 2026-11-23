@@ -2,8 +2,16 @@
 
 Android and iOS reuse the bundled connection launcher and the server-hosted Web
 UI. There is one webview, no default server address, and no bundled server,
-sandbox, desktop worker resource, updater, tray, autostart or single-instance
+sandbox, desktop worker resource, desktop updater, tray, autostart or single-instance
 plugin. Desktop keeps its existing local-service and remote-client modes.
+
+Mobile connection settings include client version checks. Android downloads a
+matching Release APK, verifies size/SHA256, package name, increasing versionCode
+and the installed signing certificate before opening the system installer. The
+user must allow this installation source and confirm installation; cancelling
+allows retry. iOS opens the configured HTTPS distribution page; a missing URL
+is shown explicitly and an unsigned IPA is never offered as directly installable.
+See [mobile update configuration](../docs/plans/2026-11-23-mobile-client-updates.md).
 
 The launcher verifies the selected HTTP(S) server's `/api/status` JSON (`ok:
 true`) before saving `connection.json` and navigating. A server deployed under a

@@ -3,7 +3,7 @@ members = ["crates/protocol", "crates/server", "crates/runner", "crates/desktop-
 resolver = "2"
 
 [workspace.package]
-version = "0.10.11-alpha"
+version = "0.10.12-alpha"
 edition = "2024"
 license = "UNLICENSED"
 

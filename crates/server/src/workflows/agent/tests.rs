@@ -2230,21 +2230,20 @@ async fn provider_defaults_ignore_legacy_quotas_and_configured_admission_waits_a
             .await
             .is_err()
     );
-    workflow_executions::Entity::update_many()
+    // Keep the queued execution polled so it can release in-flight database work.
+    let cancelling = workflow_executions::Entity::update_many()
         .col_expr(
             workflow_executions::Column::State,
             Expr::value("cancelling"),
         )
         .filter(workflow_executions::Column::Id.eq(fixture.run.id))
-        .exec(&fixture.s.db)
-        .await
-        .unwrap();
-    assert!(
+        .exec(&fixture.s.db);
+    let (cancelled, result) = tokio::join!(
+        cancelling,
         tokio::time::timeout(Duration::from_secs(3), &mut queued)
-            .await
-            .unwrap()
-            .is_err()
     );
+    cancelled.unwrap();
+    assert!(result.unwrap().is_err());
     assert_eq!(
         requests.lock().unwrap().len(),
         3,

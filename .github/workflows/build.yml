@@ -797,6 +797,7 @@ jobs:
   mobile:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/mobile-client.yml
+    secrets: inherit
 
   release:
     # Dispatch exercises the exact collection/checksum path without publishing.

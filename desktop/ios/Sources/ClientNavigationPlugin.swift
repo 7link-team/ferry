@@ -1,6 +1,9 @@
 import Foundation
 import Tauri
 import WebKit
+import UIKit
+
+private struct DistributionArgs: Decodable { let url: String }
 
 private struct NavigationConfig: Decodable {
     let failureURL: URL
@@ -102,6 +105,21 @@ private final class NavigationProxy: NSObject, WKNavigationDelegate {
 
 final class ClientNavigationPlugin: Plugin {
     private var proxies: [NavigationProxy] = []
+
+    @objc public func openDistribution(_ invoke: Invoke) throws {
+        let args = try invoke.parseArgs(DistributionArgs.self)
+        guard let url = URL(string: args.url), url.scheme == "https",
+              url.host != nil, url.user == nil, url.password == nil else {
+            invoke.reject("install_failed")
+            return
+        }
+        DispatchQueue.main.async {
+            UIApplication.shared.open(url, options: [:]) { opened in
+                if opened { invoke.resolve(["status": "distribution_opened"]) }
+                else { invoke.reject("install_failed") }
+            }
+        }
+    }
 
     override func load(webview: WKWebView) {
         guard let config = try? parseConfig(NavigationConfig.self),

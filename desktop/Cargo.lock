@@ -1071,12 +1071,13 @@ dependencies = [
 
 [[package]]
 name = "ferry-desktop"
-version = "0.10.11-alpha"
+version = "0.10.12-alpha"
 dependencies = [
  "reqwest",
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",

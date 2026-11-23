@@ -19,7 +19,7 @@ test('mobile rejects empty address without entering the local server path', asyn
   await vi.waitFor(() => expect(document.getElementById('open').disabled).toBe(false));
   expect(invoke.mock.calls).toEqual([['connection_settings']]);
   expect(document.getElementById('connection-error').textContent).not.toBe('');
-  expect(document.querySelector('.updates').hidden).toBe(true);
+  expect(document.querySelector('.updates').hidden).toBe(false);
   expect(document.getElementById('url').placeholder).toBe('https://');
 });
 

@@ -1,4 +1,5 @@
 import { copy } from './mobile-copy.js';
+import { setupUpdates } from './mobile-update.js';
 
 const byId = (id) => document.getElementById(id);
 const { core } = window.__TAURI__;
@@ -8,6 +9,7 @@ let locale = preferred.startsWith('zh') ? 'zh-CN' : preferred.startsWith('ms') ?
 try { locale = localStorage.getItem('connection-language') || locale; } catch { /* OS storage may be unavailable. */ }
 if (!copy[locale]) locale = 'en-US';
 let busy = false;
+let renderUpdates = () => {};
 let errorKey = location.hash.includes('navigation-failed') ? 'navigation_failed' : '';
 function render() {
   const text = copy[locale];
@@ -18,8 +20,8 @@ function render() {
   byId('connection-language').setAttribute('aria-label', text.language);
   byId('open').textContent = busy ? text.connecting : text.open;
   byId('connection-error').textContent = text[errorKey] || errorKey;
+  renderUpdates();
 }
-document.querySelector('.updates').hidden = true;
 byId('url').placeholder = 'https://';
 byId('connection-language').hidden = false;
 byId('connection-language').value = locale;
@@ -56,3 +58,4 @@ try {
     if (!location.hash.startsWith('#connection-settings')) await openWorkspace();
   }
 } catch (error) { errorKey = String(error); render(); }
+renderUpdates = await setupUpdates(() => locale);

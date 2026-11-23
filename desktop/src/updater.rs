@@ -1,6 +1,7 @@
 //! Signed desktop updates. Only the local launcher may check/install them.
+use crate::release::{Asset, Release, channel};
 use semver::Version;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -31,25 +32,6 @@ impl UpdateState {
         Ok(Busy(&self.busy))
     }
 }
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Channel {
-    repository: String,
-    #[serde(default)]
-    include_prereleases: bool,
-}
-#[derive(Deserialize)]
-struct Release {
-    tag_name: String,
-    draft: bool,
-    prerelease: bool,
-    assets: Vec<Asset>,
-}
-#[derive(Deserialize)]
-struct Asset {
-    name: String,
-    browser_download_url: String,
-}
 #[derive(Serialize)]
 pub struct UpdateInfo {
     current_version: String,
@@ -61,32 +43,6 @@ fn launcher(label: &str) -> Result<(), String> {
         return Err("只能从本机连接设置窗口管理应用更新。".into());
     }
     Ok(())
-}
-
-fn channel(app: &tauri::AppHandle) -> Result<Channel, String> {
-    let channel: Channel = serde_json::from_value(
-        app.config()
-            .plugins
-            .0
-            .get("release")
-            .cloned()
-            .ok_or("未配置更新来源。")?,
-    )
-    .map_err(|_| "更新来源配置无效。")?;
-    let parts: Vec<_> = channel.repository.split('/').collect();
-    if parts.len() != 2
-        || parts.iter().any(|part| {
-            part.is_empty()
-                || *part == "."
-                || *part == ".."
-                || !part
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
-        })
-    {
-        return Err("更新仓库配置无效。".into());
-    }
-    Ok(channel)
 }
 
 #[tauri::command]
@@ -286,10 +242,13 @@ mod tests {
             tag_name: v.into(),
             prerelease: pre,
             draft,
+            body: None,
             assets: if asset {
                 vec![Asset {
                     name: "latest.json".into(),
                     browser_download_url: "https://example.invalid/latest.json".into(),
+                    digest: None,
+                    size: 0,
                 }]
             } else {
                 vec![]

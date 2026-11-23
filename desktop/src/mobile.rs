@@ -131,7 +131,7 @@ impl NavigationReadiness {
 }
 
 #[cfg(mobile)]
-mod native {
+pub(crate) mod native {
     use super::*;
     use crate::connection::{Preferences, read_preferences, save_preferences};
     use std::sync::{
@@ -189,7 +189,7 @@ mod native {
         }
     }
 
-    fn require_settings(window: &tauri::WebviewWindow) -> Result<(), String> {
+    pub(crate) fn require_settings(window: &tauri::WebviewWindow) -> Result<(), String> {
         let state = window.state::<Connection>();
         let bundled = state.bundled.lock().unwrap().clone();
         if window.label() != "launcher"
@@ -370,10 +370,20 @@ mod native {
             .plugin(
                 tauri::plugin::Builder::<tauri::Wry, serde_json::Value>::new("mobile-connection")
                     .setup(|_app, _api| {
+                        _app.manage(crate::mobile_update::native::State::default());
+                        #[cfg(target_os = "android")]
+                        {
+                            let handle = _api.register_android_plugin(
+                                &_app.config().identifier,
+                                "ClientUpdatePlugin",
+                            )?;
+                            _app.manage(crate::mobile_update::native::Native(handle));
+                        }
                         #[cfg(target_os = "ios")]
                         {
                             tauri::ios_plugin_binding!(init_plugin_client_navigation);
-                            _api.register_ios_plugin(init_plugin_client_navigation)?;
+                            let handle = _api.register_ios_plugin(init_plugin_client_navigation)?;
+                            _app.manage(crate::mobile_update::native::Native(handle));
                         }
                         Ok(())
                     })
@@ -511,7 +521,9 @@ mod native {
             })
             .invoke_handler(tauri::generate_handler![
                 connection_settings,
-                open_workspace
+                open_workspace,
+                crate::mobile_update::native::mobile_check_update,
+                crate::mobile_update::native::mobile_install_update
             ])
             .run(context)
             .expect("run client shell");

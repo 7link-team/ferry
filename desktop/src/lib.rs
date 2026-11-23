@@ -6,6 +6,9 @@
 mod connection;
 #[cfg(any(mobile, test))]
 mod mobile;
+#[cfg(any(mobile, test))]
+mod mobile_update;
+mod release;
 #[cfg(desktop)]
 mod server;
 #[cfg(desktop)]

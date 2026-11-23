@@ -9,6 +9,16 @@ source = source.replace('android:usesCleartextTraffic="${usesCleartextTraffic}"'
 if (!source.includes('android:windowSoftInputMode=')) {
   source = source.replace('android:launchMode="singleTask"', 'android:launchMode="singleTask"\n            android:windowSoftInputMode="adjustResize"');
 }
+if (!source.includes('android.permission.REQUEST_INSTALL_PACKAGES')) {
+  source = source.replace('<application', '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application');
+}
+if (!source.includes('android:authorities="${applicationId}.updates"')) {
+  source = source.replace('</application>', `    <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="\${applicationId}.updates" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>
+    </application>`);
+}
 if (!source.includes('android:usesCleartextTraffic="true"') || !source.includes('android:windowSoftInputMode="adjustResize"')) {
   throw new Error('Unexpected Android manifest; update the mobile preparation generator against the installed Tauri template.');
 }
@@ -21,6 +31,22 @@ const gradle = fileURLToPath(new URL('./gen/android/app/build.gradle.kts', impor
 let build = readFileSync(gradle, 'utf8').replaceAll('\r\n', '\n');
 if (build.includes('AUTO-GENERATED')) throw new Error('Refusing to patch generated Gradle output');
 build = build.replace(/compileSdk = \d+/, 'compileSdk = 36').replace(/targetSdk = \d+/, 'targetSdk = 36');
+if (!build.includes('// Persistent mobile update signing')) {
+  build += `
+// Persistent mobile update signing. Secrets come from the build environment.
+android {
+    val updateStore = System.getenv("MOBILE_ANDROID_KEYSTORE_PATH")
+    if (!updateStore.isNullOrBlank()) {
+        signingConfigs.getByName("debug") {
+            storeFile = file(updateStore)
+            storePassword = requireNotNull(System.getenv("MOBILE_ANDROID_STORE_PASSWORD"))
+            keyAlias = requireNotNull(System.getenv("MOBILE_ANDROID_KEY_ALIAS"))
+            keyPassword = requireNotNull(System.getenv("MOBILE_ANDROID_KEY_PASSWORD"))
+        }
+    }
+}
+`;
+}
 writeFileSync(gradle, build);
 
 // Protect transparent edge-to-edge system bars independently of remote theme.
@@ -47,3 +73,11 @@ writeFileSync(activity, kotlin);
 const protection = readFileSync(new URL('./android/SystemBarProtection.kt', import.meta.url), 'utf8')
   .replace('package __APPLICATION_PACKAGE__', `package ${config.identifier}`);
 writeFileSync(activity.replace('MainActivity.kt', 'SystemBarProtection.kt'), protection);
+writeFileSync(activity.replace('MainActivity.kt', 'ClientUpdatePlugin.kt'),
+  readFileSync(new URL('./android/ClientUpdatePlugin.kt', import.meta.url), 'utf8')
+    .replace('package __APPLICATION_PACKAGE__', `package ${config.identifier}`));
+const { mkdirSync } = await import('node:fs');
+const xml = new URL('./gen/android/app/src/main/res/xml/', import.meta.url);
+mkdirSync(xml, { recursive: true });
+writeFileSync(new URL('update_paths.xml', xml),
+  '<?xml version="1.0" encoding="utf-8"?>\n<paths xmlns:android="http://schemas.android.com/apk/res/android"><cache-path name="updates" path="native-updates/" /></paths>\n');

@@ -76,7 +76,9 @@ async function connect() {
       const pid = adb('shell', 'pidof', packageId).split(' ')[0];
       if (!pid) throw new Error('app has not started');
       adb('forward', 'tcp:9224', `localabstract:webview_devtools_remote_${pid}`);
-      browser = await chromium.connectOverCDP('http://127.0.0.1:9224');
+      // Android WebView has no browser context/download manager. Keep its native
+      // defaults; applying Chromium's browser-wide download override is unsupported.
+      browser = await chromium.connectOverCDP('http://127.0.0.1:9224', { noDefaults: true });
       const pages = browser.contexts().flatMap((context) => context.pages());
       assert.equal(pages.length, 1);
       return pages[0];
@@ -109,7 +111,13 @@ try {
   await page.locator('#url').waitFor();
   await page.waitForFunction(() => document.getElementById('url')?.getAttribute('placeholder') === 'https://');
   assert.equal(await page.locator('#url').inputValue(), '');
-  assert.equal(await page.locator('.updates').isVisible(), false);
+  assert.equal(await page.locator('.updates').isVisible(), true);
+  await page.waitForFunction(() => document.getElementById('version')?.textContent.includes('.'));
+  const pendingUpdate = await page.evaluate(async () => {
+    try { await window.__TAURI__.core.invoke('mobile_install_update'); return 'unexpected_install'; }
+    catch (error) { return String(error); }
+  });
+  assert.equal(pendingUpdate, 'update_missing', 'Installer requires checked native update metadata');
   await page.locator('#open').click();
   assert.notEqual(await page.locator('#connection-error').textContent(), '');
   assert.equal(await page.evaluate(() => innerWidth), 320);
@@ -135,7 +143,11 @@ try {
   await page.locator('#demo-name').fill('Disposable demo');
   await page.locator('#login').click();
   await page.getByText('Session saved', { exact: true }).waitFor();
-  assert.equal((await browser.contexts()[0].cookies(first.url)).some((cookie) => cookie.name === 'demo_session'), true);
+  // WebView implements page-scoped Network cookies, not browser-context Storage.
+  const cookieSession = await page.context().newCDPSession(page);
+  const { cookies } = await cookieSession.send('Network.getCookies', { urls: [first.url] });
+  assert.equal(cookies.some((cookie) => cookie.name === 'demo_session' && cookie.httpOnly), true);
+  await cookieSession.detach();
   const access = await page.evaluate(async (serverUrl) => {
     const invoke = window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
     if (!invoke) return { bridgeAvailable: false, read: 'bridge_unavailable', write: 'bridge_unavailable' };
@@ -143,11 +155,15 @@ try {
       try { await invoke(command, args); return 'ALLOWED'; }
       catch (error) { return String(error); }
     };
-    return { bridgeAvailable: true, read: await attempt('connection_settings'), write: await attempt('open_workspace', { serverUrl }) };
+    return { bridgeAvailable: true, read: await attempt('connection_settings'),
+      write: await attempt('open_workspace', { serverUrl }),
+      checkUpdate: await attempt('mobile_check_update'), installUpdate: await attempt('mobile_install_update') };
   }, second.url);
   if (access.bridgeAvailable) {
     assert.match(access.read, /settings_unavailable|not allowed|denied|forbidden/i);
     assert.match(access.write, /settings_unavailable|not allowed|denied|forbidden/i);
+    assert.match(access.checkUpdate, /settings_unavailable|not allowed|denied|forbidden/i);
+    assert.match(access.installUpdate, /settings_unavailable|not allowed|denied|forbidden/i);
   }
   record('single native webview connects and remote page cannot write settings', first.url);
   await page.screenshot({ path: `${artifactDir}/connected.png` });

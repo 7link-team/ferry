@@ -1,6 +1,6 @@
 [package]
 name = "ferry-desktop"
-version = "0.10.11-alpha"
+version = "0.10.12-alpha"
 edition = "2024"
 
 [lib]
@@ -17,7 +17,8 @@ tauri-utils = { version = "2", features = ["build-2"] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["time", "sync", "fs"] }
+tokio = { version = "1", features = ["time", "sync", "fs", "io-util"] }
+sha2 = "0.10"
 url = "2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 semver = "1"

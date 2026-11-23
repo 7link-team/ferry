@@ -1,4 +1,9 @@
 fn main() {
+    println!("cargo:rerun-if-env-changed=MOBILE_ANDROID_KEYSTORE_PATH");
+    println!(
+        "cargo:rustc-env=CLIENT_PERSISTENT_ANDROID_SIGNING={}",
+        std::env::var("MOBILE_ANDROID_KEYSTORE_PATH").is_ok_and(|path| !path.trim().is_empty())
+    );
     #[cfg(target_os = "macos")]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("ios") {
         link_ios_navigation();

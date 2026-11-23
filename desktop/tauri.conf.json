@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Ferry",
-  "version": "0.10.11-alpha",
+  "version": "0.10.12-alpha",
   "identifier": "com.aspeed.ferry",
   "build": {
     "frontendDist": "./ui"
@@ -61,7 +61,11 @@
     },
     "release": {
       "repository": "7link-team/ferry",
-      "includePrereleases": true
+      "includePrereleases": true,
+      "mobile": {
+        "packageName": "ferry",
+        "iosDistributionUrl": null
+      }
     }
   }
 }

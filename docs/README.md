@@ -10,6 +10,7 @@ Start here to find the canonical document for a topic. Directory and file names 
 
 ## Start here
 
+- [0.10.12-alpha candidate notes](releases/v0.10.12-alpha.md): mobile version checks, verified Android update handoff and configurable iOS distribution; verify publication on GitHub.
 - [0.10.11-alpha release notes](releases/v0.10.11-alpha.md): preserve legacy scheduling hints and fully visible table rows; mobile release packaging.
 - [0.10.10-alpha release notes](releases/v0.10.10-alpha.md): accessible page headings and usable host preview tables; includes mobile release packaging.
 - [0.10.9-alpha release notes](releases/v0.10.9-alpha.md): workspace timezones, workflow diagnostics, mobile release assets and responsive list corrections; verify publication on GitHub.

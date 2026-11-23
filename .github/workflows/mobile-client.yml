@@ -2,6 +2,15 @@ name: Mobile client builds
 
 on:
   workflow_call:
+    secrets:
+      MOBILE_ANDROID_KEYSTORE_BASE64:
+        required: false
+      MOBILE_ANDROID_STORE_PASSWORD:
+        required: false
+      MOBILE_ANDROID_KEY_ALIAS:
+        required: false
+      MOBILE_ANDROID_KEY_PASSWORD:
+        required: false
   workflow_dispatch:
   push:
     # Validate native-input changes on main before an immutable release tag.
@@ -85,8 +94,22 @@ jobs:
           cp .github/scripts/mobile-gradle.init.gradle "$HOME/.gradle/init.d/mobile-repositories.gradle"
       - name: Build installable debug APKs
         working-directory: desktop
+        env:
+          MOBILE_ANDROID_KEYSTORE_BASE64: ${{ secrets.MOBILE_ANDROID_KEYSTORE_BASE64 }}
+          MOBILE_ANDROID_STORE_PASSWORD: ${{ secrets.MOBILE_ANDROID_STORE_PASSWORD }}
+          MOBILE_ANDROID_KEY_ALIAS: ${{ secrets.MOBILE_ANDROID_KEY_ALIAS }}
+          MOBILE_ANDROID_KEY_PASSWORD: ${{ secrets.MOBILE_ANDROID_KEY_PASSWORD }}
         run: |
           set -o pipefail
+          if [ -n "$MOBILE_ANDROID_KEYSTORE_BASE64$MOBILE_ANDROID_STORE_PASSWORD$MOBILE_ANDROID_KEY_ALIAS$MOBILE_ANDROID_KEY_PASSWORD" ]; then
+            test -n "$MOBILE_ANDROID_KEYSTORE_BASE64" && test -n "$MOBILE_ANDROID_STORE_PASSWORD" && test -n "$MOBILE_ANDROID_KEY_ALIAS" && test -n "$MOBILE_ANDROID_KEY_PASSWORD" || { echo "::error::All four mobile signing secrets must be configured together"; exit 1; }
+            export MOBILE_ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/mobile-update.keystore"
+            trap 'rm -f "$MOBILE_ANDROID_KEYSTORE_PATH"' EXIT
+            umask 077
+            printf '%s' "$MOBILE_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$MOBILE_ANDROID_KEYSTORE_PATH"
+          else
+            echo "::warning::No persistent Android signing key configured. These acceptance APKs cannot guarantee cross-build installation updates."
+          fi
           mkdir -p ../build-artifacts/mobile-android
           npx tauri android build --debug --target aarch64 x86_64 --apk --split-per-abi --ci 2>&1 | tee ../build-artifacts/mobile-android/build.log
       - name: Preserve failed Android build diagnostics
