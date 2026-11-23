@@ -60,7 +60,9 @@ if (args[0] === '--sync') {
     if (check) {
       for (const path of files(temporary)) {
         if (!existsSync(join(icons, path)) || !readFileSync(join(icons, path)).equals(readFileSync(join(temporary, path)))) {
-          throw new Error(`Native icon is stale: ${path}. Run npm run brand:icons`);
+          const message = `Native icon is stale: ${path}. Run npm run brand:icons`;
+          console.error(`::error::${message}`);
+          throw new Error(message);
         }
       }
     } else {

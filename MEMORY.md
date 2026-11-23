@@ -1,3 +1,12 @@
+# Release correction ? v0.10.14-alpha preparation
+
+## Phase / Evidence
+RELEASE/DIAGNOSIS. Immutable .13 product8564ff61ad3a64cca77c6b0fc248935ca02ad5aa pushed; release45170715241 and image45170715059. Image build failed: Docker web stage omitted desktop/ui, causing TS2307 on native launcher import. Fixed Dockerfile COPY plus dockerignore exceptions. Exact Docker COPY isolation reproduced theme check, TypeScript and production Vite build PASS; actual Docker daemon unavailable locally.
+Cloud .13 iOS stopped at native icon consistency check; API annotations did not include stale filename. Public job log retrieval needs authentication and browser access host unavailable. Added explicit checker failure annotation so next CI names the file. No credential-store access or approval bypass. Do not call this a successful .13 release.
+## Next Action
+Commit/push corrected .14 MAIN ONLY (no .14 tag until macOS icon cause is identified and fixed). Inspect new mobile build annotations. Preserve all old tags. Current .14 manifests and release notes prepared; local underlying native acceptance below. Cloud iOS and actual container build remain unaccepted.
+
+---
 # Release continuation — v0.10.13-alpha
 
 ## Phase / Scope
@@ -5,7 +14,7 @@ RELEASE. User said continue after local delivery and outstanding commit/push/pub
 ## Verified / Decisions
 Version manifests and both lockfiles now .13; release notes docs/releases/v0.10.13-alpha.md added. Fresh typecheck/native JS31/shared i18n-theme12/mobile packaging7/icon consistency/version binding/diffcheck/desktop fmt pass. Previous full975frontend and real packaged HTTPS/browser acceptance below remains valid for product changes. Generator preparation additionally made idempotent and SHA-checked twice. No signing material configured or invented.
 ## Next Action
-Commit reviewed deliverable paths, SSH-push main and new annotated .13 tag. Discover public Actions run IDs; monitor all required jobs and image architectures, inspect failures, verify actual published assets/checksums/mobile identities and immutable source before claiming publication. Current commits/tag/run IDs not yet assigned. Do not expose credentials or bypass tool approval gates.
+Main/tag push complete; monitor all required jobs and image architectures, inspect failures, verify actual published assets/checksums/mobile identities and immutable source before claiming publication. Product commit8564ff61ad3a (full git identity authoritative), SSH atomic main/tag push SUCCESS. New immutable tagv0.10.13-alpha. Release Actions45170715241; server image45170715059; main CI45170714737; standalone mobile45170714659. Public API read works; existing gh API auth was unavailable in prior release, do not seek credential stores. Published assets not yet present; cloud verification pending. Do not expose credentials or bypass tool approval gates.
 ## Last Checkpoint
 2026-11-23: precommit release review; no .13 tag existed on remote and origin/main matches local parent e3fcd6b.
 

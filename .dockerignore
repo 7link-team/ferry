@@ -4,5 +4,7 @@ target
 data
 desktop/*
 !desktop/tauri.conf.json
+!desktop/ui
+!desktop/ui/**
 build-artifacts
 .git

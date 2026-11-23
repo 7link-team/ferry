@@ -10,6 +10,8 @@ RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY index.html tsconfig.json vite.config.ts ./
 COPY scripts/build-raft-theme.mjs ./scripts/build-raft-theme.mjs
 COPY src ./src
+# The shared TypeScript project also checks the native launcher's entry point.
+COPY desktop/ui ./desktop/ui
 # Vite copies public/ (brand logo, favicons) into dist; without it they fall back to index.html.
 COPY public ./public
 RUN npm run build
