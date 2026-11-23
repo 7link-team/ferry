@@ -1,10 +1,31 @@
+# Native icon correction ready for cloud verification (.14 still untagged)
+
+## Phase / Current source
+IMPLEMENTATION -> TESTING. Main currentlyc39ba3a; local native-icon-images.mjs +3Node tests + regenerated52assets ready to commit. New helper replaces the preliminary local opacity-only normalizer (not retained separately). Existing default Web source artwork unchanged.
+## Root cause / proof
+Mac job in diagnostic run45173565328 failed and uploaded artifact14818554355, ios-client-simulator-and-unsigned-device (3,285,052bytes). Downloaded via nightly.link artifact-ID route using8verifiedranges; direct run route404. All original files in externalmac-icons/, ZIP retained. compare-mac-icons.py reads expected c39Gitblobs and reports six differing files: Square142/284/310 and Android432foreground each1bluechannel+/-1pixel; iOS1024two RGBpixels; ICNS embedded1024payload. Pinned CLI source confirms floating point resampling/premultiplication.
+## Implemented / local verification
+- Deterministic integer area resampling with premultiplied alpha, stable PNG/ICO/ICNS encoding, same pinned dimensions/names/Android margin-mask layout; iOS opaque white.
+- True Windows+Mac diagnostic outputs (all52files) canonicalized byte-identically by local normalization test. No weakening of source-byte consistency check.
+- PNG fixtures all5filters; transparent edge resize hand expectations; encoding identity:3Node tests PASS. brand:icons then brand:icons:check PASS. Independent Pillow: PNGCRCverify, all ICO/ICNS frames decode,32px pixelidentity acrosscontainers,18iOSicons alpha255 PASS. Viewed128pxlogo; appearance faithful.
+- Normalizer has its own scripts/native-icon-images.mjs responsibility; exporter reuses it, no added dependencies. CI invokes Node tests through brand:icons:check.
+## Next action
+Commit only helper/tests/exporter/package script/generatedicons/ADR/MEMORY/.14notes; SSH-pushmain. Discover latest standalone mobile run, inspect actual Linux/macOS iconcheck and native builds. Only tag .14 after those pass; then monitor complete release+image gates and verify assets. No .14 tag yet. Prior .13 immutable and not accepted.
+
+---
 # Release correction ? v0.10.14-alpha preparation
 
 ## Phase / Evidence
 RELEASE/DIAGNOSIS. Immutable .13 product8564ff61ad3a64cca77c6b0fc248935ca02ad5aa pushed; release45170715241 and image45170715059. Image build failed: Docker web stage omitted desktop/ui, causing TS2307 on native launcher import. Fixed Dockerfile COPY plus dockerignore exceptions. Exact Docker COPY isolation reproduced theme check, TypeScript and production Vite build PASS; actual Docker daemon unavailable locally.
 Cloud .13 iOS stopped at native icon consistency check; API annotations did not include stale filename. Public job log retrieval needs authentication and browser access host unavailable. Added explicit checker failure annotation so next CI names the file. No credential-store access or approval bypass. Do not call this a successful .13 release.
+## Current diagnostic continuation
+Main f2e8cb2 pushed .14 manifests and Docker-context correction, then c39ba3a added retained native-icon diagnostic output to existing mobile CI artifacts. Still NO .14 tag. Main-mobile f2e8 run45172460785 failed Linux check explicitly: Square142x142Logo.png stale, so issue is cross-platform generation, not just iOS. Latest diagnostic mobile run45173565328, Android job137688944168 and iOS137688945356 queued at last check. Latest main root45173565853 pending. Download public diagnostic artifact using nightly.link after failure; compare generated vs committed PNG pixels/chunks before changing algorithm or assertions. No weakening consistency check.
+CUA browser host unavailable; sky Windows Chrome get_window_state was rejected by automatic review because current browser URL could not be verified. Stopped UI automation. Public API logs require admin; public job page allowed but log endpoint404. Use explicit CI failure annotations and generated diagnostics instead. WSL absent; canceled installation prompt without installing anything.
+## Additional verification / queue
+Local iOS PNG alpha check found254..255 (including1024 icon), despite white background request. Implemented an RGBA8 PNG scanline normalization in export-native-icons.mjs using only Node zlib: preserve RGB, forcealpha255, encode PNG with valid CRCs. Regenerated all18iOSicons. Independent Pillow check PASS for fullopacity AND exact RGB/dimension preservation against c39 commit; repeated brand:icons:check PASS. These opacity changes remain local/uncommitted until cross-platform diagnosis integrated. External Linux comparison now reads expected c39 blobs, so local regenerated iOS files cannot falsify cross-platform comparison. Latest c39 Android/iOS diagnostic jobs still queued through20:40 local. User was asynchronously offered cancelling old .13 runs45170714737 and45170715241 to free Runner capacity; no reply/approval inferred. No .14 tag. No active long poller remains; public status reads and optional 45s clock sleeps only.
+External compare-linux-icons.py downloads nightly.link run45173565328/android-client-build-diagnostics.zip to external evidence folder and compares bytes/RGBA extrema/counts; still404 because jobs not run. PNG samePixels uses all channel differences, not RGBA getbbox (alpha-only trap). Do not substitute a guessed algorithm or weaken checks before actual comparison.
 ## Next Action
-Commit/push corrected .14 MAIN ONLY (no .14 tag until macOS icon cause is identified and fixed). Inspect new mobile build annotations. Preserve all old tags. Current .14 manifests and release notes prepared; local underlying native acceptance below. Cloud iOS and actual container build remain unaccepted.
+Wait for c39ba3a diagnostic mobile outputs; download android-client-build-diagnostics artifact and compare Square142x142Logo.png (and remaining files) byte/pixel differences. Fix deterministic generation, validate on Windows/Linux/macOS before tagging .14. Preserve all old tags. Current .14 manifests and release notes prepared; local underlying native acceptance below. Cloud iOS and actual container build remain unaccepted.
 
 ---
 # Release continuation — v0.10.13-alpha

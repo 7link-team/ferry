@@ -1,15 +1,17 @@
 // Native packages derive their artwork from the same master as the Web UI.
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdtempSync, readFileSync, writeFileSync, readdirSync, existsSync, copyFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, existsSync, copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { normalizeNativeIconImages } from './native-icon-images.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const icons = join(root, 'desktop/icons');
 const args = process.argv.slice(2);
+
 function files(directory, prefix = '') {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
     const path = join(prefix, entry.name);
@@ -46,17 +48,7 @@ if (args[0] === '--sync') {
       join(root, 'public/brand/logo.png'), '--output', temporary, '--ios-color', '#ffffff'],
     { cwd: root, windowsHide: true, encoding: 'utf8' });
     if (result.status !== 0) throw new Error(result.stderr || result.stdout || result.error?.message);
-    // The ICNS encoder emits its HashMap entries in random order. Canonicalize
-    // container order without changing any encoded image or size metadata.
-    const icns = join(temporary, 'icon.icns');
-    const bytes = readFileSync(icns), chunks = [];
-    for (let offset = 8; offset < bytes.length;) {
-      const size = bytes.readUInt32BE(offset + 4);
-      if (size < 8 || offset + size > bytes.length) throw new Error('Invalid generated ICNS');
-      chunks.push(bytes.subarray(offset, offset + size)); offset += size;
-    }
-    chunks.sort(Buffer.compare);
-    writeFileSync(icns, Buffer.concat([bytes.subarray(0, 8), ...chunks]));
+    normalizeNativeIconImages(temporary, readFileSync(join(root, 'public/brand/logo.png')));
     // Retain generated inputs in the existing CI diagnostics artifact when a
     // platform's encoder differs; local checks produce no extra files.
     if (check && process.env.NATIVE_ICON_DIAGNOSTICS_DIR) {
