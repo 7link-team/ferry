@@ -4,7 +4,7 @@
 Priority: make production Codeup weekly workflow 116765975084269568 actually succeed through PDF and enterprise notification, Monday09:00 workspace time. Keep native v0.10.14-alpha release pending; no immutable tag moved. Workspace111019986952126464. Latest channel requested by user: enterprise chat ferry (not old company-mobile).
 
 ## Current Phase / Current Step
-REVIEW: local native authentication diagnosis fix implemented and verified. Production workflow has NOT been fixed, rerun, published or scheduled in this turn.
+TESTING / CLOUD: local native authentication diagnosis fix verified and SSH-pushed in d27e621; launcher CI order fix in94e6033. Working tree checked clean after source push. Production workflow has NOT been fixed, rerun, published or scheduled in this turn.
 
 ## Confirmed facts / Decisions
 - Execution118383005512237056 period failed after31s. ASPEED native thread01a2092d-aa97-7db1-b423-ace024e4516a has six upstream401 INVALID_API_KEY responses. Root issue is configured model-service credential rejection; no evidence of timezone/Runner auth causing this execution failure.
@@ -22,12 +22,12 @@ REVIEW: local native authentication diagnosis fix implemented and verified. Prod
 
 ## Remaining Work / Next Action
 1. Local self-review: scope/reuse/architecture/regression/complexity/durable state PASS. Original production end-to-end acceptance NOT READY: credential rejected, actual PDF/delivery/schedule unverified. No test processes remain.
-2. Commit/SSH-push reviewed authentication diagnostic fix and existing verified desktop CI order fix, then read exact new main CI results; no .14 tag until native/root CI accepted. Only explicitly stage deliverables.
+2. Read new main d27e621 Build/release45226851695 (queued at last check) and deployment acceptance45226851603 (in progress). Source commits94e6033+d27e621 SSH-pushed. No .14 tag until native/root CI accepted. Only explicitly stage deliverables.
 3. Production needs an accepted API key in existing credential sub2api codex. User can update through platform UI without sharing secret. Once normal API authorization exists, repair graph timezone/channel and run actual chain; verify real PDF and enterprise delivery before enabling schedule. Do not claim local tests equal this acceptance.
 4. Complete pending native release below, preserve separate task.
 
 ## Pending native v0.10.14-alpha publication
-- Main origin9ca4091d97 (ci Android diagnostics), versions .14; no .14 tag. Product505d6ea deterministic icons; f2e8cb2 Docker context; c39ba3a diagnostic artifacts. .13 tag8564ff61 immutable, publication failed; previous .12 release verified31assets.
+- Main origin d27e621 (auth diagnostic fix, preceded by94e6033 launcher CI order); previous origin9ca4091d97. Versions .14; no .14 tag. Product505d6ea deterministic icons; f2e8cb2 Docker context; c39ba3a diagnostic artifacts. .13 tag8564ff61 immutable, publication failed; previous .12 release verified31assets.
 - Latest mobile45181740341 source9ca4091 SUCCESS AndroidAPK+iOS simulator/native acceptance+unsignedIPA. Prior transient Gradle plugin failure resolved on retry without version downgrade.
 - Main45181740148 failed Linux desktop137759371274 and MacARM137759371668 at direct Cargo tests: desktop/ui-dist absent before bundler. Uncommitted build.yml adds npm run build:launcher after Web build and before desktop tests. Local clean-dist RED/GREEN native15pass/2existingIgnored evidence recorded.
 - User cancelled obsolete .13 builds45170714737/45170715241; no pending cancellation action. Do not re-ask.
@@ -37,7 +37,7 @@ REVIEW: local native authentication diagnosis fix implemented and verified. Prod
 
 ## Evidence / Tools / Constraints
 External evidence C:/Users/FullStack/AppData/Local/ferry-verification/: workflow-116765975084269568 has realCodex/date/mock401/PDF rendered evidence; v0.10.14-alpha has cloud diagnostics and native build RED/GREEN. .12 folder has reusable public artifact/release verification scripts. Public GitHub API/nightly.link range downloads usable; logs require auth. CUA host unavailable and earlier browser review denied address validation; no credential bypass.
-SSH root192.168.0.4 session18954 usable. Never repeat password. Postgres container ferry-postgres-1 DBferry userpostgres; server ferry-ferry-1. Limit queries to target workspace/resources; no secret printing. Native Runner state LOCALAPPDATA/ferry-runner-agent, target provider home contains exact failed Codex logs.
+SSH root192.168.0.4 session18954 was explicitly closed after diagnostics. Never repeat password. Postgres container ferry-postgres-1 DBferry userpostgres; server ferry-ferry-1. Limit queries to target workspace/resources; no secret printing. Native Runner state LOCALAPPDATA/ferry-runner-agent, target provider home contains exact failed Codex logs.
 Direct execution; no new agents/worktrees. LF, explicit staging, SSH push; preserve preexisting build.yml fix. ADR auth diagnosis design persisted.
 
 ## Last Checkpoint
