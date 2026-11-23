@@ -416,7 +416,7 @@ export function ResourceTable<T>({
           ]}
           sticky={{ header: true }} rowClickable={entry => !entry.row} onRowClick={entry => { if (!entry.row) enterFolder(entry.path); }}
           onPageChange={setPage} onPageSizeChange={value => { setPageSize(value); setPage(1); }} pageSizeOptions={[...PAGE_SIZES]} onRetry={reload} empty={commonText("repository.emptyGroup")} />
-      </div> : <AutoTable<T> fill minDataHeight={config.minDataHeight ?? "row"} layout="auto" scrollRef={scrollRef} rowKey={config.rowKey}
+      </div> : <AutoTable<T> fill minDataHeight={config.minDataHeight ?? "actions"} layout="auto" scrollRef={scrollRef} rowKey={config.rowKey}
         className="[&_[data-auto-table-footer]]:shadow-[0_-4px_10px_-4px_var(--sticky-shadow-color)]"
         hiddenFields={hiddenColumns}
         columns={config.columns.map(column => ({ field: column.key, name: configText(column.label, column.labelKey), width: column.width ? `${column.width}px` : undefined, align: column.align, sortable: column.sortable, render: (_value, row) => column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "") }))}

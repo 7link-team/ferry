@@ -192,6 +192,7 @@ export function hostsLists({
     }),
     hosts: list({
       resource: "hosts",
+      minDataHeight: "row",
       defaultRefresh: 10,
       toolbar: {
         create: { label: "添加主机", labelKey: "common-domain:form.addHost" },

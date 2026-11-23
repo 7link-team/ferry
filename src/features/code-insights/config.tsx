@@ -194,7 +194,7 @@ export function codeInsightForm(_workspace: string): FormConfig<Row> {
             label: "时区",
             labelKey: "insight-domain:时区",
             type: "custom",
-              render: ({ draft, readOnly, onPatch }) => <EffectiveTimezone><AutoField label={commonText("resource-domain:cron.timezone")}>{readOnly ? <p className="text-sm">{String(draft.timezone || "—")}</p> : <Input name="timezone" aria-label={commonText("resource-domain:cron.timezone")} value={String(draft.timezone ?? "")} readOnly={readOnly} onChange={event => onPatch({ timezone: event.target.value })} />}</AutoField></EffectiveTimezone>,
+              render: ({ draft, readOnly, onPatch }) => <EffectiveTimezone><AutoField label={commonText("resource-domain:cron.timezone")}>{readOnly ? <p className="text-sm">{String(draft.timezone || "—")}</p> : <Input name="timezone" placeholder="UTC" aria-label={commonText("resource-domain:cron.timezone")} value={String(draft.timezone ?? "")} readOnly={readOnly} onChange={event => onPatch({ timezone: event.target.value })} />}</AutoField></EffectiveTimezone>,
             placeholder: "UTC",
             when: (row) => row.update_mode === "scheduled",
             help: "留空按 UTC；Cron 按所选时区执行。可填写 IANA 时区，例如 Asia/Shanghai、Asia/Singapore。",

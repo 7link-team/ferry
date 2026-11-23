@@ -83,8 +83,8 @@ interface TableOptionsBase<T = unknown> {
   groupBy?: (row: T) => string;
   rowClickable?: (row: T) => boolean;
   scrollRef?: React.Ref<HTMLDivElement>;
-  /** Keep a readable data viewport; row measures the header and action controls. */
-  minDataHeight?: number | "row";
+  /** Keep the header plus action controls, or the complete first row, visible. */
+  minDataHeight?: number | "actions" | "row";
   minWidth?: number;
   /** Resource lists size columns to content; file lists reserve fixed metadata widths. */
   layout?: "auto" | "fixed";

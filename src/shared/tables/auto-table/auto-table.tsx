@@ -52,16 +52,18 @@ function AutoTableInner<T>(
   useLayoutEffect(() => {
     const table = tableRef.current;
     const header = table?.tHead;
-    if (options.minDataHeight !== "row" || !table || !header) return;
-    const controls = [...(table.tBodies[0]?.rows[0]?.lastElementChild?.querySelectorAll<HTMLElement>("button,a") ?? [])];
-    const measure = () => setRowMinimum(Math.max(100, Math.ceil(header.getBoundingClientRect().height + Math.max(44, ...controls.map(control => control.getBoundingClientRect().height)))));
+    if (typeof options.minDataHeight !== "string" || !table || !header) return;
+    const firstRow = table.tBodies[0]?.rows[0];
+    const controls = [...(firstRow?.lastElementChild?.querySelectorAll<HTMLElement>("button,a") ?? [])];
+    const measure = () => setRowMinimum(Math.max(100, Math.ceil(header.getBoundingClientRect().height + Math.max(44, options.minDataHeight === "row" ? firstRow?.getBoundingClientRect().height ?? 0 : 0, ...controls.map(control => control.getBoundingClientRect().height)))));
     measure();
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
     observer?.observe(header);
+    if (options.minDataHeight === "row" && firstRow) observer?.observe(firstRow);
     controls.forEach(control => observer?.observe(control));
     return () => observer?.disconnect();
   }, [options.minDataHeight, rows, options.actionWidth]);
-  const minimumDataHeight = options.minDataHeight === "row" ? rowMinimum : options.minDataHeight;
+  const minimumDataHeight = typeof options.minDataHeight === "string" ? rowMinimum : options.minDataHeight;
   const query = state?.query ?? local.query;
   const filtered = Object.values(query.filter ?? {}).some(value => value !== "" && value !== undefined && value !== null && value !== false);
   const total = state?.total ?? local.total;
