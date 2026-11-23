@@ -78,6 +78,8 @@ jobs:
         run: python3 .github/scripts/mobile-release.py version
       - run: npm ci
       - name: Verify native icons match the Web brand master
+        env:
+          NATIVE_ICON_DIAGNOSTICS_DIR: build-artifacts/mobile-android/native-icons
         run: npm run brand:icons:check
       - name: Launcher and navigation regressions
         run: npx vitest run --config desktop/vitest.config.js
@@ -156,6 +158,8 @@ jobs:
         run: python3 .github/scripts/mobile-release.py version
       - run: npm ci
       - name: Verify native icons match the Web brand master
+        env:
+          NATIVE_ICON_DIAGNOSTICS_DIR: build-artifacts/mobile-ios/native-icons
         run: npm run brand:icons:check
       - name: Install Xcode project generator
         run: command -v xcodegen || brew install xcodegen

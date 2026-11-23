@@ -57,6 +57,15 @@ if (args[0] === '--sync') {
     }
     chunks.sort(Buffer.compare);
     writeFileSync(icns, Buffer.concat([bytes.subarray(0, 8), ...chunks]));
+    // Retain generated inputs in the existing CI diagnostics artifact when a
+    // platform's encoder differs; local checks produce no extra files.
+    if (check && process.env.NATIVE_ICON_DIAGNOSTICS_DIR) {
+      const diagnostic = resolve(root, process.env.NATIVE_ICON_DIAGNOSTICS_DIR);
+      for (const path of files(temporary)) {
+        mkdirSync(dirname(join(diagnostic, path)), { recursive: true });
+        copyFileSync(join(temporary, path), join(diagnostic, path));
+      }
+    }
     if (check) {
       for (const path of files(temporary)) {
         if (!existsSync(join(icons, path)) || !readFileSync(join(icons, path)).equals(readFileSync(join(temporary, path)))) {
