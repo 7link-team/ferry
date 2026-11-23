@@ -40,6 +40,18 @@ beforeEach(() => {
   } })));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+it("keeps the page heading independent of the workspace timezone notice", async () => {
+  required = false;
+  permissions = ["hosts.read", "settings.update"];
+  await act(async () => root.render(<App />));
+  const heading = host.querySelector("h1")!;
+  expect(heading).not.toBeNull();
+  expect(heading.querySelector("a")).toBeNull();
+  const timezoneLink = host.querySelector('a[href$="/workspace-settings/1/edit"]');
+  expect(timezoneLink).not.toBeNull();
+  expect(timezoneLink!.parentElement).toBe(heading.parentElement);
+});
+
 it("refreshes identity after saving a profile without replacing the mounted form", async () => {
   required = false;
   const original = fetch;

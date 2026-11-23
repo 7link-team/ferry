@@ -372,14 +372,14 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
               )}
             </ol>
           </nav>
-          <h1 className="mt-1.5 mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xl font-semibold">
-            <span>
+          <div className="mt-1.5 mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h1 className="text-xl font-semibold">
             {item.label}
             {route.mode === "new" && (item.resource === "hosts" ? commonText("shell.addSuffix") : commonText("shell.createSuffix"))}
             {route.mode === "edit" && commonText("shell.editSuffix")}
-            </span>
+            </h1>
             {!current.timezone && permissions.has("settings.update") && <a className="text-sm font-normal text-muted-foreground underline" title={commonText("resource-domain:workspace.unconfirmedNotice")} aria-label={`${commonText("resource-domain:workspace.settings")}: ${commonText("resource-domain:workspace.unconfirmedNotice")}`} href={href({ workspace: current.id, group: "ops", item: "workspace-settings", id: "1", mode: "edit" }, {})}>{commonText("resource-domain:workspace.timezone")} · {commonText("resource-domain:workspace.unconfirmed")}</a>}
-          </h1>
+          </div>
 
           {relatedItems.length > 1 && !["pipelines", "workflows", "credentials"].includes(parentItem.key) && <nav aria-label={commonText("shell.relatedPages", { name: notificationArea ? commonText("notifications:notification-channels") : parentItem.label })} className="mb-3 flex flex-wrap gap-3">
             {relatedItems.map(i => <a key={i.key} {...to(group.key, i.key, notificationMenu && ["notification-templates", "notification-deliveries"].includes(i.key) ? { ...i.params, scope: notificationMenus[notificationMenu]! } : i.params)} aria-current={i.key === item.key ? "page" : undefined} className={cn("border-b-2 px-1 py-2 text-sm", i.key === item.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{i.label}</a>)}

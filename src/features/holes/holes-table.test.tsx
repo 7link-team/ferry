@@ -42,6 +42,12 @@ const render = async (permissions = ["holes.read", "holes.update", "holes.delete
 };
 const rowText = (index: number) => element.querySelectorAll("tbody tr")[index]!.textContent ?? "";
 
+it("reserves a usable viewport for preview rows in constrained host tabs", async () => {
+  await render();
+  const viewport = element.querySelector("table")!.parentElement!;
+  expect(viewport.style.minHeight).toBe("120px");
+});
+
 it("shows the source and review of manual and automatic previews and links to their owner", async () => {
   items.rows = [
     hole(),

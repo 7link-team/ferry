@@ -422,6 +422,7 @@ export function holesLists({
   return {
     holes: list<Hole>({
       resource: "holes",
+      minDataHeight: 120,
       defaultRefresh: 5,
       rowKey: (row) => row.id,
       filters: [
