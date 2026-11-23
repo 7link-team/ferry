@@ -77,11 +77,11 @@ export function localeHeaders(headers?: HeadersInit): Record<string, string> {
 }
 
 /** No reload or route remount: drafts, query state, fragments and history state survive. */
-export function setLocale(locale: Locale, persist = true): void {
+export function setLocale(locale: Locale, persist = true, navigate = true): void {
   if (!supportedLocales.includes(locale)) return;
   if (persist) try { localStorage.setItem(preferenceKey, locale); } catch { /* Storage is optional. */ }
   const next = localizedPath(location.pathname, locale) + location.search + location.hash;
-  history.replaceState(history.state, "", next);
+  if (navigate) history.replaceState(history.state, "", next);
   document.documentElement.lang = locale;
   document.documentElement.dir = locale.startsWith("ar-") ? "rtl" : "ltr";
   window.dispatchEvent(new Event(LOCALE_EVENT));

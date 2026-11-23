@@ -1,3 +1,37 @@
+# Release continuation — v0.10.13-alpha
+
+## Phase / Scope
+RELEASE. User said continue after local delivery and outstanding commit/push/publication report. Complete SSH main/tag push and cloud release verification for native HTTPS, shared themed launcher and brand icons. Existing .12 tag immutable. Direct; no new agents/worktrees.
+## Verified / Decisions
+Version manifests and both lockfiles now .13; release notes docs/releases/v0.10.13-alpha.md added. Fresh typecheck/native JS31/shared i18n-theme12/mobile packaging7/icon consistency/version binding/diffcheck/desktop fmt pass. Previous full975frontend and real packaged HTTPS/browser acceptance below remains valid for product changes. Generator preparation additionally made idempotent and SHA-checked twice. No signing material configured or invented.
+## Next Action
+Commit reviewed deliverable paths, SSH-push main and new annotated .13 tag. Discover public Actions run IDs; monitor all required jobs and image architectures, inspect failures, verify actual published assets/checksums/mobile identities and immutable source before claiming publication. Current commits/tag/run IDs not yet assigned. Do not expose credentials or bypass tool approval gates.
+## Last Checkpoint
+2026-11-23: precommit release review; no .13 tag existed on remote and origin/main matches local parent e3fcd6b.
+
+---
+# Native client follow-up — local acceptance COMPLETE
+
+## Phase / Scope
+ACCEPTANCE. Direct; no new agents/worktrees. Native logo correction, Android HTTPS hang and shared themed connection page complete locally. No new version/tag/commit/push/publication or production mutation.
+## Implemented / Verified
+- Official .12 APK RED: rustls-platform-verifier Android initialization panic. Fixed synchronous JNI initialization and Cargo-selected JVM companion. New packaged APK HTTPS update check returned normally, real https://ferry.7link.top rendered login, failure restored editable controls, shared language preserved exact local URL, retry reached login, no panic. No credentials entered.
+- Actual shared LanguageSwitcher(preservePath)/ThemeSwitcher in offline Vite launcher; native guards/form IDs retained; Web locale default unchanged. Form/error/update surfaces use theme tokens. Desktop native copy zh/en/ms complete; other shared locale choices fall back to English native copy.
+- Browser mobile AND desktop handlers each passed1440/820/390/320,zh/en/ms,four palettes/light-dark,custom panel,200%font,path/draft preservation,error recovery,zero app errors/whole-page overflow. Screenshots reviewed after transitions settled. Actual iOS/native desktop runtime not run on Windows; not claimed.
+- Native icons derive from Web master; isolated export and canonical ICNS chunk ordering make generation repeatable. Android/iOS CI sync hooks present. Both APK icons pixel-match source and contain JNI/JVM verifier.
+## Tests / Builds
+PASS: full frontend128files/975tests/1existingSkip using maxWorkers2 (239.28s); native JS31; shared i18n/theme12; native Rust15/2existingIgnored using unit-test TAURI_CONFIG with no sidecars. typecheck,Web productionbuild,standalone launcher build,desktop fmt,diffcheck,repeated iconcheck PASS. First unconstrained frontend run Windows subprocess timeout was stopped; bounded rerun passed original assertions unchanged.
+PASS: ARM64+x86_64 debug APK builds. Real native acceptance on owned emulator5556; original user5554 untouched. Both are local modified .12 debug packages, NOT published Release replacements and NOT physical ARM64 verification.
+## Artifacts / Evidence
+External C:/Users/FullStack/AppData/Local/ferry-verification/: apk-https-baseline.{json,log},apk-https-acceptance.json,apk-https-final.log,native-apk-content.json,native-final-android-build.log,native-ui-frontend-bounded.log,native-ui-rust-final.log,native-ui-web-build.log; connection-ui/ and connection-ui-desktop/ screenshots+verification.json. Ad hoc scripts there; no reports/logs/binaries staged.
+ARM64: desktop/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk,168090817bytes,SHA256fd6d587b5b870c15d9f23b20f036cd955b0a172dffeef4f9bf2bfa58b3d8f732. x86_64: sibling app-x86_64-debug.apk,169386814bytes,SHA2568de22d823120ae09decd6c4346a231b78313cb44c8c8900d4622bd4bd32f4698. Ignored build outputs, not Git deliverables.
+## Review / Next Action
+Self-review and requested local-behavior acceptance PASS: scope/reuse/architecture/regression/complexity/state/hygiene. ADR records design matrix. Source and generated brand assets remain uncommitted. No database/auth/business/timezone semantics changed. User can accept local ARM64 debug APK on phone; previously deferred signing limits remain. Future publication needs normal version bump/tag/cloud desktop+iOS verification; none started here. Never imply existing .12 Release changed.
+## Last Checkpoint
+2026-11-23: all local verification completed. Confirmed5556 AVD identity ClientHttpsAcceptance20261123 and stopped only this owned test emulator; original5554 untouched. External diagnostic files retained.
+
+---
+# Previous release (completed; retain immutable identity)
 # Task State
 
 ## Task / Objective

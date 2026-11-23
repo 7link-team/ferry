@@ -12,3 +12,7 @@ The user-supplied `logo.png` is the unmodified 1254×1254 RGBA master. It replac
 Run `python scripts/export-brand-icon.py` with Pillow to reproduce PNG and six-size ICO exports. Alpha transparency is retained. Small-size exports use the same complete artwork; they are not redrawn. The source is not enlarged or described as a native 2048px image.
 
 The login mark displays at 128px on phones and 160px from the small-screen breakpoint; navigation retains its compact size.
+
+Native desktop and mobile application icons use this same master. Regenerate
+them with `npm run brand:icons`; `npm run brand:icons:check` checks all native
+exports. See `desktop/icons/README.md` for native project synchronization.

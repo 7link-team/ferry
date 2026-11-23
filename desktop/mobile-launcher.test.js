@@ -1,10 +1,14 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-async function launch(settings = null, hash = '') {
+async function launch(settings = null, hash = '', sharedLocale = '') {
   vi.resetModules();
   history.replaceState({}, '', `/${hash}`);
   document.body.innerHTML = readFileSync('desktop/ui/index.html', 'utf8');
+  if (sharedLocale) {
+    document.getElementById('connection-controls').dataset.ready = 'true';
+    document.getElementById('connection-language').value = sharedLocale;
+  }
   vi.stubGlobal('__MOBILE_CLIENT__', true);
   const invoke = vi.fn(async (command) => command === 'connection_settings' ? settings : undefined);
   vi.stubGlobal('__TAURI__', { core: { invoke }, app: { getVersion: async () => '0.1.0' }, event: { listen: async () => () => {} } });
@@ -12,6 +16,16 @@ async function launch(settings = null, hash = '') {
   return invoke;
 }
 afterEach(() => { vi.unstubAllGlobals(); history.replaceState({}, '', '/'); });
+
+test('mobile uses the shared locale without showing a second language picker', async () => {
+  localStorage.setItem('connection-language', 'zh-CN');
+  try {
+    await launch(null, '#connection-settings', 'ms-MY');
+    expect(document.documentElement.lang).toBe('ms-MY');
+    expect(document.getElementById('connection-language').hidden).toBe(true);
+    expect(document.getElementById('open').textContent).toBe('Buka ruang kerja');
+  } finally { localStorage.removeItem('connection-language'); }
+});
 
 test('mobile rejects empty address without entering the local server path', async () => {
   const invoke = await launch();

@@ -1071,9 +1071,11 @@ dependencies = [
 
 [[package]]
 name = "ferry-desktop"
-version = "0.10.12-alpha"
+version = "0.10.13-alpha"
 dependencies = [
+ "jni 0.22.4",
  "reqwest",
+ "rustls-platform-verifier",
  "semver",
  "serde",
  "serde_json",

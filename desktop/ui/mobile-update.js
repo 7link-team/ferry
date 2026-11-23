@@ -8,7 +8,7 @@ export async function setupUpdates(getLocale) {
   let info = null;
   let busy = false;
   let status = 'update_ready';
-  const text = () => updateCopy[getLocale()];
+  const text = () => updateCopy[getLocale()] || updateCopy['en-US'];
   const message = (key) => (text()[key] || text().update_unavailable)
     .replace('{version}', info?.version || '');
   function render() {

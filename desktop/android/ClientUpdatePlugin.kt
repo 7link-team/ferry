@@ -21,6 +21,8 @@ class InstallUpdateArgs { lateinit var path: String }
 
 @TauriPlugin
 class ClientUpdatePlugin(private val activity: Activity) : Plugin(activity) {
+  init { nativeclient.tls.CertificateVerifier.initialize(activity.applicationContext) }
+
   @Suppress("DEPRECATION")
   private fun signers(info: PackageInfo): Set<String> =
     (if (Build.VERSION.SDK_INT >= 28) info.signingInfo?.apkContentsSigners else info.signatures)

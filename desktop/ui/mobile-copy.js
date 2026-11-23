@@ -78,3 +78,24 @@ export const updateCopy = {
     install_failed: 'Tidak dapat membuka pemasang sistem atau halaman pengedaran. Sila cuba lagi.',
   },
 };
+
+export const desktopCopy = {
+  'zh-CN': {
+    title: '连接服务', help: '输入远程服务地址，或留空使用随应用安装的本地服务。',
+    release: '发布说明 ↗', version_error: '无法读取当前版本。',
+    available: '发现版本 {version}。安装时应用将退出并重新启动。',
+    downloaded: '已下载 {size} MB，下载后校验签名。', installed: '更新已安装，正在重启…',
+  },
+  'en-US': {
+    title: 'Connect to a server', help: 'Enter a remote server address, or leave it empty to use the local service installed with this app.',
+    release: 'Release notes ↗', version_error: 'Cannot read the current version.',
+    available: 'Version {version} is available. The app will close and restart during installation.',
+    downloaded: 'Downloaded {size} MB. The signature will be verified after download.', installed: 'Update installed. Restarting…',
+  },
+  'ms-MY': {
+    title: 'Sambung ke pelayan', help: 'Masukkan alamat pelayan jauh, atau biarkan kosong untuk menggunakan perkhidmatan setempat yang dipasang bersama aplikasi ini.',
+    release: 'Nota keluaran ↗', version_error: 'Tidak dapat membaca versi semasa.',
+    available: 'Versi {version} tersedia. Aplikasi akan ditutup dan dimulakan semula semasa pemasangan.',
+    downloaded: '{size} MB dimuat turun. Tandatangan akan disahkan selepas muat turun.', installed: 'Kemas kini dipasang. Memulakan semula…',
+  },
+};

@@ -8,6 +8,28 @@ import { setLocale, supportedLocales } from "./locale";
 
 afterEach(() => localStorage.clear());
 
+it("keeps the exact native bundled document URL while switching language", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  history.replaceState({ retained: true }, "", "/index.html#connection-settings");
+  setLocale("en-US", false, false);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<LanguageSwitcher preservePath />));
+    await act(async () => host.querySelector("button")!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    const choice = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(item => item.lang === "ms-MY")!;
+    await act(async () => choice.click());
+    expect(location.pathname + location.hash).toBe("/index.html#connection-settings");
+    expect(history.state).toEqual({ retained: true });
+    expect(document.documentElement.lang).toBe("ms-MY");
+    expect(localStorage.getItem("ui.locale")).toBe("ms-MY");
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});
+
 it("switches accessible menu choices and route language without discarding an unsaved draft", async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   history.replaceState(

@@ -343,6 +343,18 @@ pub(crate) mod native {
         window.navigate(url).map_err(|_| "navigation_failed".into())
     }
 
+    #[cfg(target_os = "android")]
+    #[jni::jni_mangle("nativeclient.tls.CertificateVerifier")]
+    pub fn initialize<'caller>(
+        mut env: jni::EnvUnowned<'caller>,
+        _class: jni::objects::JClass<'caller>,
+        context: jni::objects::JObject<'caller>,
+    ) {
+        // Initialize before registering commands that issue HTTPS requests.
+        env.with_env(|env| rustls_platform_verifier::android::init_with_env(env, context))
+            .resolve::<jni::errors::ThrowRuntimeExAndDefault>();
+    }
+
     pub fn run() {
         #[allow(unused_mut)]
         let mut context = tauri::generate_context!();
@@ -544,12 +556,22 @@ mod tests {
         let native = url::Url::parse("tauri://localhost").unwrap();
         assert!(local_document(&native, &configured));
         assert!(local_document(&configured, &native));
-        assert!(capture_bundled_document(&mut None, &configured, Some(native)));
+        assert!(capture_bundled_document(
+            &mut None,
+            &configured,
+            Some(native)
+        ));
         for rejected in [
-            "tauri://localhost/untrusted.html", "tauri://localhost/?query=1",
-            "tauri://other/", "https://localhost/", "tauri://user@localhost/",
+            "tauri://localhost/untrusted.html",
+            "tauri://localhost/?query=1",
+            "tauri://other/",
+            "https://localhost/",
+            "tauri://user@localhost/",
         ] {
-            assert!(!local_document(&url::Url::parse(rejected).unwrap(), &configured));
+            assert!(!local_document(
+                &url::Url::parse(rejected).unwrap(),
+                &configured
+            ));
         }
     }
 

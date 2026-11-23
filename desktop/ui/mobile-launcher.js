@@ -7,12 +7,12 @@ document.documentElement.dataset.nativeClient = 'mobile';
 const preferred = navigator.languages?.[0] || navigator.language || 'en-US';
 let locale = preferred.startsWith('zh') ? 'zh-CN' : preferred.startsWith('ms') ? 'ms-MY' : 'en-US';
 try { locale = localStorage.getItem('connection-language') || locale; } catch { /* OS storage may be unavailable. */ }
-if (!copy[locale]) locale = 'en-US';
+if (byId('connection-controls')?.dataset.ready) locale = byId('connection-language').value;
 let busy = false;
 let renderUpdates = () => {};
 let errorKey = location.hash.includes('navigation-failed') ? 'navigation_failed' : '';
 function render() {
-  const text = copy[locale];
+  const text = copy[locale] || copy['en-US'];
   document.documentElement.lang = locale;
   document.title = text.title;
   for (const [id, key] of [['connection-title', 'title'], ['connection-help', 'help'], ['url-label', 'address']]) byId(id).textContent = text[key];
@@ -23,7 +23,7 @@ function render() {
   renderUpdates();
 }
 byId('url').placeholder = 'https://';
-byId('connection-language').hidden = false;
+byId('connection-language').hidden = !!byId('connection-controls')?.dataset.ready;
 byId('connection-language').value = locale;
 byId('connection-language').addEventListener('change', () => {
   locale = byId('connection-language').value;

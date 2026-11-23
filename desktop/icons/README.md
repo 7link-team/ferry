@@ -1,9 +1,16 @@
-`source.png` 是占位标识（1024×1024），其余文件由它生成：
+# Native application icons
 
-    npm run tauri -- icon icons/source.png --ios-color '' 2>/dev/null || npm run tauri -- icon icons/source.png
+The single artwork master is `public/brand/logo.png`, also used by the Web UI.
+The old placeholder master is no longer used. Do not edit generated images.
 
-换正式 Logo 时替换 `source.png` 再重新执行，不要手改生成结果。
+Run `npm run brand:icons` from the repository root to regenerate desktop PNG,
+Windows ICO/Store, macOS ICNS, Android launcher/adaptive foreground and iOS icons
+with the pinned Tauri CLI. The original Web artwork remains unchanged. Desktop
+icons retain transparency; iOS uses the generator's required opaque white canvas.
 
-**本项目不构建移动应用**，所以生成后请删掉 `android/` 与 `ios/` 两个目录；
-桌面与 Windows Store 需要的是本目录下的 `32x32.png`、`128x128.png`、
-`icon.icns`、`icon.ico` 和 `Square*Logo.png`，`tauri.conf.json` 只引用这些。
+Run `npm run brand:icons:check` to reject missing or stale native exports.
+After native project initialization, run
+`node scripts/export-native-icons.mjs --sync android` or `--sync ios` from the
+repository root. Mobile CI performs these steps before packaging; it copies the
+generated artwork into the platform's declared icon resources and leaves the
+official native project templates/asset manifests intact.

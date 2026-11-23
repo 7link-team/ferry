@@ -77,6 +77,8 @@ jobs:
       - name: Check release version binding
         run: python3 .github/scripts/mobile-release.py version
       - run: npm ci
+      - name: Verify native icons match the Web brand master
+        run: npm run brand:icons:check
       - name: Launcher and navigation regressions
         run: npx vitest run --config desktop/vitest.config.js
       - name: Install Android build tools
@@ -88,6 +90,7 @@ jobs:
         run: |
           npx tauri android init --ci --skip-targets-install
           node mobile-prepare.mjs
+          node ../scripts/export-native-icons.mjs --sync android
       - name: Configure official Maven Central alternative
         run: |
           mkdir -p "$HOME/.gradle/init.d"
@@ -152,11 +155,15 @@ jobs:
       - name: Check release version binding
         run: python3 .github/scripts/mobile-release.py version
       - run: npm ci
+      - name: Verify native icons match the Web brand master
+        run: npm run brand:icons:check
       - name: Install Xcode project generator
         run: command -v xcodegen || brew install xcodegen
       - name: Generate native project from official templates
         working-directory: desktop
-        run: npx tauri ios init --ci --skip-targets-install
+        run: |
+          npx tauri ios init --ci --skip-targets-install
+          node ../scripts/export-native-icons.mjs --sync ios
       - name: Build simulator client
         working-directory: desktop
         run: npx tauri ios build --debug --target aarch64-sim --no-sign --ci

@@ -13,6 +13,21 @@ beforeEach(async () => {
   invoke.mockClear();
 });
 afterEach(() => { vi.unstubAllGlobals(); });
+test('shared language changes translate the desktop form and retain its draft and update result', async () => {
+  document.getElementById('url').value = 'https://draft.example.invalid';
+  invoke.mockResolvedValueOnce({ current_version: '0.1.0-alpha.2', version: '0.1.0-alpha.3' });
+  document.getElementById('check-update').click();
+  await vi.waitFor(() => expect(document.getElementById('check-update').disabled).toBe(false));
+  const language = document.getElementById('connection-language');
+  language.value = 'ms-MY';
+  language.dispatchEvent(new Event('change'));
+  expect(document.getElementById('url-label').textContent).toBe('Alamat pelayan');
+  expect(document.getElementById('open').textContent).toBe('Buka ruang kerja');
+  expect(document.getElementById('connection-help').textContent).toContain('setempat');
+  expect(document.getElementById('update-status').textContent).toContain('0.1.0-alpha.3');
+  expect(document.getElementById('url').value).toBe('https://draft.example.invalid');
+  expect(document.getElementById('install-update').hidden).toBe(false);
+});
 test('release link uses configured URL and native browser command', async () => {
   const link = document.getElementById('release-page');
   expect(releaseInvoke).toHaveBeenCalledWith('release_page');

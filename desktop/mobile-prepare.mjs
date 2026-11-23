@@ -30,6 +30,12 @@ writeFileSync(manifest, source);
 const gradle = fileURLToPath(new URL('./gen/android/app/build.gradle.kts', import.meta.url));
 let build = readFileSync(gradle, 'utf8').replaceAll('\r\n', '\n');
 if (build.includes('AUTO-GENERATED')) throw new Error('Refusing to patch generated Gradle output');
+// The JVM verifier must match the Android companion selected by Cargo.
+const lock = readFileSync(new URL('./Cargo.lock', import.meta.url), 'utf8');
+const verifierVersion = lock.match(/name = "rustls-platform-verifier-android"\r?\nversion = "([^"]+)"/)?.[1];
+if (!verifierVersion) throw new Error('Android certificate verifier missing from Cargo.lock');
+build = build.replace(/\n\/\/ Android system certificate verifier\nrepositories \{[^\n]+\}\ndependencies \{[^\n]+\}\n/g, '\n').trimEnd();
+build += `\n// Android system certificate verifier\nrepositories { maven { url = uri("https://raw.githubusercontent.com/rustls/rustls-platform-verifier/maven-archive/android-release-support/maven/") } }\ndependencies { implementation("org.rustls:rustls-platform-verifier:${verifierVersion}") }\n`;
 build = build.replace(/compileSdk = \d+/, 'compileSdk = 36').replace(/targetSdk = \d+/, 'targetSdk = 36');
 if (!build.includes('// Persistent mobile update signing')) {
   build += `
@@ -77,6 +83,10 @@ writeFileSync(activity.replace('MainActivity.kt', 'ClientUpdatePlugin.kt'),
   readFileSync(new URL('./android/ClientUpdatePlugin.kt', import.meta.url), 'utf8')
     .replace('package __APPLICATION_PACKAGE__', `package ${config.identifier}`));
 const { mkdirSync } = await import('node:fs');
+const tlsDirectory = new URL('./gen/android/app/src/main/java/nativeclient/tls/', import.meta.url);
+mkdirSync(tlsDirectory, { recursive: true });
+writeFileSync(new URL('CertificateVerifier.kt', tlsDirectory),
+  readFileSync(new URL('./android/CertificateVerifier.kt', import.meta.url), 'utf8'));
 const xml = new URL('./gen/android/app/src/main/res/xml/', import.meta.url);
 mkdirSync(xml, { recursive: true });
 writeFileSync(new URL('update_paths.xml', xml),

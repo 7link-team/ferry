@@ -1,9 +1,12 @@
 {
   "name": "ferry",
-  "version": "0.10.12-alpha",
+  "version": "0.10.13-alpha",
   "private": true,
   "type": "module",
   "scripts": {
+    "build:launcher": "vite build --config desktop/vite.config.ts",
+    "brand:icons": "node scripts/export-native-icons.mjs",
+    "brand:icons:check": "node scripts/export-native-icons.mjs --check",
     "dev": "vite --host 127.0.0.1",
     "build": "node scripts/build-raft-theme.mjs --check && tsc -b && node --max-old-space-size=4096 node_modules/vite/bin/vite.js build",
     "typecheck": "tsc -b",

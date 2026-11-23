@@ -17,7 +17,7 @@ import {
   type Locale,
 } from "./locale";
 
-export function LanguageSwitcher({ floating = false, showLabel = false }: { floating?: boolean; showLabel?: boolean }) {
+export function LanguageSwitcher({ floating = false, showLabel = false, preservePath = false }: { floating?: boolean; showLabel?: boolean; preservePath?: boolean }) {
   const { t } = useTranslation();
   const locale = currentLocale();
   return (
@@ -54,7 +54,7 @@ export function LanguageSwitcher({ floating = false, showLabel = false }: { floa
           </div>
           <DropdownMenuRadioGroup
             value={locale}
-            onValueChange={(value) => setLocale(value as Locale)}
+            onValueChange={(value) => setLocale(value as Locale, true, !preservePath)}
             aria-label={t("language.label")}
             className="space-y-1"
           >
