@@ -4,7 +4,7 @@ Publish the workspace-timezone/workflow-diagnostic update with actual Android AP
 ## Current Phase
 RELEASE DELIVERY / LOCAL ACCEPTANCE COMPLETE
 ## Current Step
-v0.10.11-alpha source and manifests ready, NOT yet committed/tagged. Final local verification PASS. Next self-review/staged review, commit product, push immutable11tag via SSH; then docs-only [skip ci] state checkpoint/push main to avoid duplicate branch workflows. Full tag CI and container workflow remain unchanged. Track publication and verify actual Release downloads before claiming completion.
+v0.10.11-alpha product60596a319a67dc868eb2204e68d7b111c0bcdef1 committed and immutable annotated tag SSH-pushed. Exact tag Build/release45101201903 started. Final local acceptance PASS. Next commit this docs-only checkpoint [skip ci] and SSH push main (avoids duplicate branch runs; full tag CI and image workflow unchanged), then track publication and verify actual Release downloads before claiming complete.
 ## Confirmed Constraints
 - SSH push only; never move existing tags (.7/.8/.9/.10). No extra branches/worktrees, explicit staging only. Windows tty:true/login:false; hidden child processes. LF/core.autocrlf=false.
 - Workspace business timezone is editable IANA; new spaces suggest browser/system as required editable value. Existing spaces stay NULL/unconfirmed until administrator saves; no inferred backfill or historical instant rewrite.
@@ -52,3 +52,8 @@ v0.10.11-alpha source and manifests ready, NOT yet committed/tagged. Final local
 Local source self-review: scope/reuse/architecture/regression/complexity/verification PASS. Release delivery NOT READY until actual cloud publication/download verification. Execution mode Direct; no new subagents.
 ## Last Checkpoint
 2026-11-23: final scoped11local acceptance complete; ready for reviewed product commit/tag publication.
+
+## .11 tag publication checkpoint
+- Product60596a319a67dc868eb2204e68d7b111c0bcdef1, immutable tagv0.10.11-alpha SSH pushed. Exact Build/release45101201903 discovered from public filtered workflow page (API limited). Container run still to discover.
+- Full final source verification PASS:35browser scripts all exit0, actual11embedded template test incl Malay320/200%, full frontend974PASS/1existingSkip, UI/server/Runner build and cargo workspace check, mobile fixture7. No logs/binaries staged.
+- Stable verify-assets.mjs and verify-image.mjs adapted to11/source60596a3, await actual publication.
