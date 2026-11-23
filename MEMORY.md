@@ -7,12 +7,12 @@ Finish Release delivery with APK/unsigned IPA assets, and implement the user-app
 TESTING / v0.10.12-alpha CLOUD RELEASE GATES
 
 ## Current Step
-All .11 cloud rerun jobs and Release publication succeeded. Actual .11 release has31assets including APKs/IPA. All10mobile files were downloaded from exact-tag Actions artifacts and matched byte-for-byte to the published Release API SHA256/size. Small signed manifests came from Release. Package content/version/ABI validation against immutable .11tag configuration PASS. .12new update code implemented; final local full workspace tests/check running before reviewed commit/new immutable tag. Product74053d8e47e395a5f35da2280687821c03bdd2a5 committed; annotated immutable v0.10.12-alpha SSH pushed and remote peeled SHA verified. Exact Build45123101293 and Server image45123101291 target74053d8. Main documentation checkpoint push follows; no further product edits authorized by a failure-free gate.
+All .11 cloud rerun jobs and Release publication succeeded. Actual .11 release has31assets including APKs/IPA. All10mobile files were downloaded from exact-tag Actions artifacts and matched byte-for-byte to the published Release API SHA256/size. Small signed manifests came from Release. Package content/version/ABI validation against immutable .11tag configuration PASS. .12new update code and final local tests/checks completed; product committed and immutable12tag pushed. Product74053d8e47e395a5f35da2280687821c03bdd2a5 committed; annotated immutable v0.10.12-alpha SSH pushed and remote peeled SHA verified. Exact Build45123101293 and Server image45123101291 target74053d8. Main documentation checkpoint push follows; no further product edits authorized by a failure-free gate.
 
 ## Git / Source
-- Repository D:/Projects/github/ferry, product main74053d8; origin main6e94810 before documentation checkpoint push.
+- Repository D:/Projects/github/ferry, origin/main contains product74053d8 and docs checkpoints; tree clean after latest checkpoint push.
 - Immutable v0.10.11-alpha product60596a319a67dc868eb2204e68d7b111c0bcdef1. Never move tags.
-- Working tree contains mobile updater implementation, proven provider fixture coordination fix, version12in7manifests/locks and docs. Explicit staging only. No new branches/worktrees/agents.
+- Committed product contains mobile updater implementation, proven provider fixture coordination fix, version12in7manifests/locks and docs. Explicit staging only. No new branches/worktrees/agents.
 - v0.10.12-alpha notes docs/releases/v0.10.12-alpha.md; design/config/review docs/plans/2026-11-23-mobile-client-updates.md; decision ADR.md.
 
 ## Confirmed Constraints
@@ -54,11 +54,10 @@ All .11 cloud rerun jobs and Release publication succeeded. Actual .11 release h
 C:/Users/FullStack/AppData/Local/ferry-verification/v0.10.11-alpha/: final .11browser/runtime evidence; .12logs prefixedv12 and mobile-update*, mobile-updates-qa.json, mobile-update-native-results.json, provider controlledRED/GREEN logs. .12local APK staging under siblingv0.10.12-alpha/local-mobile. No generated artifacts/logs/signing keys staged.
 
 ## Remaining / Next Action
-1. Wait82272fullworkspace tests and42142workspace check; inspect final summaries and fix only actual failures. Complete self-review/staged-diff hygiene and requirement acceptance. New iOS native validation remains cloud-only.
-2. Commit reviewed12product candidate incl7versionfiles, native update code/docs and proven provider fixture fix. Annotated immutable12tag; SSH push tagfirst to trigger fullrelease, then docs-only checkpoint[skip ci]commit and SSH mainpush (prior release procedure avoids duplicate branch builds). User release/push authorization persists.
-3. Track exact new Build/image runs efficiently (publicAPI?every300s; do not poll completed jobs repeatedly). Require new iOS actual compile/native acceptance. Never skip/weaken CI gates or move failed tags.
-4. After12actualpublication, adapt stable verifiers tag/source, verify mobile full bytes/package hashes, signed runner manifest/updater refs and both image revisions. Report actual links/signing limits. .11alreadyfinished; .12notpublished yet.
-5. Final MEMORY/ADR/notes checkpoint, explicit docs-onlycommit[skip ci]/SSHmainpush, cleanworkingtree. Do not claim production deployment or live report success.
+1. Track Build45123101293 and image45123101291 for source74053d8. Active watcher71399, script stable12/watch.py polls?300s, saves jobs JSON. Latest: iOS137521172529building simulator; Android137521172652queued; checks advanced to cargo check, no failures observed. Do not start another release or repeat completed local gates without a new failure/change.
+2. Require actual new-source iOS compile/native acceptance. If a gate fails inspect its exact evidence and reproduce before fixing. Never skip/weaken assertions or move immutable12tag.
+3. After12actualpublication, use prepared stable12/verify-assets.mjs and verify-image.mjs. Download mobile Actions artifacts if CDN is slow and compare full actual payload bytes with published Release digests; record provenance, then validate package/version/ABI. Verify runner manifest signature/updater refs and both image source revisions. Do not claim full CDN downloads when using exact-tag build payloads.
+4. Final MEMORY/ADR/notes checkpoint, explicit docs-onlycommit[skip ci]/SSHmainpush, clean tree. Report actual links, fixed-signing/iOS distribution setup requirements. No production deployment/live report success claim.
 
 ## Review / Acceptance
 Execution Direct. Local feature scope/reuse/architecture/security/regression/complexity reviewed; release acceptance NOT READY pending fullworkspace results and new-source cloud native/publication. No new permission question is needed for already-authorized release.
@@ -71,3 +70,6 @@ Full .12workspace1429PASS/26ignored and check exit0; frontend974PASS/1skip, laun
 
 ## .12 immutable publication checkpoint
 2026-11-23T06:17Z: product74053d8e47e395a5f35da2280687821c03bdd2a5, tag object6f71f84b98f874561a87ec0bfd8ef5a83101d9da; remote SSH peeledSHA verified. Build/release45123101293 queued, Server image45123101291in_progress. Final split12APKs build PASS and restaged metadata/hash checks PASS; nativeRust15PASS/2existingignored, launcher29PASS, four fresh viewportlocale fixtures PASS. Source review scope/reuse/architecture/security/regression/complexity/staged hygiene PASS; no binaries/logs/keys committed. Product31files. Separate npmtypecheck exit0; workspace1429/26 result parser corrected for PowerShell UTF16 log encoding (test execution itself exit0). Main docs checkpoint [skip ci] push next. Do not recreate/move12tag; track exact runs and verify publication before claiming release complete.
+
+## Current cloud tracking / user clarification
+Main20be78c and immutable12tag74053d8 SSH pushed, local tree clean. User asked whether APK/IPA are separate from run45123101293: confirmed they are reusable-workflow jobs INSIDE this run, linked directly to Android137521172652 and iOS137521172529. Artifacts appear only after upload; one release job publishes them after all gates pass. No separate manual mobile run required. Active watcher71399; no new user decision/permission pending. .11publication already verified; remaining is12cloud validation/publication.
