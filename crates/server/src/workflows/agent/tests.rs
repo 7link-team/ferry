@@ -1126,6 +1126,10 @@ async fn exceeding_the_tool_call_limit_cancels_and_fails() {
 
 #[tokio::test]
 async fn an_approval_request_or_an_unfinished_run_fails_the_node() {
+    assert_eq!(
+        super::super::run::failure_reason(&failed("agents.upstreamAuthenticationFailed")),
+        "agent_failed"
+    );
     let fixture = Fixture::new().await;
     fixture.script(vec![
         AgentStep::Event(Event::Approval {

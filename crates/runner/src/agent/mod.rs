@@ -737,13 +737,17 @@ async fn run_command(
     diagnostics.abort();
     cleanup?;
     reaped.context("native runtime did not stop")??;
-    let _ = tokio::time::timeout(
-        Duration::from_secs(2),
-        events.send(Event::Finished {
-            outcome,
-            usage: driver.usage(),
-        }),
-    )
-    .await;
+    // A Finished event terminates the server's reader. On an execution error,
+    // let Session::Failed carry the cause instead of hiding it behind Failed.
+    if result.is_ok() {
+        let _ = tokio::time::timeout(
+            Duration::from_secs(2),
+            events.send(Event::Finished {
+                outcome,
+                usage: driver.usage(),
+            }),
+        )
+        .await;
+    }
     result.map(|_| outcome)
 }

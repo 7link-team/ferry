@@ -551,6 +551,28 @@ fn codex() -> protocol::Protocol {
 }
 
 #[test]
+fn codex_terminal_authentication_error_is_actionable_without_leaking_upstream_text() {
+    let error = json!({"message":"unexpected status 401 Unauthorized: Invalid API key, https://example.invalid/?key=private", "codexErrorInfo":{"httpConnectionFailed":{"httpStatusCode":401}}});
+    for terminal in [false, true] {
+        let mut p = codex();
+        let event = if terminal {
+            json!({"method":"turn/completed","params":{"threadId":"thread-a","turn":{"id":"turn-a","status":"failed","error":error}}})
+        } else {
+            json!({"method":"error","params":{"threadId":"thread-a","turnId":"turn-a","willRetry":false,"error":error}})
+        };
+        let failure = p
+            .receive(event)
+            .err()
+            .expect("terminal authentication failure must retain its cause");
+        assert_eq!(failure.to_string(), "agents.upstreamAuthenticationFailed");
+    }
+    let mut p = codex();
+    assert!(p.receive(json!({"method":"error","params":{"threadId":"thread-a","turnId":"turn-a","willRetry":true,"error":error}})).unwrap().done.is_none());
+    let mut p = codex();
+    assert_eq!(p.receive(json!({"method":"error","params":{"threadId":"thread-a","turnId":"turn-a","willRetry":false,"error":{"message":"other failure"}}})).unwrap().done, Some(Outcome::Failed));
+}
+
+#[test]
 fn codex_tool_arguments_preserve_native_values_and_absence() {
     let mut p = codex();
     for (kind, field, input) in [
@@ -1195,6 +1217,38 @@ async fn live_custom_provider_roundtrip() {
         }
     }
     assert!(failures.is_empty(), "failed: {failures:?}");
+}
+
+#[tokio::test]
+#[ignore = "requires installed Codex and a local upstream returning HTTP 401"]
+async fn live_custom_provider_authentication_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(Runtime::Codex);
+    req.cwd = dir.path().to_string_lossy().into_owned();
+    req.permission = Permission::ReadOnly;
+    req.model = Some("e2e-codex".into());
+    req.provider = Some(Provider {
+        key: "4242".into(),
+        format: "openai_responses".into(),
+        base_url: format!("{}/v1", std::env::var("FERRY_E2E_UPSTREAM").unwrap()),
+        api_key: "e2e-invalid-key".into(),
+        models: vec!["e2e-codex".into()],
+        options: json!({}),
+    });
+    let (events, mut received) = mpsc::channel(64);
+    let (_input, inputs) = mpsc::channel(2);
+    let (_stop, cancel) = watch::channel(false);
+    let task = tokio::spawn(run(req, events, inputs, cancel));
+    while let Some(event) = received.recv().await {
+        assert!(
+            !matches!(event, Event::Finished { .. }),
+            "Finished would hide the subsequent Session::Failed cause"
+        );
+    }
+    assert_eq!(
+        task.await.unwrap().unwrap_err().to_string(),
+        "agents.upstreamAuthenticationFailed"
+    );
 }
 
 #[test]

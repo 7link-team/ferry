@@ -381,13 +381,19 @@ impl Protocol {
                     self.pending.is_empty(),
                     "runtime completed with unresolved approvals"
                 );
+                if params["turn"]["status"] == "failed" {
+                    check_authentication_error(&params["turn"]["error"])?;
+                }
                 step.done = Some(match params["turn"]["status"].as_str() {
                     Some("completed") => Outcome::Completed,
                     Some("interrupted") => Outcome::Cancelled,
                     _ => Outcome::Failed,
                 });
             }
-            "error" if params["willRetry"] != true => step.done = Some(Outcome::Failed),
+            "error" if params["willRetry"] != true => {
+                check_authentication_error(&params["error"])?;
+                step.done = Some(Outcome::Failed);
+            }
             _ => {}
         }
         Ok(step)
@@ -481,4 +487,21 @@ impl Protocol {
         }
         Ok(step)
     }
+}
+
+// Never forward native error text: upstream diagnostics can contain credentials.
+// Only this recognized failure identity crosses the Runner transport.
+fn check_authentication_error(error: &Value) -> Result<()> {
+    let message = error["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    ensure!(
+        error["codexErrorInfo"]["httpConnectionFailed"]["httpStatusCode"] != 401
+            && !message.contains("401 unauthorized")
+            && !message.contains("invalid_api_key")
+            && !message.contains("invalid api key"),
+        "agents.upstreamAuthenticationFailed"
+    );
+    Ok(())
 }

@@ -54,6 +54,12 @@ fn offline(name: &str) -> ApiError {
 
 fn remote_failed(error: impl std::fmt::Display) -> ApiError {
     let error = error.to_string();
+    if error == "agents.upstreamAuthenticationFailed" {
+        return ApiError::localized(
+            StatusCode::BAD_GATEWAY,
+            crate::i18n::Message::new("agents.upstreamAuthenticationFailed"),
+        );
+    }
     if error == "agents.runtimeSetupFailed" {
         return ApiError::localized(
             StatusCode::CONFLICT,
@@ -234,6 +240,21 @@ mod tests {
 
     #[test]
     fn session_failure_identity_is_allowlisted_and_preserves_unknown_raw_reasons() {
+        let authentication = remote_failed("agents.upstreamAuthenticationFailed");
+        assert_eq!(authentication.0, StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            authentication.2.as_ref().unwrap().key,
+            "agents.upstreamAuthenticationFailed"
+        );
+        for locale in [
+            crate::i18n::Locale::EnUs,
+            crate::i18n::Locale::ZhCn,
+            crate::i18n::Locale::MsMy,
+        ] {
+            let rendered = authentication.render(locale);
+            assert!(rendered.contains("401"));
+            assert!(!rendered.contains("agents.upstreamAuthenticationFailed"));
+        }
         let setup = remote_failed("agents.runtimeSetupFailed");
         assert_eq!(setup.0, StatusCode::CONFLICT);
         for locale in crate::i18n::Locale::ALL {
