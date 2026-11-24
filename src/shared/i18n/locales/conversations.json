@@ -1,4 +1,5 @@
 {
+  "queueSend": ["Queue", "排队发送", "排隊傳送", "待機送信", "대기 전송", "Beratur"],
   "modelIntroduction": ["Automatic introduction","自动介绍","自動介紹","自動自己紹介","자동 소개","Pengenalan automatik"],
   "retryIntroduction": ["Retry introduction","重新生成介绍","重新產生介紹","自己紹介を再生成","소개 다시 생성","Jana semula pengenalan"],
   "emptyConversationTitle": ["A conversation starts here", "从一句话开始", "從一句話開始", "ここから会話を始めましょう", "여기서 대화를 시작하세요", "Perbualan bermula di sini"],

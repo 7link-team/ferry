@@ -39,7 +39,8 @@ try{
     const after={title:await title.boundingBox(),footer:await footer.boundingBox()};
     assert(Math.abs(before.title.y-after.title.y)<1,label+' title moved');
     assert(Math.abs(before.footer.y-after.footer.y)<1,label+' footer moved');
-    assert(after.title.y>=0&&after.footer.y+after.footer.height<=page.viewportSize().height,label+' chrome outside viewport');
+    const visible=await page.evaluate(()=>({top:visualViewport?.offsetTop??0,bottom:(visualViewport?.offsetTop??0)+(visualViewport?.height??innerHeight)}));
+    assert(after.title.y>=visible.top&&after.footer.y+after.footer.height<=visible.bottom,label+' chrome outside visible viewport');
     assert.equal(await dialog.evaluate(el=>el.scrollTop),0,label+' outer surface scrolled');
     assert(await body.evaluate(el=>el.scrollTop>0),label+' body did not scroll');
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),label+' document overflow');
@@ -53,6 +54,13 @@ try{
     await assertChrome('workflow-run-'+width);
     const dialog=page.getByRole('dialog');
     await dialog.getByRole('textbox',{name:'field_31',exact:true}).fill('last-field');
+    if(width===390){
+      await page.evaluate(()=>{for(const [key,value]of Object.entries({height:360,offsetTop:20}))Object.defineProperty(visualViewport,key,{configurable:true,value});visualViewport.dispatchEvent(new Event('resize'));});
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      await assertChrome('workflow-run-visual-keyboard');
+      assert.equal(await dialog.getByRole('textbox',{name:'field_31',exact:true}).inputValue(),'last-field');
+      await page.evaluate(()=>{for(const key of ['height','offsetTop'])delete visualViewport[key];visualViewport.dispatchEvent(new Event('resize'));});
+    }
     await dialog.getByRole('button',{name:'取消',exact:true}).click();
     assert.equal(await page.getByRole('dialog').count(),0);
   }

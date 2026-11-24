@@ -500,7 +500,7 @@ export function Composer({
         e.preventDefault();
         if (!locked && !recording) void onSend();
       }}
-      className="mx-auto w-full max-w-4xl space-y-2"
+      className="mx-auto w-full max-w-4xl shrink-0 space-y-2"
     >
       <div
         data-conversation-composer
@@ -695,8 +695,9 @@ export function Composer({
         )}
         <div
           data-composer-toolbar
-          className="flex flex-wrap items-center gap-1 border-t border-border/50 bg-muted/20 px-2 py-1.5 [&>button]:size-11 [&_button]:min-h-11 [&_button]:min-w-11"
+          className="flex items-center gap-1 border-t border-border/50 bg-muted/20 px-2 py-1.5 [&_button]:min-h-11 [&_button]:min-w-11"
         >
+          <div data-composer-tools className="flex min-w-[44px] flex-1 items-center gap-1 overflow-x-auto [&>button]:size-[44px] [&>button]:shrink-0">
           <input
             ref={fileInput}
             aria-label={t("attach")}
@@ -743,7 +744,8 @@ export function Composer({
               <AtSign />
             </Button>
           )}
-          <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center gap-1">
+          </div>
+          <div className="ml-auto flex min-w-0 max-w-full shrink items-center gap-1">
             {current && (
               <Button
                 type="button"
@@ -756,21 +758,23 @@ export function Composer({
                 <Square className="size-4" />
               </Button>
             )}
-            <div className="flex min-w-0 max-w-full shrink-0 items-stretch">
+            <div className="flex min-w-0 max-w-full shrink items-stretch">
               <Button
                 type="submit"
                 size="sm"
-                className="h-auto min-w-0 flex-1 whitespace-normal rounded-r-none text-xs disabled:opacity-100 disabled:text-primary-foreground/50"
+                className="h-auto min-w-[44px] flex-1 shrink whitespace-normal rounded-r-none text-xs disabled:opacity-100 disabled:text-primary-foreground/50"
                 title={t(mode === "enter" ? "enterSends" : "ctrlEnterSends")}
+                aria-label={queues ? t(mode === "enter" ? "queueWithEnter" : "queueWithCtrlEnter") : t(mode === "enter" ? "sendWithEnter" : "sendWithCtrlEnter")}
                 disabled={
                   locked ||
                   recording ||
                   (!draft.prompt.trim() && !draft.attachments.length)
                 }
               >
-                {queues
+                <span className="break-all md:hidden">{t(queues ? "queueSend" : "send")}</span>
+                <span className="hidden md:inline">{queues
                   ? t(mode === "enter" ? "queueWithEnter" : "queueWithCtrlEnter")
-                  : t(mode === "enter" ? "sendWithEnter" : "sendWithCtrlEnter")}
+                  : t(mode === "enter" ? "sendWithEnter" : "sendWithCtrlEnter")}</span>
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

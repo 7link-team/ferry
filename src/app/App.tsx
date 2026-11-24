@@ -293,7 +293,7 @@ function Workspace({ identity, reload, onSignedOut, conversationSessions }: { id
     </div>;
 
   return (
-    <div className={cn("grid h-full min-h-0 min-w-0 grid-cols-1", item.resource === "conversations" ? "grid-rows-[min-content_minmax(min-content,1fr)_min-content] overflow-y-auto md:grid-rows-[min-content_minmax(min-content,1fr)]" : "grid-rows-[auto_minmax(0,1fr)_auto] md:grid-rows-[auto_minmax(0,1fr)]")}>
+    <div data-workspace-shell className="grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] max-md:overflow-hidden md:grid-rows-[auto_minmax(0,1fr)]">
       <AppHeader home={to(nav[0]!.key, nav[0]!.items[0]!.key)} navigation={
         <nav className="hidden min-w-0 max-w-full gap-1 overflow-x-auto md:flex" aria-label={t("app.modules")}>
           {groups.map((g) => (
@@ -344,9 +344,8 @@ function Workspace({ identity, reload, onSignedOut, conversationSessions }: { id
           </div>)}
         </nav>
 
-        {/* Content keeps its scroll container; configuration forms retain a readable
-            minimum and let the outer shell scroll when space is constrained. */}
-        <main className={cn("grid min-h-0 min-w-0 grid-cols-1 px-4 pt-3", route.mode === "list" ? "grid-rows-[auto_minmax(min-content,1fr)] overflow-x-hidden overflow-y-auto" : "grid-rows-[auto_1fr]")}>
+        {/* Content scrolls inside the mobile shell while navigation stays reachable. */}
+        <main className={cn("grid min-h-0 min-w-0 grid-cols-1 overflow-y-auto px-4 pt-3", route.mode === "list" ? "grid-rows-[auto_minmax(min-content,1fr)] overflow-x-hidden" : "grid-rows-[auto_minmax(0,1fr)]")}>
           <div>
           {route.mode === "list" && visibleMenu.length > 1 && <div className="mb-2 md:hidden"><DropdownMenu key={route.item}><DropdownMenuTrigger asChild><Button variant="outline" className="min-h-11 w-full justify-between"><span className="min-w-0 truncate">{group.label} · {parentItem.label}</span><ChevronDown className="size-4 shrink-0" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" collisionPadding={8} className="max-h-[60dvh] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto">{visibleMenu.map(entry => <DropdownMenuItem asChild key={entry.key}><a {...to(group.key, menuTarget(group, entry).key, menuTarget(group, entry).params)} aria-current={entry.key === parentItem.key ? "page" : undefined} className="min-h-11 whitespace-normal break-words">{entry.section ? `${commonText(entry.section)} · ` : ""}{entry.label}</a></DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>}
           <nav aria-label={commonText("shell.breadcrumbs")}>

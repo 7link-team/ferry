@@ -345,7 +345,7 @@ export function ConversationsWorkspace({
         {sidebar}
       </aside>
       <main className="relative flex min-h-0 min-w-0 flex-col">
-        <div className="absolute left-2 top-3 z-10 md:hidden">
+        <div data-conversation-navigation className="absolute left-2 top-2 z-10 md:hidden">
           {mobileButton}
         </div>
         {!readable || denied ? (
@@ -413,6 +413,7 @@ export function ConversationsWorkspace({
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40 md:hidden" />
           <Dialog.Content
+            data-mobile-drawer
             aria-describedby={undefined}
             className="fixed inset-y-0 left-0 z-50 flex w-[min(20rem,85vw)] flex-col border-r bg-sidebar text-sidebar-foreground shadow-lg md:hidden"
           >

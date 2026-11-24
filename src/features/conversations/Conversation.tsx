@@ -695,7 +695,7 @@ export function Conversation({
       className="relative flex min-h-0 min-w-0 flex-1 flex-col"
       aria-label={t("title")}
     >
-      <header className="shrink-0 border-b bg-background px-3 py-3 md:px-6">
+      <header data-conversation-header className="shrink-0 border-b bg-background px-3 py-2 md:px-6 md:py-3">
         <div className="flex flex-col items-stretch gap-3 md:flex-row md:flex-wrap md:items-center md:justify-between">
           <button
             type="button"
@@ -721,7 +721,7 @@ export function Conversation({
               </p>
             </div>
           </button>
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1 [&>button]:min-h-11 [&>button]:min-w-11">
+          <div role="group" aria-label={t("title")} tabIndex={0} className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto md:flex-wrap [&>button]:shrink-0 [&>button]:min-h-11 [&>button]:min-w-11">
             <ConversationApproval endpoint={endpoint} mode={data.config.approval_mode??"request"} version={data.version} canManage={!!data.can_manage&&permissions.has("conversations.update")} executing={executing} onSaved={(mode,version)=>setData(old=>old?{...old,version,config:{...old.config,approval_mode:mode}}:old)}/>
             {data.can_manage && permissions.has("conversations.update") && <ConversationAppearance endpoint={endpoint} value={data.config.appearance} canUpload={permissions.has("conversations.run") && data.state === "active"} onSaved={appearance => setData(old => old ? { ...old, config: { ...old.config, appearance } } : old)} />}
             <Button
@@ -786,7 +786,7 @@ export function Conversation({
         )}
       </header>
       <div
-        className="flex shrink-0 flex-wrap items-center gap-1 border-b px-3 py-1.5 sm:px-6"
+        className="flex shrink-0 items-center gap-1 overflow-x-auto border-b px-3 py-1.5 sm:px-6 md:flex-wrap [&>button]:shrink-0"
         role="group"
         aria-label={t("messageFilters")}
       >
@@ -872,7 +872,7 @@ export function Conversation({
             node.scrollHeight - node.scrollTop - node.clientHeight < 80;
           if (follow.current) setNewBelow(false);
         }}
-        className="conversation-feed min-h-[min(50dvh,16rem)] flex-1 overflow-auto overscroll-contain px-2 pb-6 pt-3 sm:px-6"
+        className="conversation-feed min-h-0 flex-1 overflow-auto overscroll-contain px-2 pb-6 pt-3 sm:px-6"
         aria-label={t("messages")}
       >
         <div className={`mx-auto w-full max-w-4xl ${!data.turns.length && !data.messages.length ? "flex min-h-full flex-col" : ""}`}>

@@ -46,6 +46,9 @@ try {
     assert.equal(await page.getByRole('dialog').count(),0);
     await page.reload();await page.locator('button[type=submit]').last().waitFor();
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),tab+' edit overflow '+width);
+    if(width<768)for(const input of await page.locator('input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([aria-hidden=true]),textarea,select:not([aria-hidden=true])').all()) {
+      assert(await input.evaluate(element=>parseFloat(getComputedStyle(element).fontSize)>=16),tab+' mobile field font '+width);
+    }
     if(width<1200)for(const button of await page.locator('.crud-config-page [data-slot=button]:visible').all()) {
       const box=await button.boundingBox();assert(box.height>=44&&box.width>=44,tab+' touch target '+width);
     }

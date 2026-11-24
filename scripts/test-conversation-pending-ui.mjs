@@ -134,6 +134,63 @@ try {
     releaseDetail();
     assert.deepEqual(errors, []);
     console.log(`PASS ${width}px: cold entry has no empty flash, returning restores thread and unsent draft before the API responds, document retained`);
+    if (width === 390) {
+      await page.evaluate(()=>localStorage.setItem('ui.chat.composerHeight','288'));
+      await go('/en-US/account');await page.locator('input[name=name]').waitFor();
+      await go('/en-US/workspaces/1/conversations/2');
+      await page.getByRole('heading',{name:row.title,exact:true}).waitFor();
+      const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const bounds = async (label, focused, top = 0, height = page.viewportSize().height) => {
+        const metrics = await page.evaluate(() => {
+          const box = selector => { const element = document.querySelector(selector), rect = element.getBoundingClientRect(); return {x:rect.x,y:rect.y,right:rect.right,bottom:rect.bottom,height:rect.height,width:rect.width,client:element.clientHeight,scroll:element.scrollHeight}; };
+          return {send:box('[data-conversation-composer] button[type=submit]'),tools:box('[data-composer-tools]'),feed:box('.conversation-feed'),nav:box('[data-mobile-navigation]'),frame:box('[data-app-viewport]'),width:innerWidth,document:document.documentElement.scrollWidth,draft:document.querySelector('textarea').value};
+        });
+        assert(metrics.send.y >= top && metrics.send.bottom <= top+height+1,label+' send outside viewport: '+JSON.stringify(metrics));
+        assert(metrics.send.x>=0 && metrics.send.right<=metrics.width+1,label+' send outside width');
+        assert(metrics.send.height>=44 && metrics.send.width>=44,label+' send touch target');
+        assert(metrics.tools.width>=44,label+' attachment/record controls lost their scroll area');
+        assert(metrics.feed.client>8,label+' message region collapsed');
+        assert(metrics.document<=metrics.width,label+' whole-page horizontal overflow');
+        assert.equal(metrics.draft,'Keep this unsent draft',label+' draft lost');
+        if (!focused) assert(metrics.nav.height>0 && metrics.nav.bottom<=top+height+1,label+' navigation outside viewport');
+      };
+      for (const locale of ['en-US','zh-CN','ms-MY']) {
+        await go(`/${locale}/workspaces/1/conversations/2`);
+        for (const size of [{width:375,height:667},{width:320,height:568},{width:667,height:375},{width:375,height:360}]) {
+          await page.locator('textarea').evaluate(element=>element.blur());
+          await page.setViewportSize(size);
+          const focused=size.height<=500;
+          if (focused) await page.locator('textarea').focus();
+          await settle();await bounds(`${locale}-${size.width}-${size.height}`,focused);
+          const sendTop=await page.locator('[data-conversation-composer] button[type=submit]').evaluate(element=>element.getBoundingClientRect().top);
+          await page.locator('.conversation-feed').evaluate(element=>element.scrollTop=0);
+          assert.equal(await page.locator('[data-conversation-composer] button[type=submit]').evaluate(element=>element.getBoundingClientRect().top),sendTop,'scrolling messages must not move send controls');
+          assert.equal(await page.locator('[data-platform-content]').evaluate(element=>element.scrollTop),0,'conversation must not scroll its outer shell');
+          await page.screenshot({path:join(evidence,`h5-${locale}-${size.width}-${size.height}.png`),fullPage:true});
+        }
+      }
+      // Simulate a keyboard that shrinks only visualViewport, as on iOS.
+      await page.setViewportSize({width:375,height:667});
+      await page.locator('textarea').focus();
+      await page.evaluate(()=>{const view=visualViewport;for(const [key,value] of Object.entries({height:360,offsetTop:20}))Object.defineProperty(view,key,{configurable:true,value});view.dispatchEvent(new Event('resize'));});
+      await settle();await bounds('visual-keyboard',true,20,360);
+      await page.locator('[data-conversation-navigation] button').click();
+      const drawer=page.locator('[data-mobile-drawer]');await drawer.waitFor();
+      await drawer.locator('input').focus();await settle();
+      const drawerBox=await drawer.boundingBox();
+      assert(drawerBox.y>=20 && drawerBox.y+drawerBox.height<=381,'conversation drawer must fit the keyboard viewport');
+      await page.evaluate(()=>{for(const key of ['height','offsetTop'])delete visualViewport[key];visualViewport.dispatchEvent(new Event('resize'));});
+      await drawer.getByRole('button').first().click();
+      await page.locator('textarea').evaluate(element=>element.blur());await settle();await bounds('keyboard-dismissed',false);
+      await page.emulateMedia({reducedMotion:'reduce'});
+      await page.evaluate(()=>{document.documentElement.style.fontSize='32px';document.documentElement.classList.add('dark');});
+      await page.locator('textarea').focus();await settle();await bounds('large-text-dark-reduced-motion',true);
+      await page.screenshot({path:join(evidence,'h5-large-text-dark.png'),fullPage:true});
+      await page.evaluate(()=>{document.documentElement.style.removeProperty('font-size');document.documentElement.classList.remove('dark');});
+      await page.locator('textarea').evaluate(element=>element.blur());await settle();
+      assert.equal(await page.evaluate(()=>localStorage.getItem('ui.chat.composerHeight')),'288','keyboard and rotation must not overwrite the resize preference');
+      console.log('PASS H5: zh/en/ms phone/landscape/short viewport, visual-only keyboard resize/dismiss, 200% text, dark and reduced motion; send/navigation reachable and drafts retained');
+    }
     await context.close();
   }
   console.log(`Evidence: ${evidence}`);
