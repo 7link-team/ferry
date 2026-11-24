@@ -116,20 +116,22 @@ fn validate(request: &Request) -> Result<()> {
     Ok(())
 }
 
-/// Claude's `--tools` and `--allowedTools` values for a request.
+/// Claude's `--tools` and `--allowedTools` values for a request. `Task` (named
+/// `Agent` in newer CLIs, which still accept `Task`) lets Claude run its own
+/// subagents inside the turn, under the same tool and directory limits.
 fn claude_tools(request: &Request) -> (&'static str, &'static str) {
     const PLATFORM: &str =
         "mcp__ferry__ferry_discover,mcp__ferry__ferry_request,mcp__ferry__ferry_ask_user";
     if request.write_workdir {
         return if request.platform_tools {
             (
-                "Read,Glob,Grep,Edit,Write,mcp__ferry__ferry_discover,mcp__ferry__ferry_request,mcp__ferry__ferry_ask_user",
-                "Read(./**),Edit(./**),Write(./**),mcp__ferry__ferry_discover,mcp__ferry__ferry_request,mcp__ferry__ferry_ask_user",
+                "Read,Glob,Grep,Edit,Write,Task,mcp__ferry__ferry_discover,mcp__ferry__ferry_request,mcp__ferry__ferry_ask_user",
+                "Read(./**),Edit(./**),Write(./**),Task,mcp__ferry__ferry_discover,mcp__ferry__ferry_request,mcp__ferry__ferry_ask_user",
             )
         } else {
             (
-                "Read,Glob,Grep,Edit,Write",
-                "Read(./**),Edit(./**),Write(./**)",
+                "Read,Glob,Grep,Edit,Write,Task",
+                "Read(./**),Edit(./**),Write(./**),Task",
             )
         };
     }
@@ -138,7 +140,7 @@ fn claude_tools(request: &Request) -> (&'static str, &'static str) {
     } else if request.permission == Permission::ReadOnly {
         PLATFORM
     } else {
-        "Read,Glob,Grep,Edit,Write,Bash,mcp__ferry__ferry_discover,mcp__ferry__ferry_request,mcp__ferry__ferry_ask_user"
+        "Read,Glob,Grep,Edit,Write,Bash,Task,mcp__ferry__ferry_discover,mcp__ferry__ferry_request,mcp__ferry__ferry_ask_user"
     };
     (tools, if request.platform_tools { PLATFORM } else { "" })
 }

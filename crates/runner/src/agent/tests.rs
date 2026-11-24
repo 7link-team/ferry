@@ -1422,3 +1422,25 @@ fn native_approval_count_has_no_legacy_sixteen_call_ceiling() {
         assert!(matches!(&step.events[0], Event::Approval { .. }));
     }
 }
+
+#[test]
+fn claude_may_run_its_own_subagents_only_where_it_may_use_tools() {
+    let mut r = request(Runtime::Claude);
+    r.permission = Permission::OnRequest;
+    let (tools, _) = claude_tools(&r);
+    assert!(tools.split(',').any(|t| t == "Task"), "{tools}");
+    r.write_workdir = true;
+    let (tools, allowed) = claude_tools(&r);
+    assert!(tools.split(',').any(|t| t == "Task"), "{tools}");
+    assert!(allowed.split(',').any(|t| t == "Task"), "{allowed}");
+    r.write_workdir = false;
+    r.permission = Permission::ReadOnly;
+    for platform in [false, true] {
+        r.platform_tools = platform;
+        let (tools, allowed) = claude_tools(&r);
+        assert!(
+            !tools.contains("Task") && !allowed.contains("Task"),
+            "{tools}"
+        );
+    }
+}
