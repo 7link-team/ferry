@@ -6,7 +6,7 @@
 3. Complete native v0.10.14-alpha publication, preserving immutable tags and signing limitations.
 
 ## Current Phase / Current Step
-TESTING / CLOUD: local source follow-ups verified and SSH-pushed in4897b632da094d904f17cffa72e38b319d2ebd60; working tree checked clean. No production writes, schedule enabling or deployment occurred. .14 tag already exists at previous accepted source; new source is outside that tag.
+TESTING / CLOUD: follow-ups pushed in4897b632da094d904f17cffa72e38b319d2ebd60; two CI acceptance adaptations locally verified, ready for commit and cloud validation. No production writes, schedule enabling or deployment occurred. .14 tag already exists at previous accepted source; new source is outside that tag.
 
 ## Production status / Blocker
 - User repaired provider token. Latest actual execution118539555044327424 (#3) passed period+commits, then failed expression /nodes/3/params/prompt before analyze starts. Real sandbox reproduces batch $json being absent. Saved prompt uses JSON.stringify($json). Recommend plain instructions: remove leading '=' and interpolation; compose automatically appends every input JSON once. Explicit $input.all().map(item=>item.json) is also verified if needed. No new execution after#3 at last server check.
@@ -32,7 +32,7 @@ Self-review: scope/reuse/architecture/complexity/regression/commit hygiene/durab
 ## Publication status / Next actions
 - Main source now4897b63; previous checkpoint3ad5ef8; accepted product d27e621 and launcher CI order94e6033. Main45226851695 + deployment45226851603 SUCCESS.
 - v0.10.14-alpha TAG CREATED and SSH-pushed at d27e6219f9c69e626dd1dc4812be594e8e396cb8, exact accepted source. Never move it. Source manifests still .14; later feature changes need a later version before release.
-- Exact-tag root45313356617 in progress, but mobile/ios job138174186856 FAILED native flow before first case. Image45313356564 still in progress at last check. No .14 publication success claim.
+- Exact-tag root45313356617 completed FAILURE, sole mobile/ios job138174186856 FAILED before first case. Image45313356564 completed SUCCESS; rerun attempt remains1. No .14 publication success claim.
 - Actual27,152,377byte diagnostic ZIP verified: LOCALAPPDATA/ferry-verification/v0.10.14-alpha/tag-ios-diagnostics.zip. results.json: cases[], uiAcceptancePENDING, xcrun simctl launch ETIMEDOUT at60s; subsequent terminate and uninstall also time out. Not an app assertion failure. Latest main standalone mobile45181740341 had passed. Recommended original failed-job rerun on a fresh CI host; user question pending with job URL. Re-run menu may require whole root run completion; do not tell user to cancel running release jobs.
 - No GitHub authenticated CLI/browser available to rerun. Public API/artifact downloads usable; no token/cookie bypass. Signing remains user-deferred: AndroiddebugAPK, unsignedIPA, no direct iPhone installation or cross-CI upgrade-signing claim.
 
@@ -44,3 +44,15 @@ Self-review: scope/reuse/architecture/complexity/regression/commit hygiene/durab
 ## Constraints / Last checkpoint
 Direct execution, no new agents/worktrees. LF, no blind staging, no build/temporary artifacts in Git. Preserve users' explicit approval modes/budget/timezone decisions. Prior native logo/HTTPS/launcher changes and evidence remain in Git/ADR; earlier .12 verified31assets, .13failed immutable.
 2026-11-24: all requested local UI/workspace/log fixes accepted; production workflow and .14 release remain independently unfinished.
+
+## 2026-11-24 CI follow-up checkpoint
+- Main45318798793: upgrade check rejects additive workspace avatar:null; existing test already normalizes additive account avatar and workspace timezone. Add an explicit avatar-is-null assertion before full historical resource equality, preserving every old-field assertion. No product/API change.
+- Workspace browser assertion included new initials in whole-menu innerText. Now separately assert exact workspace name and exact owner role, retaining aria-checked and all downstream operations. Complete local test-workspace-admin-ui PASS.
+- Deployment acceptance45318798764 SUCCESS. Main still running with these two failures; tag iOS rerun not started.
+- Local upgrade first attempted with old-named release0101 binary: HTTP404 at legacy hosts route, proves unsuitable artifact, not a migration result. Exported immutable v0.1.0-alpha.1 source outside repo (no worktree) and compiling actual old server; next run old-source binary against current embedded server. PostgreSQL/MySQL gates remain cloud verification.
+- Next: finish actual alpha1 build, run upgrade regression, checkpoint/commit exact two test adaptations, SSH-push, track new CI. Production workflow and release still NOT READY.
+
+## CI adaptation verification
+PASS: actual v0.1.0-alpha.1 exported source compiled without changes; complete SQLite upgrade using that binary and current server passed, preserving account/session, grants, credentials, repository, host, pipeline/run, backups, restart behavior, and asserting workspace avatar NULL. POSIX successful-run comparison explicitly skipped on Windows; cloud Linux and three-database verification still required.
+PASS: full workspace-admin real Chromium acceptance (including exact workspace name/owner role with initials avatar, invite rotation/join, custom roles and member operations), LF/diff hygiene. Only two acceptance scripts changed; production code unchanged. Self-review scope/reuse/architecture/complexity/regression PASS for test adaptations. Overall production/report/release acceptance remains NOT READY.
+Next: explicitly commit MEMORY.md plus two scripts, SSH push main, inspect fresh CI; .14 iOS rerun still awaits user action with original request pending.

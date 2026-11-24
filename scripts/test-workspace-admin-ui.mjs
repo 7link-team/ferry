@@ -72,7 +72,8 @@ try {
   await switcher.click();
   const guestHome = g.getByRole('menuitemradio').filter({hasText:'Guest home'});
   assert.equal(await guestHome.getAttribute('aria-checked'),'true');
-  assert.match(await guestHome.innerText(),/^Guest home\s*拥有者（我创建的）$/);
+  assert.equal(await guestHome.getByText('Guest home', {exact:true}).count(), 1);
+  assert.equal(await guestHome.getByText('拥有者（我创建的）', {exact:true}).count(), 1);
   await g.getByRole('menuitem',{name:'创建/加入工作空间',exact:true}).click();
   await g.getByPlaceholder('邀请码',{exact:true}).fill(code);
   await g.getByRole('button',{name:'加入',exact:true}).click();

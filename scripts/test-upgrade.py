@@ -180,6 +180,10 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                         # additive projection must not guess a business zone.
                         assert 'timezone' in migrated and migrated['timezone'] is None, migrated
                         original['timezone'] = None
+                        # Workspace presentation is additive; legacy spaces have
+                        # no saved avatar. Keep every other field comparison.
+                        assert 'avatar' in migrated and migrated['avatar'] is None, migrated
+                        original['avatar'] = None
                 if path == '/workspaces/upgrade/pipeline-runs/'+run:
                     # New archive metadata is additive; old runs have no archived files.
                     assert after.get('artifacts') == []
