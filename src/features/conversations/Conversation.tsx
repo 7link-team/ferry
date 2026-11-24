@@ -6,6 +6,8 @@ import { randomUUID } from "../../shared/uuid";
 import { IdentityAvatar, type AvatarValue } from "../../shared/ui/identity-avatar";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, api, errorText } from "../../shared/api/api";
+import { canResumeSession } from "../../shared/api/session";
+import { watchPageResume } from "../../shared/api/use-auto-refresh";
 import { base } from "../../shared/api/resource";
 import { AlertDialog, Dialog } from "radix-ui";
 import { toast } from "sonner";
@@ -388,9 +390,10 @@ export function Conversation({
     };
   }, [lastMessage, endpoint, activity, thread, executing]);
   useEffect(() => {
-    const controller = new AbortController();
+    let controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
-    async function refresh() {
+    async function refresh(controller: AbortController) {
+      if (document.hidden) return;
       try {
         const revision = decisionRevision.current;
         const row = await api<ConversationData>(endpoint, {
@@ -423,7 +426,8 @@ export function Conversation({
         if (controller.signal.aborted) return;
         if (
           cause instanceof ApiError &&
-          [401, 403, 404].includes(cause.status)
+          [401, 403, 404].includes(cause.status) &&
+          !(cause.status === 401 && canResumeSession())
         ) {
           setData(undefined);
           setEvents([]);
@@ -432,13 +436,21 @@ export function Conversation({
         }
         setConnection(errorText(cause));
       } finally {
-        if (!controller.signal.aborted)
-          timer = setTimeout(() => void refresh(), 1000);
+        if (!controller.signal.aborted && !document.hidden)
+          timer = setTimeout(() => void refresh(controller), 1000);
       }
     }
     applied.current = "";
-    void refresh();
+    const resume = () => {
+      controller.abort();
+      clearTimeout(timer);
+      controller = new AbortController();
+      void refresh(controller);
+    };
+    const stop = watchPageResume(resume);
+    if (!document.hidden) void refresh(controller);
     return () => {
+      stop();
       controller.abort();
       clearTimeout(timer);
     };

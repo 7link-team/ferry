@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { useAutoRefresh } from "./use-auto-refresh";
+import { useAutoRefresh, watchPageResume } from "./use-auto-refresh";
 
 let root: Root;
 let host: HTMLDivElement;
@@ -17,6 +17,23 @@ function Clock({ seconds, refresh, pending = false }: { seconds: number; refresh
   return <span role="timer">{remaining}</span>;
 }
 const advance = async (milliseconds: number) => act(async () => { await vi.advanceTimersByTimeAsync(milliseconds); });
+
+it("ignores background resume events and removes every listener on cleanup", () => {
+  const resume=vi.fn();
+  const stop=watchPageResume(resume);
+  const hidden=vi.mocked(Object.getOwnPropertyDescriptor(document,'hidden')!.get!);
+  hidden.mockReturnValue(true);
+  document.dispatchEvent(new Event('visibilitychange'));
+  for(const event of ['pageshow','online','focus','session:renewed']) window.dispatchEvent(new Event(event));
+  expect(resume).not.toHaveBeenCalled();
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(resume).toHaveBeenCalledOnce();
+  stop();
+  document.dispatchEvent(new Event('visibilitychange'));
+  for(const event of ['pageshow','online','focus','session:renewed']) window.dispatchEvent(new Event(event));
+  expect(resume).toHaveBeenCalledOnce();
+});
 
 it("counts 10 down to 0, waits for the request and restarts without overlap", async () => {
   let finish!: () => void;

@@ -1,6 +1,7 @@
 import { LoadingSkeleton } from "../shared/ui/loading-skeleton";
 import {lazy, Suspense, useEffect, useLayoutEffect, useMemo, useState, type ReactNode} from "react";
 import {api} from "../shared/api/api";
+import {watchPageResume} from "../shared/api/use-auto-refresh";
 import {commonText as t, useCommonTranslation} from "../shared/i18n/i18n";
 import {AutoField} from "../shared/forms/auto-form";
 import {sanitizeRichText} from "../features/maintenance/value-content";
@@ -51,12 +52,14 @@ export function PlatformFrame({children}: {children: ReactNode}) {
     const schedule = () => { cancelAnimationFrame(scheduled); scheduled = requestAnimationFrame(measure); };
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(schedule);
     measure();
+    const stopResume = watchPageResume(schedule);
     viewport?.addEventListener("resize", schedule);
     viewport?.addEventListener("scroll", schedule);
     window.addEventListener("resize", schedule);
     document.addEventListener("focusin", schedule);
     document.addEventListener("focusout", schedule);
     return () => {
+      stopResume();
       cancelAnimationFrame(scheduled);
       observer?.disconnect();
       viewport?.removeEventListener("resize", schedule);

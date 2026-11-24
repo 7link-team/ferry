@@ -1,5 +1,17 @@
 import { useEffect, useState } from "react";
 
+/** Reconnect reads after browser suspension, network recovery or cookie renewal. */
+export function watchPageResume(resume: () => void) {
+  const wake = () => { if (!document.hidden) resume(); };
+  const events = ["focus", "pageshow", "online", "session:renewed"] as const;
+  for (const event of events) window.addEventListener(event, wake);
+  document.addEventListener("visibilitychange", wake);
+  return () => {
+    for (const event of events) window.removeEventListener(event, wake);
+    document.removeEventListener("visibilitychange", wake);
+  };
+}
+
 /** Finish each request before restarting the countdown; hidden tabs do not poll. */
 export function useAutoRefresh(seconds: number, refresh: () => unknown | Promise<unknown>, pending = false) {
   const [remaining, setRemaining] = useState(seconds);

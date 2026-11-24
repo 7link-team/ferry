@@ -5,6 +5,7 @@ import { Conversation, type ConversationSnapshot } from "./Conversation";
 import { describeOperation, EndedDecisionCard, ExecutionTimeline, PendingDecisionCard, QuestionCard } from "./TurnActivity";
 import { LONG_TEXT_LIMIT } from "./LazyDetails";
 import * as apiModule from "../../shared/api/api";
+import { observeSession, clearSession } from "../../shared/api/session";
 import { commonText } from "../../shared/i18n/i18n";
 import { conversationText } from "./resource-config";
 
@@ -44,6 +45,7 @@ afterEach(async () => {
   host.remove();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  clearSession();
 });
 const permissions = new Set(["conversations.read", "conversations.run"]);
 const buttons = (text: string) => [...host.querySelectorAll("button")].filter((button) => button.textContent?.trim() === text);
@@ -74,6 +76,44 @@ it("restores conversation content while its background refresh waits and clears 
   await act(async () => reject!(new apiModule.ApiError("Access denied", 403)));
   expect(host.textContent).not.toContain("please");
   expect(changed).toHaveBeenLastCalledWith(undefined);
+});
+
+it.each(['visibilitychange','focus','pageshow','online','session:renewed'])("recovers a suspended read on %s and ignores its late result without replacing the draft", async event => {
+  const row = conversation([], []);
+  let release!: (value: never) => void;
+  let firstSignal: AbortSignal | null | undefined;
+  let reads = 0;
+  vi.spyOn(apiModule, "api").mockImplementation(async (path, options) => {
+    if (String(path).includes('/events?')) return {items:[],next:0,has_more:false} as never;
+    if (++reads === 1) { firstSignal = options?.signal; return new Promise<never>(resolve => {release=resolve;}); }
+    return {...row,title:'Recovered conversation'} as never;
+  });
+  await act(async () => root.render(<Conversation workspace="1" id="2" permissions={permissions} initialDraft={{prompt:'Keep my draft',attachments:[]}} initialSnapshot={{id:'2',data:row as unknown as ConversationSnapshot['data'],events:[],cursor:0}} />));
+  await act(async () => (event === 'visibilitychange' ? document : window).dispatchEvent(new Event(event)));
+  expect(firstSignal?.aborted).toBe(true);
+  expect(host.textContent).toContain('Recovered conversation');
+  await act(async () => release({...row,title:'Stale response'} as never));
+  expect(host.textContent).not.toContain('Stale response');
+  expect(host.querySelector('textarea')?.value).toBe('Keep my draft');
+});
+
+it("retains messages during access renewal and recovers on the renewed event", async () => {
+  const now=Date.now();
+  observeSession({server_time_ms:now,access_expires_at_ms:now-1,refresh_expires_at_ms:now+60000,auto_renew:true,refreshable:true});
+  const row=conversation([], [chat('1','user',null)]);
+  let expired=true;
+  vi.spyOn(apiModule,'api').mockImplementation(async path=>{
+    if(String(path).includes('/events?')) return {items:[],next:0,has_more:false} as never;
+    if(expired) throw new apiModule.ApiError('Renewing session',401);
+    return {...row,title:'Renewed conversation'} as never;
+  });
+  await act(async()=>root.render(<Conversation workspace="1" id="2" permissions={permissions} initialSnapshot={{id:'2',data:row as unknown as ConversationSnapshot['data'],events:[],cursor:0}}/>));
+  expect(host.textContent).toContain('please');
+  expect(host.querySelector('textarea')).not.toBeNull();
+  expired=false;
+  await act(async()=>window.dispatchEvent(new Event('session:renewed')));
+  expect(host.textContent).toContain('Renewed conversation');
+  expect(host.textContent).not.toContain('Renewing session');
 });
 
 it("counts six actionable requests rather than turns or historical platform errors", async () => {

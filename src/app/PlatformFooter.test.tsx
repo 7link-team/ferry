@@ -42,3 +42,15 @@ it("uses the layout viewport when visualViewport is unavailable and ignores read
   expect(document.documentElement.style.getPropertyValue('--app-viewport-height')).toBe('360px');
   expect(document.documentElement.hasAttribute('data-app-input-active')).toBe(false);
 });
+
+it("remeasures a restored page without requiring a resize or remounting its draft", async () => {
+  const viewport=Object.assign(new EventTarget(),{height:667,scale:1,offsetTop:0});
+  vi.stubGlobal('visualViewport',viewport);
+  await act(async()=>root.render(<PlatformFrame><textarea defaultValue="Keep draft"/></PlatformFrame>));
+  const input=host.querySelector('textarea');
+  viewport.height=844;viewport.offsetTop=0;
+  await act(async()=>{window.dispatchEvent(new Event('pageshow'));await vi.advanceTimersByTimeAsync(20);});
+  expect(document.documentElement.style.getPropertyValue('--app-viewport-height')).toBe('844px');
+  expect(host.querySelector('textarea')).toBe(input);
+  expect(input?.value).toBe('Keep draft');
+});

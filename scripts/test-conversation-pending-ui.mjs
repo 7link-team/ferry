@@ -27,6 +27,7 @@ try {
     let releaseList;
     const initialList = new Promise(resolve => releaseList = resolve);
     let detailGate = Promise.resolve();
+    let suspendNextDetail = false, detailSuspended = false, releaseSuspended;
     await page.route('**/api/**', async route => {
       const path = new URL(route.request().url()).pathname, method = route.request().method();
       let data = { items: [], total: 0, page: 1, page_size: 50 };
@@ -41,7 +42,16 @@ try {
         await initialList;
         // Deliberately stale: current detail must keep the selected badge accurate.
         data = { items: [{ id: '2', title: row.title, agent_name: 'Report assistant', kind: 'private', state: 'active', pending: 6 }], total: 1, page: 1, page_size: 50 };
-      } else if (path.endsWith('/conversations/2')) { await detailGate; data = structuredClone(row); }
+      } else if (path.endsWith('/conversations/2')) {
+        if (suspendNextDetail) {
+          suspendNextDetail = false;
+          detailSuspended = true;
+          const stale = {...structuredClone(row), title:'Stale suspended response'};
+          await new Promise(resolve => {releaseSuspended = resolve;});
+          return route.fulfill({json:stale}).catch(()=>{});
+        }
+        await detailGate; data = structuredClone(row);
+      }
       else if (path.endsWith('/events')) data = { items: [], next: 0, has_more: false };
       else if (/\/turns\/\d+\/(decisions|decision-resolutions)$/.test(path)) {
         const input = route.request().postDataJSON(); writes.push({ path, input });
@@ -145,6 +155,23 @@ try {
     releaseDetail();
     assert.deepEqual(errors, []);
     console.log(`PASS ${width}px: cold entry has no empty flash, returning restores thread and unsent draft before the API responds, document retained`);
+    // A suspended browser request must not hold the conversation hostage after
+    // a foreground/network wake. No message or operation is replayed.
+    suspendNextDetail = true;
+    await page.evaluate(()=>window.dispatchEvent(new Event('pageshow')));
+    for(let attempt=0;!detailSuspended && attempt<50;attempt++) await page.waitForTimeout(100);
+    assert(detailSuspended,'fixture must suspend one conversation read');
+    row.title = 'Conversation recovered after background';
+    await page.evaluate(()=>window.dispatchEvent(new Event('online')));
+    await page.getByRole('heading',{name:row.title,exact:true}).waitFor();
+    releaseSuspended();
+    await page.waitForTimeout(100);
+    assert.equal(await page.getByRole('heading',{name:'Stale suspended response',exact:true}).count(),0);
+    assert.equal(await page.locator('textarea').inputValue(),'Keep this unsent draft');
+    assert.equal(await page.evaluate(()=>document.documentElement.dataset.navigationToken),'same-document');
+    assert(writes.every(write=>!write.path.endsWith('/turns')),'foreground recovery never replays a message');
+    assert.deepEqual(errors,[]);
+    console.log(`PASS ${width}px: suspended read aborted on resume, new content loaded, late result ignored, draft/document retained`);
     if (width === 390) {
       await page.evaluate(()=>localStorage.setItem('ui.chat.composerHeight','288'));
       await go('/en-US/account');await page.locator('input[name=name]').waitFor();

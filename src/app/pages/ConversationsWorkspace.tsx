@@ -14,6 +14,8 @@ import { Dialog } from "radix-ui";
 import { href, navigate, useRoute } from "../router";
 import { ResourceForm } from "../resources/ResourceForm";
 import { ApiError, errorText } from "../../shared/api/api";
+import { canResumeSession } from "../../shared/api/session";
+import { watchPageResume } from "../../shared/api/use-auto-refresh";
 import { listResource } from "../../shared/api/resource";
 import { commonText, useCommonTranslation } from "../../shared/i18n/i18n";
 import type { AnyRow } from "../../shared/resources/config";
@@ -111,9 +113,10 @@ export function ConversationsWorkspace({
       session.drafts.clear();
       return;
     }
-    const controller = new AbortController();
+    let controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
-    async function refresh() {
+    async function refresh(controller: AbortController) {
+      if (document.hidden) return;
       try {
         const results = await Promise.all(
           Array.from({ length: pages }, (_, index) =>
@@ -142,7 +145,8 @@ export function ConversationsWorkspace({
         setError("");
       } catch (cause) {
         if (controller.signal.aborted) return;
-        if (cause instanceof ApiError && [401, 403].includes(cause.status)) {
+        if (cause instanceof ApiError && [401, 403].includes(cause.status) &&
+            !(cause.status === 401 && canResumeSession())) {
           setDenied(true);
           setRows([]);
           session.list = undefined;
@@ -153,12 +157,20 @@ export function ConversationsWorkspace({
         setError(errorText(cause));
         setLoaded(true);
       } finally {
-        if (!controller.signal.aborted)
-          timer = setTimeout(() => void refresh(), 3000);
+        if (!controller.signal.aborted && !document.hidden)
+          timer = setTimeout(() => void refresh(controller), 3000);
       }
     }
-    void refresh();
+    const resume = () => {
+      controller.abort();
+      clearTimeout(timer);
+      controller = new AbortController();
+      void refresh(controller);
+    };
+    const stop = watchPageResume(resume);
+    if (!document.hidden) void refresh(controller);
     return () => {
+      stop();
       controller.abort();
       clearTimeout(timer);
     };

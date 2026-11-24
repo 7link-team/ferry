@@ -5,9 +5,10 @@ import { conversationText } from "../../features/conversations/resource-config";
 import { listResource } from "../../shared/api/resource";
 import type { ConversationsSession } from "./ConversationsWorkspace";
 import { ApiError } from "../../shared/api/api";
+import { observeSession, clearSession } from "../../shared/api/session";
 
 const route = vi.hoisted(() => ({ mode: "view", id: "1" as string | undefined }));
-afterEach(() => { route.mode = "view"; route.id = "1"; });
+afterEach(() => { route.mode = "view"; route.id = "1"; clearSession(); });
 
 vi.mock("../router", () => ({
   href: () => "#",
@@ -73,6 +74,24 @@ it("removes cached room content and drafts when list access is revoked", async (
     expect(host.textContent).not.toContain("Private room");
     expect(session.list).toBeUndefined();expect(session.snapshot).toBeUndefined();expect(session.drafts.size).toBe(0);
   } finally { await act(async()=>root.unmount());host.remove(); }
+});
+
+it("preserves the selected room and draft through renewable 401 and recovers after renewal", async () => {
+  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});
+  const now = Date.now();
+  observeSession({server_time_ms:now,access_expires_at_ms:now-1,refresh_expires_at_ms:now+60000,auto_renew:true,refreshable:true});
+  const session: ConversationsSession = {drafts:new Map([['1',{prompt:'Keep draft',attachments:[]}]]),selected:'1',list:{rows:[{id:'1',title:'Saved room',agent_name:'Agent',state:'active'}],total:1,query:'',pages:1}};
+  vi.mocked(listResource).mockRejectedValueOnce(new ApiError('Sign in',401));
+  const { ConversationsWorkspace } = await import('./ConversationsWorkspace');
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+  try {
+    await act(async()=>root.render(<ConversationsWorkspace workspace="1" permissions={new Set(['conversations.read'])} form={undefined} session={session}/>));
+    expect(host.querySelector('[data-conversation-content]')).not.toBeNull();
+    expect(session.drafts.get('1')?.prompt).toBe('Keep draft');
+    await act(async()=>window.dispatchEvent(new Event('session:renewed')));
+    expect(host.textContent).toContain('Private chat');
+    expect(host.textContent).not.toContain('Sign in');
+  } finally {await act(async()=>root.unmount());host.remove();}
 });
 
 it("badges private and group conversations that have approvals waiting for the viewer", async () => {
