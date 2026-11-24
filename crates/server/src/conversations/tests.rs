@@ -2685,3 +2685,34 @@ async fn relay_holds_past_the_hop_limit_or_when_off_until_a_human_continues() {
         assert_eq!(link.hop, 0);
     }
 }
+
+#[tokio::test]
+async fn room_threads_migration_is_idempotent_and_unique_per_resource() {
+    use crate::entities::ai_chat_threads as threads;
+    use crate::migration::room_threads::Migration;
+    use sea_orm_migration::{MigrationTrait, SchemaManager};
+    let (_dir, s, id) = seeded().await;
+    let manager = SchemaManager::new(&s.db);
+    Migration.up(&manager).await.unwrap();
+    let thread = |row: i64| threads::Model {
+        id: row,
+        workspace_id: 1,
+        conversation_id: id.into(),
+        kind: "pipeline".into(),
+        resource_id: 55,
+        linked: 1,
+        created_by: 1,
+        created_at: 0,
+    };
+    threads::Entity::insert(thread(1).into_active_model())
+        .exec(&s.db)
+        .await
+        .unwrap();
+    assert!(
+        threads::Entity::insert(thread(2).into_active_model())
+            .exec(&s.db)
+            .await
+            .is_err()
+    );
+    assert!(Migration.down(&manager).await.is_err());
+}

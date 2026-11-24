@@ -205,6 +205,61 @@ pub mod ai_chat_turns {
     pub enum Relation {}
     impl ActiveModelBehavior for ActiveModel {}
 }
+pub mod ai_chat_threads {
+    use sea_orm::entity::prelude::*;
+    /// A pipeline or workflow created (linked) or run from a room.
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_chat_threads")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub conversation_id: i64,
+        pub kind: String,
+        pub resource_id: i64,
+        pub linked: i16,
+        pub created_by: i64,
+        pub created_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod ai_chat_run_links {
+    use sea_orm::entity::prelude::*;
+    /// A pipeline run or workflow execution started from a room; `id` is the run id.
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_chat_run_links")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub conversation_id: i64,
+        pub thread_id: i64,
+        pub kind: String,
+        pub turn_id: i64,
+        pub chat_agent_id: i64,
+        pub hop: i64,
+        pub notified_at: Option<i64>,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod ai_chat_thread_items {
+    use sea_orm::entity::prelude::*;
+    /// Which room messages belong to a thread.
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_chat_thread_items")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub message_id: i64,
+        pub thread_id: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
 pub mod ai_chat_files {
     use sea_orm::entity::prelude::*;
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
