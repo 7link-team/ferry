@@ -1384,5 +1384,19 @@
   "addMyAgent": ["Add my Agent", "添加我的 Agent", "加入我的 Agent", "自分の Agent を追加", "내 Agent 추가", "Tambah Agent saya"],
   "agentSponsor": ["Added by", "添加者", "加入者", "追加したメンバー", "추가한 멤버", "Ditambah oleh"],
   "removeAgent": ["Remove Agent", "移除 Agent", "移除 Agent", "Agent を削除", "Agent 제거", "Keluarkan Agent"],
-  "held": ["Waiting to continue", "等待继续", "等待繼續", "続行待ち", "계속 대기 중", "Menunggu diteruskan"]
+  "held": ["Waiting to continue", "等待继续", "等待繼續", "続行待ち", "계속 대기 중", "Menunggu diteruskan"],
+  "threads": ["Pipelines and workflows", "流水线和工作流", "流水線和工作流程", "パイプラインとワークフロー", "파이프라인 및 워크플로", "Saluran paip dan aliran kerja"],
+  "threadPipeline": ["Pipeline thread", "流水线话题", "流水線話題", "パイプラインのスレッド", "파이프라인 스레드", "Bebenang saluran paip"],
+  "threadWorkflow": ["Workflow thread", "工作流话题", "工作流程話題", "ワークフローのスレッド", "워크플로 스레드", "Bebenang aliran kerja"],
+  "threadLinked": ["Created in this room", "在本会话中创建", "在本對話中建立", "このルームで作成", "이 대화방에서 생성", "Dicipta dalam bilik ini"],
+  "threadLatestRun": ["Latest run", "最近一次运行", "最近一次執行", "最新の実行", "최근 실행", "Larian terkini"],
+  "threadOpenRun": ["Open run", "查看运行", "查看執行", "実行を開く", "실행 열기", "Buka larian"],
+  "threadEmpty": ["No messages in this thread yet.", "该话题暂无消息。", "此話題尚無訊息。", "このスレッドにはまだメッセージがありません。", "이 스레드에는 아직 메시지가 없습니다.", "Belum ada mesej dalam bebenang ini."],
+  "threadReply": ["Write in this thread", "在此话题中回复", "在此話題中回覆", "このスレッドに書き込む", "이 스레드에 작성", "Tulis dalam bebenang ini"],
+  "threadResourceDeleted": ["Deleted resource", "资源已删除", "資源已刪除", "削除されたリソース", "삭제된 리소스", "Sumber telah dipadam"],
+  "createdInConversation": ["Created in conversation", "创建自会话", "建立自對話", "作成元の会話", "생성된 대화", "Dicipta dalam perbualan"],
+  "success": ["Succeeded", "成功", "成功", "成功", "성공", "Berjaya"],
+  "deleted": ["Deleted", "已删除", "已刪除", "削除済み", "삭제됨", "Dipadam"],
+  "waiting": ["Waiting", "等待中", "等待中", "待機中", "대기 중", "Menunggu"],
+  "cancelling": ["Cancelling", "正在取消", "正在取消", "キャンセル中", "취소 중", "Membatalkan"]
 }

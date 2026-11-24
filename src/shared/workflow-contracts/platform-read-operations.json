@@ -1862,6 +1862,10 @@
     ]
   },
   {
+    "path": "/resource-conversations/{kind}/{id}",
+    "permission": "conversations.read"
+  },
+  {
     "path": "/roles",
     "permission": "roles.read",
     "query": [

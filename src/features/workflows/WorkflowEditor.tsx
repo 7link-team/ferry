@@ -1,3 +1,4 @@
+import { ResourceOrigin } from "../conversations/ResourceOrigin";
 import { WorkspaceDate } from "../../shared/timezone";
 import { AutoField } from "../../shared/forms/auto-form";
 import { EditorFormActionsContext } from "../../shared/forms/auto-form/form-actions";
@@ -884,6 +885,7 @@ export function WorkflowEditor({
           }
         }}
       >
+        {!templateMode && <ResourceOrigin workspace={workspace} kind="workflow" id={draft.id} permissions={permissions} />}
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border px-2.5 py-1 text-xs">{t("state")}:
             {draft.lifecycle === "archived"

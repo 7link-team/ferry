@@ -2,6 +2,7 @@ import { useWorkspaceTimezone, formatDate, dayKey } from "../../shared/timezone"
 import { ConversationMembers, type ConversationMember } from "./ConversationMembers";
 import { normalizeRoom } from "./room-agents";
 import { HeldRelays, RoomControls } from "./room-controls";
+import { RoomThreadList, RoomThreadPanel, type RoomThread } from "./RoomThreads";
 import { InlineAlert } from "../../shared/ui/inline-alert";
 import { cliToolLabel } from "../../shared/forms/cli-tools";
 import { randomUUID } from "../../shared/uuid";
@@ -102,6 +103,8 @@ interface ChatMessage {
   mentions?: string[];
   saved?: boolean;
   unread?: boolean;
+  /** Set when the message belongs to a pipeline/workflow thread. */
+  thread_id?: string | null;
 }
 interface ConversationData {
   kind: "private" | "group";
@@ -126,6 +129,7 @@ interface ConversationData {
   version: number;
   owner_id: string;
   members_version: string;
+  threads?: RoomThread[];
 }
 const fetchConversation = (endpoint: string, init?: RequestInit) =>
   api<ConversationData>(endpoint, init).then(row => normalizeRoom(row));
@@ -272,6 +276,7 @@ export function Conversation({
   >([]);
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [agentIds, setAgentIds] = useState<string[]>([]);
+  const [openThread, setOpenThread] = useState("");
   const [membersVersion, setMembersVersion] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   useEffect(() => {
@@ -859,6 +864,11 @@ export function Conversation({
         )}
       </header>
       <div className="hidden shrink-0 flex-wrap items-center gap-1 border-b px-3 py-1.5 sm:px-6 md:flex" role="group" aria-label={t("messageFilters")}>{messageFilters}</div>
+      {data.kind === "group" && <RoomThreadList threads={data.threads ?? []} onOpen={setOpenThread} />}
+      <RoomThreadPanel thread={data.threads?.find((thread) => thread.id === openThread)}
+        messages={data.messages.filter((message) => message.thread_id === openThread)}
+        workspace={workspace} endpoint={endpoint} onOpenChange={(open) => { if (!open) setOpenThread(""); }}
+        onSent={async () => setData(await fetchConversation(endpoint))} />
       <ConversationMembers open={infoOpen} onOpenChange={setInfoOpen} selected={selectedMember} onSelect={setSelectedMember}
         title={data.title} workspace={workspace} permissions={permissions} members={[
           ...data.members.map(member => ({ ...member, kind: "user" as const })),
@@ -958,7 +968,7 @@ export function Conversation({
               </div>
             </div>
           )}
-          {conversationTimeline(data.messages, data.turns)
+          {conversationTimeline(data.messages.filter((message) => !message.thread_id), data.turns)
             .filter((entry) => {
               const m = entry.message;
               if (activity === "unread") return !!m?.unread;

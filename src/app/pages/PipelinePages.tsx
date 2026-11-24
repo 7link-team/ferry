@@ -1,3 +1,4 @@
+import { ResourceOrigin } from "../../features/conversations/ResourceOrigin";
 import { cn } from "cn";
 import { useMemo } from "react";
 import type { PipelineRun } from "../../features/pipelines/pipeline";
@@ -21,6 +22,7 @@ export function PipelineDetail({ workspace, pipelineId, permissions, form, runs 
   const [tab, setTab] = useQueryValue("tab", "config");
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
     <RemoteResourceHeading endpoint={`/workspaces/${encodeURIComponent(workspace)}/pipelines/${encodeURIComponent(pipelineId)}`} fallback={pipelineId} />
+    <ResourceOrigin workspace={workspace} kind="pipeline" id={pipelineId} permissions={permissions} />
     <div role="tablist" aria-label={commonText("shell.pipelineDetail")} className="flex gap-1 border-b">
       {([["config", commonText("shell.configuration")], ["runs", commonText("shell.executionRecords")]] as const).map(([value, label]) => <Button key={value} type="button" role="tab" aria-selected={tab === value} variant="ghost" className={cn("rounded-none border-b-2", tab === value ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab(value)}>{label}</Button>)}
     </div>

@@ -10,9 +10,9 @@ const evidence = await mkdtemp(join(tmpdir(), 'conversation-relay-'));
 const server = await preview({ preview: { host: '127.0.0.1', port: 0 } });
 const origin = process.env.FERRY_UI_ORIGIN || `http://127.0.0.1:${server.httpServer.address().port}`;
 const labels = {
-  'en-US': { relay: 'Agent relay', held: 'Agent relays are paused', cont: 'Continue', sponsor: 'Added by', add: 'Add my Agent', members: 'Conversation members' },
-  'zh-CN': { relay: 'Agent 传话', held: 'Agent 之间的传话已暂停', cont: '继续', sponsor: '添加者', add: '添加我的 Agent', members: '会话成员' },
-  'ms-MY': { relay: 'Geganti Agent', held: 'Geganti antara Agent dijeda', cont: 'Teruskan', sponsor: 'Ditambah oleh', add: 'Tambah Agent saya', members: 'Ahli perbualan' },
+  'en-US': { send: 'Send', relay: 'Agent relay', held: 'Agent relays are paused', cont: 'Continue', sponsor: 'Added by', add: 'Add my Agent', members: 'Conversation members' },
+  'zh-CN': { send: '发送', relay: 'Agent 传话', held: 'Agent 之间的传话已暂停', cont: '继续', sponsor: '添加者', add: '添加我的 Agent', members: '会话成员' },
+  'ms-MY': { send: 'Hantar', relay: 'Geganti Agent', held: 'Geganti antara Agent dijeda', cont: 'Teruskan', sponsor: 'Ditambah oleh', add: 'Tambah Agent saya', members: 'Ahli perbualan' },
 };
 let browser;
 try {
@@ -32,7 +32,9 @@ try {
       ],
       version: 1, revision_id: '1', members_version: '1', config: { name: 'Codex', runtime: 'codex', model: '', cwd: '/tmp', relay_enabled: true }, binding: null,
       turns: [turn('601', '102', 'held', 'GET /orders now returns {items,total}; please update the app.')],
+      threads: [{ id: '700', kind: 'pipeline', resource_id: '77', name: 'Orders API build', deleted: false, linked: true, latest_run: { id: '88', kind: 'pipeline_run', state: 'failed' } }],
     };
+    row.messages.push({ id: '502', role: 'notice', turn_id: null, reply_to: null, agent_id: '0', sender_name: '', owner_id: '1', prompt: 'Run 88 finished: failed.', attachments: [], targets: [], created_at: 1764000120000, thread_id: '700' });
     await page.route('**/api/**', async route => {
       const path = new URL(route.request().url()).pathname, method = route.request().method();
       let data = { items: [], total: 0, page: 1, page_size: 50 };
@@ -51,6 +53,10 @@ try {
       } else if (/\/conversations\/2\/agents\/\d+$/.test(path) && method === 'PATCH') {
         const input = route.request().postDataJSON(); writes.push(`${path}:${input.approval_mode}`);
         row.agents = row.agents.map(item => path.endsWith(`/${item.room_agent_id}`) ? { ...item, approval_mode: input.approval_mode } : item); data = {};
+      } else if (path.endsWith('/conversations/2/messages') && method === 'POST') {
+        const input = route.request().postDataJSON(); writes.push(`thread:${input.thread_id}:${input.prompt}`);
+        row.messages.push({ id: String(600 + row.messages.length), role: 'user', turn_id: null, reply_to: null, agent_id: '0', sender_name: 'Ana', owner_id: '1', prompt: input.prompt, attachments: [], targets: [], created_at: 1764000180000, thread_id: input.thread_id });
+        data = { id: '1' };
       } else if (path.endsWith('/conversations/2')) data = structuredClone(row);
       else if (path.endsWith('/events')) data = { items: [], next: 0, has_more: false };
       return route.fulfill({ json: data });
@@ -68,6 +74,20 @@ try {
     await held.waitFor({ state: 'detached' });
     assert(writes.some(item => item.endsWith('/relay/continue')), 'continue posted');
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no page overflow with relay');
+    // Threads: results stay out of the main feed and open in their own panel.
+    assert.equal(await page.getByText('Run 88 finished: failed.').count(), 0, 'thread line not in the main feed');
+    await page.locator('[data-room-thread="700"]').click();
+    const thread = page.locator('[data-thread-panel]');
+    await thread.getByText('Run 88 finished: failed.').waitFor();
+    assert((await thread.locator('a').getAttribute('href')).includes('/workspaces/1/pipeline-runs/88'));
+    await thread.locator('textarea').fill('Why did it fail?');
+    await thread.getByRole('button', { name: text.send, exact: true }).click();
+    await thread.getByText('Why did it fail?').waitFor();
+    assert(writes.includes('thread:700:Why did it fail?'), 'reply posted into the thread');
+    assert(await thread.evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'thread panel does not overflow');
+    await page.screenshot({ path: join(evidence, `${locale}-${width}-thread.png`) });
+    await page.keyboard.press('Escape');
+    await thread.waitFor({ state: 'detached' });
     // Members panel: sponsors are visible, own Agent's approval is editable, room controls work.
     await page.locator('[data-conversation-header] button').filter({ hasText: row.title }).first().click();
     const panel = page.getByRole('dialog');
