@@ -30,6 +30,15 @@ impl NodeLog {
             ..Default::default()
         }
     }
+    /// Lifecycle metadata only; callers never include prompts, credentials or bodies.
+    pub(super) fn event(&mut self, event: &str, fields: serde_json::Value) {
+        self.push(
+            "event",
+            serde_json::json!({"event":event,"data":fields})
+                .to_string()
+                .as_bytes(),
+        );
+    }
     pub(super) fn push(&mut self, stream: &str, bytes: &[u8]) {
         if bytes.is_empty() || self.truncated {
             return;
@@ -857,6 +866,7 @@ mod tests {
         .await
         .unwrap();
         workspaces::Entity::insert(workspaces::ActiveModel {
+            avatar: sea_orm::Set(None),
             timezone: Set(None),
             id: Set(11),
             slug: Set("host-wait".into()),

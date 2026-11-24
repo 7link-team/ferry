@@ -1693,6 +1693,7 @@ mod tests {
             cluster: None,
         });
         workspaces::Entity::insert(workspaces::ActiveModel {
+            avatar: sea_orm::Set(None),
             id: Set(1),
             slug: Set("cron-locale-test".into()),
             name: Set("Workspace".into()),

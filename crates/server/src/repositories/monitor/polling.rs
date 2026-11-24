@@ -187,6 +187,7 @@ mod tests {
         });
         crate::entities::workspaces::Entity::insert(
             crate::entities::workspaces::Model {
+                avatar: None,
                 timezone: None,
                 id: 1,
                 slug: "poll-test".into(),

@@ -18,6 +18,29 @@ export const executionStateText = (state: unknown) => {
   return text===key ? value : text;
 };
 const failed = (state: unknown) => state === "failed" || state === "cancelled";
+/** Keep historical/native log lines intact; translate only our lifecycle records. */
+export function formatExecutionLogs(logs: string): string {
+  const labels = {
+    agent_started: "execution.log.agentStarted",
+    agent_finished: "execution.log.agentFinished",
+    model_turn_started: "execution.log.turnStarted",
+    model_turn_waiting: "execution.log.waiting",
+    model_turn_finished: "execution.log.turnFinished",
+    model_session_ready: "execution.log.sessionReady",
+    model_usage: "execution.log.usage",
+    model_request_started: "execution.log.requestStarted",
+    model_response_received: "execution.log.responseReceived",
+  } as const;
+  return logs.split("\n").map(line => {
+    const match = line.match(/^(\[[^\]]+\] \[event\] )(.+)$/);
+    if (!match) return line;
+    try {
+      const record = JSON.parse(match[2]!) as { event: string; data: unknown };
+      if (!Object.hasOwn(labels, record.event)) return line;
+      return `${match[1]}${t(labels[record.event as keyof typeof labels])} ${JSON.stringify(record.data)}`;
+    } catch { return line; }
+  }).join("\n");
+}
 const color = (state: unknown) => failed(state) ? "var(--destructive)" : state === "running" ? "var(--primary)" : ["succeeded", "cached", "pinned", "reused", "bypassed"].includes(String(state)) ? "#16a34a" : "var(--muted-foreground)";
 
 /** Frozen execution graph and recorded node data; no parameter editing or reruns. */
@@ -80,7 +103,7 @@ export function WorkflowExecutionView({ workspace, execution, graph, attempts, n
           {tab === "process" ? <>
             <dl className="grid grid-cols-2 gap-2 text-xs"><dt>{t("execution.startedAt")}</dt><dd>{Number(attempt?.started_at)>0?<WorkspaceDate value={Number(attempt?.started_at)} />:"—"}</dd><dt>{t("execution.finishedAt")}</dt><dd>{Number(attempt?.finished_at)>0?<WorkspaceDate value={Number(attempt?.finished_at)} />:"—"}</dd><dt>{t("execution.duration")}</dt><dd>{Number(attempt?.started_at)>0?`${Math.max(0,(Number(attempt?.finished_at)||Date.now())-Number(attempt?.started_at))} ms`:"—"}</dd><dt>{t("itemsIn")}</dt><dd>{String(attempt?.items_in??0)}</dd><dt>{t("itemsOut")}</dt><dd>{String(attempt?.items_out??0)}</dd></dl>
             {attempt?.state === "failed" && execution.end_reason ? <InlineAlert>{String(execution.end_reason)}</InlineAlert>:null}
-            {data?.logs ? <><pre data-node-execution-logs className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">{data.logs}</pre>{data.logs_truncated && <p role="status" className="text-xs text-amber-700 dark:text-amber-400">{t("execution.logsTruncated")}</p>}</> : loading ? <LoadingSkeleton variant="form" /> : logs.length ? logs.map((log,index)=><section key={index}><h4 className="text-xs font-medium">{log.key}</h4><pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">{log.text.slice(0,200_000)}</pre></section>) : <p className="text-xs text-muted-foreground">{t("execution.noTextLogs")}</p>}
+            {data?.logs ? <><pre data-node-execution-logs className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">{formatExecutionLogs(data.logs)}</pre>{data.logs_truncated && <p role="status" className="text-xs text-amber-700 dark:text-amber-400">{t("execution.logsTruncated")}</p>}</> : loading ? <LoadingSkeleton variant="form" /> : logs.length ? logs.map((log,index)=><section key={index}><h4 className="text-xs font-medium">{log.key}</h4><pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">{log.text.slice(0,200_000)}</pre></section>) : <p className="text-xs text-muted-foreground">{t("execution.noTextLogs")}</p>}
           </> : loading ? <LoadingSkeleton variant="form" /> : tab === "input" ? <WorkflowDataView items={data?.input.items??[]} /> : <>
             {(data?.output?.ports??[]).map(port=><section key={`${port.name}:${port.index}`} className="space-y-2"><h4 className="text-sm font-medium">{port.name==="main"?t("mainPort"):port.name}</h4><WorkflowDataView items={port.items} /></section>)}
             {!data?.output && <p className="text-sm text-muted-foreground">{t("inspector.noOutput")}</p>}

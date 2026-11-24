@@ -46,6 +46,12 @@ pub(super) async fn execute(
         params["prompt"].as_str().unwrap_or_default(), items, Some(&params["output_schema"]), false, clock)?})];
     let mut log = NodeLog::with_limit(policy.log_output_bytes);
     let node_log = (node_run > 0).then_some(node_run);
+    let started = Instant::now();
+    log.event(
+        "agent_started",
+        json!({"runtime":"api","model":agent.model,"input_items":items.len()}),
+    );
+    log.flush(s, node_log).await?;
     let mut active_round = None;
     let result = {
         let work = async {
@@ -88,6 +94,8 @@ pub(super) async fn execute(
                     &policy,
                 )?;
                 active_round = Some(round);
+                log.event("model_request_started", json!({"round":round+1,"provider_id":profile.provider_id.to_string(),"request_bytes":serde_json::to_vec(&p).map_or(0,|bytes|bytes.len())}));
+                log.flush(s, node_log).await?;
                 let output = loop {
                     let result = super::super::ai::execute_indexed(
                         s,
@@ -130,6 +138,10 @@ pub(super) async fn execute(
                     return Err(failed("workflow.agentOutputTooLarge"));
                 }
                 let (message, text, calls) = agent_response(body, anthropic)?;
+                log.event(
+                    "model_response_received",
+                    json!({"round":round+1,"received_bytes":received,"tool_calls":calls.len()}),
+                );
                 messages.push(message);
                 if calls.is_empty() {
                     match accept_with_policy(&text, validator, &policy) {
@@ -214,6 +226,7 @@ pub(super) async fn execute(
         // The work future is dropped above, so it cannot race this cleanup.
         super::super::ai::interrupted(s, run, node_run, round).await?;
     }
+    log.event("agent_finished", json!({"elapsed_ms":started.elapsed().as_millis(),"output_items":usize::from(result.is_ok()),"error":result.as_ref().err().and_then(|error|error.2.as_ref().map(|message|&message.key))}));
     let _ = log.flush(s, node_log).await;
     result
 }

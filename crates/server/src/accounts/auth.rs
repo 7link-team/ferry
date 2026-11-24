@@ -700,6 +700,7 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
         id: i64,
         slug: String,
         name: String,
+        avatar: Option<String>,
         timezone: Option<String>,
         owner_id: i64,
         role_name: String,
@@ -712,6 +713,7 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
             workspaces::Column::Id,
             workspaces::Column::Slug,
             workspaces::Column::Name,
+            workspaces::Column::Avatar,
             workspaces::Column::Timezone,
             workspaces::Column::OwnerId,
         ])
@@ -745,6 +747,7 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
                 "id": Id::from(row.id),
                 "slug": row.slug,
                 "name": row.name,
+                "avatar":row.avatar.as_deref().and_then(|value|serde_json::from_str::<Value>(value).ok()),
                 "timezone":row.timezone,
                 "role_name": crate::accounts::workspace::role_name(&row.role_name, row.role_builtin != 0),
                 "relation": if row.owner_id == i64::from(account.user.id) { "owner" } else { "member" },
@@ -765,7 +768,7 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
             })
             .collect();
         workspaces = workspaces::Entity::find().order_by_asc(workspaces::Column::Name).all(&s.db).await?
-            .into_iter().map(|row| json!({"id": Id::from(row.id), "slug": row.slug, "name": row.name,"timezone":row.timezone,
+            .into_iter().map(|row| json!({"id": Id::from(row.id), "slug": row.slug, "name": row.name,"timezone":row.timezone,"avatar":row.avatar.as_deref().and_then(|value|serde_json::from_str::<Value>(value).ok()),
                 "role_name": roles.get(&row.id).cloned().unwrap_or_else(|| crate::i18n::message("auth.platform_superadmin")),
                 "relation": if row.owner_id == i64::from(account.user.id) { "owner" } else if roles.contains_key(&row.id) { "member" } else { "none" },
                 "permissions": crate::accounts::workspace::PERMISSIONS.iter().map(|p| p.0).collect::<Vec<_>>() })).collect();

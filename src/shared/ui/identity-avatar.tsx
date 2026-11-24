@@ -34,12 +34,12 @@ export function avatarHash(value: string) {
   return hash >>> 0;
 }
 export function IdentityAvatar({ id, name, kind, value, className = "size-10" }: {
-  id: string; name: string; kind: "user" | "agent"; value?: AvatarValue | null | undefined; className?: string;
+  id: string; name: string; kind: "user" | "agent" | "workspace"; value?: AvatarValue | null | undefined; className?: string;
 }) {
   const [failed, setFailed] = useState("");
   const hash = avatarHash(`${kind}:${id}:${value?.seed ?? ""}`);
   const hue = hash % 360;
-  const style = value?.style ?? (kind === "agent" ? "pixel" : "portrait");
+  const style = value?.style ?? (kind === "agent" ? "pixel" : kind === "workspace" ? "initials" : "portrait");
   const illustration = useMemo(() => ["pixel", "initials", "emoji"].includes(style) || style === "image" && value?.image && failed !== value.image
     ? "" : illustrationSource(style, `${kind}:${id}:${value?.seed ?? ""}`, value ? value.gender : "neutral"), [style, kind, id, value?.seed, value?.gender, value?.image, failed]);
   const color = `hsl(${hue} 55% 42%)`;
@@ -59,7 +59,7 @@ export function IdentityAvatar({ id, name, kind, value, className = "size-10" }:
 
 const emojis = ["🙂", "😊", "😎", "🤓", "🧑‍💻", "👩‍🚀", "🦊", "🐼", "🐱", "🐶", "🦁", "🦉", "🤖", "👾", "🚀", "💡", "✨", "🌻", "🌊", "🌙", "🎯", "🎨", "🧠", "⚡"];
 export function AvatarEditor({ id, name, kind, value, onChange, readOnly = false, onBusyChange }: {
-  id: string; name: string; kind: "user" | "agent"; value?: AvatarValue | null | undefined; onChange: (value: AvatarValue) => void; readOnly?: boolean;
+  id: string; name: string; kind: "user" | "agent" | "workspace"; value?: AvatarValue | null | undefined; onChange: (value: AvatarValue) => void; readOnly?: boolean;
   onBusyChange?: ((busy: boolean) => void) | undefined;
 }) {
   useCommonTranslation();
@@ -89,7 +89,7 @@ export function AvatarEditor({ id, name, kind, value, onChange, readOnly = false
     <div className="flex flex-col items-center gap-3 sm:flex-row sm:gap-4">
       <IdentityAvatar id={id} name={name} kind={kind} value={value} className="size-20 text-2xl" />
       {!readOnly && <div className="grid w-full min-w-0 flex-1 grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label={t("avatar")}>
-        {avatarStyles.map(style => <Button key={style} type="button" variant={style === (value?.style ?? (kind === "agent" ? "pixel" : "portrait")) ? "secondary" : "outline"} className="h-auto min-h-24 min-w-0 flex-col gap-2 px-2 py-3 whitespace-normal text-center" aria-label={t(style)} aria-pressed={value?.style === style || !value && style === (kind === "agent" ? "pixel" : "portrait")} onClick={() => onChange({ style, seed: value?.seed, gender: value?.gender ?? "neutral", ...(style === "emoji" ? { emoji: value?.emoji || emojis[kind === "agent" ? 12 : 0] } : {}) })}>
+        {avatarStyles.filter(style => kind !== "workspace" || ["initials", "emoji", "image"].includes(style)).map(style => <Button key={style} type="button" variant={style === (value?.style ?? (kind === "agent" ? "pixel" : kind === "workspace" ? "initials" : "portrait")) ? "secondary" : "outline"} className="h-auto min-h-24 min-w-0 flex-col gap-2 px-2 py-3 whitespace-normal text-center" aria-label={t(style)} aria-pressed={value?.style === style || !value && style === (kind === "agent" ? "pixel" : kind === "workspace" ? "initials" : "portrait")} onClick={() => onChange({ style, seed: value?.seed, gender: value?.gender ?? "neutral", ...(style === "emoji" ? { emoji: value?.emoji || emojis[kind === "agent" ? 12 : 0] } : {}) })}>
           <IdentityAvatar id={id} name={name} kind={kind} value={{ style, seed: value?.seed, gender: value?.gender ?? "neutral", ...(style === "emoji" ? { emoji: value?.emoji || emojis[kind === "agent" ? 12 : 0] } : {}) }} className="size-12 text-base" />
           <span className="max-w-full break-words text-xs">{t(style)}</span>
         </Button>)}
@@ -99,12 +99,12 @@ export function AvatarEditor({ id, name, kind, value, onChange, readOnly = false
       {value?.style === "emoji" && <div className="grid grid-cols-6 gap-1 sm:grid-cols-8" role="group" aria-label={t("emoji")}>
         {emojis.map(emoji => <Button type="button" key={emoji} variant={value.emoji === emoji ? "secondary" : "ghost"} className="min-h-11 min-w-11 text-2xl" aria-label={emoji} aria-pressed={value.emoji === emoji} onClick={() => onChange({ style: "emoji", emoji })}>{emoji}</Button>)}
       </div>}
-      {!readOnly && ["portrait", "adventurer", "notionists", "lorelei", "pixel-art"].includes(value?.style ?? (kind === "agent" ? "pixel" : "portrait")) && <AutoField label={t("gender")} help={t("genderHelp")}><select className="h-11 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={value?.gender ?? "neutral"}
+      {!readOnly && ["portrait", "adventurer", "notionists", "lorelei", "pixel-art"].includes(value?.style ?? (kind === "agent" ? "pixel" : kind === "workspace" ? "initials" : "portrait")) && <AutoField label={t("gender")} help={t("genderHelp")}><select className="h-11 w-full min-w-0 rounded-md border bg-background px-3 text-sm" value={value?.gender ?? "neutral"}
         onChange={event => onChange({ style: value?.style ?? "portrait", gender: event.target.value as AvatarValue["gender"], seed: randomUUID() })}>
         {["neutral", "male", "female"].map(gender => <option key={gender} value={gender}>{t(gender)}</option>)}
       </select></AutoField>}
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" className="min-h-11" disabled={uploading || value?.style === "image" || value?.style === "emoji" || value?.style === "initials"} onClick={() => onChange({ style: value?.style ?? (kind === "agent" ? "pixel" : "portrait"), gender: value?.gender ?? "neutral", seed: randomUUID() })}>{t("regenerate")}</Button>
+        <Button type="button" variant="outline" className="min-h-11" disabled={uploading || value?.style === "image" || value?.style === "emoji" || value?.style === "initials"} onClick={() => onChange({ style: value?.style ?? (kind === "agent" ? "pixel" : kind === "workspace" ? "initials" : "portrait"), gender: value?.gender ?? "neutral", seed: randomUUID() })}>{t("regenerate")}</Button>
         <Button type="button" variant="outline" className="min-h-11" disabled={uploading} onClick={() => input.current?.click()}>{t(uploading ? "processing" : "upload")}</Button>
         <input ref={input} className="hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => void upload(event.target.files?.[0])} />
       </div>

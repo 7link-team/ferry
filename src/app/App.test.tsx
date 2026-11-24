@@ -10,6 +10,7 @@ import { defaultSiteSettings, SiteSettingsContext } from "../shared/site/setting
 import { Entry } from "./Entry";
 import { RepositoryMonitor,repositoryEventList } from "./pages/RepositoryMonitor";
 import { navigate, parse } from "./router";
+import { nav } from "./nav";
 
 vi.mock("../features/pipelines/YamlEditor", () => ({
   YamlEditor: ({ value }: { value: string }) => <textarea aria-label="GitHub Actions YAML" value={value} readOnly />,
@@ -760,6 +761,11 @@ it("keeps workspace settings usable after save and gives Cancel a read-only sing
     return { items: [], total: 0, page: 1, page_size: 20 };
   } })));
   await act(async () => root.render(<App />));
+  const information = nav.flatMap(group => group.items).find(item => item.key === "workspace-settings")!;
+  expect(information.hidden).not.toBe(true);
+  expect(information.parent).toBeUndefined();
+  expect(host.querySelector('[data-avatar-editor]')).not.toBeNull();
+  expect([...host.querySelectorAll('input')].some(input => input.value === 'Workspace')).toBe(true);
   const picker = host.querySelector<HTMLInputElement>('[role="combobox"]')!;
   const cancel = [...host.querySelectorAll("a")].find(link => link.textContent === commonText("common.cancel"))!;
   expect(parse(new URL(cancel.href).pathname)).toMatchObject({ item: "workspace-settings", id: "1", mode: "view" });

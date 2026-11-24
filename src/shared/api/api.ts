@@ -91,6 +91,7 @@ export const errorText = (error: unknown) =>
   error instanceof Error ? error.message : i18n.t("errors.operation");
 
 export interface Workspace {
+  avatar?: AvatarValue | null;
   timezone?: string | null;
   id: string;
   slug: string;

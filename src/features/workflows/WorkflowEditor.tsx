@@ -1212,7 +1212,7 @@ export function WorkflowEditor({
         )}
         {tab === "history" && draft.id && renderTable?.(historyConfig, refresh)}
         {tab === "executions" && draft.id && (
-          <div className="space-y-5">
+          <div data-workflow-executions className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
             {renderTable?.(executionsConfig, refresh)}
           </div>
         )}

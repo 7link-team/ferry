@@ -502,6 +502,7 @@ function WorkspaceSwitcher({ identity, current, onRefresh, onWorkspaces }: { ide
         <DropdownMenu onOpenChange={open => { if (open) onRefresh(); }}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" className="min-h-11 min-w-0 max-w-[min(18rem,calc(100vw-2rem))] shrink gap-1.5 max-sm:max-w-[38vw] max-sm:px-2" aria-label={workflowText("switchWorkspace")}>
+              {current && <IdentityAvatar id={current.id} name={current.name} kind="workspace" value={current.avatar} className="size-6 shrink-0" />}
               <span className="truncate">{current?.name ?? workflowText("switchWorkspace")}</span>
               <ChevronDown className="size-4 shrink-0" />
             </Button>
@@ -517,6 +518,7 @@ function WorkspaceSwitcher({ identity, current, onRefresh, onWorkspaces }: { ide
             >
               {identity.workspaces.map((w) => (
                 <DropdownMenuRadioItem key={w.id} value={w.id} className="flex-wrap">
+                  <IdentityAvatar id={w.id} name={w.name} kind="workspace" value={w.avatar} className="size-6 shrink-0" />
                   <span className="min-w-0 flex-1 basis-32 break-words">{w.name}</span>
                   <span className="min-w-0 break-words text-xs text-muted-foreground">{myRole(w.relation, w.role_name)}</span>
                 </DropdownMenuRadioItem>

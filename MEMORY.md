@@ -1,44 +1,46 @@
 # Task State
 
-## Task / Objective
-Priority: make production Codeup weekly workflow 116765975084269568 actually succeed through PDF and enterprise notification, Monday09:00 workspace time. Keep native v0.10.14-alpha release pending; no immutable tag moved. Workspace111019986952126464. Latest channel requested by user: enterprise chat ferry (not old company-mobile).
+## Objectives / Confirmed scope
+1. Make production Codeup workflow116765975084269568 (workspace111019986952126464) complete PDF + enterprise chat ferry delivery, then Monday09:00 workspace-time schedule. Preserve UTC persistence/workspace business timezone.
+2. User follow-ups: fix collapsed execution-history height, enrich execution logs, correct batch-prompt help; independent Workspace information menu/form for name/avatar/timezone.
+3. Complete native v0.10.14-alpha publication, preserving immutable tags and signing limitations.
 
 ## Current Phase / Current Step
-TESTING / CLOUD: local native authentication diagnosis fix verified and SSH-pushed in d27e621; launcher CI order fix in94e6033. Working tree checked clean after source push. Production workflow has NOT been fixed, rerun, published or scheduled in this turn.
+REVIEW / local source follow-ups verified, ready for explicit staging and SSH push. No production writes, schedule enabling or deployment occurred. .14 tag already exists at previous accepted source; new source is outside that tag.
 
-## Confirmed facts / Decisions
-- Execution118383005512237056 period failed after31s. ASPEED native thread01a2092d-aa97-7db1-b423-ace024e4516a has six upstream401 INVALID_API_KEY responses. Root issue is configured model-service credential rejection; no evidence of timezone/Runner auth causing this execution failure.
-- Agent115434614507438080 uses model115398114952609792 (sub2api codex CLI), provider115397742670381056 and credential115397742666186752 (sub2api codex token). Credential last updated Nov15; no custom model header overrides. ASPEED and Mac Runners online0.10.12; server0.10.12.
-- Production draft v2 still explicitly embeds Shanghai date prompt/settings and old company-mobile notification channel. Final graph must use workspace frozen clock, requested enterprise channel, verified PDF/delivery, then Monday09:00 schedule. UTC persistence/workspace business zone remains user policy.
-- Normal platform API authorization required for config writes and runs; do not bypass with SQL, forged identity/session or borrowed browser cookies. Read-only SSH diagnostics authorized. No usable Ferry MCP/API login currently. User asked local testing first; do not block independent tests on login.
-- Fix reuses existing Session::Failed. Terminal Codex authentication failure becomes static allowlisted localized identity; raw diagnostics never forwarded. Failed protocol/process execution must not send Finished first (server reader stops on Finished). Six backend locales supplied, workflow end reason remains agent_failed. No wire schema/dependency/database/config changes.
+## Production status / Blocker
+- User repaired provider token. Latest actual execution118539555044327424 (#3) passed period+commits, then failed expression /nodes/3/params/prompt before analyze starts. Real sandbox reproduces batch $json being absent. Saved prompt uses JSON.stringify($json). Recommend plain instructions: remove leading '=' and interpolation; compose automatically appends every input JSON once. Explicit $input.all().map(item=>item.json) is also verified if needed. No new execution after#3 at last server check.
+- Initial #2 failure118383005512237056 was proven401 INVALID_API_KEY in exact ASPEED Codex thread logs, not timezone/Runner authentication. Error preservation fix d27e621 already pushed and tested.
+- Draft still v2 with Shanghai text/settings and old company-mobile target. Must use workspace clock and requested enterprise channel; verify actual PDF/delivery before schedule.
+- No normal Ferry API login/MCP connection available. Browser tools removed after automatic URL-validation refusals. Never bypass with SQL writes, forged sessions or borrowed cookies. SSH readonly diagnostics authorized; SSH session38958 explicitly closed. Do not repeat passwords. User is editing/rerunning personally; no repeated request to merely reopen Chrome.
 
-## Completed Work / Actual Verification
-- RED regression demonstrated lost terminal auth cause; GREEN Runner agent34 tests.
-- Full Runner cargo test:113 passed/10 existing ignored, CLI5 passed. Two opt-in real-process checks also explicitly run: valid custom upstream model/path/auth header matches; upstream401 yields actionable safe error with no premature Finished. No test-only credentials reused in production.
-- Real local Codex date prompt: since2026-11-16T00:00:00+08:00 until2026-11-22T23:59:59.999+08:00; independent calendar assertions pass. First scratch script mangled Unicode through PowerShell stdin; corrected using escaped Unicode, not a product defect.
-- Real sandbox typed-expression test and published workflow example save test PASS with absolute FERRY_SANDBOX_PATH. Transport error localization and preview guidance PASS. PDF8 tests PASS; exported two-page existing renderer sample visually inspected with PyMuPDF (Poppler unavailable), no broken CJK/layout. Sample is synthetic renderer evidence, NOT real weekly report.
-- cargo check --workspace PASS (existing warnings); cargo fmt --check and git diff --check PASS. Workflow suite:183 passed,3 failed due missing sh/cygpath,3 ignored. After process-local Git PATH correction, all13 host tests including the3 failures PASS; all3 ignored real-sandbox tests explicitly run PASS. Thus every workflow test exercised successfully across these runs. No assertion/source change for shell setup.
+## Implemented source / Decisions
+- Shared execution table flex/min-height chain restored; vertical scrolling keeps pagination reachable on short phones. Existing table/filter/pagination/loading/error behavior reused.
+- Existing NodeLog gains native/API agent lifecycle metadata: input/output counts, sizes, host/model, duration/outcome/error identity, native token usage, CLI10s waiting progress. Start metadata flushed before dispatch. No raw prompt/tool-body/credential logging. Frontend translates known phase labels in six languages, preserves historical/native/malformed/future records.
+- All6 agent prompt-help translations corrected: previous help explicitly recommended invalid $json.since for this batch node. Automatic input contract unchanged; no implicit current-item fallback or production graph rewrite.
+- Workspace information is visible independently in maintenance, same workspace-settings URL. Shared form: name/avatar/timezone; switcher shows saved workspace avatar and refreshed name. Name reuses creation validation (trim/nonempty<=60Unicode), optional fields preserve old clients. Avatar uses existing validated account JSON/PNG and neutral initials/emoji/upload controls, no person gender controls. Scoped settings.update, optimistic version, transaction/audit and timezone schedule recomputation preserved.
+- Add only nullable workspaces.avatar using existing long_text helper (MySQLLONGTEXT, PG/SQLiteTEXT), early additive migration before old complete-entity backfills, idempotent; down refuses destructive data loss. No production migration. Existing entity/fixtures updated only for new field. /me authorized workspace summaries include parsed avatar. Audit records avatar_changed, not image body.
+- Generated platform-tools catalogue regenerated from source; workspace API docs describe fields/version/permissions/compatibility. No manual generated-file edits. ADR covers design/review/DDL/rollback.
 
-## Remaining Work / Next Action
-1. Local self-review: scope/reuse/architecture/regression/complexity/durable state PASS. Original production end-to-end acceptance NOT READY: credential rejected, actual PDF/delivery/schedule unverified. No test processes remain.
-2. Read new main d27e621 Build/release45226851695 (queued at last check) and deployment acceptance45226851603 (in progress). Source commits94e6033+d27e621 SSH-pushed. No .14 tag until native/root CI accepted. Only explicitly stage deliverables.
-3. Production needs an accepted API key in existing credential sub2api codex. User can update through platform UI without sharing secret. Once normal API authorization exists, repair graph timezone/channel and run actual chain; verify real PDF and enterprise delivery before enabling schedule. Do not claim local tests equal this acceptance.
-4. Complete pending native release below, preserve separate task.
+## Actual verification / Evidence
+PASS: latest affected frontend75tests (then58 rerun after menu assertions), other related resource/data-view checks19; final TypeScript typecheck; production Web build and server build; cargo check --workspace --all-targets; fmt/diff checks; generator --check320operations.
+PASS: account/workspace8 tests; migrations40tests; final MySQL long_text refinement retested via workspace_avatar migration; CLI/API persisted lifecycle log test; four timeout/cancellation/schema/API-no-replay regressions. Real sandbox exact old-batch-error, plain-input-single-injection and explicit batch expression test passed.
+PASS: complete real local workflow-editor browser suite including actual DB/sandbox execution, immutable versions, node forms, mobile editing. New history layout/pagination screenshots at1440/820/390/320. New Workspace information saved name+emoji+timezone, /me avatar readback, independent nav, zh/en/ms1440/820/320 layouts. Screens inspected: Chinese desktop and Malayphone form, shortphone pagination. No whole-page horizontal overflow. Local synthetic fixtures only; not a real weekly business report.
+Evidence outside Git: LOCALAPPDATA/ferry-verification/workflow-116765975084269568 (logs); final browser screenshots and ui-acceptance.json in LOCALAPPDATA/Temp/workflow-editor-XLBnuS. Prior workflow-editor-IFAztB initial height fix. No browser/test process remains.
+Self-review: scope/reuse/architecture/complexity/regression/commit hygiene/durable state PASS for local fixes. Production end-to-end acceptance NOT READY. Publication NOT READY.
 
-## Pending native v0.10.14-alpha publication
-- Main origin d27e621 (auth diagnostic fix, preceded by94e6033 launcher CI order); previous origin9ca4091d97. Versions .14; no .14 tag. Product505d6ea deterministic icons; f2e8cb2 Docker context; c39ba3a diagnostic artifacts. .13 tag8564ff61 immutable, publication failed; previous .12 release verified31assets.
-- Latest mobile45181740341 source9ca4091 SUCCESS AndroidAPK+iOS simulator/native acceptance+unsignedIPA. Prior transient Gradle plugin failure resolved on retry without version downgrade.
-- Main45181740148 failed Linux desktop137759371274 and MacARM137759371668 at direct Cargo tests: desktop/ui-dist absent before bundler. Uncommitted build.yml adds npm run build:launcher after Web build and before desktop tests. Local clean-dist RED/GREEN native15pass/2existingIgnored evidence recorded.
-- User cancelled obsolete .13 builds45170714737/45170715241; no pending cancellation action. Do not re-ask.
-- Product already implemented: rustls Android JNI init (oldAPK panic RED/new localAPK HTTPS/login/update/error/retry GREEN); native launcher uses actual shared language/theme components, preserves bundled URL;52 icons deterministic Windows/Mac bytes including opaqueiOS; Docker COPY includes desktop/ui. Local full frontend975pass/1skip, nativeJS31, shared12, nativeRust15/2ignored, browser1440/820/390/320 three locales/themes/200percent font PASS. Those are earlier actual results, not newly rerun this turn.
-- No production Android keystore or Apple team/distribution: user deferred. APK debug, IPA unsigned; never claim direct iPhone install or cross-CI signing compatibility.
-- After accepted new main/tag CI: publish .14 immutable tag, verify exact-tag mobile/desktop Release assets/hash/source and both image architectures/latest, then clean state/docs. No .14 publication claimed yet.
+## Publication status / Next actions
+- Main starting point3ad5ef8; accepted product d27e621 and launcher CI order94e6033. Main45226851695 + deployment45226851603 SUCCESS.
+- v0.10.14-alpha TAG CREATED and SSH-pushed at d27e6219f9c69e626dd1dc4812be594e8e396cb8, exact accepted source. Never move it. Source manifests still .14; later feature changes need a later version before release.
+- Exact-tag root45313356617 in progress, but mobile/ios job138174186856 FAILED native flow before first case. Image45313356564 still in progress at last check. No .14 publication success claim.
+- Actual27,152,377byte diagnostic ZIP verified: LOCALAPPDATA/ferry-verification/v0.10.14-alpha/tag-ios-diagnostics.zip. results.json: cases[], uiAcceptancePENDING, xcrun simctl launch ETIMEDOUT at60s; subsequent terminate and uninstall also time out. Not an app assertion failure. Latest main standalone mobile45181740341 had passed. Recommended original failed-job rerun on a fresh CI host; user question pending with job URL. Re-run menu may require whole root run completion; do not tell user to cancel running release jobs.
+- No GitHub authenticated CLI/browser available to rerun. Public API/artifact downloads usable; no token/cookie bypass. Signing remains user-deferred: AndroiddebugAPK, unsignedIPA, no direct iPhone installation or cross-CI upgrade-signing claim.
 
-## Evidence / Tools / Constraints
-External evidence C:/Users/FullStack/AppData/Local/ferry-verification/: workflow-116765975084269568 has realCodex/date/mock401/PDF rendered evidence; v0.10.14-alpha has cloud diagnostics and native build RED/GREEN. .12 folder has reusable public artifact/release verification scripts. Public GitHub API/nightly.link range downloads usable; logs require auth. CUA host unavailable and earlier browser review denied address validation; no credential bypass.
-SSH root192.168.0.4 session18954 was explicitly closed after diagnostics. Never repeat password. Postgres container ferry-postgres-1 DBferry userpostgres; server ferry-ferry-1. Limit queries to target workspace/resources; no secret printing. Native Runner state LOCALAPPDATA/ferry-runner-agent, target provider home contains exact failed Codex logs.
-Direct execution; no new agents/worktrees. LF, explicit staging, SSH push; preserve preexisting build.yml fix. ADR auth diagnosis design persisted.
+## Next concrete actions
+1. Explicitly stage reviewed source/docs/tests, commit and SSH-push main; verify clean tree, persist exact source commit and new CI run IDs. No tag movement.
+2. Read exact-tag release/image statuses; after user rerun, verify iOS/native/mobile/device artifacts, Release checksums/source and both image architectures. .12 evidence folder contains reusable verify/download scripts; .14 folder diagnostic downloader uses8verified ranges.
+3. Production workflow needs user normal API authorization or their direct prompt edit/rerun. Then inspect analyze/PDF/notification, repair workspace-timezone/channel via normal authorized API, publish/schedule only after actual success. Do not claim local sample or tests equal real report delivery.
 
-## Last Checkpoint
-2026-11-24: confirmed401 root cause, local date/auth/PDF/sandbox checks passed; all workflow cases exercised successfully (shell PATH corrected for3); production remains unverified; release outstanding.
+## Constraints / Last checkpoint
+Direct execution, no new agents/worktrees. LF, no blind staging, no build/temporary artifacts in Git. Preserve users' explicit approval modes/budget/timezone decisions. Prior native logo/HTTPS/launcher changes and evidence remain in Git/ADR; earlier .12 verified31assets, .13failed immutable.
+2026-11-24: all requested local UI/workspace/log fixes accepted; production workflow and .14 release remain independently unfinished.

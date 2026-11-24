@@ -1133,6 +1133,17 @@ pub struct NewWorkspace {
     timezone: Option<String>,
 }
 
+pub(crate) fn validate_name(value: &str) -> Result<String> {
+    let name = value.trim();
+    if name.is_empty() || name.chars().count() > 60 {
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.name_invalid"),
+        ));
+    }
+    Ok(name.to_owned())
+}
+
 pub async fn create(
     State(s): State<AppState>,
     account: Account,
@@ -1152,7 +1163,6 @@ pub(crate) async fn create_in(
     conn: &impl sea_orm::ConnectionTrait,
 ) -> Result<Value> {
     let slug = body.slug.trim().to_lowercase();
-    let name = body.name.trim().to_owned();
     let timezone = body
         .timezone
         .as_deref()
@@ -1165,12 +1175,7 @@ pub(crate) async fn create_in(
             crate::i18n::Message::new("workspace.error.slug_invalid"),
         ));
     }
-    if name.is_empty() || name.chars().count() > 60 {
-        return Err(ApiError::localized(
-            axum::http::StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("workspace.error.name_invalid"),
-        ));
-    }
+    let name = validate_name(&body.name)?;
     if workspaces::Entity::find()
         .filter(workspaces::Column::Slug.eq(slug.clone()))
         .one(conn)
@@ -1184,6 +1189,7 @@ pub(crate) async fn create_in(
     }
     let (id, now, code) = (s.next_id()?, db::now(), join_code());
     workspaces::Entity::insert(workspaces::ActiveModel {
+        avatar: sea_orm::Set(None),
         id: Set(i64::from(id)),
         slug: Set(slug.clone()),
         name: Set(name.clone()),
@@ -1343,6 +1349,7 @@ mod tests {
             cluster: None,
         });
         workspaces::Entity::insert(workspaces::ActiveModel {
+            avatar: sea_orm::Set(None),
             timezone: Set(None),
             id: Set(10),
             slug: Set("legacy-permissions".into()),

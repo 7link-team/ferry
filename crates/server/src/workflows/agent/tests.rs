@@ -1,6 +1,147 @@
 use super::*;
 
 #[tokio::test]
+#[ignore = "requires a built real ferry-sandbox via absolute FERRY_SANDBOX_PATH"]
+async fn batch_agent_prompt_uses_automatic_inputs_without_a_current_item() {
+    let mut node = json!({"id":"analyze","name":"Analyze","type":"ai.agent.run","type_version":1,"params":params(1)});
+    node["params"]["prompt"] = json!("=Analyze {{JSON.stringify($json)}}");
+    let input = || ferry_protocol::sandbox::InputData {
+        items: vec![Item {
+            json: json!({"commits":[{"message":"private-commit-marker"}]})
+                .as_object()
+                .unwrap()
+                .clone(),
+            binary: Default::default(),
+            paired: vec![],
+        }],
+        upstream: vec![],
+    };
+    let error = super::super::graph::resolve(&node, "/nodes/3", input(), &[None], json!({}), true)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.2.as_ref().unwrap().params["path"],
+        "/nodes/3/params/prompt"
+    );
+    node["params"]["prompt"] = json!("Analyze all supplied commits and return a summary.");
+    let resolved =
+        super::super::graph::resolve(&node, "/nodes/3", input(), &[None], json!({}), true)
+            .await
+            .unwrap();
+    let prompt = compose(
+        "",
+        resolved[0]["prompt"].as_str().unwrap(),
+        &input().items,
+        Some(&resolved[0]["output_schema"]),
+        false,
+        None,
+    )
+    .unwrap();
+    assert_eq!(prompt.matches("private-commit-marker").count(), 1);
+    assert!(prompt.contains("<workflow_input_items count=\"1\">"));
+    node["params"]["prompt"] =
+        json!("=Analyze {{JSON.stringify($input.all().map(item=>item.json))}}");
+    let resolved =
+        super::super::graph::resolve(&node, "/nodes/3", input(), &[None], json!({}), true)
+            .await
+            .unwrap();
+    assert!(
+        resolved[0]["prompt"]
+            .as_str()
+            .unwrap()
+            .contains("private-commit-marker")
+    );
+}
+
+#[tokio::test]
+async fn cli_and_api_agent_lifecycle_logs_expose_progress_without_prompt_bodies() {
+    use crate::entities::workflow_node_runs as nodes;
+    use sea_orm::IntoActiveModel;
+    for api in [false, true] {
+        let fixture = Fixture::new().await;
+        let id = fixture.s.ids.next_id().unwrap();
+        let attempt = nodes::Model {
+            id: i64::from(id),
+            execution_id: fixture.run.id,
+            node_id: "agent".into(),
+            iteration_path: "[]".into(),
+            iteration_hash: "".into(),
+            attempt: 1,
+            state: "running".into(),
+            items_in: 1,
+            items_out: 0,
+            output: "".into(),
+            output_asset: None,
+            logs: None,
+            logs_truncated: false,
+            logs_updated_at: 0,
+            error: "".into(),
+            cache_key: "".into(),
+            cache_hit_from: None,
+            cost_micros: 0,
+            started_at: crate::db::now(),
+            started_by: 1,
+            finished_at: 0,
+            finished_by: 0,
+            resolved_params: None,
+            seed: None,
+            redo_round: 0,
+            error_policy: "stop".into(),
+            version: 1,
+        };
+        nodes::Entity::insert(attempt.into_active_model())
+            .exec(&fixture.s.db)
+            .await
+            .unwrap();
+        let mut server = None;
+        if api {
+            let (url, task, _) =
+                api_upstream("openai", vec![api_answer(r#"{"summary":"done"}"#)]).await;
+            api_model(&fixture, "openai", &url).await;
+            server = Some(task);
+        } else {
+            fixture.script(answer(r#"{"summary":"done"}"#));
+        }
+        let mut parameters = params(fixture.agent.id);
+        parameters["prompt"] = json!("private-prompt-must-not-appear-in-logs");
+        execute_with(
+            &fixture.s,
+            &fixture.run,
+            i64::from(id),
+            &json!({"id":"agent","type":"ai.agent.run"}),
+            &[Item {
+                json: Map::new(),
+                binary: Default::default(),
+                paired: vec![],
+            }],
+            &[parameters],
+            Limits {
+                timeout: Duration::from_secs(10),
+                clock: None,
+            },
+        )
+        .await
+        .unwrap();
+        let row = nodes::Entity::find_by_id(i64::from(id))
+            .one(&fixture.s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let logs = row.logs.unwrap();
+        assert!(logs.contains("agent_started"), "{logs}");
+        assert!(logs.contains("agent_finished"), "{logs}");
+        assert!(logs.contains("\"input_items\":1"), "{logs}");
+        assert!(logs.contains("\"output_items\":1"), "{logs}");
+        assert!(logs.contains("elapsed_ms"), "{logs}");
+        assert!(!logs.contains("private-prompt-must-not-appear-in-logs"));
+        assert!(row.logs_updated_at > 0);
+        if let Some(task) = server {
+            task.abort();
+        }
+    }
+}
+
+#[tokio::test]
 async fn api_and_cli_agents_receive_the_same_frozen_workflow_clock() {
     let instant = chrono::DateTime::parse_from_rfc3339("2026-11-22T16:30:00Z")
         .unwrap()

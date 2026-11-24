@@ -115,6 +115,27 @@ try {
   assert.equal(await page.getByRole('tab', { name: '版本历史', exact: true }).count(), 0);
   assert.equal(await page.getByRole('tab', { name: '执行记录', exact: true }).count(), 0);
   await page.goto(`${origin}/zh-CN${endpoint}`);
+  await page.getByRole('tab', { name: '执行记录', exact: true }).click();
+  const executionList = page.locator('[data-workflow-executions]');
+  await executionList.getByRole('columnheader').first().waitFor();
+  for (const [width, height] of [[1440, 960], [820, 1024], [390, 844], [320, 740]]) {
+    await page.setViewportSize({ width, height });
+    const layout = await executionList.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      const parent = element.parentElement.getBoundingClientRect();
+      return { height: box.height, bottomGap: parent.bottom - box.bottom, overflow: document.documentElement.scrollWidth - innerWidth };
+    });
+    assert(layout.height > (width >= 768 ? 300 : 100), JSON.stringify({ width, ...layout }));
+    assert(layout.bottomGap < 24, `execution list must fill remaining height: ${JSON.stringify({ width, ...layout })}`);
+    assert(layout.overflow <= 1, `no whole-page horizontal overflow: ${JSON.stringify({ width, ...layout })}`);
+    const footer = executionList.locator('[data-auto-table-footer]');
+    await footer.scrollIntoViewIfNeeded();
+    const footerBox = await footer.boundingBox();
+    assert(footerBox && footerBox.y >= 0 && footerBox.y + footerBox.height <= height + 1, `pagination remains reachable at ${width}px`);
+    await page.screenshot({ path: join(directory, `execution-list-${width}.png`), fullPage: true });
+  }
+  passed('execution history fills remaining height on desktop, tablet and phone without page overflow');
+  await page.setViewportSize({ width: 1440, height: 960 });
   await page.getByRole('tab', { name: '版本历史', exact: true }).click();
   await page.getByRole('columnheader').first().waitFor();
   await page.goto(`${origin}/zh-CN${endpoint}/edit`);
@@ -325,6 +346,35 @@ try {
   }
   assert.deepEqual(errors, []);
   passed('all six locale routes load the saved node workflow without raw message keys');
+  await page.goto(`${origin}/zh-CN${root}/workspace-settings/1/edit`);
+  await page.getByRole('textbox', { name: '名称', exact: true }).fill('Renamed acceptance workspace');
+  const workspaceAvatar = page.locator('[data-avatar-editor]');
+  await workspaceAvatar.locator('button[aria-pressed]').nth(1).click();
+  await workspaceAvatar.getByRole('button', { name: '🚀', exact: true }).click();
+  await page.getByRole('combobox').fill('Asia/Kuala_Lumpur');
+  await page.getByRole('combobox').press('Tab');
+  const workspaceSave = page.waitForResponse(response => response.url().endsWith(`${root}/workspace-settings/1`) && response.request().method() === 'PATCH');
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  const savedWorkspaceResponse = await workspaceSave;
+  assert.equal(savedWorkspaceResponse.status(), 200, await savedWorkspaceResponse.text());
+  const savedWorkspace = await savedWorkspaceResponse.json();
+  assert.equal(savedWorkspace.name, 'Renamed acceptance workspace');
+  assert.equal(savedWorkspace.avatar.emoji, '🚀');
+  assert.equal(savedWorkspace.timezone, 'Asia/Kuala_Lumpur');
+  assert.equal((await api('/me')).workspaces.find(item => item.id === workspace.id).avatar.emoji, '🚀');
+  for (const locale of ['zh-CN', 'en-US', 'ms-MY']) {
+    for (const [width, height] of [[1440, 960], [820, 1024], [320, 740]]) {
+      await page.setViewportSize({ width, height });
+      await page.goto(`${origin}/${locale}${root}/workspace-settings/1/edit`);
+      await page.locator('[data-avatar-editor]').waitFor();
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${locale} workspace form overflow at ${width}px`);
+      await page.screenshot({ path: join(directory, `workspace-information-${locale}-${width}.png`), fullPage: true });
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.goto(`${origin}/zh-CN${root}/settings`);
+  await page.getByRole('link', { name: '空间信息', exact: true }).waitFor();
+  passed('workspace information has its own menu, saves name/avatar/timezone, refreshes identity and fits three languages on desktop/tablet/phone');
   await writeFile(`${directory}/ui-acceptance.json`, JSON.stringify({ checks, workflow: row.id, execution: execution.id, result: 'PASS' }, null, 2));
 } finally {
   if (browser) await browser.close();

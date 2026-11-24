@@ -52,6 +52,7 @@ pub(crate) async fn setup() -> (tempfile::TempDir, AppState) {
         .exec(&s.db).await.unwrap();
     for id in [1, 2] {
         crate::entities::workspaces::Entity::insert(crate::entities::workspaces::ActiveModel {
+            avatar: sea_orm::Set(None),
             timezone: Set(None),
             id: Set(id),
             slug: Set(format!("w{id}")),

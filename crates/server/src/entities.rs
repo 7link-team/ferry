@@ -543,6 +543,7 @@ pub mod workspaces {
         pub id: i64,
         pub slug: String,
         pub name: String,
+        pub avatar: Option<String>,
         pub timezone: Option<String>,
         pub owner_id: i64,
         pub join_code: String,

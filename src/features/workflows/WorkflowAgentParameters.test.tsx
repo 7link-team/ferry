@@ -63,6 +63,17 @@ async function change(label: string, value: string) {
 const reported = (key: string) => invalid.mock.calls.filter(([name]) => name === key).at(-1)?.[1];
 const location = () => host.querySelector('[data-testid="agent-location"]')?.textContent;
 
+it("documents automatic batch inputs with an expression that has no current-item dependency", async () => {
+  for (const language of ["en-US", "zh-CN", "ms-MY"]) {
+    await act(async () => { await i18n.changeLanguage(language); });
+    await render(<Harness />);
+    const help = t("agent.promptHelp");
+    expect(host.textContent).toContain(help);
+    expect(help).toContain("$input.all()");
+    expect(help).not.toContain("{{ $json.");
+  }
+});
+
 it("explains that API Agents need no host even when a CLI host target was saved", async () => {
   current.agent_id = "15";
   await render(<Harness settings={{ runtime: "host", target_kind: "host", target_ref: "9" }} />);

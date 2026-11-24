@@ -30,6 +30,20 @@ it("renders distinct offline illustration families and stable seed variations", 
 it("renders emoji as text and never executable markup", () => {
   expect(renderToStaticMarkup(<IdentityAvatar id="1" name="User" kind="user" value={{ style: "emoji", emoji: "<script>" }} />)).toContain("&lt;script&gt;");
 });
+
+it("uses initials for spaces and offers workspace avatar styles without person controls", async () => {
+  expect(renderToStaticMarkup(<IdentityAvatar id="space" name="Team" kind="workspace" />)).toContain("TE");
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<AvatarEditor id="space" name="Team" kind="workspace" onChange={() => {}} />));
+    // Image selection uses the existing upload control, alongside initials/emoji.
+    expect(host.querySelectorAll('button[aria-pressed]')).toHaveLength(2);
+    expect(host.querySelector('select')).toBeNull();
+    expect(host.querySelector('input[type="file"]')).not.toBeNull();
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
 it("rejects an unsupported upload without changing the saved avatar", async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const host = document.createElement("div"); document.body.append(host);

@@ -1,4 +1,13 @@
 {
+  "execution.log.agentStarted": ["Agent started", "智能体开始执行", "智慧體開始執行", "エージェント実行開始", "에이전트 실행 시작", "Ejen mula berjalan"],
+  "execution.log.agentFinished": ["Agent execution ended", "智能体执行结束", "智慧體執行結束", "エージェント実行終了", "에이전트 실행 종료", "Pelaksanaan ejen tamat"],
+  "execution.log.turnStarted": ["Model turn started", "模型轮次开始", "模型回合開始", "モデルターン開始", "모델 턴 시작", "Giliran model bermula"],
+  "execution.log.waiting": ["Waiting for model; execution remains active", "等待模型响应，执行仍在进行", "等待模型回應，執行仍在進行", "モデル応答待ち、実行は継続中", "모델 응답 대기 중, 실행 계속 진행", "Menunggu respons model; pelaksanaan masih aktif"],
+  "execution.log.turnFinished": ["Model turn ended", "模型轮次结束", "模型回合結束", "モデルターン終了", "모델 턴 종료", "Giliran model tamat"],
+  "execution.log.sessionReady": ["Model session connected", "模型会话已连接", "模型工作階段已連線", "モデルセッション接続済み", "모델 세션 연결됨", "Sesi model disambungkan"],
+  "execution.log.usage": ["Model outcome and token usage", "模型结果与 Token 用量", "模型結果與 Token 用量", "モデル結果とトークン使用量", "모델 결과 및 토큰 사용량", "Hasil model dan penggunaan token"],
+  "execution.log.requestStarted": ["Model API request started", "模型 API 请求开始", "模型 API 請求開始", "モデル API リクエスト開始", "모델 API 요청 시작", "Permintaan API model bermula"],
+  "execution.log.responseReceived": ["Model API response received", "已收到模型 API 响应", "已收到模型 API 回應", "モデル API 応答受信済み", "모델 API 응답 수신됨", "Respons API model diterima"],
   "agent.locationApi": [
     "Execution location: model API on the server; no Runner host is required. Host targets apply only to CLI models.",
     "执行位置：由服务端调用模型 API，无需 Runner 主机；主机目标仅用于 CLI 模型。",
@@ -6104,12 +6113,12 @@
     "Gesaan tugas"
   ],
   "agent.promptHelp": [
-    "Input items are appended to the prompt as JSON. Start with = to use expressions, e.g. =Analyze {{ $json.since }}.",
-    "输入数据会以 JSON 附加到提示后。以 = 开头可使用表达式，例如 =分析 {{ $json.since }}。",
-    "輸入資料會以 JSON 附加到提示後。以 = 開頭可使用運算式，例如 =分析 {{ $json.since }}。",
-    "入力項目は JSON としてプロンプトの後に追加されます。= で始めると式を使えます（例：=分析 {{ $json.since }}）。",
-    "입력 항목은 JSON으로 프롬프트 뒤에 추가됩니다. =로 시작하면 표현식을 쓸 수 있습니다(예: =분석 {{ $json.since }}).",
-    "Item input ditambah pada gesaan sebagai JSON. Mulakan dengan = untuk ungkapan, cth. =Analisis {{ $json.since }}."
+    "All input items are appended automatically as JSON; plain instructions are enough. This batch node has no current $json. For expressions, use $input.all(), e.g. =Analyze {{ $input.all().length }} input items.",
+    "全部输入数据会自动以 JSON 附带，直接填写分析要求即可。此批量节点没有当前单条 $json。表达式请使用 $input.all()，例如 =分析 {{ $input.all().length }} 条输入。",
+    "全部輸入資料會自動以 JSON 附帶，直接填寫分析要求即可。此批次節點沒有目前單筆 $json。運算式請使用 $input.all()，例如 =分析 {{ $input.all().length }} 筆輸入。",
+    "すべての入力は JSON として自動追加されるため、指示だけを入力できます。このバッチノードに現在の $json はありません。式には $input.all() を使用します（例：=入力 {{ $input.all().length }} 件を分析）。",
+    "모든 입력은 JSON으로 자동 첨부되므로 분석 지시만 입력하면 됩니다. 이 일괄 노드에는 현재 항목 $json이 없습니다. 표현식에는 $input.all()을 사용하세요(예: =입력 {{ $input.all().length }}개 분석).",
+    "Semua item input dilampirkan secara automatik sebagai JSON; arahan biasa sudah memadai. Nod kelompok ini tiada $json semasa. Gunakan $input.all() untuk ungkapan, contohnya =Analisis {{ $input.all().length }} item input."
   ],
   "agent.promptTooLong": [
     "The task prompt exceeds 32 KiB.",

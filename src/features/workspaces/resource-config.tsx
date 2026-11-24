@@ -3,7 +3,7 @@ import type { FormField } from "../../shared/resources/types";
 import { detectedTimezone } from "../../shared/timezone";
 import { api } from "../../shared/api/api";
 import type { AvatarValue } from "../../shared/api/api";
-import { IdentityAvatar } from "../../shared/ui/identity-avatar";
+import { AvatarEditor, IdentityAvatar } from "../../shared/ui/identity-avatar";
 import { deleteResource } from "../../shared/api/resource";
 import { commonText } from "../../shared/i18n/i18n";
 import type { ResourceConfigContext } from "../../shared/resources/config";
@@ -185,7 +185,12 @@ export function workspacesForms({
   permissions,
 }: ResourceConfigContext): Record<string, FormConfig<AnyRow>> {
   return {
-    "workspace-settings": form({ resource: "workspace-settings", permissionResource: "settings", blank: {}, heading: () => commonText("resource-domain:workspace.settings"), sections: [{ fields: [workspaceTimezoneField()] }] }),
+    "workspace-settings": form({ resource: "workspace-settings", permissionResource: "settings", blank: {}, heading: () => commonText("resource-domain:workspace.settings"), sections: [{ fields: [
+      {key:"name",label:"Name",labelKey:"common-domain:common.name",type:"text",required:true},
+      {key:"avatar",label:"Avatar",labelKey:"identity:avatar",type:"custom",span:2,
+        render:({draft,readOnly,onPatch,onValidityChange})=><AvatarEditor id={workspace} name={String(draft.name??"")} kind="workspace" value={draft.avatar} readOnly={readOnly} onBusyChange={onValidityChange} onChange={avatar=>onPatch({avatar})}/>},
+      workspaceTimezoneField()
+    ] }] }),
     members: form({
       resource: "members",
       heading: (r: Member) => r.name,

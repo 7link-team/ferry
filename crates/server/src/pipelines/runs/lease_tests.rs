@@ -88,6 +88,7 @@ pub(crate) async fn fixture(limit: i64) -> (tempfile::TempDir, AppState, AppStat
         .unwrap();
     workspaces::Entity::insert(
         workspaces::Model {
+            avatar: None,
             timezone: None,
             id: 11,
             slug: "tests".into(),

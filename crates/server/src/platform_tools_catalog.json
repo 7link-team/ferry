@@ -5950,7 +5950,8 @@
     "source": "crates/server/src/main.rs",
     "signature": "async fn read(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
     "definitions": [],
-    "permission_checks": []
+    "permission_checks": [],
+    "documentation": "Read the current workspace's information. This singleton always uses id=1;\nthe workspace comes from the authenticated URL scope, never from the body."
   },
   {
     "path": "/workspace-settings/{id}",
@@ -5959,11 +5960,11 @@
     "source": "crates/server/src/main.rs",
     "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Update>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct Update {\n    timezone: String,\n    version: i64,\n    // Shared resource forms resend these read-only fields. Neither chooses the tenant.\n    #[serde(rename = \"id\")]\n    _id: Option<Id>,\n    #[serde(rename = \"name\")]\n    _name: Option<String>,\n}"
+      "struct Update {\n    timezone: String,\n    version: i64,\n    // Neither the singleton id nor presentation fields choose the tenant.\n    #[serde(rename = \"id\")]\n    _id: Option<Id>,\n    name: Option<String>,\n    avatar: Option<crate::avatar::Avatar>,\n}"
     ],
     "permission_checks": [
       "settings.update"
     ],
-    "documentation": "Changes workspace wall-clock semantics and recomputes future schedules atomically."
+    "documentation": "Update workspace name, avatar and business timezone with the fresh `version`\nreturned by GET /workspace-settings/1. `timezone` is a required IANA name;\n`name` is optional, trimmed, nonempty and at most 60 Unicode characters.\nOptional `avatar` reuses the account presentation object, e.g.\n{\"style\":\"initials\"} or {\"style\":\"emoji\",\"emoji\":\"...\"}; image avatars\nmust use the existing validated local 128x128 PNG representation, not a URL.\nOmitted/null avatar and omitted name preserve existing values for old clients.\nWrites require settings.update and are scoped, versioned and audited. A changed\ntimezone recomputes future schedules in the same transaction; UTC history stays."
   }
 ]

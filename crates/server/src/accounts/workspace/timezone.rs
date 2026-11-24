@@ -13,9 +13,11 @@ pub(crate) fn validate(value: &str) -> Result<chrono_tz::Tz> {
 }
 
 fn view(row: &workspaces::Model) -> Value {
-    json!({"id":"1","name":row.name,"timezone":row.timezone,"version":row.updated_at})
+    json!({"id":"1","name":row.name,"avatar":row.avatar.as_deref().and_then(|value|serde_json::from_str::<Value>(value).ok()),"timezone":row.timezone,"version":row.updated_at})
 }
 
+/// Read the current workspace's information. This singleton always uses id=1;
+/// the workspace comes from the authenticated URL scope, never from the body.
 pub async fn read(
     State(s): State<AppState>,
     scope: Scope,
@@ -36,14 +38,22 @@ pub async fn read(
 pub struct Update {
     timezone: String,
     version: i64,
-    // Shared resource forms resend these read-only fields. Neither chooses the tenant.
+    // Neither the singleton id nor presentation fields choose the tenant.
     #[serde(rename = "id")]
     _id: Option<Id>,
-    #[serde(rename = "name")]
-    _name: Option<String>,
+    name: Option<String>,
+    avatar: Option<crate::avatar::Avatar>,
 }
 
-/// Changes workspace wall-clock semantics and recomputes future schedules atomically.
+/// Update workspace name, avatar and business timezone with the fresh `version`
+/// returned by GET /workspace-settings/1. `timezone` is a required IANA name;
+/// `name` is optional, trimmed, nonempty and at most 60 Unicode characters.
+/// Optional `avatar` reuses the account presentation object, e.g.
+/// {"style":"initials"} or {"style":"emoji","emoji":"..."}; image avatars
+/// must use the existing validated local 128x128 PNG representation, not a URL.
+/// Omitted/null avatar and omitted name preserve existing values for old clients.
+/// Writes require settings.update and are scoped, versioned and audited. A changed
+/// timezone recomputes future schedules in the same transaction; UTC history stays.
 pub async fn update(
     State(s): State<AppState>,
     scope: Scope,
@@ -63,7 +73,23 @@ pub async fn update(
             crate::i18n::Message::new("platform.recordChangedOrDeleted"),
         ));
     }
-    let saved = update_in(&tx, &row, &row.name, Some(&body.timezone)).await?;
+    let name = validate_name(body.name.as_deref().unwrap_or(&row.name))?;
+    if let Some(avatar) = &body.avatar {
+        avatar.validate()?;
+    }
+    let mut saved = update_in(&tx, &row, &name, Some(&body.timezone)).await?;
+    if let Some(avatar) = body.avatar {
+        let avatar = serde_json::to_string(&avatar).map_err(|_| ApiError::missing())?;
+        workspaces::Entity::update_many()
+            .col_expr(
+                workspaces::Column::Avatar,
+                Expr::value(Some(avatar.clone())),
+            )
+            .filter(workspaces::Column::Id.eq(row.id))
+            .exec(&tx)
+            .await?;
+        saved.avatar = Some(avatar);
+    }
     crate::hosts::activity_in(
         &s,
         &tx,
@@ -71,7 +97,7 @@ pub async fn update(
         "update",
         "workspace-settings",
         &scope.workspace_id,
-        json!({"timezone":{"from":row.timezone,"to":saved.timezone}}),
+        json!({"name":{"from":row.name,"to":saved.name},"timezone":{"from":row.timezone,"to":saved.timezone},"avatar_changed":row.avatar!=saved.avatar}),
     )
     .await?;
     tx.commit().await?;
@@ -182,9 +208,11 @@ mod tests {
             );
         }
         let Json(saved) = update(State(s.clone()), scope.clone(), path(),
-            body(json!({"id":"2","name":"ignored tenant name","timezone":"Asia/Kuala_Lumpur","version":old["version"]})))
+            body(json!({"id":"2","name":"Renamed workspace","avatar":{"style":"emoji","emoji":"🧭"},"timezone":"Asia/Kuala_Lumpur","version":old["version"]})))
             .await.unwrap();
-        assert_eq!(saved["name"], old["name"]);
+        assert_eq!(saved["name"], "Renamed workspace");
+        assert_eq!(saved["avatar"]["style"], "emoji");
+        assert_eq!(saved["avatar"]["emoji"], "🧭");
         assert_eq!(saved["timezone"], "Asia/Kuala_Lumpur");
         assert_ne!(saved["version"], old["version"]);
         assert_eq!(
@@ -222,6 +250,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(audits.len(), 1);
+        for invalid_name in [String::new(), "x".repeat(61)] {
+            assert_eq!(update(State(s.clone()),admin(1),path(),body(json!({"name":invalid_name,"timezone":"Asia/Kuala_Lumpur","version":saved["version"]}))).await.unwrap_err().0,StatusCode::BAD_REQUEST);
+        }
+        assert_eq!(update(State(s.clone()),admin(1),path(),body(json!({"avatar":{"style":"image","image":"https://example.invalid/avatar.png"},"timezone":"Asia/Kuala_Lumpur","version":saved["version"]}))).await.unwrap_err().0,StatusCode::BAD_REQUEST);
+        let Json(preserved) = update(
+            State(s.clone()),
+            admin(1),
+            path(),
+            body(json!({"timezone":"Asia/Kuala_Lumpur","version":saved["version"]})),
+        )
+        .await
+        .unwrap();
+        assert_eq!(preserved["name"], saved["name"]);
+        assert_eq!(preserved["avatar"], saved["avatar"]);
         crate::entities::workspace_roles::Entity::update_many()
             .col_expr(
                 crate::entities::workspace_roles::Column::Permissions,

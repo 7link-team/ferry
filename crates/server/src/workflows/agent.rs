@@ -432,6 +432,9 @@ impl Session<'_> {
     /// Drive one native turn to completion; any limit, revocation or
     /// cancellation stops the CLI and fails the node.
     async fn turn(&mut self, request: Request) -> Result<Answer> {
+        let started = Instant::now();
+        self.log.event("model_turn_started", json!({"prompt_bytes":request.prompt.len(),"resumed":request.native_session_id.is_some()}));
+        let _ = self.log.flush(self.s, self.node_run).await;
         let (cancel, cancelled) = watch::channel(false);
         let (events_tx, mut events) = mpsc::channel(32);
         let (inputs, commands) = mpsc::channel(16);
@@ -449,6 +452,11 @@ impl Session<'_> {
         let mut check = tokio::time::interval(Duration::from_millis(500));
         let mut renewal = tokio::time::interval(Duration::from_secs(10));
         let mut flush = tokio::time::interval(Duration::from_millis(250));
+        let mut progress = tokio::time::interval_at(
+            Instant::now() + Duration::from_secs(10),
+            Duration::from_secs(10),
+        );
+        progress.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         for timer in [&mut check, &mut renewal, &mut flush] {
             timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         }
@@ -532,11 +540,15 @@ impl Session<'_> {
                 _ = flush.tick(), if self.log.dirty => {
                     let _ = self.log.flush(self.s, self.node_run).await;
                 }
+                _ = progress.tick(), if failure.is_none() => {
+                    self.log.event("model_turn_waiting", json!({"elapsed_ms":started.elapsed().as_millis(),"received_bytes":self.received,"tool_calls":self.calls}));
+                }
                 _ = &mut grace, if failure.is_some() => break,
             }
         }
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
+        self.log.event("model_turn_finished", json!({"outcome":outcome,"elapsed_ms":started.elapsed().as_millis(),"received_bytes":self.received,"tool_calls":self.calls,"error":failure.as_ref().and_then(|error|error.2.as_ref().map(|message|&message.key))}));
         if let Some(error) = failure {
             return Err(error);
         }
@@ -578,8 +590,18 @@ impl Session<'_> {
                 Some((_, current)) => current.push_str(&text),
                 None => texts.push((item_id, text)),
             },
-            Event::Session { native_session_id } => *session = Some(native_session_id),
-            Event::Finished { outcome: value, .. } => *outcome = Some(value),
+            Event::Session { native_session_id } => {
+                self.log.event("model_session_ready", json!({}));
+                *session = Some(native_session_id);
+            }
+            Event::Finished {
+                outcome: value,
+                usage,
+            } => {
+                self.log
+                    .event("model_usage", json!({"outcome":value,"usage":usage}));
+                *outcome = Some(value);
+            }
             Event::Tool { name, state, .. } => {
                 self.log.push(
                     "cli",
@@ -745,6 +767,7 @@ pub(super) async fn execute_with(
                 deadline,
                 limits.timeout,
                 workspace_timezone,
+                items.len(),
             )
             .await
         })
@@ -837,6 +860,7 @@ async fn on_runner(
     deadline: Option<Instant>,
     timeout: Duration,
     workspace_timezone: Option<&str>,
+    input_items: usize,
 ) -> Result<OnHost> {
     let runtime = config.runtime.cli()?;
     // The resolved CLI (a model profile may select another one than the Agent row).
@@ -933,6 +957,7 @@ async fn on_runner(
         timeout,
         policy: policy.clone(),
     };
+    session.log.event("agent_started", json!({"input_items":input_items,"host_id":row.id.to_string(),"host":row.name,"runtime":cli,"model":config.model}));
     session.log.push(
         "agent",
         format!(
@@ -1055,6 +1080,7 @@ async fn on_runner(
             .log
             .push("agent", format!("failed: {}", error.1).as_bytes()),
     }
+    session.log.event("agent_finished", json!({"output_items":usize::from(result.is_ok()),"output_bytes":result.as_ref().ok().and_then(|(object,_)|serde_json::to_vec(object).ok()).map(|bytes|bytes.len()),"error":result.as_ref().err().and_then(|error|error.2.as_ref().map(|message|&message.key))}));
     let _ = session.log.flush(s, node_run).await;
     result.map(OnHost::Done)
 }
