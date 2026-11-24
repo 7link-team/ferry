@@ -612,11 +612,53 @@ async fn context_in(
             output = output[start..].to_owned();
         }
     }
+    let roster = roster(conn, row.conversation_id, link.chat_agent_id).await?;
     if output.is_empty() {
-        Ok(output)
+        Ok(roster)
     } else {
-        Ok(format!("<group_history>\n{output}\n</group_history>\n\n"))
+        Ok(format!(
+            "{roster}<group_history>\n{output}\n</group_history>\n\n"
+        ))
     }
+}
+
+/// The other room Agents this Agent can hand work to, and how.
+async fn roster(conn: &impl ConnectionTrait, conversation: i64, me: i64) -> Result<String> {
+    let rows = agents::Entity::find()
+        .filter(agents::Column::ConversationId.eq(conversation))
+        .filter(agents::Column::State.eq("active"))
+        .filter(agents::Column::Id.ne(me))
+        .order_by_asc(agents::Column::Id)
+        .all(conn)
+        .await?;
+    if rows.is_empty() {
+        return Ok(String::new());
+    }
+    let sponsors = users::Entity::find()
+        .filter(users::Column::Id.is_in(rows.iter().map(|a| a.added_by)))
+        .all(conn)
+        .await?;
+    let mut out = String::from("<room_agents>\n");
+    for a in &rows {
+        let name = serde_json::from_str::<Value>(&a.config)
+            .ok()
+            .and_then(|c| c["name"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let sponsor = sponsors
+            .iter()
+            .find(|u| u.id == a.added_by)
+            .map(|u| u.name.as_str())
+            .unwrap_or("");
+        out.push_str(&format!(
+            "- room Agent {}: {name} (added by {sponsor})\n",
+            Id::from(a.id)
+        ));
+    }
+    out.push_str(&format!(
+        "To hand work to another Agent (report a failing API call, announce a contract change, ask for a fix), call ferry_request POST /conversations/{}/relay with {{\"agents\":[room Agent ids],\"text\":\"...\"}}. It needs no approval. Their reply arrives later as a new message to you; do not poll or wait for it.\n</room_agents>\n\n",
+        Id::from(conversation)
+    ));
+    Ok(out)
 }
 
 /// One turn for a room Agent, linked to the message that asked for it.

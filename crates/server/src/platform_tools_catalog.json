@@ -1474,6 +1474,47 @@
     "permission": "conversations.update"
   },
   {
+    "path": "/conversations/{id}/agents",
+    "method": "POST",
+    "handler": "add",
+    "source": "crates/server/src/conversations/room_agents.rs",
+    "signature": "async fn add(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<AddBody>,\n) -> Result<(StatusCode, Json<Value>)>",
+    "definitions": [
+      "struct AddBody {\n    agent_id: Id,\n}"
+    ],
+    "permission_checks": [
+      "conversations.run"
+    ],
+    "permission": "conversations.run"
+  },
+  {
+    "path": "/conversations/{id}/agents/{agent}",
+    "method": "DELETE",
+    "handler": "remove",
+    "source": "crates/server/src/conversations/room_agents.rs",
+    "signature": "async fn remove(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, room_agent)): Path<(String, Id, Id)>,\n) -> Result<StatusCode>",
+    "definitions": [],
+    "permission_checks": [
+      "conversations.run"
+    ],
+    "permission": "conversations.run"
+  },
+  {
+    "path": "/conversations/{id}/agents/{agent}",
+    "method": "PATCH",
+    "handler": "update",
+    "source": "crates/server/src/conversations/room_agents.rs",
+    "signature": "async fn update(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id, room_agent)): Path<(String, Id, Id)>,\n    Json(body): Json<UpdateBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct UpdateBody {\n    approval_mode: String,\n}"
+    ],
+    "permission_checks": [
+      "conversations.run"
+    ],
+    "documentation": "Only the sponsor sets their Agent's approval mode, never during a turn and\nnever through an Agent tool call; it changes no permission grants.",
+    "permission": "conversations.run"
+  },
+  {
     "path": "/conversations/{id}/appearance",
     "method": "PUT",
     "handler": "appearance::update",
@@ -1569,7 +1610,7 @@
     "source": "crates/server/src/conversations.rs",
     "signature": "async fn rebind(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<Rebind>,\n) -> Result<Json<Value>>",
     "definitions": [
-      "struct Rebind {\n    /// The room Agent to move; omitted for a private conversation.\n    #[serde(default)]\n    agent_id: Option<Id>,\n}"
+      "struct Rebind {\n    /// The room Agent to move; omitted for a private conversation.\n    #[serde(default)]\n    agent_id: Option<Id>,\n    /// The room Agent row; required when several members added the same Agent.\n    #[serde(default)]\n    room_agent_id: Option<Id>,\n}"
     ],
     "permission_checks": [
       "conversations.run"
@@ -1597,7 +1638,7 @@
     "source": "crates/server/src/conversations/groups.rs",
     "signature": "async fn send_message(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(mut body): Json<MessageBody>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct MessageBody {\n    prompt: String,\n    client_id: String,\n    #[serde(default)]\n    attachments: Vec<Attachment>,\n    #[serde(default)]\n    targets: Vec<Id>,\n    #[serde(default)]\n    reply_to: Option<Id>,\n    #[serde(default)]\n    mentions: Vec<Id>,\n}"
+      "struct MessageBody {\n    prompt: String,\n    client_id: String,\n    #[serde(default)]\n    attachments: Vec<Attachment>,\n    #[serde(default)]\n    targets: Vec<Id>,\n    #[serde(default)]\n    reply_to: Option<Id>,\n    #[serde(default)]\n    mentions: Vec<Id>,\n    /// Room Agent row ids; preferred over `targets` (Agent definition ids).\n    #[serde(default)]\n    agents: Vec<Id>,\n}"
     ],
     "permission_checks": [
       "conversations.run"
@@ -1658,6 +1699,34 @@
       "struct Read {\n    message_id: Id,\n}"
     ],
     "permission_checks": []
+  },
+  {
+    "path": "/conversations/{id}/relay",
+    "method": "PATCH",
+    "handler": "switch",
+    "source": "crates/server/src/conversations/relay.rs",
+    "signature": "async fn switch(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(body): Json<SwitchBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct SwitchBody {\n    enabled: bool,\n}"
+    ],
+    "permission_checks": [
+      "conversations.run"
+    ],
+    "documentation": "Any room participant may turn Agent-to-Agent relay on or off.",
+    "permission": "conversations.run"
+  },
+  {
+    "path": "/conversations/{id}/relay/continue",
+    "method": "POST",
+    "handler": "resume",
+    "source": "crates/server/src/conversations/relay.rs",
+    "signature": "async fn resume(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "conversations.run"
+    ],
+    "documentation": "Delivers held relays now, as a new chain (hop 0).",
+    "permission": "conversations.run"
   },
   {
     "path": "/conversations/{id}/turns",
@@ -5436,6 +5505,20 @@
     "permission_checks": [
       "workflow-groups.create"
     ]
+  },
+  {
+    "path": "/workflow-groups/ordering",
+    "method": "PATCH",
+    "handler": "pipelines::contexts::reorder_workflow_groups",
+    "source": "crates/server/src/main.rs",
+    "signature": "async fn reorder_workflow_groups(\n    State(s): State<AppState>,\n    scope: Scope,\n    Json(body): Json<ReorderGroupsBody>,\n) -> Result<Json<Value>>",
+    "definitions": [
+      "struct ReorderGroupsBody {\n    ids: Vec<String>,\n}"
+    ],
+    "permission_checks": [
+      "workflow-groups.update"
+    ],
+    "permission": "workflow-groups.update"
   },
   {
     "path": "/workflow-groups/{id}",

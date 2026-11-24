@@ -2606,6 +2606,12 @@ async fn agents_relay_to_each_other_without_approval_as_the_target_sponsor() {
     let later = relayed_turns(&s, target).await.pop().unwrap().0;
     let context = groups::context(&s.db, &later, 64 * 1024).await.unwrap();
     assert!(context.contains("GET /orders returns 500"), "{context}");
+    // The target also learns who else is in the room and how to relay back.
+    assert!(context.contains("<room_agents>"), "{context}");
+    assert!(
+        context.contains(&format!("POST /conversations/{id}/relay")),
+        "{context}"
+    );
     // Self, unknown and other-conversation relays are refused.
     let caller_row = crate::entities::ai_chat_turns::Entity::find_by_id(running.id)
         .one(&s.db)
