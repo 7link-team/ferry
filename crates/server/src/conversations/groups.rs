@@ -112,6 +112,8 @@ pub(super) async fn prepare(
             binding: super::placement::UNBOUND.into(),
             native_session_id: String::new(),
             state: "active".into(),
+            added_by: scope.user.id.into(),
+            approval_mode: super::approval::default_mode(),
         });
     }
     Ok(result)
@@ -492,6 +494,8 @@ pub(super) async fn send_message(
                 conversation_id: id.into(),
                 message_id: message.into(),
                 chat_agent_id: a.id,
+                hop: 0,
+                caller_chat_agent_id: 0,
             }
             .into_active_model(),
         )

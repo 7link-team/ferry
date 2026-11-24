@@ -95,6 +95,8 @@ async fn enqueue(
                 conversation_id: id.into(),
                 message_id: 0,
                 chat_agent_id: a.id,
+                hop: 0,
+                caller_chat_agent_id: 0,
             }
             .into_active_model(),
         )

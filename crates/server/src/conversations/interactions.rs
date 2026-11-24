@@ -499,6 +499,8 @@ pub(super) async fn members(
                     binding: super::placement::UNBOUND.into(),
                     native_session_id: String::new(),
                     state: "active".into(),
+                    added_by: scope.user.id.into(),
+                    approval_mode: super::approval::mode(&c.config)?,
                 }
                 .into_active_model(),
             )
@@ -570,6 +572,8 @@ mod tests {
                 binding: c.binding.clone(),
                 native_session_id: String::new(),
                 state: "active".into(),
+                added_by: 1,
+                approval_mode: "request".into(),
             }
             .into_active_model(),
         )

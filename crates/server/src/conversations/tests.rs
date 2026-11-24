@@ -562,6 +562,8 @@ async fn groups_require_membership_only_mentioned_agents_reply_with_separate_nat
                 binding: c.binding.clone(),
                 native_session_id: String::new(),
                 state: "active".into(),
+                added_by: 1,
+                approval_mode: "request".into(),
             }
             .into_active_model(),
         )
@@ -2018,4 +2020,57 @@ async fn both_engines_business_clock_context_is_workspace_scoped_and_legacy_stay
             .unwrap(),
         ""
     );
+}
+
+#[tokio::test]
+async fn room_agent_sponsors_backfill_owner_and_mode_and_allow_one_copy_per_sponsor() {
+    use crate::entities::ai_chat_agents as room_agents;
+    use crate::migration::room_agent_sponsors::Migration;
+    use sea_orm_migration::{MigrationTrait, SchemaManager};
+    let (_dir, s, id) = seeded().await;
+    let c = find(&s.db, &admin(1), id).await.unwrap();
+    let mut room = c.clone().into_active_model();
+    room.config = sea_orm::Set(r#"{"approval_mode":"assisted"}"#.into());
+    room.update(&s.db).await.unwrap();
+    let row = |row_id: i64, added_by: i64| room_agents::Model {
+        id: row_id,
+        workspace_id: 1,
+        conversation_id: id.into(),
+        agent_id: c.agent_id,
+        revision_id: c.revision_id,
+        config: c.config.clone(),
+        binding: c.binding.clone(),
+        native_session_id: String::new(),
+        state: "active".into(),
+        added_by,
+        approval_mode: "request".into(),
+    };
+    // A row written before the migration has no sponsor.
+    room_agents::Entity::insert(row(9001, 0).into_active_model())
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let manager = SchemaManager::new(&s.db);
+    Migration.up(&manager).await.unwrap();
+    Migration.up(&manager).await.unwrap();
+    let migrated = room_agents::Entity::find_by_id(9001_i64)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(migrated.added_by, c.owner_id);
+    assert_eq!(migrated.approval_mode, "assisted");
+    // Another developer may add the same Agent definition; the same sponsor may not twice.
+    room_agents::Entity::insert(row(9002, c.owner_id + 1).into_active_model())
+        .exec(&s.db)
+        .await
+        .unwrap();
+    assert!(
+        room_agents::Entity::insert(row(9003, c.owner_id).into_active_model())
+            .exec(&s.db)
+            .await
+            .is_err()
+    );
+    assert!(manager.has_column("ai_chat_turns", "hop").await.unwrap());
+    assert!(Migration.down(&manager).await.is_err());
 }

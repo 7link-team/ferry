@@ -147,6 +147,9 @@ pub mod ai_chat_agents {
         pub binding: String,
         pub native_session_id: String,
         pub state: String,
+        /// The developer who added this Agent; its turns run as this user.
+        pub added_by: i64,
+        pub approval_mode: String,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}
@@ -193,6 +196,10 @@ pub mod ai_chat_turns {
         pub conversation_id: i64,
         pub message_id: i64,
         pub chat_agent_id: i64,
+        /// Agent-to-Agent relay depth; 0 when a human started the chain.
+        pub hop: i64,
+        /// The room Agent that relayed this turn; 0 for a human.
+        pub caller_chat_agent_id: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

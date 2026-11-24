@@ -37,6 +37,7 @@ mod platform_monitor;
 mod platform_storage;
 mod preview_ingress;
 mod resource_policy;
+pub(crate) mod room_agent_sponsors;
 mod runner_timezones;
 mod session_policy;
 mod workflow_node_logs;
@@ -214,6 +215,7 @@ impl MigratorTrait for Migrator {
             Box::new(chat_api::Migration),
             Box::new(resource_policy::Migration),
             Box::new(account_email_verification::Migration),
+            Box::new(room_agent_sponsors::Migration),
         ]
     }
 }

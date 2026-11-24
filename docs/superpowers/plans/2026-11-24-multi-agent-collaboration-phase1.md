@@ -40,10 +40,10 @@
 - Produces columns:
   - `ai_chat_agents.added_by: i64` (backfill = conversation `owner_id`), `ai_chat_agents.approval_mode: String` (backfill = current room mode via `approval::mode(conversation.config)`, default `"request"`).
   - `ai_chat_turns.hop: i64` (default 0), `ai_chat_turns.caller_chat_agent_id: i64` (default 0 = human).
-  - `ai_chat_messages.held_targets: String` JSON array of room Agent ids (default `"[]"`).
+  - No message column for held deliveries (an older migration reads `ai_chat_messages` through the entity, so new columns there break fresh installs). A held relay delivery is an `ai_turns` row with `state = "held"` plus its link; Continue switches it to `queued`.
   - Index `ai_chat_agents (conversation_id, agent_id, added_by)` replacing any uniqueness on `(conversation_id, agent_id)` if one exists.
 
-- [ ] **Step 1: Write the failing migration test** `room_agent_sponsors_backfills_owner_and_mode` in the new module: create a SQLite DB at the previous schema with one room (owner 7, config `{"approval_mode":"assisted"}`) and one `ai_chat_agents` row; run the migration twice; assert `added_by == 7`, `approval_mode == "assisted"`, turn `hop == 0`, message `held_targets == "[]"`.
+- [ ] **Step 1: Write the failing migration test** `room_agent_sponsors_backfills_owner_and_mode` in the new module: create a SQLite DB at the previous schema with one room (owner 7, config `{"approval_mode":"assisted"}`) and one `ai_chat_agents` row; run the migration twice; assert `added_by` = owner, `approval_mode == "assisted"`, `hop` column exists, same sponsor cannot add the same Agent twice, another sponsor can.
 - [ ] **Step 2: Run** `cargo test -p ferry-server room_agent_sponsors` — expect FAIL (module missing).
 - [ ] **Step 3: Implement** `pub struct Migration` with idempotent column adds and backfill `UPDATE`s; update entity structs.
 - [ ] **Step 4: Run** the test and `cargo test -p ferry-server migration` — expect PASS.
@@ -123,8 +123,8 @@
 **Interfaces:**
 - `pub(super) async fn relay(s: &AppState, turn: &turns::Model, body: RelayBody) -> Result<Value>`; `RelayBody { agents: Vec<Id>, text: String }`. Called when a running room-Agent turn issues `ferry_request POST /conversations/{this id}/relay`; no approval; any other conversation id → 403.
 - Inserts `ai_chat_messages` role `"relay"`, `agent_id` = caller's agent, `targets` = room Agent ids; for each target (active, not the caller) queues a turn as in Task 3 with `hop = caller hop + 1`, `caller_chat_agent_id = caller room Agent id`.
-- If `hop > agent_relay_max_hops` or room config `relay_enabled == false`: no turns; targets stored in `held_targets`; returns `{queued: [], held: [...]}` so the caller knows. Otherwise `{queued: [ids], held: []}`.
-- `POST /{workspace}/conversations/{id}/relay/continue` (any human room member): queues all `held_targets` with hop 0, clears them. `PATCH` room config `relay_enabled` via existing conversation config update (any developer member may set).
+- If `hop > agent_relay_max_hops` or room config `relay_enabled == false`: turns are inserted with `state = "held"` (never claimed); returns `{queued: [], held: [...]}` so the caller knows. Otherwise `{queued: [ids], held: []}`.
+- `POST /{workspace}/conversations/{id}/relay/continue` (any human room member): switches this room's `held` turns to `queued` with hop 0. `PATCH` room config `relay_enabled` via existing conversation config update (any developer member may set).
 - Human `send_message` turns have `hop = 0`.
 - Sponsor of each target gets the existing mention/unread signal (add sponsor id to the message `mentions`).
 
