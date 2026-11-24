@@ -582,7 +582,7 @@ async fn context_in(
         return Ok(String::new());
     };
     let mut history = messages::Entity::find()
-        .filter(messages::Column::Role.eq("user"))
+        .filter(messages::Column::Role.is_in(["user", "relay"]))
         .filter(messages::Column::RetractedAt.is_null())
         .filter(messages::Column::ConversationId.eq(row.conversation_id))
         .filter(messages::Column::Id.lt(link.message_id))
@@ -593,7 +593,12 @@ async fn context_in(
     history.reverse();
     let mut output = String::new();
     for m in history {
-        output.push_str(&format!("\nMember {}: {}", m.owner_id, m.prompt));
+        if m.role == "relay" {
+            // Agent-to-Agent messages, so each Agent sees what others asked.
+            output.push_str(&format!("\nAgent {}: {}", m.sender_name, m.prompt));
+        } else {
+            output.push_str(&format!("\nMember {}: {}", m.owner_id, m.prompt));
+        }
         let turns = links::Entity::find()
             .filter(links::Column::MessageId.eq(m.id))
             .order_by_asc(links::Column::Id)

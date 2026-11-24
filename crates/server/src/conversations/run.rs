@@ -334,10 +334,31 @@ pub(super) async fn claim(
         tx.commit().await?;
         return Ok(None);
     }
-    // Serialize room replies, including queued replies from earlier messages.
-    if turns::Entity::find()
+    // One turn at a time per room Agent (and per private conversation), in
+    // order; different room Agents run in parallel on their own hosts.
+    let room_agent = crate::entities::ai_chat_turns::Entity::find_by_id(row.id)
+        .one(&tx)
+        .await?
+        .map(|link| link.chat_agent_id);
+    let same_agent: Option<Vec<i64>> = match room_agent {
+        Some(agent) => Some(
+            crate::entities::ai_chat_turns::Entity::find()
+                .select_only()
+                .column(crate::entities::ai_chat_turns::Column::Id)
+                .filter(crate::entities::ai_chat_turns::Column::ChatAgentId.eq(agent))
+                .into_tuple()
+                .all(&tx)
+                .await?,
+        ),
+        None => None,
+    };
+    let mut earlier = turns::Entity::find()
         .filter(turns::Column::ConversationId.eq(c.id))
-        .filter(turns::Column::Id.ne(row.id))
+        .filter(turns::Column::Id.ne(row.id));
+    if let Some(ids) = same_agent {
+        earlier = earlier.filter(turns::Column::Id.is_in(ids));
+    }
+    if earlier
         .filter(
             sea_orm::Condition::any()
                 .add(turns::Column::State.is_in(["running", "stopping"]))

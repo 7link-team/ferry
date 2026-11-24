@@ -633,7 +633,8 @@ async fn groups_require_membership_only_mentioned_agents_reply_with_separate_nat
         .unwrap();
     assert_eq!(queued.len(), 2);
     let (first, execution, lease) = run::claim(&s, queued[0].id.into()).await.unwrap().unwrap();
-    assert!(run::claim(&s, queued[1].id.into()).await.unwrap().is_none());
+    // Different room Agents run in parallel, each on its own host.
+    let parallel = run::claim(&s, queued[1].id.into()).await.unwrap().unwrap();
     run::append(
         &s,
         &first,
@@ -662,8 +663,7 @@ async fn groups_require_membership_only_mentioned_agents_reply_with_separate_nat
     run::finish(&s, &first, &lease, Some(Outcome::Completed), "", true)
         .await
         .unwrap();
-    let (second_turn, second_execution, second_lease) =
-        run::claim(&s, queued[1].id.into()).await.unwrap().unwrap();
+    let (second_turn, second_execution, second_lease) = parallel;
     assert_ne!(execution.agent_id, second_execution.agent_id);
     assert!(second_execution.native_session_id.is_empty());
     assert!(
@@ -2453,4 +2453,38 @@ async fn claim_pauses_an_agent_whose_sponsor_left_the_workspace() {
         .unwrap();
     assert_eq!(t.state, "cancelled");
     assert!(t.error.contains("conversations.sponsorUnavailable"));
+}
+
+#[tokio::test]
+async fn the_same_room_agent_still_runs_one_turn_at_a_time() {
+    let (_dir, s, id, owner, member) = sponsored_room().await;
+    let (row, first) = member_agent_with_queued_turn(&s, id, &owner, &member).await;
+    turns::Entity::update_many()
+        .col_expr(
+            turns::Column::State,
+            sea_orm::sea_query::Expr::value("cancelled"),
+        )
+        .filter(turns::Column::ConversationId.eq(id))
+        .filter(turns::Column::Id.ne(first))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    groups::send_message(
+        State(s.clone()),
+        owner.clone(),
+        Path(("1".into(), id)),
+        message(json!({"prompt":"next","client_id":"second","agents":[row]})),
+    )
+    .await
+    .unwrap();
+    let second = turns::Entity::find()
+        .filter(turns::Column::ConversationId.eq(id))
+        .filter(turns::Column::State.eq("queued"))
+        .filter(turns::Column::Id.ne(first))
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(run::claim(&s, first.into()).await.unwrap().is_some());
+    assert!(run::claim(&s, second.id.into()).await.unwrap().is_none());
 }
