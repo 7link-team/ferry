@@ -2074,3 +2074,185 @@ async fn room_agent_sponsors_backfill_owner_and_mode_and_allow_one_copy_per_spon
     assert!(manager.has_column("ai_chat_turns", "hop").await.unwrap());
     assert!(Migration.down(&manager).await.is_err());
 }
+
+/// A room with human members 1 (owner) and 2, and the seeded Agent sponsored by 1.
+async fn sponsored_room() -> (tempfile::TempDir, AppState, Id, Scope, Scope) {
+    use crate::entities::{
+        ai_chat_agents as room_rows, ai_chat_members as members, workspace_members,
+    };
+    let (dir, s, id) = seeded().await;
+    let c = find(&s.db, &admin(1), id).await.unwrap();
+    workspace_members::Entity::insert(
+        workspace_members::Model {
+            id: 3,
+            workspace_id: 1,
+            user_id: 2,
+            role_id: 1,
+            state: "active".into(),
+            created_at: 0,
+            updated_at: 0,
+            version: 1,
+        }
+        .into_active_model(),
+    )
+    .exec(&s.db)
+    .await
+    .unwrap();
+    for user in [1, 2] {
+        members::Entity::insert(
+            members::Model {
+                id: s.next_id().unwrap().into(),
+                workspace_id: 1,
+                conversation_id: id.into(),
+                user_id: user,
+            }
+            .into_active_model(),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+    }
+    room_rows::Entity::insert(
+        room_rows::Model {
+            id: s.next_id().unwrap().into(),
+            workspace_id: 1,
+            conversation_id: id.into(),
+            agent_id: c.agent_id,
+            revision_id: c.revision_id,
+            config: c.config.clone(),
+            binding: c.binding.clone(),
+            native_session_id: String::new(),
+            state: "active".into(),
+            added_by: 1,
+            approval_mode: "request".into(),
+        }
+        .into_active_model(),
+    )
+    .exec(&s.db)
+    .await
+    .unwrap();
+    let owner = admin(1);
+    let mut member = admin(1);
+    member.user.id = 2.into();
+    (dir, s, id, owner, member)
+}
+
+fn message(json: Value) -> Json<groups::MessageBody> {
+    Json(serde_json::from_value(json).unwrap())
+}
+
+#[tokio::test]
+async fn members_bring_their_own_copy_of_an_agent_and_address_rows_exactly() {
+    use super::room_agents;
+    use crate::entities::{ai_chat_agents as room_rows, ai_chat_turns as links};
+    let (_dir, s, id, owner, member) = sponsored_room().await;
+    let agent = find(&s.db, &owner, id).await.unwrap().agent_id;
+    let (status, Json(added)) = room_agents::add(
+        State(s.clone()),
+        member.clone(),
+        Path(("1".into(), id)),
+        Json(serde_json::from_value(json!({"agent_id":Id::from(agent)})).unwrap()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(added["added_by"], json!(Id::from(2)));
+    // The same sponsor cannot add the same Agent twice.
+    assert!(
+        room_agents::add(
+            State(s.clone()),
+            member.clone(),
+            Path(("1".into(), id)),
+            Json(serde_json::from_value(json!({"agent_id":Id::from(agent)})).unwrap()),
+        )
+        .await
+        .is_err()
+    );
+    let rows = room_rows::Entity::find()
+        .filter(room_rows::Column::ConversationId.eq(id))
+        .filter(room_rows::Column::State.ne("removed"))
+        .all(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    // A legacy definition target is ambiguous now.
+    let error = groups::send_message(
+        State(s.clone()),
+        owner.clone(),
+        Path(("1".into(), id)),
+        message(json!({"prompt":"hi","client_id":"legacy","targets":[Id::from(agent)]})),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.0, StatusCode::CONFLICT);
+    assert_eq!(error.2.unwrap().key, "conversations.ambiguousTarget");
+    // Addressing the member's row reaches exactly that row.
+    let row: Id = serde_json::from_value(added["id"].clone()).unwrap();
+    groups::send_message(
+        State(s.clone()),
+        owner.clone(),
+        Path(("1".into(), id)),
+        message(json!({"prompt":"hi","client_id":"exact","agents":[row]})),
+    )
+    .await
+    .unwrap();
+    let link = links::Entity::find()
+        .filter(links::Column::ConversationId.eq(id))
+        .all(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(link.len(), 1);
+    assert_eq!(link[0].chat_agent_id, i64::from(row));
+}
+
+#[tokio::test]
+async fn outsiders_cannot_add_and_only_sponsor_or_owner_removes_room_agents() {
+    use super::room_agents;
+    use crate::entities::ai_chat_agents as room_rows;
+    let (_dir, s, id, owner, member) = sponsored_room().await;
+    let agent = find(&s.db, &owner, id).await.unwrap().agent_id;
+    let mut outsider = admin(1);
+    outsider.user.id = 99.into();
+    assert!(
+        room_agents::add(
+            State(s.clone()),
+            outsider.clone(),
+            Path(("1".into(), id)),
+            Json(serde_json::from_value(json!({"agent_id":Id::from(agent)})).unwrap()),
+        )
+        .await
+        .is_err()
+    );
+    let owners_row = room_rows::Entity::find()
+        .filter(room_rows::Column::ConversationId.eq(id))
+        .filter(room_rows::Column::AddedBy.eq(1))
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    // A member cannot remove the owner's Agent...
+    let error = room_agents::remove(
+        State(s.clone()),
+        member.clone(),
+        Path(("1".into(), id, owners_row.id.into())),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.0, StatusCode::FORBIDDEN);
+    // ...but the owner can remove a member's Agent.
+    let (_, Json(added)) = room_agents::add(
+        State(s.clone()),
+        member.clone(),
+        Path(("1".into(), id)),
+        Json(serde_json::from_value(json!({"agent_id":Id::from(agent)})).unwrap()),
+    )
+    .await
+    .unwrap();
+    let row: Id = serde_json::from_value(added["id"].clone()).unwrap();
+    assert_eq!(
+        room_agents::remove(State(s.clone()), owner.clone(), Path(("1".into(), id, row)))
+            .await
+            .unwrap(),
+        StatusCode::NO_CONTENT
+    );
+}

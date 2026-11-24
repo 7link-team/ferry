@@ -1027,3 +1027,44 @@ async fn deliver_files(
     agent_files::remove(channel, workdir, &produced).await;
     Ok(())
 }
+
+/// Cancel a room Agent's turns that have not started (queued or held), for
+/// example when it is removed or its sponsor can no longer run it.
+pub(super) async fn cancel_queued_for(
+    conn: &impl ConnectionTrait,
+    room_agent: Id,
+    key: &'static str,
+) -> Result<()> {
+    let ids: Vec<i64> = crate::entities::ai_chat_turns::Entity::find()
+        .select_only()
+        .column(crate::entities::ai_chat_turns::Column::Id)
+        .filter(crate::entities::ai_chat_turns::Column::ChatAgentId.eq(room_agent))
+        .into_tuple()
+        .all(conn)
+        .await?;
+    if ids.is_empty() {
+        return Ok(());
+    }
+    turns::Entity::update_many()
+        .col_expr(
+            turns::Column::State,
+            sea_orm::sea_query::Expr::value("cancelled"),
+        )
+        .col_expr(
+            turns::Column::Error,
+            sea_orm::sea_query::Expr::value(crate::i18n::store_message(&Message::new(key))),
+        )
+        .col_expr(turns::Column::Version, {
+            use sea_orm::sea_query::ExprTrait;
+            sea_orm::sea_query::Expr::col(turns::Column::Version).add(1_i64)
+        })
+        .col_expr(
+            turns::Column::UpdatedAt,
+            sea_orm::sea_query::Expr::value(db::now()),
+        )
+        .filter(turns::Column::Id.is_in(ids))
+        .filter(turns::Column::State.is_in(["queued", "held"]))
+        .exec(conn)
+        .await?;
+    Ok(())
+}

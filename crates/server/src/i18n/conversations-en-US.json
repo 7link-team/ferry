@@ -53,5 +53,7 @@
   "conversations.introductionDisabled": "Automatic introductions are disabled. Enable them in platform settings before retrying.",
   "conversations.introductionStale": "This introduction belongs to an earlier Agent membership and cannot be retried.",
   "conversations.introductionCompleted": "This Agent has already completed its introduction for this membership.",
-  "conversations.introductionRetryWarning": "A previous attempt may have reached the model or performed operations with an unknown outcome. Verify its result before explicitly starting another introduction; another model call may incur usage."
+  "conversations.introductionRetryWarning": "A previous attempt may have reached the model or performed operations with an unknown outcome. Verify its result before explicitly starting another introduction; another model call may incur usage.",
+  "conversations.ambiguousTarget": "This message names an Agent added by several members. Choose which one should reply.",
+  "conversations.agentRemoved": "The Agent was removed from the room before this reply started."
 }

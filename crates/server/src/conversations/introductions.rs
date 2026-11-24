@@ -24,7 +24,7 @@ pub(super) async fn created(
             .all(tx)
             .await?
         {
-            added(s, tx, scope, id, a.agent_id).await?;
+            added(s, tx, scope, id, a.clone()).await?;
         }
     } else {
         enqueue(s, tx, scope, id, None).await?;
@@ -36,14 +36,8 @@ pub(super) async fn added(
     tx: &DatabaseTransaction,
     scope: &Scope,
     id: Id,
-    agent: i64,
+    a: snapshots::Model,
 ) -> Result<()> {
-    let a = snapshots::Entity::find()
-        .filter(snapshots::Column::ConversationId.eq(id))
-        .filter(snapshots::Column::AgentId.eq(agent))
-        .one(tx)
-        .await?
-        .ok_or_else(ApiError::missing)?;
     enqueue(s, tx, scope, id, Some(a)).await
 }
 async fn enqueue(

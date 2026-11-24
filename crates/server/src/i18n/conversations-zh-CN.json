@@ -53,5 +53,7 @@
   "conversations.introductionDisabled": "自动介绍已关闭。请先在平台设置中启用，再重试。",
   "conversations.introductionStale": "此介绍属于之前的 Agent 成员身份，不能重试。",
   "conversations.introductionCompleted": "此 Agent 已完成本次成员身份的介绍。",
-  "conversations.introductionRetryWarning": "之前的尝试可能已请求模型或执行操作，结果尚不明确。请核实结果后再明确发起新的介绍；新的模型调用可能产生用量。"
+  "conversations.introductionRetryWarning": "之前的尝试可能已请求模型或执行操作，结果尚不明确。请核实结果后再明确发起新的介绍；新的模型调用可能产生用量。",
+  "conversations.ambiguousTarget": "该消息指定的 Agent 有多位成员各自添加。请选择由谁的 Agent 回复。",
+  "conversations.agentRemoved": "回复开始前，该 Agent 已被移出会话。"
 }

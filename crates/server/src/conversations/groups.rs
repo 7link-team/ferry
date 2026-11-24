@@ -233,11 +233,24 @@ pub(super) async fn detail(
             .is_some_and(|a| a.model_profile_id != 0)
     };
     value["agent_has_model"] = json!(has_model(c.agent_id));
+    let sponsors = users::Entity::find()
+        .filter(users::Column::Id.is_in(snapshots.iter().map(|a| a.added_by)))
+        .all(conn)
+        .await?;
+    let sponsor_name = |id: i64| {
+        sponsors
+            .iter()
+            .find(|u| u.id == id)
+            .map(|u| u.name.clone())
+            .unwrap_or_default()
+    };
     let mut listed = vec![];
     for a in snapshots.iter().filter(|a| a.state != "removed") {
         let config: Value = serde_json::from_str(&a.config).unwrap_or(Value::Null);
         let host = super::placement::host_view(conn, &a.config, &a.binding).await?;
-        listed.push(json!({"id":Id::from(a.agent_id),"name":config["name"],"state":a.state,
+        // `id` stays the Agent definition for older clients; `room_agent_id` is the row.
+        listed.push(json!({"id":Id::from(a.agent_id),"room_agent_id":Id::from(a.id),"added_by":Id::from(a.added_by),
+            "sponsor_name":sponsor_name(a.added_by),"approval_mode":a.approval_mode,"name":config["name"],"state":a.state,
             "runtime":config["runtime"],"model":config["model"],"revision_id":Id::from(a.revision_id),"avatar":avatar(a.agent_id),"has_model":has_model(a.agent_id),"host":host}));
     }
     value["agents"] = json!(listed);
@@ -269,7 +282,9 @@ pub(super) async fn detail(
                 };
                 if let Some(a) = snapshots.iter().find(|a| a.id == l.chat_agent_id) {
                     t["agent_id"] = json!(Id::from(a.agent_id));
+                    t["room_agent_id"] = json!(Id::from(a.id));
                 }
+                t["hop"] = json!(l.hop);
             }
         }
     }
@@ -336,6 +351,9 @@ pub(super) struct MessageBody {
     reply_to: Option<Id>,
     #[serde(default)]
     mentions: Vec<Id>,
+    /// Room Agent row ids; preferred over `targets` (Agent definition ids).
+    #[serde(default)]
+    agents: Vec<Id>,
 }
 pub(super) async fn send_message(
     State(s): State<AppState>,
@@ -345,7 +363,7 @@ pub(super) async fn send_message(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("conversations.run")?;
     find(&s.db, &scope, id).await?;
-    if body.targets.len() > 8 {
+    if body.targets.len() + body.agents.len() > 8 {
         return Err(bad("conversations.tooManyTargets"));
     }
     check_message(&body.prompt, &body.client_id, &body.attachments)?;
@@ -381,7 +399,12 @@ pub(super) async fn send_message(
         return Err(invalid());
     }
     let attachments = serde_json::to_string(&body.attachments).unwrap();
-    let targets = serde_json::to_string(&body.targets).unwrap();
+    let candidates = super::room_agents::resolve(&tx, id, &body.agents, &body.targets).await?;
+    // Stored for display: the Agent definitions addressed (rows are in turn links).
+    let mut addressed: Vec<Id> = candidates.iter().map(|a| Id::from(a.agent_id)).collect();
+    addressed.sort();
+    addressed.dedup();
+    let targets = serde_json::to_string(&addressed).unwrap();
     if let Some(old) = messages::Entity::find()
         .filter(messages::Column::ConversationId.eq(id))
         .filter(messages::Column::Role.eq("user"))
@@ -404,14 +427,8 @@ pub(super) async fn send_message(
         return Err(error(StatusCode::CONFLICT, "conversations.archived"));
     }
     let mut selected = vec![];
-    for target in &body.targets {
-        available(&tx, &scope, *target).await?;
-        let a = agents::Entity::find()
-            .filter(agents::Column::ConversationId.eq(id))
-            .filter(agents::Column::AgentId.eq(*target))
-            .one(&tx)
-            .await?
-            .ok_or_else(ApiError::missing)?;
+    for a in candidates {
+        available(&tx, &scope, a.agent_id.into()).await?;
         if a.state != "active" {
             return Err(error(StatusCode::CONFLICT, "conversations.interrupted"));
         }

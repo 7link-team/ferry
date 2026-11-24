@@ -505,6 +505,9 @@ pub struct Rebind {
     /// The room Agent to move; omitted for a private conversation.
     #[serde(default)]
     agent_id: Option<Id>,
+    /// The room Agent row; required when several members added the same Agent.
+    #[serde(default)]
+    room_agent_id: Option<Id>,
 }
 
 /// Releases the current host so the next message runs on another one, in a
@@ -536,14 +539,17 @@ pub(super) async fn rebind(
         Ok((value.to_string(), host))
     };
     let (host, agent) = if groups::is_group(&tx, id).await? {
-        let agent = body.agent_id.ok_or_else(invalid)?;
-        let mut member = members::Entity::find()
-            .filter(members::Column::ConversationId.eq(id))
-            .filter(members::Column::AgentId.eq(agent))
-            .filter(members::Column::State.ne("removed"))
-            .one(&tx)
+        let rooms: Vec<Id> = body.room_agent_id.into_iter().collect();
+        let targets: Vec<Id> = if rooms.is_empty() {
+            vec![body.agent_id.ok_or_else(invalid)?]
+        } else {
+            vec![]
+        };
+        let mut member = super::room_agents::resolve(&tx, id, &rooms, &targets)
             .await?
+            .pop()
             .ok_or_else(ApiError::missing)?;
+        let agent = member.agent_id;
         if member.binding == UNBOUND {
             return Err(conflict());
         }

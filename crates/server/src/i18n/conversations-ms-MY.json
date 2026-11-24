@@ -53,5 +53,7 @@
   "conversations.introductionDisabled": "Pengenalan automatik dinyahdayakan. Dayakannya dalam tetapan platform sebelum mencuba semula.",
   "conversations.introductionStale": "Pengenalan ini milik keahlian Agent terdahulu dan tidak boleh dicuba semula.",
   "conversations.introductionCompleted": "Agent ini sudah melengkapkan pengenalannya untuk keahlian ini.",
-  "conversations.introductionRetryWarning": "Percubaan terdahulu mungkin telah menghubungi model atau menjalankan operasi dengan hasil yang tidak diketahui. Sahkan hasilnya sebelum memulakan pengenalan baharu secara jelas; panggilan model baharu mungkin menghasilkan penggunaan."
+  "conversations.introductionRetryWarning": "Percubaan terdahulu mungkin telah menghubungi model atau menjalankan operasi dengan hasil yang tidak diketahui. Sahkan hasilnya sebelum memulakan pengenalan baharu secara jelas; panggilan model baharu mungkin menghasilkan penggunaan.",
+  "conversations.ambiguousTarget": "Agent dalam mesej ini ditambah oleh beberapa ahli. Pilih Agent milik siapa yang patut membalas.",
+  "conversations.agentRemoved": "Agent telah dikeluarkan daripada bilik sebelum balasan ini bermula."
 }

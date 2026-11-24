@@ -53,5 +53,7 @@
   "conversations.introductionDisabled": "自動紹介は無効です。再試行する前にプラットフォーム設定で有効にしてください。",
   "conversations.introductionStale": "この紹介は以前の Agent メンバーシップに属しているため、再試行できません。",
   "conversations.introductionCompleted": "この Agent は今回のメンバーシップの紹介を完了しています。",
-  "conversations.introductionRetryWarning": "以前の試行でモデルへの要求や操作が実行され、結果が不明な場合があります。結果を確認してから、新しい紹介を明示的に開始してください。新たなモデル呼び出しで使用量が発生する場合があります。"
+  "conversations.introductionRetryWarning": "以前の試行でモデルへの要求や操作が実行され、結果が不明な場合があります。結果を確認してから、新しい紹介を明示的に開始してください。新たなモデル呼び出しで使用量が発生する場合があります。",
+  "conversations.ambiguousTarget": "このメッセージの Agent は複数のメンバーが追加しています。どのメンバーの Agent が返信するか選択してください。",
+  "conversations.agentRemoved": "返信が始まる前に Agent がルームから削除されました。"
 }

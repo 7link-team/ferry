@@ -336,8 +336,11 @@ pub(super) async fn members(
     if body.member_ids.len() > 100 || body.agent_ids.len() > 8 {
         return Err(invalid());
     }
+    // The owner's member edit manages only the Agents the owner sponsors;
+    // other developers add and remove their own Agents.
     let existing = agents::Entity::find()
         .filter(agents::Column::ConversationId.eq(id))
+        .filter(agents::Column::AddedBy.eq(scope.user.id))
         .all(&s.db)
         .await?;
     let mut additions = vec![];
@@ -465,9 +468,10 @@ pub(super) async fn members(
         if available(&tx, &scope, a.id.into()).await?.revision_id != a.revision_id {
             return Err(conflict());
         }
-        if let Some(mut old) = agents::Entity::find()
+        let row = if let Some(mut old) = agents::Entity::find()
             .filter(agents::Column::ConversationId.eq(id))
             .filter(agents::Column::AgentId.eq(a.id))
+            .filter(agents::Column::AddedBy.eq(scope.user.id))
             .one(&tx)
             .await?
         {
@@ -486,28 +490,32 @@ pub(super) async fn members(
                 .filter(crate::entities::ai_chat_api_sessions::Column::AgentId.eq(a.id))
                 .exec(&tx)
                 .await?;
-            old.into_active_model().reset_all().update(&tx).await?;
+            old.clone()
+                .into_active_model()
+                .reset_all()
+                .update(&tx)
+                .await?;
+            old
         } else {
-            agents::Entity::insert(
-                agents::Model {
-                    id: s.next_id()?.into(),
-                    workspace_id: scope.workspace_id.into(),
-                    conversation_id: id.into(),
-                    agent_id: a.id,
-                    revision_id: a.revision_id,
-                    config: serde_json::to_string(&config).unwrap(),
-                    binding: super::placement::UNBOUND.into(),
-                    native_session_id: String::new(),
-                    state: "active".into(),
-                    added_by: scope.user.id.into(),
-                    approval_mode: super::approval::mode(&c.config)?,
-                }
-                .into_active_model(),
-            )
-            .exec(&tx)
-            .await?;
-        }
-        super::introductions::added(&s, &tx, &scope, id, a.id).await?;
+            let row = agents::Model {
+                id: s.next_id()?.into(),
+                workspace_id: scope.workspace_id.into(),
+                conversation_id: id.into(),
+                agent_id: a.id,
+                revision_id: a.revision_id,
+                config: serde_json::to_string(&config).unwrap(),
+                binding: super::placement::UNBOUND.into(),
+                native_session_id: String::new(),
+                state: "active".into(),
+                added_by: scope.user.id.into(),
+                approval_mode: super::approval::mode(&c.config)?,
+            };
+            agents::Entity::insert(row.clone().into_active_model())
+                .exec(&tx)
+                .await?;
+            row
+        };
+        super::introductions::added(&s, &tx, &scope, id, row).await?;
     }
     c.version += 1;
     c.updated_at = db::now();

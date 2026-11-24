@@ -481,7 +481,10 @@ async fn a_chosen_directory_never_moves_by_itself_and_can_be_released() {
         State(s.clone()),
         admin(1),
         Path(("1".into(), id)),
-        Json(Rebind { agent_id: None }),
+        Json(Rebind {
+            agent_id: None,
+            room_agent_id: None,
+        }),
     )
     .await
     .unwrap();
@@ -493,7 +496,10 @@ async fn a_chosen_directory_never_moves_by_itself_and_can_be_released() {
             State(s.clone()),
             admin(1),
             Path(("1".into(), id)),
-            Json(Rebind { agent_id: None }),
+            Json(Rebind {
+                agent_id: None,
+                room_agent_id: None
+            }),
         )
         .await
         .is_err()
