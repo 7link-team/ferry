@@ -562,7 +562,8 @@ async fn groups_require_membership_only_mentioned_agents_reply_with_separate_nat
                 binding: c.binding.clone(),
                 native_session_id: String::new(),
                 state: "active".into(),
-                added_by: 1,
+                // The member who addresses these Agents sponsors them.
+                added_by: 2,
                 approval_mode: "request".into(),
             }
             .into_active_model(),
@@ -2255,4 +2256,75 @@ async fn outsiders_cannot_add_and_only_sponsor_or_owner_removes_room_agents() {
             .unwrap(),
         StatusCode::NO_CONTENT
     );
+}
+
+#[tokio::test]
+async fn room_agents_run_as_their_sponsor_with_their_own_approval_mode() {
+    use super::room_agents;
+    use crate::entities::ai_chat_turns as links;
+    let (_dir, s, id, owner, member) = sponsored_room().await;
+    let agent = find(&s.db, &owner, id).await.unwrap().agent_id;
+    let (_, Json(added)) = room_agents::add(
+        State(s.clone()),
+        member.clone(),
+        Path(("1".into(), id)),
+        Json(serde_json::from_value(json!({"agent_id":Id::from(agent)})).unwrap()),
+    )
+    .await
+    .unwrap();
+    let row: Id = serde_json::from_value(added["id"].clone()).unwrap();
+    // The owner loosens the room, then addresses the member's Agent.
+    let mut room = find(&s.db, &owner, id).await.unwrap().into_active_model();
+    room.config = sea_orm::Set(r#"{"approval_mode":"yolo"}"#.into());
+    room.update(&s.db).await.unwrap();
+    groups::send_message(
+        State(s.clone()),
+        owner.clone(),
+        Path(("1".into(), id)),
+        message(json!({"prompt":"please","client_id":"cross","agents":[row]})),
+    )
+    .await
+    .unwrap();
+    let link = links::Entity::find()
+        .filter(links::Column::ChatAgentId.eq(i64::from(row)))
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let turn = turns::Entity::find_by_id(link.id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        turn.owner_id, 2,
+        "runs as the Agent's sponsor, not the sender"
+    );
+    let c = find(&s.db, &owner, id).await.unwrap();
+    let execution = groups::execution(&s.db, &turn, c).await.unwrap();
+    assert_eq!(
+        approval::mode(&execution.config).unwrap(),
+        "request",
+        "a room-wide yolo never loosens another sponsor's Agent"
+    );
+    // Only the sponsor changes that Agent's mode.
+    let patch = |mode: &str| Json(serde_json::from_value(json!({"approval_mode":mode})).unwrap());
+    let error = room_agents::update(
+        State(s.clone()),
+        owner.clone(),
+        Path(("1".into(), id, row)),
+        patch("yolo"),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.0, StatusCode::FORBIDDEN);
+    let Json(updated) = room_agents::update(
+        State(s.clone()),
+        member.clone(),
+        Path(("1".into(), id, row)),
+        patch("assisted"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated["approval_mode"], "assisted");
 }

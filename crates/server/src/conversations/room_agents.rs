@@ -12,7 +12,7 @@ pub(super) fn routes() -> Router<AppState> {
         )
         .route(
             "/{workspace}/conversations/{id}/agents/{agent}",
-            axum::routing::delete(remove),
+            axum::routing::delete(remove).patch(update),
         )
 }
 
@@ -171,6 +171,62 @@ pub(super) async fn remove(
     .await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct UpdateBody {
+    approval_mode: String,
+}
+
+/// Only the sponsor sets their Agent's approval mode, never during a turn and
+/// never through an Agent tool call; it changes no permission grants.
+pub(super) async fn update(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id, room_agent)): Path<(String, Id, Id)>,
+    Json(body): Json<UpdateBody>,
+) -> Result<Json<Value>> {
+    scope.require("conversations.run")?;
+    if crate::platform_tools::current_agent().is_some() {
+        return Err(ApiError::forbidden());
+    }
+    if !["request", "assisted", "yolo"].contains(&body.approval_mode.as_str()) {
+        return Err(bad("conversations.approvalModeInvalid"));
+    }
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let c = find(&tx, &scope, id).await?;
+    participant(&tx, &scope, &c).await?;
+    let mut a = agents::Entity::find_by_id(room_agent)
+        .filter(agents::Column::ConversationId.eq(id))
+        .filter(agents::Column::State.ne("removed"))
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    if a.added_by != i64::from(scope.user.id) {
+        return Err(ApiError::forbidden());
+    }
+    if super::run::agent_busy(&tx, room_agent).await? {
+        return Err(conflict());
+    }
+    let before = std::mem::replace(&mut a.approval_mode, body.approval_mode.clone());
+    a.clone()
+        .into_active_model()
+        .reset_all()
+        .update(&tx)
+        .await?;
+    crate::hosts::activity_in(
+        &s,
+        &tx,
+        &scope,
+        "update",
+        "conversations",
+        &id,
+        json!({"room_agent_id":room_agent,"changes":{"approval_mode":{"before":before,"after":body.approval_mode}}}),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(view(&a)))
 }
 
 /// The room Agents a human message addresses. `agents` names room rows;

@@ -51,7 +51,8 @@ pub(super) async fn decide_automatically(
     expected_mode: &str,
 ) -> Result<()> {
     let (tx, mut current, c) = run::leased(s, row, owner).await?;
-    if mode(&c.config)? != expected_mode || current.state != "running" {
+    let execution = groups::execution(&tx, &current, c).await?;
+    if mode(&execution.config)? != expected_mode || current.state != "running" {
         return Err(conflict());
     }
     let mut decisions: Value = serde_json::from_str(&current.decisions).map_err(|_| invalid())?;

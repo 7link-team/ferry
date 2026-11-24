@@ -295,7 +295,7 @@ pub(super) async fn execution(
     row: &turns::Model,
     mut c: conversations::Model,
 ) -> Result<conversations::Model> {
-    let approval_mode = super::approval::mode(&c.config)?;
+    let mut approval_mode = super::approval::mode(&c.config)?;
     if let Some(link) = links::Entity::find_by_id(row.id).one(conn).await? {
         let a = agents::Entity::find_by_id(link.chat_agent_id)
             .filter(agents::Column::ConversationId.eq(c.id))
@@ -310,6 +310,8 @@ pub(super) async fn execution(
         c.config = super::appearance::preserve(&c.config, &a.config);
         c.binding = a.binding;
         c.native_session_id = a.native_session_id;
+        // Each room Agent keeps its sponsor's approval mode, never the room's.
+        approval_mode = a.approval_mode;
     }
     let mut config: Value = serde_json::from_str(&c.config).map_err(|_| invalid())?;
     config["approval_mode"] = json!(approval_mode);
@@ -428,7 +430,10 @@ pub(super) async fn send_message(
     }
     let mut selected = vec![];
     for a in candidates {
-        available(&tx, &scope, a.agent_id.into()).await?;
+        // The sponsor's use of the Agent is checked when the turn starts.
+        if a.added_by == i64::from(scope.user.id) {
+            available(&tx, &scope, a.agent_id.into()).await?;
+        }
         if a.state != "active" {
             return Err(error(StatusCode::CONFLICT, "conversations.interrupted"));
         }
@@ -484,7 +489,8 @@ pub(super) async fn send_message(
                 id: turn.into(),
                 workspace_id: scope.workspace_id.into(),
                 conversation_id: id.into(),
-                owner_id: scope.user.id.into(),
+                // Room Agents always work as their sponsor, whoever addressed them.
+                owner_id: a.added_by,
                 state: "queued".into(),
                 lease_owner: String::new(),
                 expires_at: 0,

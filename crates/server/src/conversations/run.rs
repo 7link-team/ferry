@@ -1068,3 +1068,21 @@ pub(super) async fn cancel_queued_for(
         .await?;
     Ok(())
 }
+
+/// Whether a room Agent has a turn running or stopping.
+pub(super) async fn agent_busy(conn: &impl ConnectionTrait, room_agent: Id) -> Result<bool> {
+    let ids: Vec<i64> = crate::entities::ai_chat_turns::Entity::find()
+        .select_only()
+        .column(crate::entities::ai_chat_turns::Column::Id)
+        .filter(crate::entities::ai_chat_turns::Column::ChatAgentId.eq(room_agent))
+        .into_tuple()
+        .all(conn)
+        .await?;
+    Ok(!ids.is_empty()
+        && turns::Entity::find()
+            .filter(turns::Column::Id.is_in(ids))
+            .filter(turns::Column::State.is_in(["running", "stopping"]))
+            .count(conn)
+            .await?
+            > 0)
+}
