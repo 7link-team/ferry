@@ -24,3 +24,6 @@ __pycache__/
 desktop/resources/actions-workers/actions-worker-*
 
 .worktrees/
+
+# Task scratch output and logs (overwritten per task; see AGENTS.md)
+/.tmp/

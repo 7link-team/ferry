@@ -9,8 +9,9 @@
 | T4 | 待处理 | 全部完成后发布v0.11.0-alpha（用户2026-11-24决定；不打v0.10.15标签） | 888ffe1已改为0.10.15且推送，发版前改为0.11.0并重命名docs/releases；只给全绿提交打标签 |
 | T5 | 受阻（用户处理中） | 生产周报工作流（Codeup→PDF→????-ferry，周一09:00） | 需用户在正常授权下改 prompt（去掉=与$json插值）、目标群、工作区时区后重跑；不得绕过授权 |
 | T6 | 进行中 | 多开发者多Agent跨host联调（同会话） | 设计已批准(08517e9)；一期计划 docs/superpowers/plans/2026-11-24-multi-agent-collaboration-phase1.md（负责人身份/每Agent审批/接力/并行/子代理工具/界面）待用户确认后交Codex执行；二期（话题串/运行回流/删除）一期落地后再写 |
-| T7 | 进行中 | 工作流列表与流水线列表分组一致（左侧分组栏+排序） | Codex: worktree ferry-wt-groups / fix/workflow-group-sidebar；待审查与验证 |
-| T8 | 进行中 | 批量节点($json)表达式保存期拦截+明确报错+MCP说明 | 根因：ai.agent.run 无当前项，保存期跳过“=”表达式校验，运行期报通用错误；Codex: ferry-wt-batch / fix/batch-expression-guard |
+| T7 | 进行中 | 工作流列表与流水线列表分组一致（左侧分组栏+排序） | 用户改为Claude直接做；接手 ferry-wt-groups 中Codex半成品，已审查，vitest 11/11、Rust ordering 测试通过；待 build、提交合并 |
+| T8 | 进行中 | 批量节点($json)表达式保存期拦截+明确报错+MCP说明 | 根因已明；Codex半成品在 ferry-wt-batch（未提交），由Claude接手审查完成 |
+| T9 | 已完成 | 本地垃圾清理与目录规范 | 2026-11-24 删除 target 183G、desktop 构建 15G、data/backups+maintenance 等 45G、根目录41个日志；保留 data/dev-backend 与7天内证据；D盘 0→242G 空闲。Git 仓库仅17.6MB无垃圾提交。新增 AGENTS.md 规则 + npm run clean:local + /.tmp/ |
 
 ## Active task: foreground conversation recovery (2026-11-24)
 User reports conversation115981783740186624 becomes blank after prolonged backgrounding, manual refresh restores it. Phase ANALYSIS -> regression reproduction. Clean main at a261089 before work. Source-confirmed gaps: conversation/list polling waits indefinitely on a suspended request, no foreground/online/pageshow/session-renewed restart; list401 clears session drafts even when session.ts intentionally defers unauthorized pending renewal. PlatformFrame measures resize/focus only, not visibility/pageshow restoration. Exact production root cause not yet proven; device/extent clarification pending. Scope: minimal read recovery and retained drafts during renewable401, viewport wake remeasure if regression demonstrates need; normal401/403/404 authorization preserved; never replay writes. Direct execution (coupled lifecycle changes); no agents. Next: failing tests for suspended reads/late stale results/renewable401 and foreground viewport restoration, then minimal fix and final production browser recovery acceptance.

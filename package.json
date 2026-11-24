@@ -13,7 +13,8 @@
     "tauri": "cd desktop && tauri",
     "desktop:dev": "cd desktop && tauri dev",
     "desktop:build": "cd desktop && tauri build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "clean:local": "node scripts/clean-local.mjs"
   },
   "dependencies": {
     "@dicebear/adventurer": "9.4.2",

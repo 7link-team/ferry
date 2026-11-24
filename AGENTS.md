@@ -228,6 +228,13 @@ Recovery is never "read state → continue." If state and repository disagree, i
 
 **Preserve project health.** Clean up what your change introduced: unused imports, variables and functions, dead branches, orphaned files, duplicate code, obsolete config, temporary debugging code. Don't remove unrelated pre-existing code unless asked.
 
+**Local files and disk hygiene.** Scratch output has one fixed home and is overwritten, never accumulated:
+- Logs, probes and scratch files go to `.tmp/<task>.log` (ignored), reusing the same name on reruns. Never write logs or scratch files to the repository root or under `data/`.
+- Browser and release evidence goes to `%LOCALAPPDATA%/ferry-verification/<task-or-version>/`, overwritten per task. Evidence older than 7 days is removed.
+- No timestamped database backups or downloaded release copies in the repository. Take a backup only when a step is destructive, put it in `.tmp/`, and delete it once that step is verified.
+- Git worktrees reuse the main `target/` (`CARGO_TARGET_DIR`) instead of creating their own Rust build directories, and are removed after merging.
+- Run `npm run clean:local` when a task ends (`-- --all` also removes `target/` when it grows large). `data/dev-backend` is the only persistent local data.
+
 **Before committing, clean or exclude non-deliverables.** Check `git status` before staging; never blind-stage with `git add -A` or `git add .`. Build outputs, binaries, coverage and test reports, logs, caches, scratch files, editor/OS files and local-only config MUST NOT be committed — delete them or add them to `.gitignore` (prefer `.gitignore` for anything the toolchain regenerates). Never commit a file you cannot justify as part of the requested change.
 
 ## 10. Testing Discipline
