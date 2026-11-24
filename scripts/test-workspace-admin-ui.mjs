@@ -79,6 +79,9 @@ try {
   await g.getByRole('button',{name:'加入',exact:true}).click();
   await g.waitForURL(`${origin}/zh-CN/workspaces/${workspace_tenant}/dashboard`);
   await g.getByRole('heading',{name:'最近活动',exact:true}).waitFor();
+  const updated = await g.getByText(/^更新于 /).innerText();
+  assert.match(updated, /^更新于 .*\d/, 'dashboard update includes a formatted time');
+  assert(!updated.includes('[object Object]'), 'dashboard time cannot stringify a component');
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/roles`);
   const builtin = p.getByRole('row').filter({hasText:'只读'});
   await builtin.getByRole('link',{name:'复制',exact:true}).click();

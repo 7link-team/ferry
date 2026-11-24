@@ -1,4 +1,4 @@
-import { WorkspaceDate } from "../../shared/timezone";
+import { WorkspaceDate, formatDate, useWorkspaceTimezone } from "../../shared/timezone";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { useEffect,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
@@ -71,6 +71,7 @@ const labels: Record<string, string> = {
 const label = (key: string) => labels[key] ? commonText(labels[key]) : key;
 export function Dashboard({ workspace }: { workspace: string }) {
   useCommonTranslation();
+  const timezone = useWorkspaceTimezone();
   const [data, setData] = useState<Summary>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(true);
@@ -103,7 +104,7 @@ export function Dashboard({ workspace }: { workspace: string }) {
         </Button>
         {data && (
           <span className="text-xs text-muted-foreground">
-            {commonText("dashboard.updated", { time: <WorkspaceDate value={data.as_of} locale={currentLocale()} /> })}
+            {commonText("dashboard.updated", { time: formatDate(data.as_of, timezone) })}
           </span>
         )}
       </div>

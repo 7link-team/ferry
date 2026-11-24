@@ -9,8 +9,23 @@ import { analysisDateRange } from "../features/code-insights/analysis-config";
 import { workspacesForms } from "../features/workspaces/resource-config";
 import { Entry } from "../app/Entry";
 import { ResourceForm } from "../app/resources/ResourceForm";
+import { Dashboard } from "../features/dashboard/Dashboard";
 
 let host: HTMLDivElement, root: Root;
+it.each(["zh-CN", "en-US", "ms-MY"])("interpolates dashboard update time as workspace text in %s", async locale => {
+  const previous = location.pathname + location.search;
+  history.replaceState({}, "", `/${locale}/workspaces/1/dashboard`);
+  await i18n.changeLanguage(locale);
+  const at = Date.parse("2026-01-01T00:30:00Z");
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ counts:{},states:{},failures_24h:{},runners:[],recent:[],as_of:at }), {headers:{"Content-Type":"application/json"}})));
+  try {
+    for (const zone of ["Asia/Kuala_Lumpur", "America/Los_Angeles"]) {
+      await act(async () => root.render(<WorkspaceTimezoneContext.Provider value={zone}><Dashboard workspace="1" /></WorkspaceTimezoneContext.Provider>));
+      expect(host.textContent).toContain(commonText("dashboard.updated", {time:formatDate(at,zone,"datetime",locale)}));
+      expect(host.textContent).not.toContain("[object Object]");
+    }
+  } finally { history.replaceState({}, "", previous); }
+});
 beforeEach(async () => {
   await i18n.changeLanguage("zh-CN");
   localStorage.setItem("ui.locale", "zh-CN");
