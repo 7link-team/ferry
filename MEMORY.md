@@ -6,7 +6,7 @@
 3. Complete native v0.10.14-alpha publication, preserving immutable tags and signing limitations.
 
 ## Current Phase / Current Step
-TESTING / CLOUD: follow-ups pushed in4897b632da094d904f17cffa72e38b319d2ebd60; two CI acceptance adaptations locally verified, ready for commit and cloud validation. No production writes, schedule enabling or deployment occurred. .14 tag already exists at previous accepted source; new source is outside that tag.
+TESTING / CLOUD: follow-ups pushed in4897b632da094d904f17cffa72e38b319d2ebd60; two CI acceptance adaptations locally verified and SSH-pushed as2be1d0b; fresh CI45322550654 pending. No production writes, schedule enabling or deployment occurred. .14 tag already exists at previous accepted source; new source is outside that tag.
 
 ## Production status / Blocker
 - User repaired provider token. Latest actual execution118539555044327424 (#3) passed period+commits, then failed expression /nodes/3/params/prompt before analyze starts. Real sandbox reproduces batch $json being absent. Saved prompt uses JSON.stringify($json). Recommend plain instructions: remove leading '=' and interpolation; compose automatically appends every input JSON once. Explicit $input.all().map(item=>item.json) is also verified if needed. No new execution after#3 at last server check.
@@ -55,4 +55,4 @@ Direct execution, no new agents/worktrees. LF, no blind staging, no build/tempor
 ## CI adaptation verification
 PASS: actual v0.1.0-alpha.1 exported source compiled without changes; complete SQLite upgrade using that binary and current server passed, preserving account/session, grants, credentials, repository, host, pipeline/run, backups, restart behavior, and asserting workspace avatar NULL. POSIX successful-run comparison explicitly skipped on Windows; cloud Linux and three-database verification still required.
 PASS: full workspace-admin real Chromium acceptance (including exact workspace name/owner role with initials avatar, invite rotation/join, custom roles and member operations), LF/diff hygiene. Only two acceptance scripts changed; production code unchanged. Self-review scope/reuse/architecture/complexity/regression PASS for test adaptations. Overall production/report/release acceptance remains NOT READY.
-Next: explicitly commit MEMORY.md plus two scripts, SSH push main, inspect fresh CI; .14 iOS rerun still awaits user action with original request pending.
+Committed and SSH-pushed2be1d0b. Fresh Build/release45322550654 pending. Next: inspect exact-source cloud backends/e2e-build-ui and remaining gates; .14 iOS rerun still awaits user action with original request pending.
