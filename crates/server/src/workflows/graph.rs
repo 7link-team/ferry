@@ -587,6 +587,19 @@ async fn resolve_mode(
         &expression_fields(&contract.spec),
         &mut expressions,
     );
+    // Saved before save-time validation existed: name the cause instead of a
+    // generic evaluation failure.
+    if node["type"] == "ai.agent.run"
+        && selections.iter().all(Option::is_none)
+        && node["params"]["prompt"]
+            .as_str()
+            .is_some_and(super::expression::current_item_reference)
+    {
+        return Err(invalid(
+            format!("{path}/prompt"),
+            "workflow.batchCurrentItem",
+        ));
+    }
     let limit = || super::expression::error(ErrorCode::InvalidRequest, &path);
     let count = selections
         .len()
@@ -654,6 +667,18 @@ async fn resolve_mode(
                     .and_then(|index| expressions.get(index % expressions.len()))
                     .map(|(field, _)| field.as_str())
                     .unwrap_or_default();
+                let source = index
+                    .and_then(|index| expressions.get(index % expressions.len()))
+                    .map(|(_, source)| source.as_str());
+                if selections.iter().all(Option::is_none)
+                    && matches!(code, ErrorCode::MissingItem | ErrorCode::Evaluation)
+                    && source.is_some_and(super::expression::current_item_reference)
+                {
+                    return Err(invalid(
+                        format!("{path}{field}"),
+                        "workflow.batchCurrentItem",
+                    ));
+                }
                 return Err(super::expression::error(code, &format!("{path}{field}")));
             }
         }
@@ -1420,6 +1445,13 @@ mod tests {
         json!({"engine":"ferry-graph","schema":1,
             "nodes":[node("start","core.trigger.manual"),node("set","data.set")],
             "connections":[edge("start",0,"set",0)]})
+    }
+
+    #[test]
+    fn per_item_node_still_accepts_current_item_expression_at_save() {
+        let mut definition = graph();
+        definition["nodes"][1]["params"]["fields"][0]["value"] = json!("={{ $json.value }}");
+        validate(&definition.to_string()).unwrap();
     }
 
     #[test]

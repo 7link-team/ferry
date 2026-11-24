@@ -1,4 +1,5 @@
 {
+  "workflow.batchCurrentItem": "{path}：此節點對全部輸入只執行一次，沒有目前項目。請撰寫字面指令；輸入會自動附加，或使用 $input.all()。",
   "workflow.runTimeoutUnsupported": "目前執行器不支援工作流總逾時。請省略 timeout_seconds 或設為 0；各節點仍可設定逾時。",
   "workflow.runSaveDataUnsupported": "目前執行器不支援自訂 save_data 策略。請省略此欄位，使用現有執行記錄機制。",
   "workflow.runConcurrencyUnsupported": "目前執行器不支援工作流並行策略。請省略 concurrency 或將 scope 設為 none。",

@@ -1414,11 +1414,12 @@ async fn save_time_validation_bounds_the_prompt_and_requires_an_object_schema() 
     let agent = fixture.agent.id;
     let save = |params: Value| create_workflow(&fixture.s, graph(params));
     save(params(agent)).await.unwrap();
-    // Expressions in the prompt are accepted and checked again once resolved.
+    // Batch prompts cannot read a current item.
     let mut expression = params(agent);
     expression["prompt"] = json!("=Analyze {{ $json.since }}");
-    // (Saving compiles expressions in the JavaScript sandbox, absent in unit tests.)
-    super::super::graph::validate(&graph(expression).to_string()).unwrap();
+    let error = super::super::graph::validate(&graph(expression).to_string()).unwrap_err();
+    assert_eq!(key(&error), "workflow.batchCurrentItem");
+    assert_eq!(error.2.unwrap().params["path"], "/nodes/1/params/prompt");
     for (field, value) in [
         ("prompt", json!("x".repeat(32769))),
         (
@@ -1493,6 +1494,55 @@ async fn save_time_validation_bounds_the_prompt_and_requires_an_object_schema() 
         key(&save(missing).await.unwrap_err()),
         "workflow.agentSchema"
     );
+}
+
+#[tokio::test]
+async fn batch_prompt_references_are_rejected_without_blocking_batch_access() {
+    let fixture = Fixture::new().await;
+    for source in [
+        "={{ JSON.stringify($json) }}",
+        "={{ $input.item.json.x }}",
+        "={{ $binary.file }}",
+        "={{ $input['item'].json.x }}",
+    ] {
+        let mut value = params(fixture.agent.id);
+        value["prompt"] = json!(source);
+        let error = create_workflow(&fixture.s, graph(value)).await.unwrap_err();
+        assert_eq!(key(&error), "workflow.batchCurrentItem", "{source}");
+        assert_eq!(error.2.unwrap().params["path"], "/nodes/1/params/prompt");
+    }
+    for source in [
+        "Summarize the input items.",
+        "={{ JSON.stringify($input.all().map(i => i.json)) }}",
+        "={{ $('Source').all().length }}",
+        "={{ '$json is literal text' }}",
+    ] {
+        let mut value = params(fixture.agent.id);
+        value["prompt"] = json!(source);
+        let definition = graph(value);
+        super::super::graph::validate(&definition.to_string()).unwrap();
+        if !source.starts_with('=') {
+            create_workflow(&fixture.s, definition).await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn legacy_batch_prompt_reports_current_item_at_runtime() {
+    let mut node = json!({"type":"ai.agent.run","type_version":1,"params":params(1)});
+    node["params"]["prompt"] = json!("={{ JSON.stringify($json) }}");
+    let error = super::super::graph::resolve(
+        &node,
+        "/nodes/1",
+        serde_json::from_value(json!({"items":[{"json":{"value":1}}],"upstream":[]})).unwrap(),
+        &[None],
+        json!({}),
+        true,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(key(&error), "workflow.batchCurrentItem");
+    assert_eq!(error.2.unwrap().params["path"], "/nodes/1/params/prompt");
 }
 
 #[tokio::test]
@@ -2023,6 +2073,14 @@ async fn the_published_definition_format_matches_the_validated_schema() {
         format["data"]["schema"],
         super::super::graph::graph_schema()
     );
+    assert!(
+        format["data"]["node_contracts"]["ai.agent.run"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("appended")
+    );
+    assert!(format["data"]["node_contracts"]["ai.agent.run"]["params_schema"]["properties"]["prompt"]["description"]
+        .as_str().unwrap().contains("$input.item"));
     super::super::graph::validate(&format["data"]["example"].to_string()).unwrap();
 }
 

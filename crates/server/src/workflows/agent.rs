@@ -71,6 +71,12 @@ pub(super) fn validate_with_policy(
     policy: &ResourcePolicy,
 ) -> Result<()> {
     let prompt = params["prompt"].as_str().unwrap_or_default();
+    if prompt.starts_with('=') && super::expression::current_item_reference(prompt) {
+        return Err(invalid(
+            "workflow.batchCurrentItem",
+            format!("{base}/params/prompt"),
+        ));
+    }
     if !prompt.starts_with('=')
         && (prompt.trim().is_empty() || !allows(policy.agent_prompt_bytes, prompt.len()))
     {

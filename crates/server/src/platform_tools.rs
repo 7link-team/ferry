@@ -389,11 +389,15 @@ pub(crate) async fn dispatch(s: &AppState, scope: Scope, mut call: Call) -> Resu
     redact(&mut body);
     let mut result = json!({"status":status.as_u16(),"ok":status.is_success(),"data":body});
     if !status.is_success() {
-        result["guidance"] = json!(if error_key.as_deref() == Some("storage.unavailable") {
-            STORAGE_GUIDANCE
-        } else {
-            call_guidance(&call, status.as_u16())
-        });
+        result["guidance"] = json!(
+            if error_key.as_deref() == Some("workflow.batchCurrentItem") {
+                "This batch node has no current item. Use literal agent instructions; input items are appended automatically. For expressions, use $input.all()."
+            } else if error_key.as_deref() == Some("storage.unavailable") {
+                STORAGE_GUIDANCE
+            } else {
+                call_guidance(&call, status.as_u16())
+            }
+        );
     }
     Ok(result)
 }

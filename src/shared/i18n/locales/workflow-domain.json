@@ -1,4 +1,12 @@
 {
+  "workflow.batchCurrentItem": [
+    "{{path}}: This node runs once over all inputs and has no current item. Write literal instructions; inputs are appended automatically, or use $input.all().",
+    "{{path}}：此节点对全部输入只运行一次，没有当前项。请编写字面指令；输入会自动附加，或使用 $input.all()。",
+    "{{path}}：此節點對全部輸入只執行一次，沒有目前項目。請撰寫字面指令；輸入會自動附加，或使用 $input.all()。",
+    "{{path}}: このノードは全入力に対して一度だけ実行され、現在のアイテムはありません。指示を直接記述してください。入力は自動追加されます。式では $input.all() を使用してください。",
+    "{{path}}: 이 노드는 모든 입력에 대해 한 번 실행되며 현재 항목이 없습니다. 지시문을 직접 작성하세요. 입력은 자동으로 추가됩니다. 표현식에는 $input.all()을 사용하세요.",
+    "{{path}}: Nod ini dijalankan sekali untuk semua input dan tiada item semasa. Tulis arahan literal; input dilampirkan secara automatik, atau gunakan $input.all()."
+  ],
   "execution.log.agentStarted": ["Agent started", "智能体开始执行", "智慧體開始執行", "エージェント実行開始", "에이전트 실행 시작", "Ejen mula berjalan"],
   "execution.log.agentFinished": ["Agent execution ended", "智能体执行结束", "智慧體執行結束", "エージェント実行終了", "에이전트 실행 종료", "Pelaksanaan ejen tamat"],
   "execution.log.turnStarted": ["Model turn started", "模型轮次开始", "模型回合開始", "モデルターン開始", "모델 턴 시작", "Giliran model bermula"],

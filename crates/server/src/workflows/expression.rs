@@ -12,6 +12,181 @@ use tokio::{
     process::Command,
 };
 
+/// Whether a `=` template uses the current item (`$json`, `$binary`,
+/// `$input.item`) inside its `{{ }}` code. Literal template text is ignored.
+pub(super) fn current_item_reference(template: &str) -> bool {
+    let Some(mut rest) = template.strip_prefix('=') else {
+        return false;
+    };
+    while let Some(start) = rest.find("{{") {
+        let code = &rest[start + 2..];
+        let end = code.find("}}").unwrap_or(code.len());
+        if code_reference(&code[..end]) {
+            return true;
+        }
+        rest = &code[(end + 2).min(code.len())..];
+    }
+    false
+}
+
+/// Detect item-scoped JavaScript bindings without matching quoted text or comments.
+fn code_reference(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'`' => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' {
+                        i += 2;
+                    } else if bytes[i] == b'`' {
+                        i += 1;
+                        break;
+                    } else if bytes.get(i..i + 2) == Some(b"${") {
+                        let start = i + 2;
+                        let mut end = start;
+                        let mut depth = 1;
+                        while end < bytes.len() && depth > 0 {
+                            match bytes[end] {
+                                b'{' => depth += 1,
+                                b'}' => depth -= 1,
+                                _ => {}
+                            }
+                            end += 1;
+                        }
+                        if code_reference(&source[start..end.saturating_sub(1)]) {
+                            return true;
+                        }
+                        i = end;
+                    } else {
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+            b'\'' | b'"' => {
+                let quote = bytes[i];
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i] == quote {
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i + 1 < bytes.len() && &bytes[i..i + 2] != b"*/" {
+                    i += 1;
+                }
+                i = (i + 2).min(bytes.len());
+                continue;
+            }
+            b'$' if i == 0 || !identifier_byte(bytes[i - 1]) => {
+                let previous = bytes[..i].iter().rev().find(|b| !b.is_ascii_whitespace());
+                if matches!(previous, Some(b'.')) {
+                    i += 1;
+                    continue;
+                }
+                let tail = &bytes[i..];
+                for name in [b"$json".as_slice(), b"$binary".as_slice()] {
+                    if tail.starts_with(name)
+                        && !tail.get(name.len()).is_some_and(|b| identifier_byte(*b))
+                    {
+                        return true;
+                    }
+                }
+                if tail.starts_with(b"$input") && !tail.get(6).is_some_and(|b| identifier_byte(*b))
+                {
+                    let mut j = i + 6;
+                    while bytes.get(j).is_some_and(u8::is_ascii_whitespace) {
+                        j += 1;
+                    }
+                    if bytes.get(j) == Some(&b'?') {
+                        j += 1;
+                    }
+                    if bytes.get(j) == Some(&b'.') {
+                        j += 1;
+                        while bytes.get(j).is_some_and(u8::is_ascii_whitespace) {
+                            j += 1;
+                        }
+                        if bytes.get(j..j + 4) == Some(b"item")
+                            && !bytes.get(j + 4).is_some_and(|b| identifier_byte(*b))
+                        {
+                            return true;
+                        }
+                    } else if bytes.get(j) == Some(&b'[') {
+                        j += 1;
+                        while bytes.get(j).is_some_and(u8::is_ascii_whitespace) {
+                            j += 1;
+                        }
+                        if matches!(bytes.get(j), Some(b'\'' | b'"')) {
+                            let quote = bytes[j];
+                            if bytes.get(j + 1..j + 5) == Some(b"item")
+                                && bytes.get(j + 5) == Some(&quote)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
+#[cfg(test)]
+mod current_item_tests {
+    use super::current_item_reference;
+
+    #[test]
+    fn identifies_item_bindings_only_in_executable_source() {
+        for source in [
+            "={{$json.value}}",
+            "={{ $binary.file }}",
+            "={{ $input.item.json.x }}",
+            "={{ $input['item'].json.x }}",
+            "={{ `value: ${$json.value}` }}",
+        ] {
+            assert!(current_item_reference(source), "{source}");
+        }
+        for source in [
+            "={{ $input.all().map(i => i.json) }}",
+            "={{ $input.first().json }}",
+            "={{ $('Node').all() }}",
+            "={{ '$json' }}",
+            "={{ `literal $json` }}",
+            "={{ obj.$json }}",
+            "={{ /* $json */ $input.all() }}",
+            "=Summarize $json fields {{ $input.all().length }}",
+            "Summarize $json without template",
+        ] {
+            assert!(!current_item_reference(source), "{source}");
+        }
+    }
+}
+
+fn identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$')
+}
+
 pub(crate) fn timezone(settings: &serde_json::Value, path: &str) -> Result<Option<chrono_tz::Tz>> {
     settings
         .get("timezone")

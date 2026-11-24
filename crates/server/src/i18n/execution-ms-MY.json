@@ -1,4 +1,5 @@
 {
+  "workflow.batchCurrentItem": "{path}: Nod ini dijalankan sekali untuk semua input dan tiada item semasa. Tulis arahan literal; input dilampirkan secara automatik, atau gunakan $input.all().",
   "workflow.runTimeoutUnsupported": "Masa tamat seluruh aliran kerja tidak disokong. Abaikan timeout_seconds atau tetapkan kepada 0; masa tamat setiap nod masih tersedia.",
   "workflow.runSaveDataUnsupported": "Dasar save_data tersuai tidak disokong. Abaikan medan ini untuk menggunakan rekod pelaksanaan sedia ada.",
   "workflow.runConcurrencyUnsupported": "Dasar keserentakan aliran kerja tidak disokong. Abaikan concurrency atau tetapkan scope kepada none.",
