@@ -6,9 +6,10 @@
 | T1 | 待验证 | 后台恢复后会话空白（af3df2d） | CI：888ffe1(含af3df2d) Build/Mobile/Container 全绿；待真机确认（用户负责） |
 | T2 | 已完成 | H5紧凑聊天布局（a261089） | 888ffe1 全量CI通过 |
 | T3 | 已完成 | 6441f15 Build失败 | e2e-build-ui“endpoints get distinct hues”断言；后续a261089同一job通过，判为偶发，暂不改代码；再现则排查 |
-| T4 | 待处理 | 全部完成后发布v0.11.0-alpha（用户2026-11-24决定；不打v0.10.15标签） | 888ffe1已改为0.10.15且推送，发版前改为0.11.0并重命名docs/releases；只给全绿提交打标签 |
+| T4 | 待处理 | 发布v0.11.0-alpha（用户选B：二期完成后一起发） | 前提：二期完成、CI全绿、用户验收；然后改版本号、重命名发布说明、打标签 |
 | T5 | 受阻（用户处理中） | 生产周报工作流（Codeup→PDF→????-ferry，周一09:00） | 需用户在正常授权下改 prompt（去掉=与$json插值）、目标群、工作区时区后重跑；不得绕过授权 |
 | T6 | 待验证 | 多开发者多Agent跨host联调 一期 | 已推送(含前端5c6772c+ADR)。门禁：cargo workspace 1447 全过；vitest 1008 过/2 焦点时序用例仅在满载并行下失败、单独重跑通过；build 通过；浏览器验收 relay-ui 全过。待：CI 结果、用户试用；二期计划（话题串/运行回流/删除）待写；API运行时Agent多份共享会话为已知限制 |
+| T10 | 进行中 | 多Agent协作 二期（话题串/运行结果回流/删除隐藏关联） | 计划 docs/superpowers/plans/2026-11-24-multi-agent-collaboration-phase2.md 已写；待用户确认后实施（Claude直接做） |
 | T7 | 待验证 | 工作流列表与流水线列表分组一致 | ee24aea 合并推送(d8058b7)；vitest/build/Rust ordering 通过；待 CI |
 | T8 | 待验证 | ai.agent.run 提示词当前项($json)拦截+明确报错+MCP说明 | 5ca8a8a 合并推送(d8058b7)；只检查{{}}内代码、仅Agent节点保存期拦截；workflows 191 测试通过；待 CI |
 | T9 | 已完成 | 本地垃圾清理与目录规范 | 2026-11-24 删除 target 183G、desktop 构建 15G、data/backups+maintenance 等 45G、根目录41个日志；保留 data/dev-backend 与7天内证据；D盘 0→242G 空闲。Git 仓库仅17.6MB无垃圾提交。新增 AGENTS.md 规则 + npm run clean:local + /.tmp/ |
