@@ -1,5 +1,15 @@
 # Task State
 
+## 当前事项清单（2026-11-24 核对）
+| 编号 | 状态 | 事项 | 下一步/证据 |
+|---|---|---|---|
+| T1 | 待验证 | 后台恢复后会话空白（af3df2d） | 已提交推送；部署验收45359559985 SUCCESS，Build45359559852排队中；等CI，再做真机/生产复现确认 |
+| T2 | 待验证 | H5紧凑聊天布局（a261089） | 已推送；Build45352962742除macos-intel桌面外全绿，等收尾 |
+| T3 | 已完成 | 6441f15 Build失败 | e2e-build-ui“endpoints get distinct hues”断言；后续a261089同一job通过，判为偶发，暂不改代码；再现则排查 |
+| T4 | 进行中 | 发布v0.10.15-alpha（4897b63..af3df2d全部修复，均为fix→patch） | 版本号+docs/releases/v0.10.15-alpha.md已提交推送；等该提交build.yml全绿后再打标签，然后核对发布资产 |
+| T5 | 受阻 | 生产周报工作流（Codeup→PDF→????-ferry，周一09:00） | 需用户在正常授权下改 prompt（去掉=与$json插值）、目标群、工作区时区后重跑；不得绕过授权 |
+| T6 | 待处理 | 多节点Agent协作/人工参与聊天架构 | 仅有方案建议，需用户确认范围后再设计schema/协议 |
+
 ## Active task: foreground conversation recovery (2026-11-24)
 User reports conversation115981783740186624 becomes blank after prolonged backgrounding, manual refresh restores it. Phase ANALYSIS -> regression reproduction. Clean main at a261089 before work. Source-confirmed gaps: conversation/list polling waits indefinitely on a suspended request, no foreground/online/pageshow/session-renewed restart; list401 clears session drafts even when session.ts intentionally defers unauthorized pending renewal. PlatformFrame measures resize/focus only, not visibility/pageshow restoration. Exact production root cause not yet proven; device/extent clarification pending. Scope: minimal read recovery and retained drafts during renewable401, viewport wake remeasure if regression demonstrates need; normal401/403/404 authorization preserved; never replay writes. Direct execution (coupled lifecycle changes); no agents. Next: failing tests for suspended reads/late stale results/renewable401 and foreground viewport restoration, then minimal fix and final production browser recovery acceptance.
 
