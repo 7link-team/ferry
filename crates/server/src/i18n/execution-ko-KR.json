@@ -1,4 +1,5 @@
 {
+  "workflow.batchCurrentItem": "{path}: 이 노드는 모든 입력에 대해 한 번 실행되며 현재 항목이 없습니다. 지시문을 직접 작성하세요. 입력은 자동으로 추가됩니다. 표현식에는 $input.all()을 사용하세요.",
   "workflow.runTimeoutUnsupported": "이 실행기는 워크플로 전체 시간 제한을 지원하지 않습니다. timeout_seconds를 생략하거나 0으로 설정하세요. 노드별 시간 제한은 사용할 수 있습니다.",
   "workflow.runSaveDataUnsupported": "이 실행기는 사용자 지정 save_data 정책을 지원하지 않습니다. 기존 실행 기록을 사용하려면 이 필드를 생략하세요.",
   "workflow.runConcurrencyUnsupported": "이 실행기는 워크플로 동시 실행 정책을 지원하지 않습니다. concurrency를 생략하거나 scope를 none으로 설정하세요.",

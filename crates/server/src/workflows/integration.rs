@@ -1034,6 +1034,7 @@ async fn definition_format(scope: Scope, Path(_): Path<String>) -> Result<Json<V
     Ok(Json(json!({
         "schema": super::graph::graph_schema(),
         "example": definition_example(),
+        "node_contracts": {"ai.agent.run": builtin_nodes().into_iter().find(|node| node["type"] == "ai.agent.run")},
         "execution_support": {
             "settings": {
                 "timeout_seconds":"Omit or use 0. A workflow-wide timeout is not implemented; legacy node timeout_s is accepted but ignored; administrators may configure task_timeout_seconds.",

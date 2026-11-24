@@ -1,4 +1,5 @@
 {
+  "workflow.batchCurrentItem": "{path}: This node runs once over all inputs and has no current item. Write literal instructions; inputs are appended automatically, or use $input.all().",
   "workflow.runTimeoutUnsupported": "This runtime does not support a workflow-wide timeout. Omit timeout_seconds or set it to 0; node timeouts remain available.",
   "workflow.runSaveDataUnsupported": "This runtime does not support custom save_data policies. Omit save_data to use existing execution records.",
   "workflow.runConcurrencyUnsupported": "This runtime does not support workflow concurrency policies. Omit concurrency or set scope to none.",

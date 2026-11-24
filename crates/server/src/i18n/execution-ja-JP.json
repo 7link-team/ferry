@@ -1,4 +1,5 @@
 {
+  "workflow.batchCurrentItem": "{path}: このノードは全入力に対して一度だけ実行され、現在のアイテムはありません。指示を直接記述してください。入力は自動追加されます。式では $input.all() を使用してください。",
   "workflow.runTimeoutUnsupported": "この実行環境はワークフロー全体のタイムアウトに対応していません。timeout_seconds を省略するか 0 にしてください。ノードごとのタイムアウトは使用できます。",
   "workflow.runSaveDataUnsupported": "この実行環境は独自の save_data 設定に対応していません。省略すると既存の実行記録が使用されます。",
   "workflow.runConcurrencyUnsupported": "この実行環境はワークフローの同時実行設定に対応していません。concurrency を省略するか scope を none にしてください。",

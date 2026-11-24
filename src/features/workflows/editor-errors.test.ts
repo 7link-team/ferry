@@ -14,3 +14,13 @@ it("reports editor errors in the reader's language, never as English internals",
     for (const value of values.slice(1, 5)) expect(value, key).not.toBe(values[0]);
   }
 });
+
+it("provides the batch current-item error in every editor locale", async () => {
+  const values = messages["workflow.batchCurrentItem"];
+  expect(values).toHaveLength(6);
+  for (const [index, locale] of ["en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "ms-MY"].entries()) {
+    await i18n.changeLanguage(locale);
+    expect(i18n.t("workflow.batchCurrentItem", { ns: "workflow-domain", keySeparator: false, path: "/nodes/1/params/prompt" }))
+      .toBe(values[index]!.replace("{{path}}", "/nodes/1/params/prompt"));
+  }
+});

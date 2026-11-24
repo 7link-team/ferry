@@ -122,6 +122,7 @@
       "purity": "side_effect",
       "cache_allowed": false,
       "item_mode": "batch",
+      "description": "Runs once for all input items. Input items are appended to the agent prompt automatically; write literal task instructions. There is no current $json, $binary, or $input.item; use $input.all() for expressions.",
       "inputs": [
         {
           "port": "main",
@@ -170,7 +171,8 @@
           },
           "prompt": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Literal task instructions; all input items are appended automatically. Batch mode has no current $json, $binary, or $input.item."
           },
           "output_schema": {
             "type": "object",
