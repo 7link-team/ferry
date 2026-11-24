@@ -13,7 +13,7 @@ import {
 import { Dialog } from "radix-ui";
 import { href, navigate, useRoute } from "../router";
 import { ResourceForm } from "../resources/ResourceForm";
-import { errorText } from "../../shared/api/api";
+import { ApiError, errorText } from "../../shared/api/api";
 import { listResource } from "../../shared/api/resource";
 import { commonText, useCommonTranslation } from "../../shared/i18n/i18n";
 import type { AnyRow } from "../../shared/resources/config";
@@ -24,6 +24,7 @@ import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import {
   Conversation,
   type ConversationDraft,
+  type ConversationSnapshot,
 } from "../../features/conversations/Conversation";
 import { conversationText as t } from "../../features/conversations/resource-config";
 import { InlineAlert } from "../../shared/ui/inline-alert";
@@ -39,24 +40,36 @@ interface Summary {
   /** Approvals waiting for the viewer, including ones left when a reply ended. */
   pending?: number;
 }
+/** Owned by the authenticated shell; never persisted to browser storage. */
+export interface ConversationsSession {
+  list?: { rows: Summary[]; total: number; query: string; pages: number } | undefined;
+  selected?: string | undefined;
+  snapshot?: ConversationSnapshot | undefined;
+  drafts: Map<string, ConversationDraft>;
+}
 export function ConversationsWorkspace({
   workspace,
   permissions,
   form,
+  session: storedSession,
 }: {
   workspace: string;
   permissions: Set<string>;
   form: FormConfig<AnyRow> | undefined;
+  session?: ConversationsSession;
 }) {
   useCommonTranslation();
   const route = useRoute();
-  const [rows, setRows] = useState<Summary[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [localSession] = useState<ConversationsSession>(() => ({ drafts: new Map() }));
+  const session = storedSession ?? localSession;
+  const [rows, setRows] = useState<Summary[]>(session.list?.rows ?? []);
+  const [loaded, setLoaded] = useState(!!session.list);
   const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
-  const [query, setQuery] = useState("");
-  const [pages, setPages] = useState(1);
-  const [total, setTotal] = useState(0);
+  const [denied, setDenied] = useState(false);
+  const [search, setSearch] = useState(session.list?.query ?? "");
+  const [query, setQuery] = useState(session.list?.query ?? "");
+  const [pages, setPages] = useState(session.list?.pages ?? 1);
+  const [total, setTotal] = useState(session.list?.total ?? 0);
   const [mobile, setMobile] = useState(false);
   const [revision, setRevision] = useState(0);
   const [activePending, setActivePending] = useState<{ id: string; count: number }>();
@@ -65,8 +78,15 @@ export function ConversationsWorkspace({
   }, []);
   const readable = permissions.has("conversations.read");
   const editing = route.mode === "new" || route.mode === "edit";
-  const selected = route.mode !== "new" ? route.id : undefined;
-  const drafts = useRef(new Map<string, ConversationDraft>());
+  const selected = route.mode === "new" ? undefined : route.id ?? (route.mode === "list" && loaded
+    ? session.selected ?? (!query ? rows[0]?.id : undefined) : undefined);
+  const drafts = useRef(session.drafts);
+  const saveSnapshot = useCallback((snapshot: ConversationSnapshot | undefined) => {
+    session.snapshot = snapshot;
+  }, [session]);
+  useEffect(() => {
+    if (selected) session.selected = selected;
+  }, [selected, session]);
   const saveDraft = useCallback(
     (draft: ConversationDraft) => {
       if (selected) drafts.current.set(selected, draft);
@@ -76,13 +96,17 @@ export function ConversationsWorkspace({
   useEffect(() => {
     const timer = setTimeout(() => {
       setQuery(search);
-      setPages(1);
+      if (search !== query) setPages(1);
     }, 200);
     return () => clearTimeout(timer);
   }, [search]);
   useEffect(() => {
     if (!readable) {
       setRows([]);
+      session.list = undefined;
+      session.snapshot = undefined;
+      session.selected = undefined;
+      session.drafts.clear();
       return;
     }
     const controller = new AbortController();
@@ -100,19 +124,30 @@ export function ConversationsWorkspace({
           ),
         );
         if (controller.signal.aborted) return;
-        setRows([
+        const rows = [
           ...new Map(
             results
               .flatMap((result) => result.items)
               .map((row) => [row.id, row]),
           ).values(),
-        ]);
-        setTotal(results[0]?.total ?? 0);
+        ];
+        const total = results[0]?.total ?? 0;
+        session.list = { rows, total, query, pages };
+        setRows(rows);
+        setTotal(total);
         setLoaded(true);
+        setDenied(false);
         setError("");
       } catch (cause) {
         if (controller.signal.aborted) return;
-        setRows([]);
+        if (cause instanceof ApiError && [401, 403].includes(cause.status)) {
+          setDenied(true);
+          setRows([]);
+          session.list = undefined;
+          session.snapshot = undefined;
+          session.selected = undefined;
+          session.drafts.clear();
+        }
         setError(errorText(cause));
         setLoaded(true);
       } finally {
@@ -125,21 +160,21 @@ export function ConversationsWorkspace({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [workspace, readable, query, pages, revision]);
+  }, [workspace, readable, query, pages, revision, session]);
   useEffect(() => {
-    if (route.mode === "list" && loaded && !query && !error && rows[0])
+    if (route.mode === "list" && loaded && !error && selected)
       navigate(
         {
           workspace,
           group: "conversations",
           item: "conversations",
           mode: "view",
-          id: rows[0].id,
+          id: selected,
         },
         {},
         { replace: true },
       );
-  }, [workspace, route.mode, loaded, rows, query, error]);
+  }, [workspace, route.mode, loaded, rows, query, error, selected]);
   useEffect(() => {
     setMobile(false);
   }, [route.id, route.mode]);
@@ -199,7 +234,7 @@ export function ConversationsWorkspace({
             {t(query ? "noSearchResults" : "noConversations")}
           </p>
         )}
-        {rows.map((listed) => {
+        {(readable && !denied ? rows : []).map((listed) => {
           // The selected conversation's detail is authoritative; a slow list poll
           // must not put back the badge that was just cleared by its owner.
           const row = activePending && activePending.id === selected && listed.id === selected ? { ...listed, pending: activePending.count } : listed;
@@ -313,8 +348,8 @@ export function ConversationsWorkspace({
         <div className="absolute left-2 top-3 z-10 md:hidden">
           {mobileButton}
         </div>
-        {!readable ? (
-          <p role="alert">{commonText("shell.forbidden")}</p>
+        {!readable || denied ? (
+          <p role="alert">{error || commonText("shell.forbidden")}</p>
         ) : selected ? (
           <Conversation
             key={`${workspace}/${selected}`}
@@ -322,11 +357,16 @@ export function ConversationsWorkspace({
             id={selected}
             permissions={permissions}
             initialDraft={drafts.current.get(selected)}
+            initialSnapshot={session.snapshot}
+            onSnapshotChange={saveSnapshot}
             onDraftChange={saveDraft}
             onPendingChange={updatePending}
             onOpenConversation={id => { setRevision(value => value + 1); go(id, "view"); }}
             onDeleted={() => {
               drafts.current.delete(selected);
+              session.snapshot = undefined;
+              session.selected = undefined;
+              if (session.list) session.list.rows = session.list.rows.filter(row => row.id !== selected);
               setRows((old) => old.filter((row) => row.id !== selected));
               setRevision((value) => value + 1);
               go(undefined, "list");
@@ -344,6 +384,10 @@ export function ConversationsWorkspace({
               )
             }
           />
+        ) : !loaded && route.mode !== "new" ? (
+          <LoadingSkeleton variant="form" />
+        ) : error && !rows.length && route.mode !== "new" ? (
+          <InlineAlert>{error}</InlineAlert>
         ) : (
           <>
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-center">

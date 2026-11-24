@@ -38,8 +38,10 @@ try {
     assert.equal(await form.locator('button[type=submit]').count(),0);
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),tab+' view overflow '+width);
     await page.screenshot({path:join(work,`${tab}-view-${width}.png`),fullPage:true});
+    await page.evaluate(() => document.documentElement.dataset.navigationToken = 'preserve-document');
     await form.getByRole('link',{name:'编辑',exact:true}).click();
     await page.locator('button[type=submit]').last().waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.navigationToken), 'preserve-document', 'edit must not reload the document');
     assert(new URL(page.url()).pathname.endsWith('/edit'));assert.equal(new URL(page.url()).searchParams.get('tab'),tab);
     assert.equal(await page.getByRole('dialog').count(),0);
     await page.reload();await page.locator('button[type=submit]').last().waitFor();
@@ -48,8 +50,10 @@ try {
       const box=await button.boundingBox();assert(box.height>=44&&box.width>=44,tab+' touch target '+width);
     }
     await page.screenshot({path:join(work,`${tab}-edit-${width}.png`),fullPage:true});
+    await page.evaluate(() => document.documentElement.dataset.navigationToken = 'preserve-document');
     await page.getByRole('link',{name:'取消',exact:true}).click();
     await page.locator('form.resource-detail').waitFor();assert.equal(new URL(page.url()).pathname+new URL(page.url()).search,'/zh-CN'+path);
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.navigationToken), 'preserve-document', 'cancel must not reload the document');
     report.checks.push(`${tab}: ${width}px read-only, URL edit, reload, cancel restores tab and at, no overflow`);
   }
   // A stale writer stays on the editor with its draft; the server refuses the transition.
@@ -69,9 +73,11 @@ try {
     await page.locator('button[type=submit]').last().waitFor();
     const endpoint=tab==='monitoring'?monitorPath:root+'/code-insights/'+insight.id;
     const before=await api(endpoint);
+    await page.evaluate(() => document.documentElement.dataset.navigationToken = 'preserve-save');
     const response=page.waitForResponse(r=>r.url().endsWith(endpoint)&&r.request().method()==='PATCH');
     await page.getByRole('button',{name:'保存',exact:true}).click();assert((await response).ok());
     await page.locator('form.resource-detail').waitFor();assert.equal(new URL(page.url()).pathname+new URL(page.url()).search,'/zh-CN'+path);
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.navigationToken), 'preserve-save', 'save must not reload the document');
     const after=await api(endpoint);assert(after.version>before.version);assert.equal(after.enabled,false);
     if(tab==='monitoring'){assert.equal(after.runner_id,before.runner_id);assert.deepEqual(after.events,before.events);}
     else {assert.deepEqual(after.aliases,before.aliases);assert.deepEqual(after.repositories,before.repositories);}

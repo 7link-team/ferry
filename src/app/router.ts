@@ -15,7 +15,7 @@ import { useEffect,useSyncExternalStore } from "react";
 import { announce,subscribe,snapshot } from "../shared/routing/url-state";
 export { useQueryValue,useScrollSync } from "../shared/routing/url-state";
 import { resourceName } from "../shared/api/resource";
-import { currentLocale,localizedPath,pathLocale,stripLocalePrefix } from "../shared/i18n/locale";
+import { currentLocale,localizedPath,pathLocale,setLocale,stripLocalePrefix } from "../shared/i18n/locale";
 import type { Route } from "../shared/routing/types";
 import { movedGroups, nav } from "./nav";
 import { commitRoute } from "../shared/api/progress";
@@ -152,6 +152,37 @@ export function navigate(
   if (target === snapshot()) return;
   history[options?.replace ? "replaceState" : "pushState"]({}, "", target);
   announce();
+}
+
+/** Route ordinary application links through the mounted shell, including portals. */
+export function useInternalNavigation() {
+  useEffect(() => {
+    const click = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null;
+      if (!anchor || anchor.isContentEditable || anchor.hasAttribute("download") || anchor.relList.contains("external")) return;
+      const target = anchor.target || document.querySelector("base")?.target;
+      if (target && target !== "_self") return;
+      const raw = anchor.getAttribute("href");
+      if (!raw || raw.startsWith("#")) return;
+      const url = new URL(anchor.href, location.href);
+      if (url.origin !== location.origin || !["http:", "https:"].includes(url.protocol)) return;
+      const path = stripLocalePrefix(url.pathname);
+      if (!/^\/(?:workspaces(?:\/|$)|platform\/|account\/?$|login\/?$|register\/?$|initialize\/?$)/.test(path)) return;
+      if (url.pathname === location.pathname && url.search === location.search && url.hash) return;
+      event.preventDefault();
+      window.dispatchEvent(new Event("ferry:before-navigate"));
+      const destination = url.pathname + url.search + url.hash;
+      if (destination === location.pathname + location.search + location.hash) return;
+      const previousLocale = currentLocale();
+      history.pushState({}, "", destination);
+      const locale = pathLocale(url.pathname);
+      if (locale && locale !== previousLocale) setLocale(locale, false, false);
+      announce();
+    };
+    document.addEventListener("click", click);
+    return () => document.removeEventListener("click", click);
+  }, []);
 }
 
 export function useRoute(): Route {

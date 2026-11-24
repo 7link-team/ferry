@@ -2,7 +2,7 @@ import { WorkspaceTimezoneContext } from "../shared/timezone";
 import { IdentityAvatar } from "../shared/ui/identity-avatar";
 import { installIntegrationCatalog, type IntegrationManifest } from "../features/workflows/integrations";
 import { TypedValueList } from "./pages/TypedValueList";
-import { ConversationsWorkspace } from "./pages/ConversationsWorkspace";
+import { ConversationsWorkspace, type ConversationsSession } from "./pages/ConversationsWorkspace";
 import { cn } from "cn";
 import { AppHeader } from "./AppHeader";
 import { MobileNavigation } from "./MobileNavigation";
@@ -46,14 +46,22 @@ import { Platform,myRole } from "./Platform";
 import { formConfigs,listConfigs } from "./resources";
 import { ResourceForm } from "./resources/ResourceForm";
 import { ResourceTable } from "./resources/ResourceTable";
-import { href,isLoginPath,isPublicEntryPath,navigate,navigateToLogin,replacePath,safeLoginRedirect,useRoute } from "./router";
+import { href,isLoginPath,isPublicEntryPath,navigate,navigateToLogin,replacePath,safeLoginRedirect,useRoute,useInternalNavigation } from "./router";
 import { useDocumentTitle } from "./document-title";
 
 export function App() {
+  useInternalNavigation();
   useCommonTranslation();
   const route = useRoute();
   useDocumentTitle(route);
   const [identity, setIdentity] = useState<Identity>();
+  const conversationSessions = useMemo(() => new Map<string, ConversationsSession>(), [identity?.user.id]);
+  useEffect(() => {
+    for (const workspace of conversationSessions.keys()) {
+      if (!identity?.workspaces.some(value => value.id === workspace && value.permissions.includes("conversations.read")))
+        conversationSessions.delete(workspace);
+    }
+  }, [identity, conversationSessions]);
   useAccountPreferences(identity?.user.id);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -155,10 +163,10 @@ export function App() {
     if (current) return <WorkspaceTimezoneContext.Provider value={current.timezone ?? null}><HostWorkspace key={`${route.workspace}/${route.id}`} workspace={current.id} hostId={route.id} permissions={new Set(current.permissions)} headerActions={<AppearanceActions />} /></WorkspaceTimezoneContext.Provider>;
   }
   const active = identity.workspaces.find(w => w.id === route.workspace || w.slug === route.workspace) ?? (!route.workspace ? identity.workspaces[0] : undefined);
-  return <WorkspaceTimezoneContext.Provider value={active?.timezone ?? null}><Workspace identity={identity} reload={reload} onSignedOut={signedOut} /></WorkspaceTimezoneContext.Provider>;
+  return <WorkspaceTimezoneContext.Provider value={active?.timezone ?? null}><Workspace key={identity.user.id} identity={identity} reload={reload} onSignedOut={signedOut} conversationSessions={conversationSessions} /></WorkspaceTimezoneContext.Provider>;
 }
 
-function Workspace({ identity, reload, onSignedOut }: { identity: Identity; reload: () => void; onSignedOut: () => void }) {
+function Workspace({ identity, reload, onSignedOut, conversationSessions }: { identity: Identity; reload: () => void; onSignedOut: () => void; conversationSessions: Map<string, ConversationsSession> }) {
   useCommonTranslation();
   const { t } = useTranslation();
   const route = useRoute();
@@ -167,6 +175,14 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
     identity.workspaces.find((w) => w.id === route.workspace)
       ?? identity.workspaces.find((w) => w.slug === route.workspace) ?? (!route.workspace ? identity.workspaces[0] : undefined);
   const workspaceId = current?.id ?? "";
+  const conversationSession = useMemo(() => {
+    let session = conversationSessions.get(workspaceId);
+    if (!session) {
+      session = { drafts: new Map() };
+      conversationSessions.set(workspaceId, session);
+    }
+    return session;
+  }, [workspaceId, conversationSessions]);
   const needsNodeCatalog = route.item === "workflows" || route.item === "workflow-templates" || route.item === "integration-credentials" || (route.group === "workflow" && route.item === "credentials");
   const [nodeCatalogWorkspace, setNodeCatalogWorkspace] = useState("");
   const [nodeCatalogError, setNodeCatalogError] = useState("");
@@ -302,7 +318,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
         <WorkspaceHeaderActions identity={identity} onRefresh={reload} onSignedOut={onSignedOut} />
       </>} />
 
-      {item.resource === "conversations" ? <ConversationsWorkspace key={current.id} workspace={current.id} permissions={permissions} form={formConfig} /> : <div className="grid min-h-0 min-w-0 grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)]">
+      {item.resource === "conversations" ? <ConversationsWorkspace key={current.id} workspace={current.id} permissions={permissions} form={formConfig} session={conversationSession} /> : <div className="grid min-h-0 min-w-0 grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)]">
         <nav
           className="hidden flex-col gap-0.5 overflow-y-auto border-r border-sidebar-border bg-sidebar text-sidebar-foreground p-3 md:flex"
           aria-label={group.label}

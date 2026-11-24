@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { Conversation } from "./Conversation";
+import { Conversation, type ConversationSnapshot } from "./Conversation";
 import { describeOperation, EndedDecisionCard, ExecutionTimeline, PendingDecisionCard, QuestionCard } from "./TurnActivity";
 import { LONG_TEXT_LIMIT } from "./LazyDetails";
 import * as apiModule from "../../shared/api/api";
@@ -47,6 +47,21 @@ afterEach(async () => {
 });
 const permissions = new Set(["conversations.read", "conversations.run"]);
 const buttons = (text: string) => [...host.querySelectorAll("button")].filter((button) => button.textContent?.trim() === text);
+
+it("restores conversation content while its background refresh waits and clears it on access denial", async () => {
+  const row = conversation([], [chat("1", "user", null)]);
+  const snapshot: ConversationSnapshot = { id:"2", data:row as unknown as ConversationSnapshot["data"], events:[], cursor:0 };
+  let reject: ((reason: Error) => void) | undefined;
+  vi.spyOn(apiModule, "api").mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
+  const changed = vi.fn();
+  await act(async () => root.render(<Conversation workspace="1" id="2" permissions={permissions} initialSnapshot={snapshot} onSnapshotChange={changed} />));
+  expect(host.textContent).toContain("Approvals");
+  expect(host.textContent).toContain("please");
+  expect(host.querySelector('[data-slot="loading-skeleton"]')).toBeNull();
+  await act(async () => reject!(new apiModule.ApiError("Access denied", 403)));
+  expect(host.textContent).not.toContain("please");
+  expect(changed).toHaveBeenLastCalledWith(undefined);
+});
 
 it("counts six actionable requests rather than turns or historical platform errors", async () => {
   const row = conversation([

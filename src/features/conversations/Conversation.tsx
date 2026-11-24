@@ -124,6 +124,12 @@ interface Event {
   turn_id: string;
   event: ActivityEvent & { text?: string; replace?: boolean };
 }
+export interface ConversationSnapshot {
+  id: string;
+  data: ConversationData;
+  events: Event[];
+  cursor: number;
+}
 const active = (value: string) =>
   ["queued", "running", "stopping"].includes(value);
 type ExecutionItem = { name?: string | undefined; state?: string | undefined; result?: unknown };
@@ -204,6 +210,8 @@ export function Conversation({
   onDeleted,
   onOpenConversation,
   onPendingChange,
+  initialSnapshot,
+  onSnapshotChange,
 }: {
   workspace: string;
   id: string;
@@ -214,14 +222,17 @@ export function Conversation({
   onDeleted?: () => void;
   onOpenConversation?: (id: string) => void;
   onPendingChange?: (id: string, count: number) => void;
+  initialSnapshot?: ConversationSnapshot | undefined;
+  onSnapshotChange?: (snapshot: ConversationSnapshot | undefined) => void;
 }) {
   useCommonTranslation();
   const timezone = useWorkspaceTimezone();
   const endpoint = `${base(workspace, "conversations")}/${encodeURIComponent(id)}`;
-  const [data, setData] = useState<ConversationData>();
+  const restored = initialSnapshot?.id === id ? initialSnapshot : undefined;
+  const [data, setData] = useState<ConversationData | undefined>(restored?.data);
   // Invalidate reads started before a decision write completed.
   const decisionRevision = useRef(0);
-  const [events, setEvents] = useState<Event[]>([]);
+  const [events, setEvents] = useState<Event[]>(restored?.events ?? []);
   const [draft, setDraft] = useState(initialDraft?.prompt ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>(
     initialDraft?.attachments ?? [],
@@ -271,9 +282,12 @@ export function Conversation({
   const pending = useRef<{ signature: string; client_id: string } | undefined>(
     undefined,
   );
-  const cursor = useRef(0);
+  const cursor = useRef(restored?.cursor ?? 0);
   // The last conversation snapshot applied, so an unchanged poll renders nothing.
   const applied = useRef("");
+  useEffect(() => {
+    onSnapshotChange?.(data ? { id, data, events, cursor: cursor.current } : undefined);
+  }, [id, data, events, onSnapshotChange]);
   // A private message typed while a reply runs is sent once that reply finishes.
   const [queue, setQueue] = useState<{ after: string; state: "waiting" | "paused" }>();
   const queueSent = useRef("");

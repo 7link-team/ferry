@@ -9,7 +9,7 @@ import { ResourceHeading } from "../../shared/ui/resource-heading";
 import { formConfigs,listConfigs } from "../resources";
 import { ResourceForm } from "../resources/ResourceForm";
 import { ResourceTable } from "../resources/ResourceTable";
-import { href,useQueryValue } from "../router";
+import { href,navigate,useQueryValue } from "../router";
 import { HostConnectionCommand,RunnerUpdateStatus } from "./RunnerConnection";
 import { InlineAlert } from "../../shared/ui/inline-alert";
 
@@ -40,7 +40,7 @@ export function HostDetail({
   const [tab, setTab] = useQueryValue("tab", "info");
   const [alertView, setAlertView] = useState<"rules" | "events">("rules");
   useEffect(() => {
-    if (tab === "terminal" || tab === "files") location.replace(href({ workspace, group: "ops", item: "hosts", id: hostId, mode: "workspace" }, { tool: tab }));
+    if (tab === "terminal" || tab === "files") navigate({ workspace, group: "ops", item: "hosts", id: hostId, mode: "workspace" }, { tool: tab }, { replace: true });
   }, [tab, workspace, hostId]);
   const canEnroll = permissions.has("hosts.enroll");
   const [connection, setConnection] = useState<{ workspace: string; hostId: string; kind: string; name: string }>();
