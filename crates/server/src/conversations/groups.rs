@@ -480,49 +480,19 @@ pub(super) async fn send_message(
     .exec(&tx)
     .await?;
     for a in selected {
-        let turn = s.next_id()?;
-        turns::Entity::insert(
-            turns::Model {
-                purpose: "message".into(),
-                introduction_id: 0,
-                introduction_locale: String::new(),
-                id: turn.into(),
-                workspace_id: scope.workspace_id.into(),
-                conversation_id: id.into(),
-                // Room Agents always work as their sponsor, whoever addressed them.
-                owner_id: a.added_by,
-                state: "queued".into(),
-                lease_owner: String::new(),
-                expires_at: 0,
-                version: 1,
-                client_id: turn.to_string(),
-                prompt: body.prompt.clone(),
-                attachments: attachments.clone(),
-                native_session_id: String::new(),
-                candidate_session: String::new(),
-                error: String::new(),
-                usage: "null".into(),
-                decisions: "{}".into(),
-                created_at: now,
-                updated_at: now,
-            }
-            .into_active_model(),
-        )
-        .exec(&tx)
-        .await?;
-        links::Entity::insert(
-            links::Model {
-                id: turn.into(),
-                workspace_id: scope.workspace_id.into(),
-                conversation_id: id.into(),
-                message_id: message.into(),
-                chat_agent_id: a.id,
+        queue_turn(
+            &s,
+            &tx,
+            &a,
+            Queued {
+                message: message.into(),
+                prompt: &body.prompt,
+                attachments: &attachments,
+                state: "queued",
                 hop: 0,
-                caller_chat_agent_id: 0,
-            }
-            .into_active_model(),
+                caller: 0,
+            },
         )
-        .exec(&tx)
         .await?;
     }
     c.updated_at = now;
@@ -647,4 +617,68 @@ async fn context_in(
     } else {
         Ok(format!("<group_history>\n{output}\n</group_history>\n\n"))
     }
+}
+
+/// One turn for a room Agent, linked to the message that asked for it.
+pub(super) struct Queued<'a> {
+    pub message: i64,
+    pub prompt: &'a str,
+    pub attachments: &'a str,
+    /// `queued`, or `held` while a relay waits for a human.
+    pub state: &'static str,
+    pub hop: i64,
+    pub caller: i64,
+}
+pub(super) async fn queue_turn(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    a: &agents::Model,
+    q: Queued<'_>,
+) -> Result<Id> {
+    let turn = s.next_id()?;
+    let now = db::now();
+    turns::Entity::insert(
+        turns::Model {
+            purpose: "message".into(),
+            introduction_id: 0,
+            introduction_locale: String::new(),
+            id: turn.into(),
+            workspace_id: a.workspace_id,
+            conversation_id: a.conversation_id,
+            // Room Agents always work as their sponsor, whoever addressed them.
+            owner_id: a.added_by,
+            state: q.state.into(),
+            lease_owner: String::new(),
+            expires_at: 0,
+            version: 1,
+            client_id: turn.to_string(),
+            prompt: q.prompt.into(),
+            attachments: q.attachments.into(),
+            native_session_id: String::new(),
+            candidate_session: String::new(),
+            error: String::new(),
+            usage: "null".into(),
+            decisions: "{}".into(),
+            created_at: now,
+            updated_at: now,
+        }
+        .into_active_model(),
+    )
+    .exec(tx)
+    .await?;
+    links::Entity::insert(
+        links::Model {
+            id: turn.into(),
+            workspace_id: a.workspace_id,
+            conversation_id: a.conversation_id,
+            message_id: q.message,
+            chat_agent_id: a.id,
+            hop: q.hop,
+            caller_chat_agent_id: q.caller,
+        }
+        .into_active_model(),
+    )
+    .exec(tx)
+    .await?;
+    Ok(turn)
 }

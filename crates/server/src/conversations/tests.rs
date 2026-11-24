@@ -2488,3 +2488,194 @@ async fn the_same_room_agent_still_runs_one_turn_at_a_time() {
     assert!(run::claim(&s, first.into()).await.unwrap().is_some());
     assert!(run::claim(&s, second.id.into()).await.unwrap().is_none());
 }
+
+/// The owner's Agent running a turn, plus the member's Agent row as a relay target.
+async fn running_caller_and_target() -> (
+    tempfile::TempDir,
+    AppState,
+    Id,
+    Scope,
+    Scope,
+    turns::Model,
+    Id,
+) {
+    use crate::entities::ai_chat_agents as room_rows;
+    let (dir, s, id, owner, member) = sponsored_room().await;
+    let (target, _) = member_agent_with_queued_turn(&s, id, &owner, &member).await;
+    let caller_row = room_rows::Entity::find()
+        .filter(room_rows::Column::ConversationId.eq(id))
+        .filter(room_rows::Column::AddedBy.eq(1))
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    // Only the caller's turn should run; clear everything else first.
+    turns::Entity::update_many()
+        .col_expr(
+            turns::Column::State,
+            sea_orm::sea_query::Expr::value("cancelled"),
+        )
+        .filter(turns::Column::ConversationId.eq(id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    groups::send_message(
+        State(s.clone()),
+        owner.clone(),
+        Path(("1".into(), id)),
+        message(json!({"prompt":"build the API","client_id":"caller","agents":[Id::from(caller_row.id)]})),
+    )
+    .await
+    .unwrap();
+    let queued = turns::Entity::find()
+        .filter(turns::Column::ConversationId.eq(id))
+        .filter(turns::Column::State.eq("queued"))
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let (running, _, _) = run::claim(&s, queued.id.into()).await.unwrap().unwrap();
+    (dir, s, id, owner, member, running, target)
+}
+
+fn relay_call(conversation: Id, agents: Vec<Id>, text: &str) -> crate::platform_tools::Call {
+    crate::platform_tools::Call {
+        method: "POST".into(),
+        path: format!("/conversations/{conversation}/relay"),
+        body: json!({"agents":agents,"text":text}),
+        transfer: None,
+    }
+}
+
+async fn relayed_turns(
+    s: &AppState,
+    target: Id,
+) -> Vec<(turns::Model, crate::entities::ai_chat_turns::Model)> {
+    use crate::entities::ai_chat_turns as links;
+    let mut out = vec![];
+    for link in links::Entity::find()
+        .filter(links::Column::ChatAgentId.eq(i64::from(target)))
+        .filter(links::Column::CallerChatAgentId.ne(0))
+        .all(&s.db)
+        .await
+        .unwrap()
+    {
+        let turn = turns::Entity::find_by_id(link.id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        out.push((turn, link));
+    }
+    out
+}
+
+#[tokio::test]
+async fn agents_relay_to_each_other_without_approval_as_the_target_sponsor() {
+    let (_dir, s, id, _owner, _member, running, target) = running_caller_and_target().await;
+    let result = relay::intercept(
+        &s,
+        &running,
+        &relay_call(id, vec![target], "GET /orders returns 500"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(result["data"]["held"], json!([]));
+    let delivered = relayed_turns(&s, target).await;
+    assert_eq!(delivered.len(), 1);
+    let (turn, link) = &delivered[0];
+    assert_eq!(turn.state, "queued");
+    assert_eq!(turn.owner_id, 2, "runs as the target's sponsor");
+    assert_eq!(link.hop, 1);
+    // No approval was requested for the relay itself.
+    let caller = turns::Entity::find_by_id(running.id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(caller.decisions, "{}");
+    // The target is told who wrote, and later turns see the relay in context.
+    assert!(turn.prompt.contains("GET /orders returns 500"));
+    assert!(turn.prompt.contains("Agent"), "{}", turn.prompt);
+    relay::intercept(&s, &running, &relay_call(id, vec![target], "fixed?"))
+        .await
+        .unwrap()
+        .unwrap();
+    let later = relayed_turns(&s, target).await.pop().unwrap().0;
+    let context = groups::context(&s.db, &later, 64 * 1024).await.unwrap();
+    assert!(context.contains("GET /orders returns 500"), "{context}");
+    // Self, unknown and other-conversation relays are refused.
+    let caller_row = crate::entities::ai_chat_turns::Entity::find_by_id(running.id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .chat_agent_id;
+    for call in [
+        relay_call(id, vec![caller_row.into()], "self"),
+        relay_call(id, vec![Id::from(424242)], "unknown"),
+        relay_call(Id::from(1), vec![target], "elsewhere"),
+    ] {
+        let result = relay::intercept(&s, &running, &call)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result["ok"], false, "{result}");
+    }
+}
+
+#[tokio::test]
+async fn relay_holds_past_the_hop_limit_or_when_off_until_a_human_continues() {
+    use crate::entities::ai_chat_turns as links;
+    let (_dir, s, id, owner, _member, running, target) = running_caller_and_target().await;
+    links::Entity::update_many()
+        .col_expr(links::Column::Hop, sea_orm::sea_query::Expr::value(10_i64))
+        .filter(links::Column::Id.eq(running.id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let result = relay::intercept(&s, &running, &relay_call(id, vec![target], "hop eleven"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result["data"]["queued"], json!([]));
+    let delivered = relayed_turns(&s, target).await;
+    assert_eq!(delivered[0].0.state, "held");
+    // Relay switched off holds even a first hop.
+    links::Entity::update_many()
+        .col_expr(links::Column::Hop, sea_orm::sea_query::Expr::value(0_i64))
+        .filter(links::Column::Id.eq(running.id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    relay::switch(
+        State(s.clone()),
+        owner.clone(),
+        Path(("1".into(), id)),
+        Json(serde_json::from_value(json!({"enabled":false})).unwrap()),
+    )
+    .await
+    .unwrap();
+    let off = relay::intercept(&s, &running, &relay_call(id, vec![target], "while off"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(off["ok"], true, "{off}");
+    assert!(
+        relayed_turns(&s, target)
+            .await
+            .iter()
+            .all(|(t, _)| t.state == "held")
+    );
+    // Continue delivers everything held as a new chain.
+    let Json(resumed) = relay::resume(State(s.clone()), owner.clone(), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert_eq!(resumed["queued"], 2);
+    for (turn, link) in relayed_turns(&s, target).await {
+        assert_eq!(turn.state, "queued");
+        assert_eq!(link.hop, 0);
+    }
+}

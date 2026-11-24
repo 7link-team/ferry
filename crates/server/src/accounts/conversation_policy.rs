@@ -20,6 +20,8 @@ pub struct Configuration {
     pub default_approval_mode: String,
     pub introduction_enabled: bool,
     pub introduction_instructions: String,
+    /// Agent-to-Agent relays in a row before a human must continue.
+    pub agent_relay_max_hops: i64,
 }
 impl Default for Configuration {
     fn default() -> Self {
@@ -29,6 +31,7 @@ impl Default for Configuration {
             default_approval_mode: "request".into(),
             introduction_enabled: true,
             introduction_instructions: DEFAULT_INTRODUCTION_INSTRUCTIONS.into(),
+            agent_relay_max_hops: 10,
         }
     }
 }
@@ -59,6 +62,7 @@ impl Configuration {
                 .chars()
                 .any(|c| c.is_control() && !['\n', '\r', '\t'].contains(&c))
             || !(256..=8192).contains(&self.tool_response_limit_kib)
+            || !(1..=100).contains(&self.agent_relay_max_hops)
             || !["request", "assisted", "yolo"].contains(&self.default_approval_mode.as_str())
         {
             return Err(invalid());

@@ -9,6 +9,7 @@ mod introductions;
 pub(crate) mod messages;
 mod placement;
 mod questions;
+mod relay;
 mod room_agents;
 pub(crate) mod run;
 #[cfg(test)]
@@ -50,6 +51,7 @@ pub fn routes() -> Router<AppState> {
         .merge(files::routes())
         .merge(groups::routes())
         .merge(room_agents::routes())
+        .merge(relay::routes())
         .merge(interactions::routes())
         .route(
             "/{workspace}/conversations/{id}/appearance",

@@ -157,6 +157,10 @@ async fn platform_call_with_slots(
         }
         let call: crate::platform_tools::Call = serde_json::from_value(arguments.clone()).map_err(|_| invalid())?;
         call.validate()?;
+        // Relays to other room Agents are conversation actions, not workspace writes.
+        if let Some(result) = super::relay::intercept(&s, &current, &call).await? {
+            return Ok(Some(result));
+        }
         if !call.read_only() && approved.is_none() {
             let aad = format!("platform:{}:{}:{}",row.workspace_id,row.id,request_id);
             let sealed = s.vault.seal(&arguments.to_string(), &aad)?;
