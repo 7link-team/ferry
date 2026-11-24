@@ -368,16 +368,56 @@ pub async fn reorder_groups(
     Json(body): Json<ReorderGroupsBody>,
 ) -> Result<Json<Value>> {
     scope.require("pipeline-groups.update")?;
+    reorder(&s, scope, body, "group", "pipeline-groups").await
+}
+
+pub async fn reorder_workflow_groups(
+    State(s): State<AppState>,
+    scope: Scope,
+    Json(body): Json<ReorderGroupsBody>,
+) -> Result<Json<Value>> {
+    scope.require("workflow-groups.update")?;
+    reorder(&s, scope, body, "workflow_group", "workflow-groups").await
+}
+
+async fn reorder(
+    s: &AppState,
+    scope: Scope,
+    body: ReorderGroupsBody,
+    kind: &str,
+    resource: &str,
+) -> Result<Json<Value>> {
     let ids = body
         .ids
         .iter()
         .map(|id| Id::reference(id))
         .collect::<Result<Vec<_>>>()?;
-    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let tx = crate::variables::transaction(s, scope.workspace_id).await?;
+    reorder_in(&tx, scope.workspace_id, kind, &ids).await?;
+    crate::hosts::activity_in(
+        s,
+        &tx,
+        &scope,
+        "reorder",
+        resource,
+        &Id::from(0),
+        json!({"ids": body.ids}),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn reorder_in(
+    tx: &impl ConnectionTrait,
+    workspace: Id,
+    kind: &str,
+    ids: &[Id],
+) -> Result<()> {
     let current = rows::Entity::find()
-        .filter(rows::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(rows::Column::Kind.eq("group"))
-        .all(&tx)
+        .filter(rows::Column::WorkspaceId.eq(workspace))
+        .filter(rows::Column::Kind.eq(kind))
+        .all(tx)
         .await?;
     let expected: HashSet<i64> = current.iter().map(|row| row.id).collect();
     let actual: HashSet<i64> = ids.iter().map(|id| i64::from(*id)).collect();
@@ -394,24 +434,13 @@ pub async fn reorder_groups(
                 rows::Column::Version,
                 Expr::col(rows::Column::Version).add(1_i64),
             )
-            .filter(rows::Column::WorkspaceId.eq(scope.workspace_id))
-            .filter(rows::Column::Kind.eq("group"))
+            .filter(rows::Column::WorkspaceId.eq(workspace))
+            .filter(rows::Column::Kind.eq(kind))
             .filter(rows::Column::Id.eq(*id))
-            .exec(&tx)
+            .exec(tx)
             .await?;
     }
-    crate::hosts::activity_in(
-        &s,
-        &tx,
-        &scope,
-        "reorder",
-        "pipeline-groups",
-        &Id::from(0),
-        json!({"ids": body.ids}),
-    )
-    .await?;
-    tx.commit().await?;
-    Ok(Json(json!({"ok": true})))
+    Ok(())
 }
 
 pub async fn check_single(
@@ -662,4 +691,92 @@ pub async fn decorate(
         );
     }
     Ok(values)
+}
+
+#[cfg(test)]
+mod ordering_tests {
+    use super::*;
+    use sea_orm::Database;
+    use sea_orm_migration::MigratorTrait;
+
+    fn scope(permissions: &[&str]) -> Scope {
+        Scope {
+            workspace_id: 11.into(),
+            user: crate::accounts::auth::User {
+                id: 3.into(),
+                email: "reader@example.invalid".into(),
+                name: "Reader".into(),
+                is_superadmin: false,
+            },
+            permissions: permissions
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn workflow_group_ordering_requires_its_permission_and_is_scoped_by_kind() {
+        assert!(
+            scope(&["pipeline-groups.update"])
+                .require("workflow-groups.update")
+                .is_err()
+        );
+        assert!(
+            scope(&["workflow-groups.update"])
+                .require("workflow-groups.update")
+                .is_ok()
+        );
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        crate::migration::Migrator::up(&db, None).await.unwrap();
+        for (id, kind, position) in [
+            (101, "workflow_group", 0),
+            (102, "workflow_group", 1),
+            (201, "group", 0),
+        ] {
+            rows::Entity::insert(rows::ActiveModel {
+                id: Set(id),
+                workspace_id: Set(11),
+                kind: Set(kind.into()),
+                name: Set(format!("Group {id}")),
+                description: Set(String::new()),
+                position: Set(position),
+                target_kind: Set(String::new()),
+                target_ref: Set(0),
+                requires_approval: Set(0),
+                created_at: Set(1),
+                updated_at: Set(1),
+                version: Set(1),
+            })
+            .exec(&db)
+            .await
+            .unwrap();
+        }
+        assert!(
+            reorder_in(&db, 11.into(), "workflow_group", &[102.into()])
+                .await
+                .is_err()
+        );
+        assert!(
+            reorder_in(&db, 11.into(), "workflow_group", &[102.into(), 201.into()])
+                .await
+                .is_err()
+        );
+        reorder_in(&db, 11.into(), "workflow_group", &[102.into(), 101.into()])
+            .await
+            .unwrap();
+        let workflow = rows::Entity::find_by_id(102)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let pipeline = rows::Entity::find_by_id(201)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(workflow.position, 0);
+        assert_eq!(pipeline.position, 0);
+        assert_eq!(pipeline.version, 1);
+    }
 }

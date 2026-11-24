@@ -19,6 +19,7 @@ export function workflowsLists({ workspace }: ResourceConfigContext) {
       ],
       columns: [
         { key: 'name', label: commonText('common.name'), sortable: true },
+        { key: 'group_name', label: commonText('table.groups') },
         { key: 'lifecycle', label: t('state'), render: row => <Badge variant="outline">{row.lifecycle === 'archived' ? t('archived') : !row.published_revision_id ? t('draft') : row.published_revision_id === row.draft_revision_id ? t('published') : t('changes')}</Badge> },
         { key: 'description', label: commonText('common.description') },
         { key: 'updated_at', label: t('updatedAt'), labelKey: 'workflow-domain:updatedAt', sortable: true, render: row => ago(Number(row.updated_at)) },

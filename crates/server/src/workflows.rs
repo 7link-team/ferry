@@ -24,7 +24,7 @@ use crate::definitions::access::{self, Operation};
 use crate::{
     accounts::{workspace::Scope, workspace_admin},
     db, definitions,
-    entities::{definition_revisions, workflow_executions, workflows as rows},
+    entities::{definition_revisions, pipeline_contexts, workflow_executions, workflows as rows},
     error::{ApiError, Json, Path, Query, Result},
     i18n::Message,
     resources::resource::{self, ListQuery, Spec},
@@ -331,9 +331,29 @@ pub async fn list(
         &query,
     )
     .await?;
+    let groups = pipeline_contexts::Entity::find()
+        .filter(pipeline_contexts::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(pipeline_contexts::Column::Kind.eq("workflow_group"))
+        .all(&tx)
+        .await?;
+    let values = items
+        .into_iter()
+        .map(|row: rows::Model| {
+            let group_id = row.group_id;
+            let mut value = json(row);
+            value["group_name"] = json!(
+                groups
+                    .iter()
+                    .find(|group| group.id == group_id)
+                    .map(|group| group.name.as_str())
+                    .unwrap_or("")
+            );
+            value
+        })
+        .collect::<Vec<_>>();
     tx.commit().await?;
     Ok(Json(
-        json!({"items":items.into_iter().map(json).collect::<Vec<_>>(),"total":total,"page":query.page,"page_size":query.page_size}),
+        json!({"items":values,"total":total,"page":query.page,"page_size":query.page_size}),
     ))
 }
 

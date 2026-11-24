@@ -13,7 +13,7 @@ import { InlineAlert } from "../../shared/ui/inline-alert";
 
 export type GroupNode = { id: string; name: string; description: string; parent_id?: string; position?: number; version: number; count?: number };
 export function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect, groups: suppliedGroups, total }: {
-  workspace: string; permissions: Set<string>; resource: "host-groups" | "pipeline-groups" | "settings" | "dictionaries"; noun: string; active: string; onSelect: (id: string) => void; groups?: GroupNode[]; total?: number;
+  workspace: string; permissions: Set<string>; resource: "host-groups" | "pipeline-groups" | "workflow-groups" | "settings" | "dictionaries"; noun: string; active: string; onSelect: (id: string) => void; groups?: GroupNode[]; total?: number;
 }) {
   useCommonTranslation();
   const [groups, setGroups] = useState<GroupNode[]>([]);
