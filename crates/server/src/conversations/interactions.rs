@@ -441,6 +441,27 @@ pub(super) async fn members(
         "agents": changes(&previous_agents, &next_agents, &agent_names),
     });
     let title = c.title.clone();
+    // Agents sponsored by people leaving the room leave with them.
+    let leaving: Vec<i64> = people::Entity::find()
+        .filter(people::Column::ConversationId.eq(id))
+        .all(&tx)
+        .await?
+        .into_iter()
+        .map(|p| p.user_id)
+        .filter(|user| !body.member_ids.contains(&Id::from(*user)))
+        .collect();
+    for mut a in agents::Entity::find()
+        .filter(agents::Column::ConversationId.eq(id))
+        .filter(agents::Column::AddedBy.is_in(leaving))
+        .filter(agents::Column::State.ne("removed"))
+        .all(&tx)
+        .await?
+    {
+        let room_agent = Id::from(a.id);
+        a.state = "removed".into();
+        a.into_active_model().reset_all().update(&tx).await?;
+        super::run::cancel_queued_for(&tx, room_agent, "conversations.sponsorUnavailable").await?;
+    }
     people::Entity::delete_many()
         .filter(people::Column::ConversationId.eq(id))
         .exec(&tx)

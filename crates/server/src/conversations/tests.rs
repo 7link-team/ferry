@@ -2328,3 +2328,129 @@ async fn room_agents_run_as_their_sponsor_with_their_own_approval_mode() {
     .unwrap();
     assert_eq!(updated["approval_mode"], "assisted");
 }
+
+/// The member's own copy of the room Agent, with one queued turn addressed by the owner.
+async fn member_agent_with_queued_turn(
+    s: &AppState,
+    id: Id,
+    owner: &Scope,
+    member: &Scope,
+) -> (Id, i64) {
+    use super::room_agents;
+    use crate::entities::ai_chat_turns as links;
+    let agent = find(&s.db, owner, id).await.unwrap().agent_id;
+    let (_, Json(added)) = room_agents::add(
+        State(s.clone()),
+        member.clone(),
+        Path(("1".into(), id)),
+        Json(serde_json::from_value(json!({"agent_id":Id::from(agent)})).unwrap()),
+    )
+    .await
+    .unwrap();
+    let row: Id = serde_json::from_value(added["id"].clone()).unwrap();
+    // Introductions may queue too; only the addressed message matters here.
+    groups::send_message(
+        State(s.clone()),
+        owner.clone(),
+        Path(("1".into(), id)),
+        message(json!({"prompt":"work","client_id":"queued","agents":[row]})),
+    )
+    .await
+    .unwrap();
+    let turn = links::Entity::find()
+        .filter(links::Column::ChatAgentId.eq(i64::from(row)))
+        .filter(links::Column::MessageId.ne(0))
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    (row, turn)
+}
+
+#[tokio::test]
+async fn removing_a_member_removes_the_agents_they_sponsor() {
+    use crate::entities::{ai_chat_agents as room_rows, ai_chat_members as people};
+    let (_dir, s, id, owner, member) = sponsored_room().await;
+    let (row, _) = member_agent_with_queued_turn(&s, id, &owner, &member).await;
+    // Membership edits wait for an idle room; queued work is handled at claim.
+    turns::Entity::update_many()
+        .col_expr(
+            turns::Column::State,
+            sea_orm::sea_query::Expr::value("cancelled"),
+        )
+        .filter(turns::Column::ConversationId.eq(id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let version = people::Entity::find()
+        .filter(people::Column::ConversationId.eq(id))
+        .all(&s.db)
+        .await
+        .unwrap()
+        .iter()
+        .map(|p| p.id)
+        .max()
+        .unwrap();
+    let agent = find(&s.db, &owner, id).await.unwrap().agent_id;
+    interactions::members(
+        State(s.clone()),
+        owner.clone(),
+        Path(("1".into(), id)),
+        Json(
+            serde_json::from_value(
+                json!({"version":Id::from(version),"member_ids":[],"agent_ids":[Id::from(agent)]}),
+            )
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    let a = room_rows::Entity::find_by_id(i64::from(row))
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(a.state, "removed");
+}
+
+#[tokio::test]
+async fn claim_pauses_an_agent_whose_sponsor_left_the_workspace() {
+    use crate::entities::{ai_chat_agents as room_rows, workspace_members};
+    let (_dir, s, id, owner, member) = sponsored_room().await;
+    let (row, turn) = member_agent_with_queued_turn(&s, id, &owner, &member).await;
+    // Earlier queued turns (introductions) would otherwise go first.
+    turns::Entity::update_many()
+        .col_expr(
+            turns::Column::State,
+            sea_orm::sea_query::Expr::value("cancelled"),
+        )
+        .filter(turns::Column::ConversationId.eq(id))
+        .filter(turns::Column::Id.ne(turn))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    workspace_members::Entity::update_many()
+        .col_expr(
+            workspace_members::Column::State,
+            sea_orm::sea_query::Expr::value("disabled"),
+        )
+        .filter(workspace_members::Column::UserId.eq(2))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    assert!(run::claim(&s, turn.into()).await.unwrap().is_none());
+    let a = room_rows::Entity::find_by_id(i64::from(row))
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(a.state, "paused");
+    let t = turns::Entity::find_by_id(turn)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(t.state, "cancelled");
+    assert!(t.error.contains("conversations.sponsorUnavailable"));
+}

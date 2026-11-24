@@ -55,5 +55,6 @@
   "conversations.introductionCompleted": "此 Agent 已完成本次成員身分的介紹。",
   "conversations.introductionRetryWarning": "先前的嘗試可能已請求模型或執行操作，結果尚不明確。請核實結果後再明確發起新的介紹；新的模型呼叫可能產生用量。",
   "conversations.ambiguousTarget": "此訊息指定的 Agent 由多位成員各自加入。請選擇由誰的 Agent 回覆。",
-  "conversations.agentRemoved": "回覆開始前，該 Agent 已被移出對話。"
+  "conversations.agentRemoved": "回覆開始前，該 Agent 已被移出對話。",
+  "conversations.sponsorUnavailable": "加入該 Agent 的成員已無法在此對話中執行它，Agent 已暫停。"
 }

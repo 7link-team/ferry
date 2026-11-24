@@ -55,5 +55,6 @@
   "conversations.introductionCompleted": "Agent ini sudah melengkapkan pengenalannya untuk keahlian ini.",
   "conversations.introductionRetryWarning": "Percubaan terdahulu mungkin telah menghubungi model atau menjalankan operasi dengan hasil yang tidak diketahui. Sahkan hasilnya sebelum memulakan pengenalan baharu secara jelas; panggilan model baharu mungkin menghasilkan penggunaan.",
   "conversations.ambiguousTarget": "Agent dalam mesej ini ditambah oleh beberapa ahli. Pilih Agent milik siapa yang patut membalas.",
-  "conversations.agentRemoved": "Agent telah dikeluarkan daripada bilik sebelum balasan ini bermula."
+  "conversations.agentRemoved": "Agent telah dikeluarkan daripada bilik sebelum balasan ini bermula.",
+  "conversations.sponsorUnavailable": "Ahli yang menambah Agent ini tidak lagi boleh menjalankannya di sini, jadi ia dijeda."
 }

@@ -364,6 +364,29 @@ pub(super) async fn claim(
             return Ok(None);
         }
     };
+    if let Some(link) = crate::entities::ai_chat_turns::Entity::find_by_id(row.id)
+        .one(&tx)
+        .await?
+        && !sponsor_available(&tx, &row, &c, &execution).await
+    {
+        // Pause the Agent instead of failing each of its queued turns later.
+        crate::entities::ai_chat_agents::Entity::update_many()
+            .col_expr(
+                crate::entities::ai_chat_agents::Column::State,
+                sea_orm::sea_query::Expr::value("paused"),
+            )
+            .filter(crate::entities::ai_chat_agents::Column::Id.eq(link.chat_agent_id))
+            .exec(&tx)
+            .await?;
+        cancel_queued_for(
+            &tx,
+            link.chat_agent_id.into(),
+            "conversations.sponsorUnavailable",
+        )
+        .await?;
+        tx.commit().await?;
+        return Ok(None);
+    }
     row.native_session_id = execution.native_session_id.clone();
     let owner = uuid::Uuid::new_v4().to_string();
     row.state = "running".into();
@@ -1085,4 +1108,27 @@ pub(super) async fn agent_busy(conn: &impl ConnectionTrait, room_agent: Id) -> R
             .count(conn)
             .await?
             > 0)
+}
+
+/// Whether a room turn's sponsor can still run this Agent here: an active
+/// workspace member with run access who still takes part in the room.
+async fn sponsor_available(
+    tx: &sea_orm::DatabaseTransaction,
+    row: &turns::Model,
+    c: &conversations::Model,
+    execution: &conversations::Model,
+) -> bool {
+    let Ok(scope) = Scope::for_actor_in(tx, row.workspace_id.into(), row.owner_id.into()).await
+    else {
+        return false;
+    };
+    scope.require("conversations.run").is_ok()
+        && scope.require("conversations.read").is_ok()
+        && (c.owner_id == row.owner_id
+            || groups::member(tx, c, row.owner_id.into())
+                .await
+                .unwrap_or(false))
+        && available(tx, &scope, execution.agent_id.into())
+            .await
+            .is_ok()
 }
