@@ -1,5 +1,7 @@
 import { useWorkspaceTimezone, formatDate, dayKey } from "../../shared/timezone";
 import { ConversationMembers, type ConversationMember } from "./ConversationMembers";
+import { normalizeRoom } from "./room-agents";
+import { HeldRelays, RoomControls } from "./room-controls";
 import { InlineAlert } from "../../shared/ui/inline-alert";
 import { cliToolLabel } from "../../shared/forms/cli-tools";
 import { randomUUID } from "../../shared/uuid";
@@ -63,6 +65,8 @@ interface Turn {
   introduction_retry_warning?: string | null;
   introduction_retry_reason?: string | null;
   agent_id?: string;
+  room_agent_id?: string;
+  hop?: number;
   state: string;
   prompt: string;
   attachments: Attachment[];
@@ -81,7 +85,8 @@ interface BoundHost {
 interface ChatMessage {
   id: string;
   /** "notice" lines come from the platform itself, e.g. a host switch. */
-  role: "user" | "assistant" | "notice";
+  /** "relay" is one room Agent writing to others. */
+  role: "user" | "assistant" | "notice" | "relay";
   turn_id: string | null;
   reply_to: string | null;
   agent_id: string;
@@ -107,13 +112,13 @@ interface ConversationData {
   /** False when the Agent has no configured model and therefore cannot run. */
   agent_has_model?: boolean;
   members: { id: string; name: string; avatar?: AvatarValue }[];
-  agents: { id: string; name: string; state: string; avatar?: AvatarValue; runtime?: string; model?: string; revision_id?: string; host?: BoundHost | null }[];
+  agents: { id: string; name: string; state: string; avatar?: AvatarValue; runtime?: string; model?: string; revision_id?: string; host?: BoundHost | null; room_agent_id?: string; agent_id?: string; added_by?: string; sponsor_name?: string; approval_mode?: string }[];
   messages: ChatMessage[];
   id: string;
   title: string;
   state: string;
   revision_id: string;
-  config: { name: string; runtime: string; model: string; cwd: string; appearance?: ChatAppearance; approval_mode?: string };
+  config: { name: string; runtime: string; model: string; cwd: string; appearance?: ChatAppearance; approval_mode?: string; relay_enabled?: boolean };
   /** API execution has no binding; CLI execution binds at its first message. */
   binding: { execution_user: string; canonical_directory: string } | null;
   host?: BoundHost | null;
@@ -122,6 +127,8 @@ interface ConversationData {
   owner_id: string;
   members_version: string;
 }
+const fetchConversation = (endpoint: string, init?: RequestInit) =>
+  api<ConversationData>(endpoint, init).then(row => normalizeRoom(row));
 interface Event {
   sequence: number;
   turn_id: string;
@@ -396,7 +403,7 @@ export function Conversation({
       if (document.hidden) return;
       try {
         const revision = decisionRevision.current;
-        const row = await api<ConversationData>(endpoint, {
+        const row = await fetchConversation(endpoint, {
           signal: controller.signal,
         });
         if (controller.signal.aborted) return;
@@ -513,7 +520,7 @@ export function Conversation({
       });
       const revision = ++decisionRevision.current;
       committed?.();
-      const latest = await api<ConversationData>(endpoint);
+      const latest = await fetchConversation(endpoint);
       if (revision === decisionRevision.current) setData(latest);
     } catch (cause) {
       setError(errorText(cause));
@@ -576,7 +583,7 @@ export function Conversation({
           attachments: files,
           client_id: pending.current.client_id,
           ...(replyTo ? { reply_to: replyTo } : {}),
-          ...(data?.kind === "group" ? { targets: sendTargets, mentions: sendMentions } : {}),
+          ...(data?.kind === "group" ? { agents: sendTargets, mentions: sendMentions } : {}),
         }),
       });
       if (!retry && !followUp) {
@@ -588,13 +595,13 @@ export function Conversation({
       }
       pending.current = undefined;
       follow.current = true;
-      setData(await api<ConversationData>(endpoint));
+      setData(await fetchConversation(endpoint));
       return true;
     } catch (cause) {
       setError(errorText(cause));
       // Recovery may have succeeded before a send/network failure. Keep the
       // server version fresh so the next explicit retry can reuse client_id.
-      setData(await api<ConversationData>(endpoint).catch(() => data));
+      setData(await fetchConversation(endpoint).catch(() => data));
       return false;
     } finally {
       setBusy(false);
@@ -627,7 +634,7 @@ export function Conversation({
         method,
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
-      setData(await api<ConversationData>(endpoint));
+      setData(await fetchConversation(endpoint));
       setMessageAction(undefined);
     } catch (cause) {
       const text = errorText(cause);
@@ -642,7 +649,7 @@ export function Conversation({
     setActionError("");
     setBusy(true);
     try {
-      const latest = await api<ConversationData>(endpoint);
+      const latest = await fetchConversation(endpoint);
       setData(latest);
       const people = await api<{ items: { id: string; name: string }[] }>(
         `${base(workspace, "conversation-participants")}`,
@@ -664,14 +671,14 @@ export function Conversation({
       );
       setAgentOptions(
         [
-          ...latest.agents,
+          ...latest.agents.filter((a) => a.added_by === undefined || a.added_by === latest.viewer_id).map((a) => ({ ...a, id: a.agent_id ?? a.id })),
           ...options.items.filter(
             (a) => a.state === "enabled" && a.visibility === "workspace",
           ),
         ].filter((v, i, a) => a.findIndex((x) => x.id === v.id) === i),
       );
       setMemberIds(latest.members.map((m) => m.id));
-      setAgentIds(latest.agents.map((a) => a.id));
+      setAgentIds(latest.agents.filter((a) => a.added_by === undefined || a.added_by === latest.viewer_id).map((a) => a.agent_id ?? a.id));
       setMembersVersion(latest.members_version);
       setMemberSearch("");
       setMemberPicker(true);
@@ -693,8 +700,9 @@ export function Conversation({
           agent_ids: agentIds,
         }),
       });
-      setData(await api<ConversationData>(endpoint));
-      setTargets((v) => v.filter((id) => agentIds.includes(id)));
+      const reloaded = await fetchConversation(endpoint);
+      setData(reloaded);
+      setTargets((v) => v.filter((id) => reloaded.agents.some((agent) => agent.id === id)));
       setMentions((v) => v.filter((id) => memberIds.includes(id)));
       setMemberPicker(false);
     } catch (cause) {
@@ -854,7 +862,8 @@ export function Conversation({
       <ConversationMembers open={infoOpen} onOpenChange={setInfoOpen} selected={selectedMember} onSelect={setSelectedMember}
         title={data.title} workspace={workspace} permissions={permissions} members={[
           ...data.members.map(member => ({ ...member, kind: "user" as const })),
-          ...(data.kind === "group" ? data.agents : [{ id: data.agent_id, name: data.config.name, avatar: data.agent_avatar, runtime: data.config.runtime, model: data.config.model, revision_id: data.revision_id, host: data.host }]).map(agent => ({ ...agent, host: agent.runtime === "api" ? workflowText("execution.server") : agent.host?.name || t("hostPending"), kind: "agent" as const })),
+          ...(data.kind === "group" ? data.agents : [{ id: data.agent_id, name: data.config.name, avatar: data.agent_avatar, runtime: data.config.runtime, model: data.config.model, revision_id: data.revision_id, host: data.host }]).map(agent => ({ ...agent, host: agent.runtime === "api" ? workflowText("execution.server") : agent.host?.name || t("hostPending"), kind: "agent" as const,
+            ...("added_by" in agent && agent.added_by ? { sponsor: agent.sponsor_name, approvalMode: agent.approval_mode, canEditMode: agent.added_by === data.viewer_id, canRemove: agent.added_by === data.viewer_id || data.owner_id === data.viewer_id } : {}) })),
         ] satisfies ConversationMember[]} turns={data.turns} connected={!connection}
         activity={turnItems}
         files={turnFiles}
@@ -865,6 +874,17 @@ export function Conversation({
             ?.scrollIntoView({ block: "center", behavior: "smooth" }));
         }} ownerId={data.owner_id} viewerId={data.viewer_id} primaryAgentId={data.agent_id}
         onOpenConversation={onOpenConversation}
+        roomControls={data.kind === "group" ? <RoomControls workspace={workspace} endpoint={endpoint} relayEnabled={data.config.relay_enabled !== false}
+          canRun={permissions.has("conversations.run")} onChanged={async () => setData(await fetchConversation(endpoint))} /> : null}
+        onApprovalMode={async (agentId, mode) => {
+          await api(`${endpoint}/agents/${agentId}`, { method: "PATCH", body: JSON.stringify({ approval_mode: mode }) });
+          setData(await fetchConversation(endpoint));
+        }}
+        onRemoveAgent={async agentId => {
+          await api(`${endpoint}/agents/${agentId}`, { method: "DELETE" });
+          setData(await fetchConversation(endpoint));
+          setTargets(v => v.filter(id => id !== agentId));
+        }}
         manage={data.kind === "group" && data.can_manage ? <Button variant="outline" disabled={busy || data.turns.some(turn => active(turn.state))} onClick={() => { setInfoOpen(false); void openMembers(); }}>{t("manageMembers")}</Button> : null}
         executionDetails={<>            <details className="mt-5 border-t pt-3 text-xs text-muted-foreground">
               <summary className="cursor-pointer">
@@ -973,7 +993,8 @@ export function Conversation({
                     data.members.find((member) => member.id === m.owner_id)
                       ?.name ||
                     t("member")
-                  : m?.sender_name ||
+                  : (m?.role === "relay" ? data.agents.find((agent) => agent.id === m.agent_id)?.name : undefined) ||
+                    m?.sender_name ||
                     (data.kind === "group"
                       ? data.agents.find(
                           (agent) =>
@@ -1032,6 +1053,11 @@ export function Conversation({
                             {t("agent")}
                           </span>
                         )}
+                        {m?.role === "relay" && (
+                          <span data-relay-message className="rounded border border-primary/40 px-1 text-[10px] text-primary">
+                            {t("relayMessage")}
+                          </span>
+                        )}
                         {own && <span>{t("you")}</span>}
                         {!!m?.edited_at && <span>{t("edited")}</span>}
                         {date && (
@@ -1051,7 +1077,7 @@ export function Conversation({
                           {t("retracted")}
                         </p>
                       ) : (
-                        m?.role === "user" && (
+                        (m?.role === "user" || m?.role === "relay") && (
                           <div className="space-y-2">
                             {m.reply_to && (
                               <button
@@ -1144,7 +1170,7 @@ export function Conversation({
                           return (
                             <>
                               {questions.map(([request,decision])=><QuestionCard key={request} request={request} decision={decision} canAnswer={owner&&permissions.has("conversations.run")} busy={busy} executing={active(turn.state)} onAnswer={async response=>{
-                                setBusy(true);try {await api(endpoint+`/turns/${turn.id}/question-answers`,{method:"POST",body:JSON.stringify({request_id:request,...response})});decisionRevision.current++;setData(await api<ConversationData>(endpoint));}finally{setBusy(false);}
+                                setBusy(true);try {await api(endpoint+`/turns/${turn.id}/question-answers`,{method:"POST",body:JSON.stringify({request_id:request,...response})});decisionRevision.current++;setData(await fetchConversation(endpoint));}finally{setBusy(false);}
                               }}/>) }
                               {live.map(([request, decision]) => (
                                 <PendingDecisionCard
@@ -1172,7 +1198,7 @@ export function Conversation({
                                     });
                                     const revision = ++decisionRevision.current;
                                     updateDecision(turn.id, request, { resolved: "dismissed" });
-                                    const latest = await api<ConversationData>(endpoint);
+                                    const latest = await fetchConversation(endpoint);
                                     if (revision === decisionRevision.current) setData(latest);
                                   }}
                                 />
@@ -1199,7 +1225,7 @@ export function Conversation({
                         })()}
                         {turn && m?.role !== "user" && (
                           <>
-                            {active(turn.state) && (
+                            {(active(turn.state) || turn.state === "held") && (
                               <p
                                 role="status"
                                 className="flex items-center gap-2 text-xs text-muted-foreground"
@@ -1368,6 +1394,9 @@ export function Conversation({
         )}
       {data.state === "archived" && (
         <p role="status" className="px-3 text-sm text-muted-foreground sm:px-6">{t("archived")}</p>
+      )}
+      {data.kind === "group" && data.turns.some(turn => turn.state === "held") && (
+        <HeldRelays endpoint={endpoint} onChanged={async () => setData(await fetchConversation(endpoint))} />
       )}
       <div className="shrink-0 px-3 pb-3 pt-2 sm:px-6 sm:pb-5">
         {error && (

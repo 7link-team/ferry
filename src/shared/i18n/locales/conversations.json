@@ -1376,5 +1376,13 @@
     "実行場所",
     "실행 위치",
     "Lokasi pelaksanaan"
-  ]
+  ],
+  "relayMessage": ["Agent relay", "Agent 传话", "Agent 傳話", "Agent 間の連絡", "Agent 전달", "Geganti Agent"],
+  "relayHeld": ["Agent relays are paused and waiting for a member to continue them.", "Agent 之间的传话已暂停，等待成员继续。", "Agent 之間的傳話已暫停，等待成員繼續。", "Agent 間の連絡は一時停止中で、メンバーの続行を待っています。", "Agent 간 전달이 일시 중지되어 멤버가 계속하기를 기다리고 있습니다.", "Geganti antara Agent dijeda dan menunggu ahli meneruskannya."],
+  "relayContinue": ["Continue", "继续", "繼續", "続行", "계속", "Teruskan"],
+  "relayEnabled": ["Agents can message each other", "允许 Agent 之间互相传话", "允許 Agent 之間互相傳話", "Agent 同士の連絡を許可", "Agent 간 전달 허용", "Benarkan Agent saling menghantar mesej"],
+  "addMyAgent": ["Add my Agent", "添加我的 Agent", "加入我的 Agent", "自分の Agent を追加", "내 Agent 추가", "Tambah Agent saya"],
+  "agentSponsor": ["Added by", "添加者", "加入者", "追加したメンバー", "추가한 멤버", "Ditambah oleh"],
+  "removeAgent": ["Remove Agent", "移除 Agent", "移除 Agent", "Agent を削除", "Agent 제거", "Keluarkan Agent"],
+  "held": ["Waiting to continue", "等待继续", "等待繼續", "続行待ち", "계속 대기 중", "Menunggu diteruskan"]
 }

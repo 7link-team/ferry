@@ -16,6 +16,13 @@ export interface ConversationMember {
   runtime?: string | undefined; model?: string | undefined; revision_id?: string | undefined;
   /** The Runner host this Agent is bound to in the conversation, or "pending". */
   host?: string | undefined;
+  /** Room Agents: the member who added it; its turns run as that member. */
+  sponsor?: string | undefined;
+  approvalMode?: string | undefined;
+  /** Only the sponsor changes the Agent's approval mode. */
+  canEditMode?: boolean | undefined;
+  /** The sponsor or the room owner may remove a room Agent. */
+  canRemove?: boolean | undefined;
 }
 type MemberTurn = ActivityTurn;
 const NO_ACTIVITY: ActivityItems = new Map();
@@ -28,7 +35,8 @@ export function memberWorkState(turns: MemberTurn[], connected: boolean) {
   return current.state;
 }
 export function ConversationMembers({ open, onOpenChange, selected, onSelect, title, members, turns, connected,
-  ownerId, viewerId, primaryAgentId, workspace, permissions, onOpenConversation, manage, executionDetails, activity, files, onJumpToTurn }: {
+  ownerId, viewerId, primaryAgentId, workspace, permissions, onOpenConversation, manage, executionDetails, activity, files, onJumpToTurn,
+  roomControls, onApprovalMode, onRemoveAgent }: {
   open: boolean; onOpenChange: (value: boolean) => void;
   selected: string; onSelect: (value: string) => void; title: string;
   members: ConversationMember[]; turns: MemberTurn[]; connected: boolean;
@@ -41,6 +49,10 @@ export function ConversationMembers({ open, onOpenChange, selected, onSelect, ti
   files?: ReadonlyMap<string, number> | undefined;
   /** Shows a turn's message in the conversation. */
   onJumpToTurn?: ((turnId: string) => void) | undefined;
+  /** Room-wide controls shown under the member list (relay, adding Agents). */
+  roomControls?: ReactNode;
+  onApprovalMode?: ((agentId: string, mode: string) => Promise<void>) | undefined;
+  onRemoveAgent?: ((agentId: string) => Promise<void>) | undefined;
 }) {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,6 +62,11 @@ export function ConversationMembers({ open, onOpenChange, selected, onSelect, ti
   const status = (item: ConversationMember) => memberWorkState(memberTurns(item), connected);
   const filtered = members.filter(item => `${item.name} ${item.id}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const canChat = member?.kind === "agent" && onOpenConversation && ["conversations.create", "ai-agents.read", "ai-agents.use"].every(permission => permissions.has(permission));
+  async function act(action: () => Promise<void>) {
+    setBusy(true); setError("");
+    try { await action(); } catch (cause) { setError(errorText(cause)); }
+    finally { setBusy(false); }
+  }
   async function startChat() {
     if (!member || !canChat) return;
     setBusy(true); setError("");
@@ -73,9 +90,12 @@ export function ConversationMembers({ open, onOpenChange, selected, onSelect, ti
             <div className="flex flex-col items-center gap-3 py-5 text-center"><IdentityAvatar {...member} value={member.avatar} className="size-24 text-3xl" /><h3 className="max-w-full break-words text-xl font-semibold">{member.name}</h3><p className="text-sm text-muted-foreground">{t(member.kind === "agent" ? "agent" : "member")}{member.id === viewerId && member.kind === "user" ? ` · ${t("you")}` : ""}</p></div>
             <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-x-4 gap-y-4 rounded-xl border p-4 text-sm">
               <dt className="text-muted-foreground">ID</dt><dd className="break-all font-mono text-xs">{member.id}</dd>
-              {member.kind === "agent" && <><dt className="text-muted-foreground">{t("memberWorkStatus")}</dt><dd>{t(status(member))}</dd><dt className="text-muted-foreground">{t("lastResult")}</dt><dd>{memberTurns(member).filter(turn => !["queued", "running", "stopping"].includes(turn.state)).at(-1)?.state ? t(memberTurns(member).filter(turn => !["queued", "running", "stopping"].includes(turn.state)).at(-1)!.state) : t("noExecution")}</dd><dt className="text-muted-foreground">{t("runtime")}</dt><dd className="break-words">{member.runtime || "—"}</dd><dt className="text-muted-foreground">{t("model")}</dt><dd className="break-words">{member.model || t("nativeModel")}</dd>{member.host && <><dt className="text-muted-foreground">{t(member.runtime === "api" ? "executionLocation" : "executionHost")}</dt><dd className="break-words">{member.host}</dd></>}{member.revision_id && <><dt className="text-muted-foreground">{t("revision")}</dt><dd className="break-all">{member.revision_id}</dd></>}</>}
+              {member.kind === "agent" && <><dt className="text-muted-foreground">{t("memberWorkStatus")}</dt><dd>{t(status(member))}</dd><dt className="text-muted-foreground">{t("lastResult")}</dt><dd>{memberTurns(member).filter(turn => !["queued", "running", "stopping"].includes(turn.state)).at(-1)?.state ? t(memberTurns(member).filter(turn => !["queued", "running", "stopping"].includes(turn.state)).at(-1)!.state) : t("noExecution")}</dd><dt className="text-muted-foreground">{t("runtime")}</dt><dd className="break-words">{member.runtime || "—"}</dd><dt className="text-muted-foreground">{t("model")}</dt><dd className="break-words">{member.model || t("nativeModel")}</dd>{member.host && <><dt className="text-muted-foreground">{t(member.runtime === "api" ? "executionLocation" : "executionHost")}</dt><dd className="break-words">{member.host}</dd></>}{member.revision_id && <><dt className="text-muted-foreground">{t("revision")}</dt><dd className="break-all">{member.revision_id}</dd></>}{member.sponsor && <><dt className="text-muted-foreground">{t("agentSponsor")}</dt><dd className="break-words">{member.sponsor}</dd></>}{member.approvalMode && <><dt className="text-muted-foreground"><label htmlFor="room-agent-approval">{t("approvalMode")}</label></dt><dd>{member.canEditMode && onApprovalMode
+                ? <select id="room-agent-approval" className="min-h-11 w-full rounded-md border bg-background px-2 text-base sm:text-sm" value={member.approvalMode} disabled={busy} onChange={event => void act(() => onApprovalMode(member.id, event.target.value))}>{["request", "assisted", "yolo"].map(mode => <option key={mode} value={mode}>{t(`approval${mode[0]!.toUpperCase()}${mode.slice(1)}`)}</option>)}</select>
+                : t(`approval${member.approvalMode[0]!.toUpperCase()}${member.approvalMode.slice(1)}`)}</dd></>}</>}
               {member.kind === "user" && <><dt className="text-muted-foreground">{t("memberRole")}</dt><dd>{t(member.id === ownerId ? "conversationOwner" : "member")}</dd></>}
             </dl>
+            {member.kind === "agent" && member.canRemove && onRemoveAgent && <Button variant="outline" className="mt-3 min-h-11 w-full" disabled={busy} onClick={() => void act(async () => { await onRemoveAgent(member.id); onSelect(""); })}>{t("removeAgent")}</Button>}
             {member.kind === "agent" && <MemberActivity turns={memberTurns(member)} items={activity ?? NO_ACTIVITY} files={files} onJump={turnId => { onOpenChange(false); onJumpToTurn?.(turnId); }} />}
             <p className="mt-3 text-xs leading-relaxed text-muted-foreground">{t(member.kind === "agent" ? "memberStatusScope" : "humanPresenceUnavailable")}</p>
           </> : <>
@@ -83,6 +103,7 @@ export function ConversationMembers({ open, onOpenChange, selected, onSelect, ti
             <p className="mb-3 text-xs text-muted-foreground">{t("memberStatusScope")}</p>
             <ul className="space-y-1">{filtered.map(item => <li key={`${item.kind}:${item.id}`}><button type="button" className="flex min-h-20 w-full flex-wrap items-center gap-3 rounded-xl border border-transparent px-3 py-3 text-left hover:border-border hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring" onClick={() => onSelect(`${item.kind}:${item.id}`)}><IdentityAvatar {...item} value={item.avatar} className="size-12" /><span className="min-w-0 flex-1 basis-24"><span className="block truncate font-medium">{item.name}</span><span className="block text-xs text-muted-foreground">{t(item.kind === "agent" ? "agent" : "member")}{item.id === viewerId && item.kind === "user" ? ` · ${t("you")}` : ""}</span></span>{item.kind === "agent" && <span className={`max-w-full rounded-full px-2.5 py-1 text-xs [overflow-wrap:anywhere] ${["running", "queued", "statusApproval", "stopping"].includes(status(item)) ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>{t(status(item))}</span>}</button></li>)}</ul>
             {!filtered.length && <p role="status" className="py-8 text-center text-sm text-muted-foreground">{t("noMatchingMembers")}</p>}
+            {roomControls}
             {executionDetails}
           </>}
           {error && <InlineAlert className="mt-4">{error}</InlineAlert>}
