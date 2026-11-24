@@ -59,7 +59,9 @@ it("opens compact actions without losing global tools and transfers focus into m
   const search=[...panel.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.getAttribute('aria-label')===conversationText('searchMessages'))!;
   await act(async()=>search.click());
   const field=[...host.querySelectorAll<HTMLInputElement>('input')].find(input=>input.getAttribute('aria-label')===conversationText('searchMessages'))!;
-  expect(field).toBeDefined();expect(document.activeElement).toBe(field);
+  expect(field).toBeDefined();
+  // The dialog returns focus after it closes, which is asynchronous under load.
+  await vi.waitFor(()=>expect(document.activeElement).toBe(field));
   expect(document.querySelector('[data-conversation-actions]')).toBeNull();
 });
 

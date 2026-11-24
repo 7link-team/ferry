@@ -1,6 +1,6 @@
 [package]
 name = "ferry-desktop"
-version = "0.10.15-alpha"
+version = "0.11.0-alpha"
 edition = "2024"
 
 [lib]
