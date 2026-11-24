@@ -56,5 +56,8 @@
   "conversations.introductionRetryWarning": "以前の試行でモデルへの要求や操作が実行され、結果が不明な場合があります。結果を確認してから、新しい紹介を明示的に開始してください。新たなモデル呼び出しで使用量が発生する場合があります。",
   "conversations.ambiguousTarget": "このメッセージの Agent は複数のメンバーが追加しています。どのメンバーの Agent が返信するか選択してください。",
   "conversations.agentRemoved": "返信が始まる前に Agent がルームから削除されました。",
-  "conversations.sponsorUnavailable": "この Agent を追加したメンバーがここで実行できなくなったため、Agent を一時停止しました。"
+  "conversations.sponsorUnavailable": "この Agent を追加したメンバーがここで実行できなくなったため、Agent を一時停止しました。",
+  "conversations.threadCreated": "このルームに関連付けられました。実行結果はここに表示されます。",
+  "conversations.threadRunStarted": "実行 {run} を開始しました。",
+  "conversations.threadRunFinished": "実行 {run} が終了しました：{state}。"
 }

@@ -268,6 +268,7 @@ pub(super) async fn detail(
         }
     };
     value["messages"]=json!(chat.iter().map(|m|json!({"id":Id::from(m.id),"owner_id":Id::from(m.owner_id),"role":m.role,"turn_id":m.turn_id.map(Id::from),"reply_to":m.reply_to.map(Id::from),"agent_id":Id::from(m.agent_id),"sender_name":m.sender_name,"prompt":text(m),"attachments":serde_json::from_str::<Value>(&m.attachments).unwrap_or(json!([])),"targets":serde_json::from_str::<Value>(&m.targets).unwrap_or(json!([])),"created_at":m.created_at})).collect::<Vec<_>>());
+    super::threads::detail(conn, c, value).await?;
     let links = links::Entity::find()
         .filter(links::Column::ConversationId.eq(c.id))
         .all(conn)
@@ -356,6 +357,9 @@ pub(super) struct MessageBody {
     /// Room Agent row ids; preferred over `targets` (Agent definition ids).
     #[serde(default)]
     agents: Vec<Id>,
+    /// Posts the message into one of the room's threads.
+    #[serde(default)]
+    thread_id: Option<Id>,
 }
 pub(super) async fn send_message(
     State(s): State<AppState>,
@@ -479,6 +483,9 @@ pub(super) async fn send_message(
     )
     .exec(&tx)
     .await?;
+    if let Some(thread) = body.thread_id {
+        super::threads::file_message(&tx, id, thread, message.into()).await?;
+    }
     for a in selected {
         queue_turn(
             &s,

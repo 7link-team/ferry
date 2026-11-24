@@ -468,7 +468,7 @@ pub(super) async fn notice(
     owner: i64,
     agent: i64,
     message: Message,
-) -> Result<()> {
+) -> Result<Id> {
     let id = s.next_id()?;
     chat::Entity::insert(
         chat::Model {
@@ -496,7 +496,7 @@ pub(super) async fn notice(
     )
     .exec(conn)
     .await?;
-    Ok(())
+    Ok(id)
 }
 
 #[derive(Deserialize)]

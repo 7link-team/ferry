@@ -2716,3 +2716,163 @@ async fn room_threads_migration_is_idempotent_and_unique_per_resource() {
     );
     assert!(Migration.down(&manager).await.is_err());
 }
+
+fn ok_created(id: &str) -> Value {
+    json!({"status":201,"ok":true,"data":{"id":id}})
+}
+
+#[tokio::test]
+async fn room_platform_calls_link_threads_and_runs_without_touching_resources() {
+    use crate::entities::{ai_chat_run_links as run_links, ai_chat_threads as thread_rows};
+    let (_dir, s, id, owner, _member, running, _target) = running_caller_and_target().await;
+    super::threads::record(&s, &running, "POST", "/pipelines", &ok_created("777")).await;
+    super::threads::record(
+        &s,
+        &running,
+        "POST",
+        "/pipelines/999/runs",
+        &ok_created("888"),
+    )
+    .await;
+    // Failed calls and reads record nothing.
+    super::threads::record(
+        &s,
+        &running,
+        "POST",
+        "/workflows",
+        &json!({"ok":false,"status":403,"data":{}}),
+    )
+    .await;
+    super::threads::record(&s, &running, "GET", "/pipelines", &ok_created("1")).await;
+    let rows = thread_rows::Entity::find()
+        .filter(thread_rows::Column::ConversationId.eq(id))
+        .order_by_asc(thread_rows::Column::ResourceId)
+        .all(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|t| (t.resource_id, t.linked))
+            .collect::<Vec<_>>(),
+        vec![(777, 1), (999, 0)]
+    );
+    let link = run_links::Entity::find_by_id(888_i64)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(link.kind, "pipeline_run");
+    assert!(link.notified_at.is_none());
+    // Room detail shows both threads; the start notices sit inside them.
+    let Json(room) = detail(State(s.clone()), owner.clone(), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert_eq!(room["threads"].as_array().unwrap().len(), 2);
+    let threaded = room["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| !m["thread_id"].is_null())
+        .count();
+    assert_eq!(threaded, 2);
+    // A human can write into a thread.
+    let thread: Id = serde_json::from_value(room["threads"][0]["id"].clone()).unwrap();
+    groups::send_message(
+        State(s.clone()),
+        owner.clone(),
+        Path(("1".into(), id)),
+        message(json!({"prompt":"why did it fail?","client_id":"in-thread","thread_id":thread})),
+    )
+    .await
+    .unwrap();
+    let Json(room) = detail(State(s.clone()), owner.clone(), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    let posted = room["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["prompt"] == "why did it fail?")
+        .unwrap()
+        .clone();
+    assert_eq!(posted["thread_id"], json!(thread));
+}
+
+#[tokio::test]
+async fn finished_room_runs_are_reported_once_and_wake_the_starting_agent() {
+    use crate::entities::{ai_chat_run_links as run_links, ai_chat_turns as links};
+    let (_dir, s, _id, _owner, _member, running, _target) = running_caller_and_target().await;
+    // A run id with no run row counts as finished (deleted) and must not stay pending.
+    super::threads::record(
+        &s,
+        &running,
+        "POST",
+        "/pipelines/999/runs",
+        &ok_created("888"),
+    )
+    .await;
+    let caller = links::Entity::find_by_id(running.id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(super::threads::sweep(&s).await.unwrap(), 1);
+    assert_eq!(
+        super::threads::sweep(&s).await.unwrap(),
+        0,
+        "reported exactly once"
+    );
+    assert!(
+        run_links::Entity::find_by_id(888_i64)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .notified_at
+            .is_some()
+    );
+    let followups = links::Entity::find()
+        .filter(links::Column::ChatAgentId.eq(caller.chat_agent_id))
+        .filter(links::Column::Id.ne(running.id))
+        .all(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(followups.len(), 1);
+    assert_eq!(followups[0].hop, caller.hop + 1);
+    let turn = turns::Entity::find_by_id(followups[0].id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(turn.state, "queued");
+    assert!(turn.prompt.contains("/pipeline-runs/"), "{}", turn.prompt);
+}
+
+#[tokio::test]
+async fn deleting_a_room_removes_threads_but_not_the_resources() {
+    use crate::entities::{ai_chat_run_links as run_links, ai_chat_threads as thread_rows};
+    let (_dir, s, id, owner, _member, running, _target) = running_caller_and_target().await;
+    super::threads::record(&s, &running, "POST", "/pipelines", &ok_created("777")).await;
+    super::threads::record(
+        &s,
+        &running,
+        "POST",
+        "/pipelines/777/runs",
+        &ok_created("888"),
+    )
+    .await;
+    turns::Entity::update_many()
+        .col_expr(
+            turns::Column::State,
+            sea_orm::sea_query::Expr::value("completed"),
+        )
+        .filter(turns::Column::ConversationId.eq(id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    remove(State(s.clone()), owner.clone(), Path(("1".into(), id)))
+        .await
+        .unwrap();
+    assert_eq!(thread_rows::Entity::find().count(&s.db).await.unwrap(), 0);
+    assert_eq!(run_links::Entity::find().count(&s.db).await.unwrap(), 0);
+}

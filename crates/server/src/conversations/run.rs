@@ -177,7 +177,9 @@ async fn platform_call_with_slots(
         if approved == Some(false) {
             return Ok(Some(json!({"status":403,"ok":false,"error":"The user declined this platform operation. No operation was executed."})));
         }
+        let (method, path) = (call.method.clone(), call.path.clone());
         let value = crate::platform_tools::dispatch_as_agent(&s, scope, call, agent.id.into()).await?;
+        super::threads::record(&s, &current, &method, &path, &value).await;
         Ok(Some(value))
     }.await;
     let value = match result {
@@ -248,12 +250,18 @@ pub async fn scheduler(s: AppState, mut stop: watch::Receiver<bool>) {
     let mut tasks = JoinSet::new();
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut ticks: u64 = 0;
     loop {
         tokio::select! {
             _=stop.changed()=>break,
             Some(result)=tasks.join_next(),if !tasks.is_empty()=>if let Err(e)=result{tracing::error!(error=%e,"Conversation worker stopped");},
             _=tick.tick()=>{
                 if *stop.borrow(){break;}
+                // Every 5 s: report finished runs started from rooms.
+                ticks += 1;
+                if ticks % 10 == 0 && let Err(error) = super::threads::sweep(&s).await {
+                    tracing::warn!(%error, "Cannot report room runs");
+                }
                 let policy = match crate::accounts::resource_policy::load(&s.db).await { Ok(policy) => policy, Err(error) => {tracing::warn!(%error,"Cannot read conversation resource policy");continue;} };
                 if policy.conversation_concurrent_runs.is_some_and(|limit| tasks.len() as u64 >= limit) {continue;}
                 let mut query=turns::Entity::find().filter(sea_orm::Condition::any()

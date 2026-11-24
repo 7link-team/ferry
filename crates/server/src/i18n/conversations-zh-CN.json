@@ -56,5 +56,8 @@
   "conversations.introductionRetryWarning": "之前的尝试可能已请求模型或执行操作，结果尚不明确。请核实结果后再明确发起新的介绍；新的模型调用可能产生用量。",
   "conversations.ambiguousTarget": "该消息指定的 Agent 有多位成员各自添加。请选择由谁的 Agent 回复。",
   "conversations.agentRemoved": "回复开始前，该 Agent 已被移出会话。",
-  "conversations.sponsorUnavailable": "添加该 Agent 的成员已无法在此会话中运行它，Agent 已暂停。"
+  "conversations.sponsorUnavailable": "添加该 Agent 的成员已无法在此会话中运行它，Agent 已暂停。",
+  "conversations.threadCreated": "已关联到本会话，运行结果会显示在这里。",
+  "conversations.threadRunStarted": "运行 {run} 已开始。",
+  "conversations.threadRunFinished": "运行 {run} 已结束：{state}。"
 }

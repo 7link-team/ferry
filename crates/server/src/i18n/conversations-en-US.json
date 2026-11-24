@@ -56,5 +56,8 @@
   "conversations.introductionRetryWarning": "A previous attempt may have reached the model or performed operations with an unknown outcome. Verify its result before explicitly starting another introduction; another model call may incur usage.",
   "conversations.ambiguousTarget": "This message names an Agent added by several members. Choose which one should reply.",
   "conversations.agentRemoved": "The Agent was removed from the room before this reply started.",
-  "conversations.sponsorUnavailable": "The member who added this Agent can no longer run it here, so it was paused."
+  "conversations.sponsorUnavailable": "The member who added this Agent can no longer run it here, so it was paused.",
+  "conversations.threadCreated": "Linked to this room; its runs appear here.",
+  "conversations.threadRunStarted": "Run {run} started.",
+  "conversations.threadRunFinished": "Run {run} finished: {state}."
 }

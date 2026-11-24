@@ -14,6 +14,7 @@ mod room_agents;
 pub(crate) mod run;
 #[cfg(test)]
 mod tests;
+mod threads;
 use crate::{
     accounts::workspace::Scope,
     db,
@@ -52,6 +53,7 @@ pub fn routes() -> Router<AppState> {
         .merge(groups::routes())
         .merge(room_agents::routes())
         .merge(relay::routes())
+        .merge(threads::routes())
         .merge(interactions::routes())
         .route(
             "/{workspace}/conversations/{id}/appearance",
@@ -736,6 +738,7 @@ async fn remove(
         .exec(&tx)
         .await?;
     groups::delete(&tx, id).await?;
+    threads::delete(&tx, id).await?;
     interactions::delete(&tx, id).await?;
     events::Entity::delete_many()
         .filter(events::Column::ConversationId.eq(id))
