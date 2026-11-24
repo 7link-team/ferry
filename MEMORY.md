@@ -30,11 +30,10 @@ Evidence outside Git: LOCALAPPDATA/ferry-verification/workflow-11676597508426956
 Self-review: scope/reuse/architecture/complexity/regression/commit hygiene/durable state PASS for local fixes. Production end-to-end acceptance NOT READY. Publication NOT READY.
 
 ## Publication status / Next actions
-- Main source now4897b63; previous checkpoint3ad5ef8; accepted product d27e621 and launcher CI order94e6033. Main45226851695 + deployment45226851603 SUCCESS.
-- v0.10.14-alpha TAG CREATED and SSH-pushed at d27e6219f9c69e626dd1dc4812be594e8e396cb8, exact accepted source. Never move it. Source manifests still .14; later feature changes need a later version before release.
-- Exact-tag root45313356617 completed FAILURE, sole mobile/ios job138174186856 FAILED before first case. Image45313356564 completed SUCCESS; user-triggered rerun attempt2 now in_progress; replacement iOS job138207225854. No .14 publication success claim.
-- Actual27,152,377byte diagnostic ZIP verified: LOCALAPPDATA/ferry-verification/v0.10.14-alpha/tag-ios-diagnostics.zip. results.json: cases[], uiAcceptancePENDING, xcrun simctl launch ETIMEDOUT at60s; subsequent terminate and uninstall also time out. Not an app assertion failure. Latest main standalone mobile45181740341 had passed. User confirmed original failed-job rerun; public API verified attempt2 in_progress, job138207225854. Re-run menu may require whole root run completion; do not tell user to cancel running release jobs.
-- No GitHub authenticated CLI/browser available to rerun. Public API/artifact downloads usable; no token/cookie bypass. Signing remains user-deferred: AndroiddebugAPK, unsignedIPA, no direct iPhone installation or cross-CI upgrade-signing claim.
+- v0.10.14-alpha immutable tag remains d27e6219f9c69e626dd1dc4812be594e8e396cb8. User-triggered original failed-job rerun45313356617 attempt2 completed SUCCESS; iOS acceptance passed. Exact-tag image45313356564 SUCCESS. Public nondraft prerelease exists with31assets.
+- Actual Release mobile APKs/simulator ZIP/unsigned IPA/signing notes downloaded; all byte sizes/digests match GitHub API and SHA256SUMS. Runner manifest signature, all5Runner targets and5desktop updater references/signatures PASS. Official mobile-release.py package-content/version verification PASS. Evidence: LOCALAPPDATA/ferry-verification/v0.10.14-alpha/assets-verification.json and downloaded packages.
+- Android packages remain debug-signed, IPA unsigned (user-deferred signing). No direct iPhone installation claim. Release source is older than4897b63 workspace/log/history fixes; those require a later immutable version.
+- Main45322550654 pending. Older main45318798793 still runs macOSIntel job; two test adaptations already pushed as2be1d0b. Additional Windows installer job138192004806 failed on HTTP403 rate-limit during update-path verification, not yet diagnosed beyond annotation. No iOS user rerun action remains.
 
 ## Next concrete actions
 1. Read exact source4897b63 main CI45318798793 (queued at last check) and deployment acceptance45318798764 (in progress). Source/docs/tests committed and SSH-pushed; no tag movement. Correct any verified failure before a later release version/tag.
@@ -59,3 +58,6 @@ Committed and SSH-pushed2be1d0b. Fresh Build/release45322550654 pending. Next: i
 
 ## Publication rerun confirmed
 User clicked rerun failed jobs. Public API confirms45313356617 attempt2 in_progress, replacement mobile/ios138207225854 started2026-11-24T04:01:23Z; setup/version binding passed, npm ci running. Main45322550654 pending with no jobs. Next: verify native simulator acceptance, unsigned IPA staging, publication and exact-tag assets after rerun completes; no further user rerun action required now.
+
+## 2026-11-24 publication verified
+.14 native publication acceptance PASS: rerun completed,31Release assets, real downloaded mobile payload checksums/signatures/package contents/version binding verified. Overall production weekly-report acceptance remains NOT READY. Next exact action: check queued main45322550654 and prior Windows HTTP403 annotation; finish cloud acceptance before a new version for workspace/log changes. No production deployment or actual weekly PDF/delivery inferred from release success.
