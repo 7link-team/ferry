@@ -1257,6 +1257,10 @@ fn workspace_routes() -> Router<state::AppState> {
                 .post(pipelines::contexts::workflow_groups::create),
         )
         .route(
+            "/{workspace}/workflow-groups/ordering",
+            axum::routing::patch(pipelines::contexts::reorder_workflow_groups),
+        )
+        .route(
             "/{workspace}/pipelines/{id}/owner-transfers",
             post(pipelines::transfer),
         )

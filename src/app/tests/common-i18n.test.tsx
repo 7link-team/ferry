@@ -89,7 +89,7 @@ it("uses translated All and Ungrouped labels without concatenating a resource no
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({items:[],total:0,page:1,page_size:200}))));
   for (const locale of ["en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "ms-MY"] as const) {
     await language(locale);
-    for (const resource of ["host-groups", "pipeline-groups"] as const) {
+    for (const resource of ["host-groups", "pipeline-groups", "workflow-groups"] as const) {
       await act(async () => root.render(<GroupSidebar workspace="ops" permissions={new Set()} resource={resource} noun="RESOURCE" active="" onSelect={() => {}} />));
       const buttons = [...host.querySelectorAll('button')].map(button => button.textContent);
       expect(buttons).toContain(commonText("group.all"));
