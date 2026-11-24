@@ -13,7 +13,7 @@ let browser;
 try {
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   for (const width of [1440, 900, 390, 320]) {
-    const context = await browser.newContext({ viewport: { width, height: 900 } });
+    const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 1200, isMobile: width < 768 });
     const page = await context.newPage(), errors = [], writes = [];
     page.on('pageerror', error => errors.push(error.message));
     const decision = () => ({ tool: 'ferry_request', input: { method: 'POST', path: '/workflows', body: { name: 'Weekly contribution report' } }, decision: null, dispatching: false, sent: false });
@@ -174,13 +174,13 @@ try {
       await page.locator('textarea').focus();
       await page.evaluate(()=>{const view=visualViewport;for(const [key,value] of Object.entries({height:360,offsetTop:20}))Object.defineProperty(view,key,{configurable:true,value});view.dispatchEvent(new Event('resize'));});
       await settle();await bounds('visual-keyboard',true,20,360);
-      await page.locator('[data-conversation-navigation] button').click();
+      await page.locator('[data-conversation-navigation] button').tap();
       const drawer=page.locator('[data-mobile-drawer]');await drawer.waitFor();
       await drawer.locator('input').focus();await settle();
       const drawerBox=await drawer.boundingBox();
       assert(drawerBox.y>=20 && drawerBox.y+drawerBox.height<=381,'conversation drawer must fit the keyboard viewport');
       await page.evaluate(()=>{for(const key of ['height','offsetTop'])delete visualViewport[key];visualViewport.dispatchEvent(new Event('resize'));});
-      await drawer.getByRole('button').first().click();
+      await drawer.getByRole('button').first().tap();
       await page.locator('textarea').evaluate(element=>element.blur());await settle();await bounds('keyboard-dismissed',false);
       await page.emulateMedia({reducedMotion:'reduce'});
       await page.evaluate(()=>{document.documentElement.style.fontSize='32px';document.documentElement.classList.add('dark');});

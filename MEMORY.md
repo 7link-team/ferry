@@ -7,7 +7,7 @@
 4. Navigation/conversation continuity8c657ca and dashboard timestamp interpolation9719db5 already locally accepted and pushed. Latest request: another actual H5 audit and optimization for app-like interaction.
 
 ## Current Phase / Current Step
-REVIEW / H5 local acceptance PASS; source ready for explicit commit/push. No production deployment/workflow writes occurred. Preserve all earlier decisions in ADR.md. Direct execution; no agents/worktrees added.
+TESTING / CLOUD: H5 product changes locally accepted and SSH-pushed asd1437a5. Exact-source Build/release45346774947pending, deployment45346774791in_progress at last check. Additional actual mobile-emulation/tap acceptance also verified and ready for this checkpoint commit. No production deployment/workflow writes occurred. Preserve all earlier decisions in ADR.md. Direct execution; no agents/worktrees added.
 
 ## H5 verified findings and implementation
 - Actual baseline375x667 composer bottom726/navigation803,320x568 composer774/navigation851: min-content chat grid/feed minima pushed controls outside screen. Baseline screenshots conversation-pending-0fUzSf,375portrait inspected.
@@ -41,9 +41,11 @@ Workspace business timezone; UTC APIs/storage; new space browser suggestion edit
 Windows exec tty:true/login:false; hide child processes. LF/core.autocrlf=false. Explicit staging only, SSH push. No build/binary/log/temp files in Git. Audit/test artifacts external or ignored. Prior temporary old-source cleanup was policy-rejected; no bypass attempted.
 
 ## Next concrete action
-1. Explicitly stage audited H5 source/test/i18n plus MEMORY/ADR, inspect staged diff, commit and SSH-push main. Working tree must contain no unrelated changes.
+1. Commit/push the final verified mobile-touch acceptance enhancement and this checkpoint; product sourced1437a5 already pushed. Then inspect exact newest main CI/deployment results; keep working tree clean.
 2. Inspect exact new main CI/deployment results; fix verified failures before preparing next immutable release. Do not mark old .14 as including these fixes.
 3. Original production weekly report still requires normal authorized configuration and real analyze/PDF/enterprise delivery before publish/schedule. Local H5 acceptance does not resolve that independent goal.
 
 ## Last checkpoint
-2026-11-24: final H5 screenshots/browser/backend acceptance and reviews PASS; awaiting explicit commit/push, cloud gates/release and production workflow acceptance remain separate outstanding work.
+2026-11-24: product sourced1437a5 committed/pushed. Final H5/browser/backend acceptance and reviews PASS; cloud gates/release and production workflow acceptance remain separately outstanding.
+
+Final mobile-emulation acceptance: phone contexts now isMobile:true/hasTouch:true,PadhasTouch:true; actual tap() opens/closes conversation drawer in visual keyboard case. Complete enhanced H5/approvals/continuity suite PASS on final production build; evidence conversation-pending-2Sup7x. Browser keyboard remains simulated, no actual OS/device claim. Source review and requirement acceptance PASS for this H5 scope.
