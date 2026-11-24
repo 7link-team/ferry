@@ -662,7 +662,7 @@ async fn roster(conn: &impl ConnectionTrait, conversation: i64, me: i64) -> Resu
         ));
     }
     out.push_str(&format!(
-        "To hand work to another Agent (report a failing API call, announce a contract change, ask for a fix), call ferry_request POST /conversations/{}/relay with {{\"agents\":[room Agent ids],\"text\":\"...\"}}. It needs no approval. Their reply arrives later as a new message to you; do not poll or wait for it.\n</room_agents>\n\n",
+        "To hand work to another Agent (report a failing API call, announce a contract change, ask for a fix), call ferry_request POST /conversations/{}/relay with {{\"agents\":[room Agent ids],\"text\":\"...\"}}. It needs no approval. Their reply arrives later as a new message to you; do not poll or wait for it. Pipelines and workflows you create or run here are tracked as threads in this room: when a run finishes, its result arrives as a new message to you, so do not poll run status in a loop.\n</room_agents>\n\n",
         Id::from(conversation)
     ));
     Ok(out)

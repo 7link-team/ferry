@@ -1638,7 +1638,7 @@
     "source": "crates/server/src/conversations/groups.rs",
     "signature": "async fn send_message(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, id)): Path<(String, Id)>,\n    Json(mut body): Json<MessageBody>,\n) -> Result<(StatusCode, Json<Value>)>",
     "definitions": [
-      "struct MessageBody {\n    prompt: String,\n    client_id: String,\n    #[serde(default)]\n    attachments: Vec<Attachment>,\n    #[serde(default)]\n    targets: Vec<Id>,\n    #[serde(default)]\n    reply_to: Option<Id>,\n    #[serde(default)]\n    mentions: Vec<Id>,\n    /// Room Agent row ids; preferred over `targets` (Agent definition ids).\n    #[serde(default)]\n    agents: Vec<Id>,\n}"
+      "struct MessageBody {\n    prompt: String,\n    client_id: String,\n    #[serde(default)]\n    attachments: Vec<Attachment>,\n    #[serde(default)]\n    targets: Vec<Id>,\n    #[serde(default)]\n    reply_to: Option<Id>,\n    #[serde(default)]\n    mentions: Vec<Id>,\n    /// Room Agent row ids; preferred over `targets` (Agent definition ids).\n    #[serde(default)]\n    agents: Vec<Id>,\n    /// Posts the message into one of the room's threads.\n    #[serde(default)]\n    thread_id: Option<Id>,\n}"
     ],
     "permission_checks": [
       "conversations.run"
@@ -4961,6 +4961,19 @@
         "kind": "param"
       }
     ]
+  },
+  {
+    "path": "/resource-conversations/{kind}/{id}",
+    "method": "GET",
+    "handler": "origin",
+    "source": "crates/server/src/conversations/threads.rs",
+    "signature": "async fn origin(\n    State(s): State<AppState>,\n    scope: Scope,\n    Path((_, kind, id)): Path<(String, String, Id)>,\n) -> Result<Json<Value>>",
+    "definitions": [],
+    "permission_checks": [
+      "conversations.read"
+    ],
+    "documentation": "Rooms the viewer can see that created this pipeline or workflow.",
+    "permission": "conversations.read"
   },
   {
     "path": "/roles",
