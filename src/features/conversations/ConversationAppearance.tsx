@@ -70,11 +70,13 @@ export function ConversationAppearance({
   value,
   onSaved,
   canUpload,
+  showLabel = false,
 }: {
   endpoint: string;
   value: ChatAppearance | undefined;
   onSaved: (v: ChatAppearance) => void;
   canUpload: boolean;
+  showLabel?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value ?? defaultAppearance);
@@ -143,6 +145,7 @@ export function ConversationAppearance({
           title={t("chatAppearance")}
         >
           <Palette />
+          {showLabel && <span data-conversation-action-label className="md:hidden">{t("chatAppearance")}</span>}
         </Button>
       </Dialog.Trigger>
       <Dialog.Portal>

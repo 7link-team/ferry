@@ -1,4 +1,6 @@
 {
+  "conversationActions": ["Conversation actions", "更多会话操作", "更多會話操作", "会話の操作", "대화 작업", "Tindakan perbualan"],
+  "moreInputTypes": ["More input options", "更多输入方式", "更多輸入方式", "入力方法を選択", "추가 입력 옵션", "Pilihan input lain"],
   "queueSend": ["Queue", "排队发送", "排隊傳送", "待機送信", "대기 전송", "Beratur"],
   "modelIntroduction": ["Automatic introduction","自动介绍","自動介紹","自動自己紹介","자동 소개","Pengenalan automatik"],
   "retryIntroduction": ["Retry introduction","重新生成介绍","重新產生介紹","自己紹介を再生成","소개 다시 생성","Jana semula pengenalan"],

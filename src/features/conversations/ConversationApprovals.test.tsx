@@ -47,6 +47,19 @@ afterEach(async () => {
 });
 const permissions = new Set(["conversations.read", "conversations.run"]);
 const buttons = (text: string) => [...host.querySelectorAll("button")].filter((button) => button.textContent?.trim() === text);
+it("opens compact actions without losing global tools and transfers focus into message search", async () => {
+  const row=conversation([],[]);
+  vi.spyOn(apiModule,"api").mockImplementation(async path => String(path).includes('/events?') ? {items:[],next:0,has_more:false} as never : structuredClone(row) as never);
+  await act(async()=>root.render(<Conversation workspace="1" id="2" permissions={permissions} appActions={<button>Workspace tools</button>}/>));
+  await act(async()=>host.querySelector<HTMLButtonElement>('[data-conversation-more]')!.click());
+  const panel=document.querySelector('[data-conversation-actions]')!;
+  expect(panel.textContent).toContain('Workspace tools');
+  const search=[...panel.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.getAttribute('aria-label')===conversationText('searchMessages'))!;
+  await act(async()=>search.click());
+  const field=[...host.querySelectorAll<HTMLInputElement>('input')].find(input=>input.getAttribute('aria-label')===conversationText('searchMessages'))!;
+  expect(field).toBeDefined();expect(document.activeElement).toBe(field);
+  expect(document.querySelector('[data-conversation-actions]')).toBeNull();
+});
 
 it("restores conversation content while its background refresh waits and clears it on access denial", async () => {
   const row = conversation([], [chat("1", "user", null)]);

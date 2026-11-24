@@ -5,6 +5,7 @@ import { TypedValueList } from "./pages/TypedValueList";
 import { ConversationsWorkspace, type ConversationsSession } from "./pages/ConversationsWorkspace";
 import { cn } from "cn";
 import { AppHeader } from "./AppHeader";
+import { ClientConnection } from "./ClientConnection";
 import { MobileNavigation } from "./MobileNavigation";
 import { ChevronDown, ChevronRight, LogOut } from "lucide-react";
 import { LoadingSkeleton } from "../shared/ui/loading-skeleton";
@@ -292,8 +293,17 @@ function Workspace({ identity, reload, onSignedOut, conversationSessions }: { id
       ) : <><AppearanceActions floating /><UnavailablePage onBack={() => navigate({ mode: "list" }, {})} /></>}
     </div>;
 
+  const appActions = <>
+        <div className="flex min-w-0 max-w-full items-center gap-1 max-sm:min-w-11 max-sm:flex-1 max-sm:basis-0">
+          <WorkspaceSwitcher identity={identity} current={current} onRefresh={reload} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} />
+          {identity.user.is_superadmin && <Button variant="ghost" className="max-sm:hidden" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
+        </div>
+        <WorkspaceHeaderActions identity={identity} onRefresh={reload} onSignedOut={onSignedOut} />
+
+  </>;
+
   return (
-    <div data-workspace-shell className="grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] max-md:overflow-hidden md:grid-rows-[auto_minmax(0,1fr)]">
+    <div data-workspace-shell data-conversation-page={item.resource === "conversations" || undefined} className="grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] max-md:overflow-hidden md:grid-rows-[auto_minmax(0,1fr)]">
       <AppHeader home={to(nav[0]!.key, nav[0]!.items[0]!.key)} navigation={
         <nav className="hidden min-w-0 max-w-full gap-1 overflow-x-auto md:flex" aria-label={t("app.modules")}>
           {groups.map((g) => (
@@ -310,15 +320,9 @@ function Workspace({ identity, reload, onSignedOut, conversationSessions }: { id
             </a>
           ))}
         </nav>
-      } actions={<>
-        <div className="flex min-w-0 max-w-full items-center gap-1 max-sm:min-w-11 max-sm:flex-1 max-sm:basis-0">
-          <WorkspaceSwitcher identity={identity} current={current} onRefresh={reload} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} />
-          {identity.user.is_superadmin && <Button variant="ghost" className="max-sm:hidden" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
-        </div>
-        <WorkspaceHeaderActions identity={identity} onRefresh={reload} onSignedOut={onSignedOut} />
-      </>} />
+      } actions={appActions} />
 
-      {item.resource === "conversations" ? <ConversationsWorkspace key={current.id} workspace={current.id} permissions={permissions} form={formConfig} session={conversationSession} /> : <div className="grid min-h-0 min-w-0 grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)]">
+      {item.resource === "conversations" ? <ConversationsWorkspace key={current.id} workspace={current.id} permissions={permissions} form={formConfig} session={conversationSession} appActions={<><ClientConnection />{appActions}</>} /> : <div className="grid min-h-0 min-w-0 grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)]">
         <nav
           className="hidden flex-col gap-0.5 overflow-y-auto border-r border-sidebar-border bg-sidebar text-sidebar-foreground p-3 md:flex"
           aria-label={group.label}

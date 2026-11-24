@@ -24,6 +24,7 @@ import {
   Pencil,
   Undo2,
   RotateCcw,
+  Ellipsis,
 } from "lucide-react";
 import { ConversationMessage } from "./ConversationMarkdown";
 import { CollapsibleMessage } from "./CollapsibleMessage";
@@ -212,6 +213,8 @@ export function Conversation({
   onPendingChange,
   initialSnapshot,
   onSnapshotChange,
+  navigationAction,
+  appActions,
 }: {
   workspace: string;
   id: string;
@@ -224,6 +227,8 @@ export function Conversation({
   onPendingChange?: (id: string, count: number) => void;
   initialSnapshot?: ConversationSnapshot | undefined;
   onSnapshotChange?: (snapshot: ConversationSnapshot | undefined) => void;
+  navigationAction?: ReactNode;
+  appActions?: ReactNode;
 }) {
   useCommonTranslation();
   const timezone = useWorkspaceTimezone();
@@ -274,6 +279,8 @@ export function Conversation({
   const [infoOpen, setInfoOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
   const [newBelow, setNewBelow] = useState(false);
   const [error, setError] = useState("");
@@ -684,57 +691,24 @@ export function Conversation({
       setBusy(false);
     }
   }
-  if (!data)
-    return connection ? (
-      <p role="alert">{connection}</p>
-    ) : (
-      <LoadingSkeleton variant="form" />
-    );
-  return (
-    <section
-      className="relative flex min-h-0 min-w-0 flex-1 flex-col"
-      aria-label={t("title")}
-    >
-      <header data-conversation-header className="shrink-0 border-b bg-background px-3 py-2 md:px-6 md:py-3">
-        <div className="flex flex-col items-stretch gap-3 md:flex-row md:flex-wrap md:items-center md:justify-between">
-          <button
-            type="button"
-            className="flex min-h-11 min-w-0 max-w-full items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:pl-11"
-            onClick={() => { setSelectedMember(""); setInfoOpen(true); }}
-          >
-            <span
-              aria-hidden
-              className="hidden size-10 shrink-0 items-center justify-center rounded-lg bg-muted md:flex"
-            >
-              {data.kind === "group" ? (
-                <Users className="size-5" />
-              ) : (
-                <Bot className="size-5" />
-              )}
-            </span>
-            <div className="min-w-0">
-              <h2 className="truncate text-base font-semibold">{data.title}</h2>
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                {data.kind === "group"
-                  ? `${t("group")} · ${data.members.length + data.agents.length} ${t("participants")}${data.agents.length ? ` · ${t("executionLocation")} ${data.agents.map(agent => `${agent.name}: ${agent.runtime === "api" ? workflowText("execution.server") : agent.host?.name || t("hostPending")}`).join(", ")}` : ""}`
-                  : <>{data.config.name} · <ModelLabel model={data.config.model} hasModel={data.agent_has_model} /> · {data.config.runtime === "api" ? workflowText("execution.server") : <>{t("executionHost")} {data.host?.name || t("hostPending")}</>}</>}
-              </p>
-            </div>
-          </button>
-          <div role="group" aria-label={t("title")} tabIndex={0} className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto md:flex-wrap [&>button]:shrink-0 [&>button]:min-h-11 [&>button]:min-w-11">
-            <ConversationApproval endpoint={endpoint} mode={data.config.approval_mode??"request"} version={data.version} canManage={!!data.can_manage&&permissions.has("conversations.update")} executing={executing} onSaved={(mode,version)=>setData(old=>old?{...old,version,config:{...old.config,approval_mode:mode}}:old)}/>
-            {data.can_manage && permissions.has("conversations.update") && <ConversationAppearance endpoint={endpoint} value={data.config.appearance} canUpload={permissions.has("conversations.run") && data.state === "active"} onSaved={appearance => setData(old => old ? { ...old, config: { ...old.config, appearance } } : old)} />}
+  if (!data) return <>
+    <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1 md:hidden">{navigationAction}<div className="ml-auto flex min-w-0 flex-wrap items-center gap-1">{appActions}</div></div>
+    {connection ? <p role="alert">{connection}</p> : <LoadingSkeleton variant="form" />}
+  </>;
+  const managementActions = <>
+            <ConversationApproval showLabel endpoint={endpoint} mode={data.config.approval_mode??"request"} version={data.version} canManage={!!data.can_manage&&permissions.has("conversations.update")} executing={executing} onSaved={(mode,version)=>setData(old=>old?{...old,version,config:{...old.config,approval_mode:mode}}:old)}/>
+            {data.can_manage && permissions.has("conversations.update") && <ConversationAppearance showLabel endpoint={endpoint} value={data.config.appearance} canUpload={permissions.has("conversations.run") && data.state === "active"} onSaved={appearance => setData(old => old ? { ...old, config: { ...old.config, appearance } } : old)} />}
             <Button
               variant="ghost"
               size="icon"
               aria-label={t("searchMessages")}
               aria-pressed={searchOpen}
               onClick={() => {
-                setSearchOpen(!searchOpen);
+                setMoreOpen(false); setSearchOpen(!searchOpen);
                 setSearch("");
               }}
             >
-              <Search />
+              <Search /><span data-conversation-action-label className="md:hidden">{t("searchMessages")}</span>
             </Button>
             <Button
               variant="ghost"
@@ -744,52 +718,24 @@ export function Conversation({
                   ? "conversationMembers"
                   : "conversationInfo",
               )}
-              onClick={() => { setSelectedMember(""); setInfoOpen(true); }}
+              onClick={() => { setMoreOpen(false); setSelectedMember(""); setInfoOpen(true); }}
             >
-              {data.kind === "group" ? <Users /> : <Info />}
+              {data.kind === "group" ? <Users /> : <Info />}<span data-conversation-action-label className="md:hidden">{t(data.kind === "group" ? "conversationMembers" : "conversationInfo")}</span>
             </Button>
-            {data.can_manage && headerActions}
+            {data.can_manage && <div onClick={() => setMoreOpen(false)}>{headerActions}</div>}
             {data.can_manage && (
               <Button
                 variant="ghost"
                 size="icon"
                 aria-label={t("deleteConversation")}
                 disabled={data.turns.some((turn) => active(turn.state))}
-                onClick={() => setConfirmDelete(true)}
+                onClick={() => { setMoreOpen(false); setConfirmDelete(true); }}
               >
-                <Trash2 />
+                <Trash2 /><span data-conversation-action-label className="md:hidden">{t("deleteConversation")}</span>
               </Button>
             )}
-          </div>
-        </div>
-        {searchOpen && (
-          <div className="mt-3 flex items-center gap-2">
-            <Input
-              autoFocus
-              aria-label={t("searchMessages")}
-              placeholder={t("searchMessages")}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t("close")}
-              onClick={() => {
-                setSearchOpen(false);
-                setSearch("");
-              }}
-            >
-              <X />
-            </Button>
-          </div>
-        )}
-      </header>
-      <div
-        className="flex shrink-0 items-center gap-1 overflow-x-auto border-b px-3 py-1.5 sm:px-6 md:flex-wrap [&>button]:shrink-0"
-        role="group"
-        aria-label={t("messageFilters")}
-      >
+  </>;
+  const messageFilters = <>
         {["allMessages", "unread", "mentions", "saved", "pending"].map((value) => (
           <Button
             key={value}
@@ -797,7 +743,7 @@ export function Conversation({
             size="sm"
             aria-pressed={activity === value}
             onClick={() => {
-              setActivity(value);
+              setActivity(value); setMoreOpen(false);
               setThread("");
             }}
           >
@@ -821,7 +767,78 @@ export function Conversation({
             {t("markRead")}
           </Button>
         )}
-      </div>
+  </>;
+  return (
+    <section
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+      aria-label={t("title")}
+    >
+      <header data-conversation-header className="shrink-0 border-b bg-background px-3 py-2 md:px-6 md:py-3">
+        <div className="flex items-center gap-1 md:flex-wrap md:justify-between md:gap-3">
+          <div className="shrink-0 md:hidden" data-conversation-navigation>{navigationAction}</div>
+          <button
+            type="button"
+            className="flex min-h-11 min-w-0 max-w-full flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex-none"
+            onClick={() => { setSelectedMember(""); setInfoOpen(true); }}
+          >
+            <span
+              aria-hidden
+              className="hidden size-10 shrink-0 items-center justify-center rounded-lg bg-muted md:flex"
+            >
+              {data.kind === "group" ? (
+                <Users className="size-5" />
+              ) : (
+                <Bot className="size-5" />
+              )}
+            </span>
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-semibold">{data.title}</h2>
+              {activity !== "allMessages" && <span className="block truncate text-xs text-muted-foreground md:hidden">{t(activity === "pending" ? "pendingFilter" : activity)}</span>}
+              <p className="mt-0.5 hidden truncate text-xs text-muted-foreground md:block">
+                {data.kind === "group"
+                  ? `${t("group")} · ${data.members.length + data.agents.length} ${t("participants")}${data.agents.length ? ` · ${t("executionLocation")} ${data.agents.map(agent => `${agent.name}: ${agent.runtime === "api" ? workflowText("execution.server") : agent.host?.name || t("hostPending")}`).join(", ")}` : ""}`
+                  : <>{data.config.name} · <ModelLabel model={data.config.model} hasModel={data.agent_has_model} /> · {data.config.runtime === "api" ? workflowText("execution.server") : <>{t("executionHost")} {data.host?.name || t("hostPending")}</>}</>}
+              </p>
+            </div>
+          </button>
+          <div className="hidden min-w-0 max-w-full flex-wrap items-center gap-1 md:flex">{managementActions}</div>
+          <Dialog.Root open={moreOpen} onOpenChange={setMoreOpen}>
+            <Dialog.Trigger asChild><Button data-conversation-more variant="ghost" size="icon" className="relative size-11 shrink-0 md:hidden" aria-label={t("conversationActions") + (attention.count ? ` · ${t("pendingFilter")} ${attention.count}` : "")}><Ellipsis />{attention.count > 0 && <span data-conversation-pending-indicator aria-hidden="true" className="absolute -right-1 top-0 min-w-4 rounded-full bg-primary px-1 text-[10px] leading-4 text-primary-foreground">{attention.count}</span>}</Button></Dialog.Trigger>
+            <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" /><Dialog.Content data-conversation-actions aria-describedby={undefined} className="dialog-shell fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-1.5rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-background p-4 shadow-xl" onCloseAutoFocus={event => { if (searchOpen) { event.preventDefault(); searchInput.current?.focus(); } else if (infoOpen || confirmDelete) event.preventDefault(); }}>
+              <header className="flex items-center justify-between gap-2 pb-3"><Dialog.Title className="font-semibold">{t("conversationActions")}</Dialog.Title><Dialog.Close asChild><Button variant="ghost" size="icon" aria-label={commonText("common.close")}><X /></Button></Dialog.Close></header>
+              <div className="dialog-body space-y-3">
+                <div role="group" aria-label={t("messageFilters")} className="flex flex-wrap gap-1 border-b pb-3">{messageFilters}</div>
+                <div className="grid gap-1 [&_button]:h-auto [&_button]:w-full [&_button]:justify-start [&_button]:gap-3 [&_button]:px-3 [&_button]:py-2 [&_button]:text-base">{managementActions}</div>
+                {appActions && <div className="flex flex-wrap items-center gap-2 border-t pt-3">{appActions}</div>}
+              </div>
+            </Dialog.Content></Dialog.Portal>
+          </Dialog.Root>
+        </div>
+        {searchOpen && (
+          <div className="mt-3 flex items-center gap-2">
+            <Input
+              ref={searchInput}
+              autoFocus
+              aria-label={t("searchMessages")}
+              placeholder={t("searchMessages")}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t("close")}
+              onClick={() => {
+                setSearchOpen(false);
+                setSearch("");
+              }}
+            >
+              <X />
+            </Button>
+          </div>
+        )}
+      </header>
+      <div className="hidden shrink-0 flex-wrap items-center gap-1 border-b px-3 py-1.5 sm:px-6 md:flex" role="group" aria-label={t("messageFilters")}>{messageFilters}</div>
       <ConversationMembers open={infoOpen} onOpenChange={setInfoOpen} selected={selectedMember} onSelect={setSelectedMember}
         title={data.title} workspace={workspace} permissions={permissions} members={[
           ...data.members.map(member => ({ ...member, kind: "user" as const })),

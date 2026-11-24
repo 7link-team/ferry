@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "cn";
 import {
   Bot,
@@ -52,11 +52,13 @@ export function ConversationsWorkspace({
   permissions,
   form,
   session: storedSession,
+  appActions,
 }: {
   workspace: string;
   permissions: Set<string>;
   form: FormConfig<AnyRow> | undefined;
   session?: ConversationsSession;
+  appActions?: ReactNode;
 }) {
   useCommonTranslation();
   const route = useRoute();
@@ -345,9 +347,7 @@ export function ConversationsWorkspace({
         {sidebar}
       </aside>
       <main className="relative flex min-h-0 min-w-0 flex-col">
-        <div data-conversation-navigation className="absolute left-2 top-2 z-10 md:hidden">
-          {mobileButton}
-        </div>
+        {(!selected || !readable) && <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1 md:hidden">{mobileButton}<div className="ml-auto flex min-w-0 flex-wrap items-center gap-1">{appActions}</div></div>}
         {!readable || denied ? (
           <p role="alert">{error || commonText("shell.forbidden")}</p>
         ) : selected ? (
@@ -356,6 +356,8 @@ export function ConversationsWorkspace({
             workspace={workspace}
             id={selected}
             permissions={permissions}
+            navigationAction={mobileButton}
+            appActions={appActions}
             initialDraft={drafts.current.get(selected)}
             initialSnapshot={session.snapshot}
             onSnapshotChange={saveSnapshot}
@@ -380,6 +382,7 @@ export function ConversationsWorkspace({
                   onClick={() => go(selected, "edit")}
                 >
                   <Pencil />
+                  <span data-conversation-action-label className="md:hidden">{t("editConversation")}</span>
                 </Button>
               )
             }

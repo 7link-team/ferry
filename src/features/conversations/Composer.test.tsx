@@ -112,6 +112,19 @@ async function key(
     ),
   );
 }
+it("starts mobile input at one row and grows content without changing the desktop resize preference", async () => {
+  localStorage.setItem("ui.chat.composerHeight", "288");
+  const { input, send } = await mountGroup("");
+  expect(input.rows).toBe(1);
+  expect(input.style.getPropertyValue("--mobile-composer-height")).toBe("44px");
+  Object.defineProperty(input,"scrollHeight",{configurable:true,get:()=>132});
+  await write(input,"Long draft\nsecond line");
+  expect(input.style.getPropertyValue("--mobile-composer-height")).toBe("132px");
+  await write(input,"");
+  expect(input.style.getPropertyValue("--mobile-composer-height")).toBe("44px");
+  expect(localStorage.getItem("ui.chat.composerHeight")).toBe("288");
+  expect(send).not.toHaveBeenCalled();
+});
 it("filters at the caret, navigates and inserts a person without sending or losing following text", async () => {
   const { input, send, drafts } = await mountGroup();
   await write(input, "before @Al after", 10);

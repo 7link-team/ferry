@@ -54,6 +54,8 @@ try {
         if (path.endsWith('/decisions')) item.decision = input.allow;
         else item.resolved = input.action;
         data = { ok: true };
+      } else if (path.endsWith('/conversations/2/files') && method === 'POST') {
+        data = { file_id: 'fixture-file', name: 'notes.txt', mime: 'text/plain', size: 5 };
       } else if (method !== 'GET') data = { ok: true };
       await route.fulfill({ json: data });
     });
@@ -63,6 +65,11 @@ try {
     releaseList();
     await page.getByRole('heading', { name: row.title, exact: true }).waitFor();
     assert.equal(await page.locator('[data-pending-banner]').count(), 0);
+    if(width<768){
+      assert.equal(await page.locator('[data-conversation-pending-indicator]').textContent(),'6');
+      await page.locator('[data-conversation-more]').tap();
+      await page.locator('[data-conversation-actions]').getByRole('button',{name:'Switch workspace',exact:true}).waitFor();
+    }
     await page.getByRole('button', { name: 'Needs action · 6', exact: true }).click();
     assert.equal(await page.locator('[data-ended-decision]').count(), 4);
     assert.equal(await page.locator('[data-pending-decision]').count(), 2);
@@ -86,6 +93,10 @@ try {
     }
     await page.waitForFunction(() => !document.querySelector('[data-pending-badge]'));
     assert.equal(count(), 0);
+    if(width<768){
+      assert.equal(await page.locator('[data-conversation-pending-indicator]').count(),0);
+      await page.locator('[data-conversation-more]').tap();
+    }
     assert.equal(await page.getByRole('button', { name: 'Needs action', exact: true }).count(), 1);
     await page.waitForTimeout(3300); // At least one stale sidebar poll must arrive.
     assert.equal(await page.locator('[data-pending-badge]').count(), 0);
@@ -139,6 +150,36 @@ try {
       await go('/en-US/account');await page.locator('input[name=name]').waitFor();
       await go('/en-US/workspaces/1/conversations/2');
       await page.getByRole('heading',{name:row.title,exact:true}).waitFor();
+      await page.setViewportSize({width:375,height:667});
+      await page.locator('textarea').evaluate(element=>element.blur());
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      const density=await page.evaluate(()=>({feed:document.querySelector('.conversation-feed').clientHeight,input:document.querySelector('textarea').getBoundingClientRect().height,composer:document.querySelector('[data-conversation-composer]').getBoundingClientRect().height,header:document.querySelector('[data-conversation-header]').getBoundingClientRect().height}));
+      assert(density.feed>=667*.6,'default message region too small: '+JSON.stringify(density));
+      assert(density.input<=50 && density.composer<=64 && density.header<=64,'default input/title are not single-row: '+JSON.stringify(density));
+      await page.locator('[data-composer-more]').tap();
+      for(const name of ['Attach files','Record voice message','Stop','Send shortcut']) await page.getByRole('menuitem',{name,exact:true}).waitFor();
+      const chooser = page.waitForEvent('filechooser');
+      await page.getByRole('menuitem',{name:'Attach files',exact:true}).click();
+      await (await chooser).setFiles({name:'notes.txt',mimeType:'text/plain',buffer:Buffer.from('hello')});
+      await page.locator('[data-composer-attachments]').getByText('notes.txt',{exact:true}).waitFor();
+      await page.locator('[data-composer-attachments] button').click();
+      await page.locator('[data-composer-attachments]').waitFor({state:'detached'});
+      await page.locator('[data-composer-more]').tap();
+      await page.keyboard.press('Escape');
+      await page.evaluate(()=>{document.documentElement.dataset.nativeClient='mobile';window.dispatchEvent(new Event('client-shell:ready'));});
+      await page.locator('[data-conversation-more]').tap();
+      assert.equal(await page.locator('[data-conversation-actions] [data-client-connection-entry]').getAttribute('href'),'app-settings://connection');
+      await page.locator('[data-conversation-actions]').getByRole('button',{name:'Search messages',exact:true}).click();
+      await page.getByRole('textbox',{name:'Search messages',exact:true}).fill('report');
+      assert(await page.getByRole('textbox',{name:'Search messages',exact:true}).evaluate(element=>element===document.activeElement),'search receives focus from More');
+      await page.locator('[data-conversation-header]').getByRole('button',{name:'Cancel',exact:true}).click();
+      await page.evaluate(()=>{delete document.documentElement.dataset.nativeClient;window.dispatchEvent(new Event('client-shell:ready'));});
+      await page.screenshot({path:join(evidence,'compact-chat-default.png'),fullPage:true});
+      await page.locator('textarea').fill('Long draft\n'.repeat(12));
+      const grown=await page.locator('textarea').evaluate(element=>({height:element.getBoundingClientRect().height,scroll:element.scrollHeight,client:element.clientHeight}));
+      assert(grown.height>density.input && grown.scroll>grown.client,'long draft must grow and then scroll');
+      await page.locator('textarea').fill('Keep this unsent draft');
+      console.log('PASS compact chat density: '+JSON.stringify(density)+'; plus menu and bounded draft growth');
       const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const bounds = async (label, focused, top = 0, height = page.viewportSize().height) => {
         const metrics = await page.evaluate(() => {

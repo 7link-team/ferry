@@ -14,6 +14,9 @@ import {
   Reply,
   Square,
   X,
+  Plus,
+  Send,
+  Clock,
 } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
 import { AutoForm } from "../../shared/forms/auto-form";
@@ -24,6 +27,11 @@ import {
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from "../../shared/ui/dropdown-menu";
 import { conversationText as t } from "./resource-config";
 import type { Attachment } from "./AttachmentView";
@@ -105,6 +113,25 @@ export function Composer({
   const [recording, setRecording] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const focusAfterMenu = useRef(false);
+  useLayoutEffect(() => {
+    const input = textarea.current;
+    if (!input) return;
+    let frame = 0;
+    let width = input.clientWidth;
+    const fit = () => {
+      if (!draft.prompt) { input.style.setProperty("--mobile-composer-height", "44px"); return; }
+      input.style.setProperty("--mobile-composer-height", "0px");
+      input.style.setProperty("--mobile-composer-height", `${input.scrollHeight}px`);
+    };
+    const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(fit); };
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(entries => {
+      const next = entries[0]?.contentRect.width ?? width;
+      if (next !== width) { width = next; schedule(); }
+    });
+    fit(); observer?.observe(input); window.addEventListener("resize", schedule);
+    return () => { cancelAnimationFrame(frame); observer?.disconnect(); window.removeEventListener("resize", schedule); };
+  }, [draft.prompt]);
   const pendingSelection = useRef<number | null>(null);
   useLayoutEffect(() => {
     if (pendingSelection.current === null || !textarea.current) return;
@@ -494,6 +521,7 @@ export function Composer({
     setHeight(h);
     remember("ui.chat.composerHeight", String(h));
   }
+  const changeSendMode = (value: string) => { setMode(value); remember("ui.chat.sendKey", value); };
   return (
     <AutoForm
       onSubmit={(e) => {
@@ -529,7 +557,7 @@ export function Composer({
           aria-valuemin={80}
           aria-valuemax={Math.min(440, window.innerHeight * 0.45)}
           aria-valuenow={height}
-          className="absolute right-1 top-1 z-10 flex size-7 touch-none cursor-ns-resize items-center justify-center rounded text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring [@media(max-height:500px)]:hidden"
+          className="absolute right-1 top-1 z-10 hidden size-7 touch-none cursor-ns-resize items-center justify-center rounded text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring md:flex [@media(max-height:500px)]:hidden"
           onPointerDown={(e) => {
             e.preventDefault();
             resizing.current = { y: e.clientY, height };
@@ -573,6 +601,7 @@ export function Composer({
         </label>
         <textarea
           ref={textarea}
+          rows={1}
           id="conversation-message"
           value={draft.prompt}
           disabled={locked || recording}
@@ -624,7 +653,7 @@ export function Composer({
           className="block min-h-20 max-h-[45dvh] w-full resize-none border-0 bg-transparent px-3 py-3 pr-9 text-sm leading-6 shadow-none outline-none focus:ring-0 disabled:opacity-50 [@media(max-height:500px)]:min-h-8 [@media(max-height:500px)]:max-h-8 [@media(max-height:500px)]:py-1"
         />
         {!!draft.attachments.length && (
-          <div className="flex max-h-36 flex-wrap gap-2 overflow-auto px-3 pb-3">
+          <div data-composer-attachments className="flex max-h-36 flex-wrap gap-2 overflow-auto px-3 pb-3">
             {draft.attachments.map((a, i) => (
               <div
                 key={a.file_id ?? i}
@@ -648,7 +677,7 @@ export function Composer({
           </div>
         )}
         {group && (
-          <div className="flex flex-wrap gap-1 px-3 pb-2">
+          <div data-composer-recipients className="flex flex-wrap gap-1 px-3 pb-2">
             {agents
               .filter((a) => targets.includes(a.id))
               .map((a) => (
@@ -698,6 +727,17 @@ export function Composer({
           className="flex items-center gap-1 border-t border-border/50 bg-muted/20 px-2 py-1.5 [&_button]:min-h-11 [&_button]:min-w-11"
         >
           <div data-composer-tools className="flex min-w-[44px] flex-1 items-center gap-1 overflow-x-auto [&>button]:size-[44px] [&>button]:shrink-0">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button data-composer-more type="button" size="icon" variant="ghost" className="md:hidden" disabled={locked && !recording} aria-label={t("moreInputTypes")}><Plus /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" className="max-h-[min(24rem,var(--app-viewport-height,80dvh))] max-w-[calc(100vw-1.5rem)] overflow-y-auto" onCloseAutoFocus={event => { if (focusAfterMenu.current) { event.preventDefault(); textarea.current?.focus(); focusAfterMenu.current = false; } }}>
+              <DropdownMenuItem disabled={locked || recording} onSelect={() => fileInput.current?.click()}><Paperclip />{t("attach")}</DropdownMenuItem>
+              <DropdownMenuItem disabled={locked && !recording} onSelect={() => void toggleRecording()}>{recording ? <Square /> : <Mic />}{t(recording ? "stopRecording" : "recordVoice")}</DropdownMenuItem>
+              {group && <DropdownMenuItem disabled={locked || recording} onSelect={() => { focusAfterMenu.current = true; openMentions(); }}><AtSign />{t("mentionAgent")}</DropdownMenuItem>}
+              {current && <DropdownMenuItem disabled={busy || current.state === "stopping"} onSelect={onStop}><Square />{t("cancel")}</DropdownMenuItem>}
+              <DropdownMenuSeparator />
+              <DropdownMenuSub><DropdownMenuSubTrigger>{t("sendShortcut")}</DropdownMenuSubTrigger><DropdownMenuSubContent><DropdownMenuRadioGroup value={mode} onValueChange={changeSendMode}><DropdownMenuRadioItem value="enter">{t("enterSends")}</DropdownMenuRadioItem><DropdownMenuRadioItem value="ctrl-enter">{t("ctrlEnterSends")}</DropdownMenuRadioItem></DropdownMenuRadioGroup></DropdownMenuSubContent></DropdownMenuSub>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <input
             ref={fileInput}
             aria-label={t("attach")}
@@ -711,6 +751,7 @@ export function Composer({
             }}
           />
           <Button
+            className="max-md:hidden"
             size="icon"
             type="button"
             variant="ghost"
@@ -722,6 +763,7 @@ export function Composer({
             <Paperclip />
           </Button>
           <Button
+            className="max-md:hidden"
             size="icon"
             type="button"
             variant="ghost"
@@ -734,6 +776,7 @@ export function Composer({
           </Button>
           {group && (
             <Button
+              className="max-md:hidden"
               size="icon"
               type="button"
               variant="ghost"
@@ -748,6 +791,7 @@ export function Composer({
           <div className="ml-auto flex min-w-0 max-w-full shrink items-center gap-1">
             {current && (
               <Button
+                className="max-md:hidden"
                 type="button"
                 size="icon"
                 variant="outline"
@@ -759,10 +803,11 @@ export function Composer({
               </Button>
             )}
             <div className="flex min-w-0 max-w-full shrink items-stretch">
+              {recording && <Button data-mobile-record-stop type="button" size="icon" variant="destructive" className="md:hidden" aria-label={t("stopRecording")} onClick={() => void toggleRecording()}><Square /></Button>}
               <Button
                 type="submit"
                 size="sm"
-                className="h-auto min-w-[44px] flex-1 shrink whitespace-normal rounded-r-none text-xs disabled:opacity-100 disabled:text-primary-foreground/50"
+                className={`h-auto min-w-[44px] flex-1 shrink whitespace-normal md:rounded-r-none text-xs disabled:opacity-100 disabled:text-primary-foreground/50 ${recording ? "max-md:hidden" : ""}`}
                 title={t(mode === "enter" ? "enterSends" : "ctrlEnterSends")}
                 aria-label={queues ? t(mode === "enter" ? "queueWithEnter" : "queueWithCtrlEnter") : t(mode === "enter" ? "sendWithEnter" : "sendWithCtrlEnter")}
                 disabled={
@@ -771,7 +816,7 @@ export function Composer({
                   (!draft.prompt.trim() && !draft.attachments.length)
                 }
               >
-                <span className="break-all md:hidden">{t(queues ? "queueSend" : "send")}</span>
+                <span className="md:hidden" aria-hidden="true">{queues ? <Clock /> : <Send />}</span>
                 <span className="hidden md:inline">{queues
                   ? t(mode === "enter" ? "queueWithEnter" : "queueWithCtrlEnter")
                   : t(mode === "enter" ? "sendWithEnter" : "sendWithCtrlEnter")}</span>
@@ -781,7 +826,7 @@ export function Composer({
                   <Button
                     type="button"
                     size="sm"
-                    className="rounded-l-none border-l border-primary-foreground/25 px-2"
+                    className="hidden rounded-l-none border-l border-primary-foreground/25 px-2 md:inline-flex"
                     aria-label={t("sendShortcut")}
                     title={t("sendShortcut")}
                   >
@@ -791,10 +836,7 @@ export function Composer({
                 <DropdownMenuContent side="top" align="end">
                   <DropdownMenuRadioGroup
                     value={mode}
-                    onValueChange={(value) => {
-                      setMode(value);
-                      remember("ui.chat.sendKey", value);
-                    }}
+                    onValueChange={changeSendMode}
                   >
                     <DropdownMenuRadioItem value="enter">
                       {t("enterSends")}
