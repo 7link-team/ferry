@@ -6,7 +6,7 @@
 3. Complete native v0.10.14-alpha publication, preserving immutable tags and signing limitations.
 
 ## Current Phase / Current Step
-REVIEW / local source follow-ups verified, ready for explicit staging and SSH push. No production writes, schedule enabling or deployment occurred. .14 tag already exists at previous accepted source; new source is outside that tag.
+TESTING / CLOUD: local source follow-ups verified and SSH-pushed in4897b632da094d904f17cffa72e38b319d2ebd60; working tree checked clean. No production writes, schedule enabling or deployment occurred. .14 tag already exists at previous accepted source; new source is outside that tag.
 
 ## Production status / Blocker
 - User repaired provider token. Latest actual execution118539555044327424 (#3) passed period+commits, then failed expression /nodes/3/params/prompt before analyze starts. Real sandbox reproduces batch $json being absent. Saved prompt uses JSON.stringify($json). Recommend plain instructions: remove leading '=' and interpolation; compose automatically appends every input JSON once. Explicit $input.all().map(item=>item.json) is also verified if needed. No new execution after#3 at last server check.
@@ -30,14 +30,14 @@ Evidence outside Git: LOCALAPPDATA/ferry-verification/workflow-11676597508426956
 Self-review: scope/reuse/architecture/complexity/regression/commit hygiene/durable state PASS for local fixes. Production end-to-end acceptance NOT READY. Publication NOT READY.
 
 ## Publication status / Next actions
-- Main starting point3ad5ef8; accepted product d27e621 and launcher CI order94e6033. Main45226851695 + deployment45226851603 SUCCESS.
+- Main source now4897b63; previous checkpoint3ad5ef8; accepted product d27e621 and launcher CI order94e6033. Main45226851695 + deployment45226851603 SUCCESS.
 - v0.10.14-alpha TAG CREATED and SSH-pushed at d27e6219f9c69e626dd1dc4812be594e8e396cb8, exact accepted source. Never move it. Source manifests still .14; later feature changes need a later version before release.
 - Exact-tag root45313356617 in progress, but mobile/ios job138174186856 FAILED native flow before first case. Image45313356564 still in progress at last check. No .14 publication success claim.
 - Actual27,152,377byte diagnostic ZIP verified: LOCALAPPDATA/ferry-verification/v0.10.14-alpha/tag-ios-diagnostics.zip. results.json: cases[], uiAcceptancePENDING, xcrun simctl launch ETIMEDOUT at60s; subsequent terminate and uninstall also time out. Not an app assertion failure. Latest main standalone mobile45181740341 had passed. Recommended original failed-job rerun on a fresh CI host; user question pending with job URL. Re-run menu may require whole root run completion; do not tell user to cancel running release jobs.
 - No GitHub authenticated CLI/browser available to rerun. Public API/artifact downloads usable; no token/cookie bypass. Signing remains user-deferred: AndroiddebugAPK, unsignedIPA, no direct iPhone installation or cross-CI upgrade-signing claim.
 
 ## Next concrete actions
-1. Explicitly stage reviewed source/docs/tests, commit and SSH-push main; verify clean tree, persist exact source commit and new CI run IDs. No tag movement.
+1. Read exact source4897b63 main CI45318798793 (queued at last check) and deployment acceptance45318798764 (in progress). Source/docs/tests committed and SSH-pushed; no tag movement. Correct any verified failure before a later release version/tag.
 2. Read exact-tag release/image statuses; after user rerun, verify iOS/native/mobile/device artifacts, Release checksums/source and both image architectures. .12 evidence folder contains reusable verify/download scripts; .14 folder diagnostic downloader uses8verified ranges.
 3. Production workflow needs user normal API authorization or their direct prompt edit/rerun. Then inspect analyze/PDF/notification, repair workspace-timezone/channel via normal authorized API, publish/schedule only after actual success. Do not claim local sample or tests equal real report delivery.
 
