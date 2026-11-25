@@ -6,10 +6,10 @@
 | T1 | 待验证 | 后台恢复后会话空白（af3df2d） | CI：888ffe1(含af3df2d) Build/Mobile/Container 全绿；待真机确认（用户负责） |
 | T2 | 已完成 | H5紧凑聊天布局（a261089） | 888ffe1 全量CI通过 |
 | T3 | 已完成 | 6441f15 Build失败 | e2e-build-ui“endpoints get distinct hues”断言；后续a261089同一job通过，判为偶发，暂不改代码；再现则排查 |
-| T4 | 进行中 | 发布v0.11.0-alpha | 版本号已改、docs/releases/v0.11.0-alpha.md(由v0.10.15重命名并扩充)；待推送后该提交 Build 全绿再打标签并核对发布资产 |
+| T4 | 已完成 | 发布v0.11.0-alpha | 标签→52d76bc；Release 31 资产(prerelease)；latest.json/runner-update.json 均为0.11.0-alpha且5平台签名；抽查 runner linux 与 iOS IPA 的 SHA256 与 SHA256SUMS 一致；ghcr ferry-server:v0.11.0-alpha digest eeff0ab1。Android 首次 timeout 经用户重跑通过。生产部署未执行 |
 | T5 | 受阻（用户处理中） | 生产周报工作流（Codeup→PDF→????-ferry，周一09:00） | 需用户在正常授权下改 prompt（去掉=与$json插值）、目标群、工作区时区后重跑；不得绕过授权 |
 | T6 | 已完成 | 多开发者多Agent 一期 | 363de3c Build/Mobile 全绿；部署验收Swarm失败为CI网络池冲突 |
-| T10 | 待验证 | 多Agent协作 二期 | 后端 884cf19/be66dd9/761ecaa，前端 55ce068；门禁：cargo workspace 1451 全过、vitest 1012 全过(焦点测试改为等待异步焦点)、build、目录检查、浏览器验收(话题串/传话 1440/900/390/320 en/zh/ms) 通过。待 CI |
+| T10 | 已完成 | 多Agent协作 二期 | 随 v0.11.0-alpha 发布(52d76bc CI 全绿) |
 | T7 | 待验证 | 工作流列表与流水线列表分组一致 | ee24aea 合并推送(d8058b7)；vitest/build/Rust ordering 通过；待 CI |
 | T8 | 待验证 | ai.agent.run 提示词当前项($json)拦截+明确报错+MCP说明 | 5ca8a8a 合并推送(d8058b7)；只检查{{}}内代码、仅Agent节点保存期拦截；workflows 191 测试通过；待 CI |
 | T9 | 已完成 | 本地垃圾清理与目录规范 | 2026-11-24 删除 target 183G、desktop 构建 15G、data/backups+maintenance 等 45G、根目录41个日志；保留 data/dev-backend 与7天内证据；D盘 0→242G 空闲。Git 仓库仅17.6MB无垃圾提交。新增 AGENTS.md 规则 + npm run clean:local + /.tmp/ |
