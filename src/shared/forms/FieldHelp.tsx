@@ -9,6 +9,9 @@ export function fieldLabelText(node: ReactNode): string {
 }
 
 /** A non-labelable trigger also works inside existing native field labels. */
+/** Touch-first devices: help icons are not keyboard "next" stops there. */
+const touch = () => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+
 export function FieldHelp({ label, children }: { label?: ReactNode; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -17,7 +20,7 @@ export function FieldHelp({ label, children }: { label?: ReactNode; children: Re
   useEffect(() => () => clearTimeout(timer.current), []);
   return <Popover.Root open={open} onOpenChange={setOpen}>
     <Popover.Trigger asChild>
-      <span role="button" tabIndex={0} aria-label={`${fieldLabelText(label)} · ${commonText("field.help")}`} className="ml-1 inline-flex size-6 shrink-0 cursor-help items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onPointerEnter={enter} onPointerLeave={leave} onFocus={enter} onBlur={leave} onClick={event => { event.preventDefault(); event.stopPropagation(); enter(); }} onKeyDown={event => {
+      <span role="button" tabIndex={touch() ? -1 : 0} aria-label={`${fieldLabelText(label)} · ${commonText("field.help")}`} className="ml-1 inline-flex size-6 shrink-0 cursor-help items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onPointerEnter={enter} onPointerLeave={leave} onFocus={enter} onBlur={leave} onClick={event => { event.preventDefault(); event.stopPropagation(); enter(); }} onKeyDown={event => {
         if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); enter(); }
         if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setOpen(false); }
       }}><CircleHelp aria-hidden="true" className="size-3.5" /></span>
@@ -52,6 +55,7 @@ export function FieldCaption({ label, help, required = false }: { label: ReactNo
     const next = commonText(`field.${type}`) + (limits ? ` (${limits})` : "") + (example ? "\n" + commonText("field.example") + example : "") + (control.required ? "\n" + commonText("field.required") : "");
     setHint(current => current === next ? current : next);
   });
-  const content = help ?? resolve(label) ?? hint;
+  // Generated hints repeat the field itself; touch screens show only written help.
+  const content = help ?? resolve(label) ?? (touch() ? "" : hint);
   return <span ref={frame} className="inline-flex max-w-full items-center"><span id={id} data-field-caption-text>{label}</span>{required && <span className="ml-1 text-destructive" aria-hidden="true">*</span>}{content && <FieldHelp label={label}>{content}</FieldHelp>}</span>;
 }

@@ -77,7 +77,7 @@ export function App() {
     if (!identity) return;
     if (isPublicEntryPath() && !(route.workspace === "_initialize" && setupRequired && !deferredSetup)) {
       const target = safeLoginRedirect(new URLSearchParams(location.search).get("redirect"));
-      replacePath(target ?? href(identity.workspaces[0] ? {workspace:identity.workspaces[0].id,group:"ops",item:"hosts",mode:"list"} : {workspace:identity.user.is_superadmin?"_platform":"_workspaces",group:"platform",item:"workspaces",mode:"list"}, {}));
+      replacePath(target ?? href(identity.workspaces[0] ? landing(identity.workspaces[0].id) : {workspace:identity.user.is_superadmin?"_platform":"_workspaces",group:"platform",item:"workspaces",mode:"list"}, {}));
       return;
     }
     const current = identity.workspaces.find(workspace => workspace.id === route.workspace)
@@ -155,7 +155,7 @@ export function App() {
   if (!identity?.workspaces) return <><AppearanceActions floating /><Entry onReady={reload} error={error} /></>;
   if (setupRequired && !deferredSetup)
     return <><AppearanceActions floating /><Entry signedIn initialize onReady={() => { setDeferredSetup(true); reload(); }} error={error} /></>;
-  if (route.workspace === "_workspaces") return <div className="h-full overflow-auto"><AppearanceActions floating />{(identity.workspaces.length > 0 || identity.user.is_superadmin) && <Button className="absolute top-4 left-4" variant="outline" onClick={() => navigate(identity.workspaces.length ? {workspace:identity.workspaces[0]!.id,group:"ops",item:"hosts",mode:"list"} : {workspace:"_platform",group:"platform",item:"workspaces",mode:"list"}, {})}>{commonText("shell.backWorkspace")}</Button>}<Entry signedIn onReady={reload} error={error} /></div>;
+  if (route.workspace === "_workspaces") return <div className="h-full overflow-auto"><AppearanceActions floating />{(identity.workspaces.length > 0 || identity.user.is_superadmin) && <Button className="absolute top-4 left-4" variant="outline" onClick={() => navigate(identity.workspaces.length ? landing(identity.workspaces[0]!.id) : {workspace:"_platform",group:"platform",item:"workspaces",mode:"list"}, {})}>{commonText("shell.backWorkspace")}</Button>}<Entry signedIn onReady={reload} error={error} /></div>;
   if (route.workspace === "_account") return <Account identity={identity} reload={reload} headerActions={<WorkspaceHeaderActions identity={identity} onRefresh={reload} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={signedOut} />} />;
   if (route.workspace === "_platform" || (identity.user.is_superadmin && !route.workspace))
     return <Platform identity={identity} reload={reload} onSignedOut={signedOut} headerActions={<WorkspaceHeaderActions identity={identity} onRefresh={reload} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={signedOut} />} />;
@@ -494,12 +494,18 @@ function Workspace({ identity, reload, onSignedOut, conversationSessions }: { id
   );
 }
 
+/** Where a workspace opens: phones start in Conversations, like a messaging app; desktop keeps Hosts. */
+const landing = (workspace: string) =>
+  typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches
+    ? { workspace, group: "conversations", item: "conversations", mode: "list" as const }
+    : { workspace, group: "ops", item: "hosts", mode: "list" as const };
+
 const UnavailablePage = ({ onBack }: { onBack: () => void }) => (
   <div role="alert"><p>{commonText("shell.unavailable")}</p><Button variant="outline" onClick={onBack}>{commonText("common.backList")}</Button></div>
 );
 
 function AppearanceActions({ floating = false }: { floating?: boolean }) {
-  return <div className={floating ? "fixed end-3 top-2 z-40 flex items-center gap-1 rounded-md bg-card" : "flex shrink-0 items-center gap-1 max-sm:hidden"}><LanguageSwitcher /><ThemeSwitcher /></div>;
+  return <div className={floating ? "fixed end-3 top-2 z-40 flex items-center gap-1 rounded-md bg-card" : "flex shrink-0 items-center gap-1 max-sm:hidden"}>{floating && <ClientConnection />}<LanguageSwitcher /><ThemeSwitcher /></div>;
 }
 
 function WorkspaceHeaderActions({ identity, onRefresh, onWorkspaces, onSignedOut }: { identity: Identity; onRefresh: () => void; onWorkspaces?: () => void; onSignedOut: () => void }) {

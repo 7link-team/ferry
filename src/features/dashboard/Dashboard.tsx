@@ -3,7 +3,7 @@ import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { useEffect,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
 import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
-import { currentLocale } from "../../shared/i18n/locale";
+import { currentLocale, localizedPath } from "../../shared/i18n/locale";
 import { Button } from "../../shared/ui/button";
 import { InlineAlert } from "../../shared/ui/inline-alert";
 
@@ -69,6 +69,30 @@ const labels: Record<string, string> = {
   "invite-email": "invitation.email",
 };
 const label = (key: string) => labels[key] ? commonText(labels[key]) : key;
+
+type Recent = { id: string; title: string; kind?: string; agent_name?: string; unread?: number; last_message?: { text: string; sender_name: string; created_at: number } | null };
+/** Phones open on what people act on: their latest conversations. */
+function RecentConversations({ workspace }: { workspace: string }) {
+  const [rows, setRows] = useState<Recent[]>();
+  useEffect(() => {
+    const controller = new AbortController();
+    void api<{ items: Recent[] }>(`/workspaces/${workspace}/conversations?page=1&page_size=5`, { signal: controller.signal })
+      .then(result => setRows(result.items))
+      .catch(() => { if (!controller.signal.aborted) setRows([]); });
+    return () => controller.abort();
+  }, [workspace]);
+  if (!rows?.length) return null;
+  return <section data-recent-conversations aria-label={commonText("dashboard.recentConversations")} className="rounded-xl border bg-card md:hidden">
+    <h2 className="px-4 pt-3 text-sm font-medium">{commonText("dashboard.recentConversations")}</h2>
+    <ul>{rows.map(row => <li key={row.id}>
+      <a className="flex min-h-14 flex-col justify-center gap-0.5 px-4 py-2" href={localizedPath(`/workspaces/${encodeURIComponent(workspace)}/conversations/${row.id}`, currentLocale())}>
+        <span className="flex min-w-0 items-baseline gap-2"><span className="min-w-0 flex-1 truncate font-medium">{row.title}</span>
+          {!!row.unread && <span className="shrink-0 rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{row.unread}</span>}</span>
+        <span className="truncate text-xs text-muted-foreground">{row.last_message ? row.last_message.text : row.agent_name}</span>
+      </a>
+    </li>)}</ul>
+  </section>;
+}
 export function Dashboard({ workspace }: { workspace: string }) {
   useCommonTranslation();
   const timezone = useWorkspaceTimezone();
@@ -94,7 +118,7 @@ export function Dashboard({ workspace }: { workspace: string }) {
   }, [workspace, attempt]);
   return (
     <div className="min-h-0 space-y-5 overflow-auto pb-6">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 max-md:hidden">
         <Button
           variant="outline"
           disabled={busy}
@@ -109,6 +133,7 @@ export function Dashboard({ workspace }: { workspace: string }) {
         )}
       </div>
       {error && <InlineAlert>{error}</InlineAlert>}
+      <RecentConversations workspace={workspace} />
       {!data && busy && !error && <LoadingSkeleton variant="page" />}
       {data && (
         <>
@@ -118,18 +143,19 @@ export function Dashboard({ workspace }: { workspace: string }) {
           )}
           <section
             aria-label={commonText("dashboard.overview")}
-            className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+            className="grid grid-cols-3 gap-2 md:grid-cols-2 md:gap-3 lg:grid-cols-4"
           >
             {Object.entries(data.counts).map(([key, count]) => (
-              <div key={key} className="rounded-md border p-4">
-                <h2 className="text-sm text-muted-foreground">{label(key)}</h2>
-                <p className="mt-2 text-2xl font-semibold">{count}</p>
+              // Phones skip empty counters; they say nothing at a glance.
+              <div key={key} className={`rounded-md border p-2.5 md:p-4 ${count ? "" : "max-md:hidden"}`}>
+                <h2 className="truncate text-xs text-muted-foreground md:text-sm">{label(key)}</h2>
+                <p className="mt-1 text-xl font-semibold md:mt-2 md:text-2xl">{count}</p>
               </div>
             ))}
           </section>
           <div className="grid gap-4 lg:grid-cols-2">
             {Object.entries(data.states).map(([key, states]) => (
-              <section key={key} className="rounded-md border p-4">
+              <section key={key} className={`rounded-md border p-4 ${Object.keys(states).length ? "" : "max-md:hidden"}`}>
                 <h2 className="mb-3 font-medium">{commonText("dashboard.states", { name: label(key) })}</h2>
                 {Object.keys(states).length ? (
                   <dl className="flex flex-wrap gap-5">
