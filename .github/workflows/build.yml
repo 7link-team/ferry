@@ -340,8 +340,9 @@ jobs:
     env:
       FERRY_REQUIRE_ALL: "1"
       # Keep a tag so previews exercise registry digest resolution without Docker Hub's anonymous quota
-      # (mirror.gcr.io hit its shared per-minute project quota on 2026-11-24).
-      FERRY_TEST_IMAGE: public.ecr.aws/docker/library/busybox:1.36
+      # mirror.gcr.io quota is per minute (a later rerun passes); ECR Public anonymous
+      # pulls hit a data limit on shared GitHub runner IPs (2026-11-25), so it is not used.
+      FERRY_TEST_IMAGE: mirror.gcr.io/library/busybox:1.36
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
