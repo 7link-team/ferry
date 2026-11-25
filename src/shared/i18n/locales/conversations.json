@@ -1398,5 +1398,6 @@
   "success": ["Succeeded", "成功", "成功", "成功", "성공", "Berjaya"],
   "deleted": ["Deleted", "已删除", "已刪除", "削除済み", "삭제됨", "Dipadam"],
   "waiting": ["Waiting", "等待中", "等待中", "待機中", "대기 중", "Menunggu"],
-  "cancelling": ["Cancelling", "正在取消", "正在取消", "キャンセル中", "취소 중", "Membatalkan"]
+  "cancelling": ["Cancelling", "正在取消", "正在取消", "キャンセル中", "취소 중", "Membatalkan"],
+  "readOnlyComposer": ["You can read this conversation but not send messages.", "你可以查看此会话，但没有发送消息的权限。", "你可以查看此對話，但沒有傳送訊息的權限。", "この会話は閲覧のみ可能で、メッセージは送信できません。", "이 대화는 볼 수만 있고 메시지는 보낼 수 없습니다.", "Anda boleh membaca perbualan ini tetapi tidak boleh menghantar mesej."]
 }

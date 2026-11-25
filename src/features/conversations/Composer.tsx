@@ -1,3 +1,4 @@
+import { usePhone } from "../../shared/ui/use-phone";
 import {
   useEffect,
   useLayoutEffect,
@@ -96,6 +97,7 @@ export function Composer({
   agents: { id: string; name: string; state: string }[];
   people?: { id: string; name: string }[];
 }) {
+  const phone = usePhone();
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [mode, setMode] = useState(() => saved("ui.chat.sendKey", "enter"));
@@ -606,7 +608,8 @@ export function Composer({
           value={draft.prompt}
           disabled={locked || recording}
           style={{ height }}
-          placeholder={t(group ? "groupPlaceholder" : "messagePlaceholder")}
+          // Phones keep the placeholder on one line; the @ hint is for wider screens.
+          placeholder={t(group && !phone ? "groupPlaceholder" : "messagePlaceholder")}
           onKeyDown={keyDown}
           role={group ? "combobox" : undefined}
           aria-haspopup={group ? "listbox" : undefined}

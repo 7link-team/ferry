@@ -287,6 +287,8 @@ input[type="checkbox"]:not([aria-hidden="true"]) {
     padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
   }
   [data-app-header] { padding-top: max(.5rem, env(safe-area-inset-top)); }
+  /* Long press opens a message's actions (copy included), not text selection. */
+  [data-message-id] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   /* Touch scrolling needs no visible scrollbars, as in native apps. */
   [data-app-viewport], [data-app-viewport] * { scrollbar-width: none; }
   [data-app-viewport] ::-webkit-scrollbar { display: none; }

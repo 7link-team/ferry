@@ -277,6 +277,17 @@ export function Conversation({
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [agentIds, setAgentIds] = useState<string[]>([]);
   const [openThread, setOpenThread] = useState("");
+  // Phones show a message's actions after a long press, like messaging apps.
+  const [pressed, setPressed] = useState("");
+  const pressTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    if (!pressed) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!(event.target as Element | null)?.closest?.(`[data-message-id="${pressed}"]`)) setPressed("");
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [pressed]);
   const [membersVersion, setMembersVersion] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   useEffect(() => {
@@ -1047,6 +1058,11 @@ export function Conversation({
                     data-message-id={m?.id}
                     data-turn-id={m?.role === "user" ? undefined : turn?.id}
                     data-own-message={own || undefined}
+                    data-pressed={(m && pressed === m.id) || undefined}
+                    onContextMenu={event => { if (m && window.matchMedia?.("(max-width: 639px)").matches) { event.preventDefault(); setPressed(m.id); } }}
+                    onTouchStart={() => { clearTimeout(pressTimer.current); if (m) pressTimer.current = setTimeout(() => setPressed(m.id), 450); }}
+                    onTouchEnd={() => clearTimeout(pressTimer.current)}
+                    onTouchMove={() => clearTimeout(pressTimer.current)}
                     className={`group/message relative my-2 flex min-w-0 flex-wrap gap-x-2.5 gap-y-2 rounded-lg px-1 py-1.5 sm:px-3 ${own ? "justify-end" : ""}`}
                   >
                     {!own && <button type="button" className="mt-0.5 shrink-0 rounded-full focus-visible:outline-2 focus-visible:outline-ring" aria-label={`${t("memberDetails")} · ${name}`}
@@ -1054,8 +1070,8 @@ export function Conversation({
                       <IdentityAvatar id={m?.role === "user" ? m.owner_id : m?.agent_id || turn?.agent_id || data.agent_id} name={name} kind={m?.role === "user" ? "user" : "agent"}
                         value={m?.role === "user" ? data.members.find(member => member.id === m.owner_id)?.avatar : data.kind === "group" ? data.agents.find(agent => agent.id === (m?.agent_id || turn?.agent_id))?.avatar : data.agent_avatar} className="size-10" />
                     </button>}
-                    <div data-message-bubble className={`rounded-xl border px-3 py-2.5 shadow-xs sm:px-4 ${own ? "w-fit min-w-0 max-w-[85%] rounded-tr-sm border-primary/30 bg-primary/10 text-foreground" : m?.role === "user" ? "w-fit min-w-0 max-w-[calc(100%-3.25rem)] rounded-tl-sm border-primary/20 bg-muted text-foreground" : "min-w-[min(100%,12rem)] flex-1 rounded-tl-sm bg-card text-card-foreground"}`}>
-                      <div className={`mb-1 flex min-h-6 flex-wrap items-center gap-x-2 text-xs text-muted-foreground ${own ? "justify-end" : ""}`}>
+                    <div data-message-bubble className={`rounded-xl border px-3 py-2.5 shadow-xs sm:px-4 ${own ? "flex flex-col w-fit min-w-0 max-w-[85%] rounded-tr-sm border-primary/30 bg-primary/10 text-foreground" : m?.role === "user" ? "w-fit min-w-0 max-w-[calc(100%-3.25rem)] rounded-tl-sm border-primary/20 bg-muted text-foreground" : "min-w-[min(100%,12rem)] flex-1 rounded-tl-sm bg-card text-card-foreground"}`}>
+                      <div className={`flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground ${own ? "order-last mt-1 justify-end text-[11px]" : "mb-1 min-h-6"}`}>
                         {!own && <span className="font-semibold text-foreground">
                           {name}
                         </span>}
@@ -1275,7 +1291,7 @@ export function Conversation({
                       </div>
                     </div>
                     {m && !m.retracted_at && (
-                      <div className={`${own ? "ml-auto justify-end" : "ml-11"} flex w-[calc(100%-2.75rem)] items-center text-muted-foreground sm:absolute sm:right-2 sm:top-0 sm:ml-0 sm:w-auto sm:rounded-md sm:border sm:bg-background sm:p-0.5 sm:shadow-sm sm:opacity-0 sm:group-hover/message:opacity-100 sm:group-focus-within/message:opacity-100`}>
+                      <div data-message-actions className={`${own ? "ml-auto justify-end" : "ml-11"} ${pressed === m.id ? "" : "max-sm:hidden"} flex w-[calc(100%-2.75rem)] items-center text-muted-foreground sm:absolute sm:right-2 sm:top-0 sm:ml-0 sm:w-auto sm:rounded-md sm:border sm:bg-background sm:p-0.5 sm:shadow-sm sm:opacity-0 sm:group-hover/message:opacity-100 sm:group-focus-within/message:opacity-100`}>
                         {m.prompt && <CopyMessage text={m.prompt} />}
                         <Button
                           type="button"
@@ -1415,45 +1431,50 @@ export function Conversation({
             {error}
           </InlineAlert>
         )}
-        <Composer
-          endpoint={endpoint}
-          draft={{
-            prompt: draft,
-            attachments,
-            targets,
-            mentions,
-            reply_to: thread,
-          }}
-          onChange={(value) => {
-            setDraft(value.prompt);
-            setAttachments(value.attachments);
-            setTargets(value.targets ?? []);
-            setMentions(value.mentions ?? []);
-          }}
-          reply={thread ? (() => {
-            const message = data.messages.find((m) => m.id === thread);
-            return {
-              name: message?.sender_name || data.agents?.find((a) => a.id === message?.agent_id)?.name || t("agent"),
-              text: message?.retracted_at || !message ? t("retracted") : message.prompt || message.attachments?.map((a) => a.name).join(", ") || t("attach"),
-            };
-          })() : undefined}
-          onCancelReply={() => setThread("")}
-          onSend={async () => { await send(); }}
-          queue={queue && data.kind !== "group" ? {
-            state: queue.state,
-            onCancel: () => setQueue(undefined),
-            onSendNow: () => { setQueue(undefined); void send(); },
-          } : undefined}
-          disabled={!runnable}
-          busy={busy}
-          current={current}
-          group={data.kind === "group"}
-          agents={data.agents ?? []}
-          people={data.members.filter((m) => m.id !== data.viewer_id)}
-          onStop={() => {
-            if (current) void act(`/turns/${current.id}/cancellations`);
-          }}
-        />
+        {!permissions.has("conversations.run") ? (
+          // Like messaging apps: say plainly that this member cannot send, instead of an inert input.
+          <p data-read-only-composer role="status" className="rounded-2xl border bg-muted px-4 py-3 text-center text-sm text-muted-foreground">{t("readOnlyComposer")}</p>
+        ) : (
+          <Composer
+            endpoint={endpoint}
+            draft={{
+              prompt: draft,
+              attachments,
+              targets,
+              mentions,
+              reply_to: thread,
+            }}
+            onChange={(value) => {
+              setDraft(value.prompt);
+              setAttachments(value.attachments);
+              setTargets(value.targets ?? []);
+              setMentions(value.mentions ?? []);
+            }}
+            reply={thread ? (() => {
+              const message = data.messages.find((m) => m.id === thread);
+              return {
+                name: message?.sender_name || data.agents?.find((a) => a.id === message?.agent_id)?.name || t("agent"),
+                text: message?.retracted_at || !message ? t("retracted") : message.prompt || message.attachments?.map((a) => a.name).join(", ") || t("attach"),
+              };
+            })() : undefined}
+            onCancelReply={() => setThread("")}
+            onSend={async () => { await send(); }}
+            queue={queue && data.kind !== "group" ? {
+              state: queue.state,
+              onCancel: () => setQueue(undefined),
+              onSendNow: () => { setQueue(undefined); void send(); },
+            } : undefined}
+            disabled={!runnable}
+            busy={busy}
+            current={current}
+            group={data.kind === "group"}
+            agents={data.agents ?? []}
+            people={data.members.filter((m) => m.id !== data.viewer_id)}
+            onStop={() => {
+              if (current) void act(`/turns/${current.id}/cancellations`);
+            }}
+          />
+        )}
       </div>
       </div>
       <Dialog.Root
