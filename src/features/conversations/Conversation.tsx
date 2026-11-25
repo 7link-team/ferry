@@ -1046,18 +1046,19 @@ export function Conversation({
                   <article
                     data-message-id={m?.id}
                     data-turn-id={m?.role === "user" ? undefined : turn?.id}
-                    className="group/message relative my-2 flex min-w-0 flex-wrap gap-x-2.5 gap-y-2 rounded-lg px-1 py-1.5 sm:px-3"
+                    data-own-message={own || undefined}
+                    className={`group/message relative my-2 flex min-w-0 flex-wrap gap-x-2.5 gap-y-2 rounded-lg px-1 py-1.5 sm:px-3 ${own ? "justify-end" : ""}`}
                   >
-                    <button type="button" className="mt-0.5 shrink-0 rounded-full focus-visible:outline-2 focus-visible:outline-ring" aria-label={`${t("memberDetails")} · ${name}`}
+                    {!own && <button type="button" className="mt-0.5 shrink-0 rounded-full focus-visible:outline-2 focus-visible:outline-ring" aria-label={`${t("memberDetails")} · ${name}`}
                       onClick={() => { setSelectedMember(`${m?.role === "user" ? "user" : "agent"}:${m?.role === "user" ? m.owner_id : m?.agent_id || turn?.agent_id || data.agent_id}`); setInfoOpen(true); }}>
                       <IdentityAvatar id={m?.role === "user" ? m.owner_id : m?.agent_id || turn?.agent_id || data.agent_id} name={name} kind={m?.role === "user" ? "user" : "agent"}
                         value={m?.role === "user" ? data.members.find(member => member.id === m.owner_id)?.avatar : data.kind === "group" ? data.agents.find(agent => agent.id === (m?.agent_id || turn?.agent_id))?.avatar : data.agent_avatar} className="size-10" />
-                    </button>
-                    <div className={`min-w-[min(100%,12rem)] flex-1 rounded-xl border px-3 py-2.5 shadow-xs sm:px-4 ${m?.role === "user" ? "rounded-tl-sm border-primary/20 bg-muted text-foreground" : "rounded-tl-sm bg-card text-card-foreground"}`}>
-                      <div className="mb-1 flex min-h-6 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                        <span className="font-semibold text-foreground">
+                    </button>}
+                    <div data-message-bubble className={`rounded-xl border px-3 py-2.5 shadow-xs sm:px-4 ${own ? "w-fit min-w-0 max-w-[85%] rounded-tr-sm border-primary/30 bg-primary/10 text-foreground" : m?.role === "user" ? "w-fit min-w-0 max-w-[calc(100%-3.25rem)] rounded-tl-sm border-primary/20 bg-muted text-foreground" : "min-w-[min(100%,12rem)] flex-1 rounded-tl-sm bg-card text-card-foreground"}`}>
+                      <div className={`mb-1 flex min-h-6 flex-wrap items-center gap-x-2 text-xs text-muted-foreground ${own ? "justify-end" : ""}`}>
+                        {!own && <span className="font-semibold text-foreground">
                           {name}
-                        </span>
+                        </span>}
                         {m?.role === "assistant" && (
                           <span className="rounded border px-1 text-[10px]">
                             {t("agent")}
@@ -1068,7 +1069,7 @@ export function Conversation({
                             {t("relayMessage")}
                           </span>
                         )}
-                        {own && <span>{t("you")}</span>}
+
                         {!!m?.edited_at && <span>{t("edited")}</span>}
                         {date && (
                           <time
@@ -1274,7 +1275,7 @@ export function Conversation({
                       </div>
                     </div>
                     {m && !m.retracted_at && (
-                      <div className="ml-11 flex w-[calc(100%-2.75rem)] items-center text-muted-foreground sm:absolute sm:right-2 sm:top-0 sm:ml-0 sm:w-auto sm:rounded-md sm:border sm:bg-background sm:p-0.5 sm:shadow-sm sm:opacity-0 sm:group-hover/message:opacity-100 sm:group-focus-within/message:opacity-100">
+                      <div className={`${own ? "ml-auto justify-end" : "ml-11"} flex w-[calc(100%-2.75rem)] items-center text-muted-foreground sm:absolute sm:right-2 sm:top-0 sm:ml-0 sm:w-auto sm:rounded-md sm:border sm:bg-background sm:p-0.5 sm:shadow-sm sm:opacity-0 sm:group-hover/message:opacity-100 sm:group-focus-within/message:opacity-100`}>
                         {m.prompt && <CopyMessage text={m.prompt} />}
                         <Button
                           type="button"

@@ -73,6 +73,12 @@ try {
     await page.locator('main [data-slot="loading-skeleton"]').waitFor();
     assert.equal(await page.getByRole('heading', {name:'Start a conversation',exact:true}).count(), 0, 'no new-chat empty flash before the list arrives');
     releaseList();
+    if(width<768){
+      // Phones open the list first; a conversation is its own page without the bottom navigation.
+      const list=page.locator('[data-mobile-conversation-list]');await list.waitFor();
+      assert.equal(await page.locator('textarea').count(),0,'no composer on the list page');
+      await list.getByRole('link',{name:new RegExp(row.title)}).first().tap();
+    }
     await page.getByRole('heading', { name: row.title, exact: true }).waitFor();
     assert.equal(await page.locator('[data-pending-banner]').count(), 0);
     if(width<768){
@@ -146,6 +152,11 @@ try {
     let releaseDetail;
     detailGate = new Promise(resolve => releaseDetail = resolve);
     await go('/en-US/workspaces/1/conversations');
+    if(width<768){
+      // The menu shows the list on phones; reopening the conversation restores its draft.
+      const list=page.locator('[data-mobile-conversation-list]');await list.waitFor();
+      await list.getByRole('link',{name:new RegExp(row.title)}).first().tap();
+    }
     await page.getByRole('heading', {name:row.title,exact:true}).waitFor();
     assert.equal(await page.locator('main [data-slot="loading-skeleton"]').count(),0,'cached room has no loading replacement');
     assert.equal(await page.locator('textarea').inputValue(),'Keep this unsent draft');
@@ -220,7 +231,8 @@ try {
         assert(metrics.feed.client>8,label+' message region collapsed');
         assert(metrics.document<=metrics.width,label+' whole-page horizontal overflow');
         assert.equal(metrics.draft,'Keep this unsent draft',label+' draft lost');
-        if (!focused) assert(metrics.nav.height>0 && metrics.nav.bottom<=top+height+1,label+' navigation outside viewport');
+        // An open conversation is its own page on phones: no bottom navigation, only the composer.
+        assert(!metrics.nav || metrics.nav.height===0,label+' bottom navigation must be hidden in an open conversation');
       };
       for (const locale of ['en-US','zh-CN','ms-MY']) {
         await go(`/${locale}/workspaces/1/conversations/2`);
@@ -242,13 +254,18 @@ try {
       await page.locator('textarea').focus();
       await page.evaluate(()=>{const view=visualViewport;for(const [key,value] of Object.entries({height:360,offsetTop:20}))Object.defineProperty(view,key,{configurable:true,value});view.dispatchEvent(new Event('resize'));});
       await settle();await bounds('visual-keyboard',true,20,360);
+      // Back goes to the conversation list page (messaging-app navigation), which also fits the keyboard viewport.
       await page.locator('[data-conversation-navigation] button').tap();
-      const drawer=page.locator('[data-mobile-drawer]');await drawer.waitFor();
-      await drawer.locator('input').focus();await settle();
-      const drawerBox=await drawer.boundingBox();
-      assert(drawerBox.y>=20 && drawerBox.y+drawerBox.height<=381,'conversation drawer must fit the keyboard viewport');
+      const list=page.locator('[data-mobile-conversation-list]');await list.waitFor();
+      await list.locator('input').focus();await settle();
+      const listBox=await list.boundingBox();
+      assert(listBox.y>=20 && listBox.y<=381,'conversation list must start inside the keyboard viewport');
       await page.evaluate(()=>{for(const key of ['height','offsetTop'])delete visualViewport[key];visualViewport.dispatchEvent(new Event('resize'));});
-      await drawer.getByRole('button').first().tap();
+      await list.locator('input').evaluate(element=>element.blur());await settle();
+      assert.equal(await page.locator('[data-mobile-navigation]').isVisible(),true,'bottom navigation returns on the list page once the keyboard closes');
+      await list.getByRole('link',{name:new RegExp(row.title)}).first().tap();
+      await page.locator('textarea').waitFor();
+      assert.equal(await page.locator('[data-mobile-navigation]').isVisible(),false,'an open conversation hides the bottom navigation');
       await page.locator('textarea').evaluate(element=>element.blur());await settle();await bounds('keyboard-dismissed',false);
       await page.emulateMedia({reducedMotion:'reduce'});
       await page.evaluate(()=>{document.documentElement.style.fontSize='32px';document.documentElement.classList.add('dark');});

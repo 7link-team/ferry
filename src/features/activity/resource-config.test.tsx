@@ -41,7 +41,8 @@ it("opens a read-only audit panel with context, explicit missing details and fix
   expect(dialog.querySelector('[role="tabpanel"]')!.classList.contains("dialog-body")).toBe(true);
   await act(async () => dialog.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
   expect(document.querySelector('[role="dialog"]')).toBeNull();
-  expect(document.activeElement).toBe(host.querySelector("button"));
+  // The dialog returns focus after it closes, which is asynchronous under load.
+  await vi.waitFor(() => expect(document.activeElement).toBe(host.querySelector("button")));
 });
 
 it("shows formatted JSON in the shared read-only editor and copies the original record", async () => {

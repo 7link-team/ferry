@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "cn";
 import {
+  ArrowLeft,
   Bot,
-  Menu,
   MessageSquare,
   Pencil,
   Plus,
   Search,
   Users,
-  X,
 } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { href, navigate, useRoute } from "../router";
@@ -30,6 +29,7 @@ import {
 } from "../../features/conversations/Conversation";
 import { conversationText as t } from "../../features/conversations/resource-config";
 import { InlineAlert } from "../../shared/ui/inline-alert";
+import { usePhone } from "../../shared/ui/use-phone";
 
 interface Summary {
   id: string;
@@ -74,7 +74,8 @@ export function ConversationsWorkspace({
   const [query, setQuery] = useState(session.list?.query ?? "");
   const [pages, setPages] = useState(session.list?.pages ?? 1);
   const [total, setTotal] = useState(session.list?.total ?? 0);
-  const [mobile, setMobile] = useState(false);
+  // Phones work like messaging apps: the list first, a conversation as its own page.
+  const phone = usePhone();
   const [revision, setRevision] = useState(0);
   const [activePending, setActivePending] = useState<{ id: string; count: number }>();
   const updatePending = useCallback((id: string, count: number) => {
@@ -83,7 +84,7 @@ export function ConversationsWorkspace({
   const readable = permissions.has("conversations.read");
   const editing = route.mode === "new" || route.mode === "edit";
   const selected = route.mode === "new" ? undefined : route.id ?? (route.mode === "list" && loaded
-    ? session.selected ?? (!query ? rows[0]?.id : undefined) : undefined);
+    && !phone ? session.selected ?? (!query ? rows[0]?.id : undefined) : undefined);
   const drafts = useRef(session.drafts);
   const saveSnapshot = useCallback((snapshot: ConversationSnapshot | undefined) => {
     session.snapshot = snapshot;
@@ -189,9 +190,6 @@ export function ConversationsWorkspace({
         { replace: true },
       );
   }, [workspace, route.mode, loaded, rows, query, error, selected]);
-  useEffect(() => {
-    setMobile(false);
-  }, [route.id, route.mode]);
   const go = (id: string | undefined, mode: "new" | "view" | "edit" | "list") =>
     navigate(
       {
@@ -342,15 +340,15 @@ export function ConversationsWorkspace({
       </nav>
     </>
   );
-  const mobileButton = (
+  const backToList = (
     <Button
       className="size-11 md:hidden"
       variant="ghost"
       size="icon"
       aria-label={t("conversationList")}
-      onClick={() => setMobile(true)}
+      onClick={() => go(undefined, "list")}
     >
-      <Menu />
+      <ArrowLeft />
     </Button>
   );
   return (
@@ -359,7 +357,7 @@ export function ConversationsWorkspace({
         {sidebar}
       </aside>
       <main className="relative flex min-h-0 min-w-0 flex-col">
-        {(!selected || !readable) && <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1 md:hidden">{mobileButton}<div className="ml-auto flex min-w-0 flex-wrap items-center gap-1">{appActions}</div></div>}
+        {(!selected || !readable) && <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1 pt-[max(.25rem,env(safe-area-inset-top))] md:hidden"><div className="ml-auto flex min-w-0 flex-wrap items-center gap-1">{appActions}</div></div>}
         {!readable || denied ? (
           <p role="alert">{error || commonText("shell.forbidden")}</p>
         ) : selected ? (
@@ -368,7 +366,7 @@ export function ConversationsWorkspace({
             workspace={workspace}
             id={selected}
             permissions={permissions}
-            navigationAction={mobileButton}
+            navigationAction={backToList}
             appActions={appActions}
             initialDraft={drafts.current.get(selected)}
             initialSnapshot={session.snapshot}
@@ -399,6 +397,8 @@ export function ConversationsWorkspace({
               )
             }
           />
+        ) : phone && route.mode !== "new" && rows.length > 0 ? (
+          <div data-mobile-conversation-list className="flex min-h-0 flex-1 flex-col bg-sidebar text-sidebar-foreground">{sidebar}</div>
         ) : !loaded && route.mode !== "new" ? (
           <LoadingSkeleton variant="form" />
         ) : error && !rows.length && route.mode !== "new" ? (
@@ -424,32 +424,6 @@ export function ConversationsWorkspace({
           </>
         )}
       </main>
-      <Dialog.Root open={mobile} onOpenChange={setMobile}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40 md:hidden" />
-          <Dialog.Content
-            data-mobile-drawer
-            aria-describedby={undefined}
-            className="fixed inset-y-0 left-0 z-50 flex w-[min(20rem,85vw)] flex-col border-r bg-sidebar text-sidebar-foreground shadow-lg md:hidden"
-          >
-            <div className="flex items-center justify-between px-4 pt-3">
-              <Dialog.Title className="font-medium">
-                {t("conversationList")}
-              </Dialog.Title>
-              <Dialog.Close asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={commonText("common.close")}
-                >
-                  <X />
-                </Button>
-              </Dialog.Close>
-            </div>
-            {sidebar}
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
       <Dialog.Root
         open={editing}
         onOpenChange={(open) => {

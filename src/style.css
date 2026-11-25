@@ -289,6 +289,9 @@ input[type="checkbox"]:not([aria-hidden="true"]) {
   [data-app-header] { padding-top: max(.5rem, env(safe-area-inset-top)); }
   [data-workspace-shell][data-conversation-page] { grid-template-rows: minmax(0, 1fr) auto; }
   [data-workspace-shell][data-conversation-page] > [data-app-header] { display: none; }
+  /* An open conversation is its own page, like messaging apps: no bottom navigation. */
+  [data-workspace-shell][data-conversation-open] { grid-template-rows: minmax(0, 1fr); }
+  [data-workspace-shell][data-conversation-open] > [data-mobile-navigation] { display: none; }
   [data-conversation-header] { padding-top: max(8px, env(safe-area-inset-top)); }
   input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([aria-hidden="true"]),
   select:not([aria-hidden="true"]), textarea {

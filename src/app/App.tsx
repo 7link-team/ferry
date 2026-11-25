@@ -304,7 +304,7 @@ function Workspace({ identity, reload, onSignedOut, conversationSessions }: { id
   </>;
 
   return (
-    <div data-workspace-shell data-conversation-page={item.resource === "conversations" || undefined} className="grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] max-md:overflow-hidden md:grid-rows-[auto_minmax(0,1fr)]">
+    <div data-workspace-shell data-conversation-page={item.resource === "conversations" || undefined} data-conversation-open={(item.resource === "conversations" && !!route.id && route.mode === "view") || undefined} className="grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] max-md:overflow-hidden md:grid-rows-[auto_minmax(0,1fr)]">
       <AppHeader home={to(nav[0]!.key, nav[0]!.items[0]!.key)} navigation={
         <nav className="hidden min-w-0 max-w-full gap-1 overflow-x-auto md:flex" aria-label={t("app.modules")}>
           {groups.map((g) => (

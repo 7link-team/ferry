@@ -1,5 +1,6 @@
+import { usePhone } from "../../shared/ui/use-phone";
 import { ConfigurationSection, ScrollFormSections } from "../../shared/ui/scroll-form-sections";
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Minus, Plus } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
 import { base, named } from "../../shared/api/resource";
@@ -31,19 +32,6 @@ const w = (key: string, values?: Record<string, unknown>) => commonText(`resourc
 const STEPS = ["stepTemplate", "stepValues", "stepRoles", "stepPlacement", "stepConfirm"] as const;
 const DRIVER_KEYS: Record<string, string> = { native: "driverNative", docker: "driverDocker", compose: "driverCompose", stack: "driverStack" };
 export const driverLabel = (driver: string) => DRIVER_KEYS[driver] ? w(DRIVER_KEYS[driver]) : driver;
-const PHONE = "(max-width: 767px)";
-/** Phone layout (< 768px, the `md` breakpoint); false where media queries are unavailable. */
-function usePhone(): boolean {
-  return useSyncExternalStore(
-    notify => {
-      if (typeof window.matchMedia !== "function") return () => {};
-      const query = window.matchMedia(PHONE);
-      query.addEventListener("change", notify);
-      return () => query.removeEventListener("change", notify);
-    },
-    () => typeof window.matchMedia === "function" && window.matchMedia(PHONE).matches,
-  );
-}
 const selectClass = "min-h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm lg:min-h-9";
 const touch = "min-h-11 lg:min-h-9";
 
