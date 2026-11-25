@@ -41,6 +41,15 @@ interface Summary {
   mentions?: number;
   /** Approvals waiting for the viewer, including ones left when a reply ended. */
   pending?: number;
+  /** The latest message, as a one-line preview. */
+  last_message?: { text: string; sender_name: string; role: string; created_at: number } | null;
+}
+/** Messaging-app list time: clock time today, otherwise the date. */
+function previewTime(at: number) {
+  const date = new Date(at), now = new Date();
+  return date.toDateString() === now.toDateString()
+    ? date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
 }
 /** Owned by the authenticated shell; never persisted to browser storage. */
 export interface ConversationsSession {
@@ -295,10 +304,15 @@ export function ConversationsWorkspace({
               )}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium">{row.title}</span>
+              <span className="flex min-w-0 items-baseline gap-2">
+                <span className="min-w-0 flex-1 truncate font-medium">{row.title}</span>
+                {row.last_message && <time data-conversation-time className="shrink-0 text-xs opacity-60">{previewTime(row.last_message.created_at)}</time>}
+              </span>
               <span className="mt-1 flex min-w-0 gap-2 text-xs opacity-70">
-                <span className="truncate">
-                  {row.kind === "group" ? t("group") : row.agent_name}
+                <span data-conversation-preview className="truncate">
+                  {row.last_message
+                    ? `${row.kind === "group" && row.last_message.sender_name ? `${row.last_message.sender_name}: ` : ""}${row.last_message.text}`
+                    : row.kind === "group" ? t("group") : row.agent_name}
                 </span>
                 {row.state !== "active" && (
                   <span className="shrink-0">{t(row.state)}</span>

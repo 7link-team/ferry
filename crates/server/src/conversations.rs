@@ -456,6 +456,7 @@ async fn list(
         .await?;
     let counts = interactions::counts(&s.db, &scope, &rows).await?;
     let pending = pending_counts(&s.db, &scope, &rows).await?;
+    let last = last_messages(&s.db, &rows).await?;
     let items = rows
         .iter()
         .map(|r| {
@@ -464,6 +465,7 @@ async fn list(
             value["unread"] = json!(unread);
             value["mentions"] = json!(mentions);
             value["pending"] = json!(pending.get(&r.id).copied().unwrap_or(0));
+            value["last_message"] = last.get(&r.id).cloned().unwrap_or(Value::Null);
             value["kind"] = json!(if grouped.contains(&r.id) {
                 "group"
             } else {
@@ -475,6 +477,47 @@ async fn list(
     Ok(Json(
         json!({"items":items,"total":total,"page":query.page,"page_size":query.page_size}),
     ))
+}
+/// Each conversation's latest message for list previews, like messaging apps:
+/// one line of text, who sent it and when. Platform notices are skipped.
+async fn last_messages(
+    conn: &impl ConnectionTrait,
+    rows: &[conversations::Model],
+) -> Result<std::collections::HashMap<i64, Value>> {
+    use crate::entities::ai_chat_messages as chat;
+    let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+    if ids.is_empty() {
+        return Ok(Default::default());
+    }
+    let latest: Vec<i64> = chat::Entity::find()
+        .select_only()
+        .column_as(chat::Column::Id.max(), "id")
+        .filter(chat::Column::ConversationId.is_in(ids))
+        .filter(chat::Column::Role.is_in(["user", "assistant", "relay"]))
+        .filter(chat::Column::RetractedAt.is_null())
+        .group_by(chat::Column::ConversationId)
+        .into_tuple()
+        .all(conn)
+        .await?;
+    let messages = chat::Entity::find()
+        .filter(chat::Column::Id.is_in(latest))
+        .all(conn)
+        .await?;
+    Ok(messages
+        .into_iter()
+        .map(|m| {
+            let line: String = m.prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+            let mut text: String = line.chars().take(120).collect();
+            if text.len() < line.len() {
+                text.push('…');
+            }
+            (
+                m.conversation_id,
+                json!({"text":text,"sender_name":m.sender_name,"role":m.role,
+                "owner_id":Id::from(m.owner_id),"created_at":m.created_at}),
+            )
+        })
+        .collect())
 }
 #[derive(Deserialize)]
 pub struct Create {

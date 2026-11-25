@@ -2946,3 +2946,59 @@ async fn room_agents_sharing_a_directory_take_turns() {
         "the second Agent waits instead of failing on the shared directory"
     );
 }
+
+#[tokio::test]
+async fn conversation_list_previews_the_latest_message_like_messaging_apps() {
+    use crate::entities::ai_chat_messages as chat;
+    let (_dir, s, id) = seeded().await;
+    let message = |row: i64, role: &str, prompt: &str, retracted: bool| chat::Model {
+        id: row,
+        workspace_id: 1,
+        conversation_id: id.into(),
+        owner_id: 1,
+        created_at: row,
+        client_id: format!("c{row}"),
+        prompt: prompt.into(),
+        attachments: "[]".into(),
+        targets: "[]".into(),
+        role: role.into(),
+        agent_id: 0,
+        turn_id: None,
+        reply_to: None,
+        sender_name: "Owner".into(),
+        text_items: None,
+        version: 1,
+        edited_at: None,
+        retracted_at: retracted.then_some(1),
+        mentions: "[]".into(),
+    };
+    for m in [
+        message(9001, "user", "first\nquestion", false),
+        message(9002, "assistant", &"long answer ".repeat(40), false),
+        message(9003, "user", "taken back", true),
+        message(9004, "notice", "host switched", false),
+    ] {
+        chat::Entity::insert(m.into_active_model())
+            .exec(&s.db)
+            .await
+            .unwrap();
+    }
+    let Json(page) = list(State(s.clone()), admin(1), Query(HashMap::new()))
+        .await
+        .unwrap();
+    let row = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == json!(id))
+        .unwrap()
+        .clone();
+    let last = &row["last_message"];
+    assert_eq!(
+        last["role"], "assistant",
+        "notices and retracted messages are skipped"
+    );
+    let text = last["text"].as_str().unwrap();
+    assert!(text.ends_with('…') && text.chars().count() <= 121, "{text}");
+    assert!(!text.contains('\n'));
+}
