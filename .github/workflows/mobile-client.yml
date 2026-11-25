@@ -49,6 +49,8 @@ jobs:
   android:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    # The persistent signing secrets are stored in the "ferry" environment.
+    environment: ferry
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
