@@ -37,23 +37,33 @@ if (!verifierVersion) throw new Error('Android certificate verifier missing from
 build = build.replace(/\n\/\/ Android system certificate verifier\nrepositories \{[^\n]+\}\ndependencies \{[^\n]+\}\n/g, '\n').trimEnd();
 build += `\n// Android system certificate verifier\nrepositories { maven { url = uri("https://raw.githubusercontent.com/rustls/rustls-platform-verifier/maven-archive/android-release-support/maven/") } }\ndependencies { implementation("org.rustls:rustls-platform-verifier:${verifierVersion}") }\n`;
 build = build.replace(/compileSdk = \d+/, 'compileSdk = 36').replace(/targetSdk = \d+/, 'targetSdk = 36');
-if (!build.includes('// Persistent mobile update signing')) {
+if (!build.includes('// Persistent mobile release signing')) {
   build += `
-// Persistent mobile update signing. Secrets come from the build environment.
+// Persistent mobile release signing. Secrets come from the build environment.
+// Without them (forks, pull requests) release APKs fall back to the debug key so
+// they stay installable for acceptance; tagged releases require the persistent key.
 android {
     val updateStore = System.getenv("MOBILE_ANDROID_KEYSTORE_PATH")
-    if (!updateStore.isNullOrBlank()) {
-        signingConfigs.getByName("debug") {
-            storeFile = file(updateStore)
-            storePassword = requireNotNull(System.getenv("MOBILE_ANDROID_STORE_PASSWORD"))
-            keyAlias = requireNotNull(System.getenv("MOBILE_ANDROID_KEY_ALIAS"))
-            keyPassword = requireNotNull(System.getenv("MOBILE_ANDROID_KEY_PASSWORD"))
-        }
+    val persistent = if (updateStore.isNullOrBlank()) null else signingConfigs.create("persistent") {
+        storeFile = file(updateStore)
+        storePassword = requireNotNull(System.getenv("MOBILE_ANDROID_STORE_PASSWORD"))
+        keyAlias = requireNotNull(System.getenv("MOBILE_ANDROID_KEY_ALIAS"))
+        keyPassword = requireNotNull(System.getenv("MOBILE_ANDROID_KEY_PASSWORD"))
+    }
+    buildTypes {
+        getByName("debug") { if (persistent != null) signingConfig = persistent }
+        getByName("release") { signingConfig = persistent ?: signingConfigs.getByName("debug") }
     }
 }
 `;
 }
 writeFileSync(gradle, build);
+writeFileSync(fileURLToPath(new URL('./gen/android/app/proguard-native-client.pro', import.meta.url)), `# Classes reached from Rust through JNI by name must survive release shrinking.
+-keep class org.rustls.platformverifier.** { *; }
+-keep class nativeclient.tls.** { *; }
+-keep class ${JSON.parse(readFileSync(new URL('./tauri.conf.json', import.meta.url), 'utf8')).identifier}.ClientUpdatePlugin { *; }
+-keep class ${JSON.parse(readFileSync(new URL('./tauri.conf.json', import.meta.url), 'utf8')).identifier}.InstallUpdateArgs { *; }
+`);
 
 // Protect transparent edge-to-edge system bars independently of remote theme.
 const config = JSON.parse(readFileSync(new URL('./tauri.conf.json', import.meta.url), 'utf8'));

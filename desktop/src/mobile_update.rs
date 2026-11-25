@@ -38,7 +38,7 @@ fn select<'a>(
             }
             let asset = if platform == "android" {
                 let name = format!(
-                    "{}-v{}-android-{}-debug.apk",
+                    "{}-v{}-android-{}.apk",
                     channel.mobile.package_name, version, abi
                 );
                 let asset = r.assets.iter().find(|a| a.name == name)?;
@@ -372,9 +372,9 @@ mod tests {
         .unwrap();
         let releases = serde_json::from_value(serde_json::json!([{
             "tag_name": "v1.2.0-alpha", "draft": false, "prerelease": true, "assets": [{
-                "name": "client-v1.2.0-alpha-android-arm64-v8a-debug.apk", "size": 3,
+                "name": "client-v1.2.0-alpha-android-arm64-v8a.apk", "size": 3,
                 "digest": format!("sha256:{:x}", Sha256::digest(b"apk")),
-                "browser_download_url": "https://github.com/example/client/releases/download/v1.2.0-alpha/client-v1.2.0-alpha-android-arm64-v8a-debug.apk"
+                "browser_download_url": "https://github.com/example/client/releases/download/v1.2.0-alpha/client-v1.2.0-alpha-android-arm64-v8a.apk"
             }]}])).unwrap();
         (channel, releases)
     }

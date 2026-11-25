@@ -62,7 +62,8 @@ class MobileReleaseTests(unittest.TestCase):
         self.assertTrue(all('1.2.3-alpha.1' in p.name for p in self.output.iterdir()))
         disclosure = next(self.output.glob('*SIGNING*.txt')).read_text()
         self.assertIn('unsigned', disclosure)
-        self.assertIn('debug', disclosure)
+        self.assertIn('persistent release key', disclosure)
+        self.assertFalse(any(p.name.endswith('-debug.apk') for p in self.output.iterdir()))
 
     def test_missing_architecture_blocks_publication(self):
         config = self.stage_all()
@@ -91,6 +92,18 @@ class MobileReleaseTests(unittest.TestCase):
             with self.subTest(metadata=metadata), patch.object(release.subprocess, 'check_output', return_value=metadata):
                 with self.assertRaisesRegex(ValueError, 'identity|version'):
                     release.stage_android(config, [self.apk('arm64-v8a'), self.apk('x86_64')], self.output, 'aapt')
+
+    def test_debug_builds_and_foreign_signers_are_rejected(self):
+        config = release.configuration(self.root, '')
+        good = "package: name='org.example.client' versionName='1.2.3-alpha.1'\n"
+        with patch.object(release.subprocess, 'check_output', return_value=good + "application-debuggable\n"):
+            with self.assertRaisesRegex(ValueError, 'release build'):
+                release.stage_android(config, [self.apk('arm64-v8a'), self.apk('x86_64')], self.output, 'aapt')
+        signed = "Signer #1 certificate SHA-256 digest: " + "a" * 64 + "\n"
+        with patch.object(release.subprocess, 'check_output', side_effect=lambda command, **_: signed if 'verify' in command else good):
+            with self.assertRaisesRegex(ValueError, 'persistent release key'):
+                release.stage_android(config, [self.apk('arm64-v8a'), self.apk('x86_64')], self.output, 'aapt', 'apksigner', 'b' * 64)
+            release.stage_android(config, [self.apk('arm64-v8a'), self.apk('x86_64')], self.output, 'aapt', 'apksigner', 'a' * 64)
 
     def test_sidecar_and_missing_native_client_are_rejected(self):
         for entries in [{'AndroidManifest.xml': b'x', 'classes.dex': b'x'},

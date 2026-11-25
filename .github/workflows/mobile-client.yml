@@ -97,7 +97,7 @@ jobs:
         run: |
           mkdir -p "$HOME/.gradle/init.d"
           cp .github/scripts/mobile-gradle.init.gradle "$HOME/.gradle/init.d/mobile-repositories.gradle"
-      - name: Build installable debug APKs
+      - name: Build signed release APKs
         working-directory: desktop
         env:
           GRADLE_OPTS: -Dorg.gradle.logging.level=info
@@ -113,11 +113,13 @@ jobs:
             trap 'rm -f "$MOBILE_ANDROID_KEYSTORE_PATH"' EXIT
             umask 077
             printf '%s' "$MOBILE_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$MOBILE_ANDROID_KEYSTORE_PATH"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "::error::Tagged releases require the persistent Android signing secrets"; exit 1
           else
-            echo "::warning::No persistent Android signing key configured. These acceptance APKs cannot guarantee cross-build installation updates."
+            echo "::warning::No persistent Android signing key configured; acceptance APKs use the debug key and cannot update installed releases."
           fi
           mkdir -p ../build-artifacts/mobile-android
-          npx tauri android build --debug --target aarch64 x86_64 --apk --split-per-abi --ci 2>&1 | tee ../build-artifacts/mobile-android/build.log
+          npx tauri android build --target aarch64 x86_64 --apk --split-per-abi --ci 2>&1 | tee ../build-artifacts/mobile-android/build.log
       - name: Preserve failed Android build diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -125,11 +127,14 @@ jobs:
           name: android-client-build-diagnostics
           if-no-files-found: warn
           path: build-artifacts/mobile-android/
-      - name: Verify and stage versioned debug APKs
+      - name: Verify and stage versioned release APKs
+        env:
+          # Public fingerprint of the persistent release certificate; a tag fails on any other signer.
+          MOBILE_ANDROID_CERT_SHA256: ${{ secrets.MOBILE_ANDROID_KEYSTORE_BASE64 != '' && '7d:fd:8b:48:44:cc:4e:a9:66:28:af:69:e0:4e:81:56:df:5b:1c:d7:a6:b5:ac:22:41:e5:53:91:b6:d2:65:2c' || '' }}
         run: python3 .github/scripts/mobile-release.py android --output release-assets
       - uses: actions/upload-artifact@v4
         with:
-          name: android-client-debug-apks
+          name: android-client-apks
           if-no-files-found: error
           path: release-assets/*
       - uses: actions/upload-artifact@v4

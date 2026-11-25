@@ -31,8 +31,8 @@ def configuration(root, ref):
 def names(config):
     stem = f"{config['name']}-v{config['version']}"
     return {
-        'arm64-v8a': f'{stem}-android-arm64-v8a-debug.apk',
-        'x86_64': f'{stem}-android-x86_64-debug.apk',
+        'arm64-v8a': f'{stem}-android-arm64-v8a.apk',
+        'x86_64': f'{stem}-android-x86_64.apk',
         'device': f'{stem}-ios-arm64-unsigned.ipa',
         'simulator': f'{stem}-ios-arm64-simulator.app.zip',
         'signing': f'{stem}-mobile-SIGNING.txt',
@@ -85,8 +85,16 @@ def checksum(path):
     path.with_name(path.name + '.sha256').write_text(f'{digest(path)}  {path.name}\n', encoding='utf-8')
 
 
-def stage_android(config, apks, output, aapt):
-    require(len(apks) == 2, 'Exactly two split debug APKs are required')
+def signer(apksigner, apk):
+    """SHA-256 of the APK's only signing certificate, as lowercase hex."""
+    report = subprocess.check_output([str(apksigner), 'verify', '--print-certs', str(apk)], text=True)
+    digests = re.findall(r'Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})', report)
+    require(len(digests) == 1, 'Expected exactly one Android signer')
+    return digests[0]
+
+
+def stage_android(config, apks, output, aapt, apksigner=None, expected_signer=None):
+    require(len(apks) == 2, 'Exactly two split release APKs are required')
     found = set()
     for apk in apks:
         abi = android_abi(apk)
@@ -95,6 +103,9 @@ def stage_android(config, apks, output, aapt):
         metadata = subprocess.check_output([str(aapt), 'dump', 'badging', str(apk)], text=True)
         require(f"name='{config['identifier']}'" in metadata, 'Android package identity mismatch')
         require(f"versionName='{config['version']}'" in metadata, 'Android package version mismatch')
+        require('application-debuggable' not in metadata, 'Android package must be a release build')
+        if expected_signer:
+            require(signer(apksigner, apk) == expected_signer, 'Android package is not signed with the persistent release key')
         target = output / names(config)[abi]
         shutil.copyfile(apk, target)
         checksum(target)
@@ -108,7 +119,8 @@ def stage_ios(config, ipa, simulator, output):
         checksum(target)
     disclosure = output / names(config)['signing']
     disclosure.write_text(
-        'Android APKs are debug builds signed with the CI debug key, not production release signing.\n'
+        'Android APKs are release builds signed with the persistent release key; tagged releases '
+        'refuse any other signer. Installations from earlier debug-signed releases need one reinstall.\n'
         'The simulator archive runs only in an ARM64 iOS simulator.\n'
         'The device IPA is unsigned and cannot be installed on a physical iPhone until signed '
         'with a valid Apple team and provisioning profile. No App Store publication was performed.\n',
@@ -142,8 +154,12 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     if args.mode == 'android':
         apks = list((root / 'desktop/gen/android/app/build/outputs/apk').rglob('*.apk'))
-        aapt = pathlib.Path(os.environ['ANDROID_HOME']) / 'build-tools/36.0.0/aapt'
-        stage_android(config, apks, args.output, aapt)
+        tools = pathlib.Path(os.environ['ANDROID_HOME']) / 'build-tools/36.0.0'
+        expected = os.environ.get('MOBILE_ANDROID_CERT_SHA256', '').replace(':', '').lower() or None
+        # A tag must ship the persistent key; other builds may fall back to the debug key.
+        require(expected or not os.environ.get('GITHUB_REF', '').startswith('refs/tags/'),
+                'Tagged releases require the persistent Android signing certificate')
+        stage_android(config, apks, args.output, tools / 'aapt', tools / 'apksigner', expected)
     elif args.mode == 'ios':
         ipas = list((root / 'desktop/gen/apple/build/arm64').glob('*.ipa'))
         require(len(ipas) == 1, 'One unsigned device IPA is required')

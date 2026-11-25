@@ -10,7 +10,7 @@
 | T5 | 受阻（用户处理中） | 生产周报工作流（Codeup→PDF→????-ferry，周一09:00） | 需用户在正常授权下改 prompt（去掉=与$json插值）、目标群、工作区时区后重跑；不得绕过授权 |
 | T6 | 已完成 | 多开发者多Agent 一期 | 363de3c Build/Mobile 全绿；部署验收Swarm失败为CI网络池冲突 |
 | T10 | 已完成 | 多Agent协作 二期 | 随 v0.11.0-alpha 发布(52d76bc CI 全绿) |
-| T11 | 进行中(暂停，先做T12) | Android 固定签名+改 release 构建（iOS 暂无 Apple 账号，延后） | 密钥已生成于 %USERPROFILE%\.ferry-signing（证书SHA256 7D:FD:8B:48…65:2C）；本机 NDK 28.2 目录不完整(缺source.properties)，本地验证改用 NDK 29；待改 mobile-prepare(release 用固定密钥+混淆保留规则)/CI 去 --debug 且打标签必须有密钥/发布文件名去 -debug/应用内更新匹配/测试 |
+| T11 | 受阻(待用户) | Android 固定签名+release 构建（iOS 待 Apple 账号） | 代码已推送；本地 release 双架构以固定证书签名、非可调试，模拟器安装启动+HTTPS 检查更新通过。解除：用户把 %USERPROFILE%\.ferry-signing\github-secrets.txt 4 项填入 GitHub Secrets、备份密钥库；之后的标签构建才会成功 |
 | T12 | 待验证 | 手机端会话照 WhatsApp/Telegram：先列表→点开全屏聊天页(左上返回，无底部导航)；自己消息靠右无头像，他人靠左带头像，Agent回复保持整宽卡片 | 本地：vitest 1012 全过、build、pending-ui(1440/900/390/320+H5键盘/大字/深色) 与 relay-ui 浏览器验收通过；聊天可视高度 467→532；待推送/CI/用户真机确认 |
 | T7 | 待验证 | 工作流列表与流水线列表分组一致 | ee24aea 合并推送(d8058b7)；vitest/build/Rust ordering 通过；待 CI |
 | T8 | 待验证 | ai.agent.run 提示词当前项($json)拦截+明确报错+MCP说明 | 5ca8a8a 合并推送(d8058b7)；只检查{{}}内代码、仅Agent节点保存期拦截；workflows 191 测试通过；待 CI |

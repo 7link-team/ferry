@@ -75,9 +75,13 @@ v0.10.11-alpha tag or interrupt its second CI attempt.
 Use an actual HTTPS TestFlight, App Store or enterprise distribution landing page
 for `iosDistributionUrl`, then rebuild. Keep `null` until a valid channel exists.
 
-Optional GitHub Actions secrets (configure all four together):
-`MOBILE_ANDROID_KEYSTORE_BASE64`, `MOBILE_ANDROID_STORE_PASSWORD`,
-`MOBILE_ANDROID_KEY_ALIAS`, `MOBILE_ANDROID_KEY_PASSWORD`.
+GitHub Actions secrets (configure all four together; required for tagged releases since
+2026-11-25): `MOBILE_ANDROID_KEYSTORE_BASE64`, `MOBILE_ANDROID_STORE_PASSWORD`,
+`MOBILE_ANDROID_KEY_ALIAS`, `MOBILE_ANDROID_KEY_PASSWORD`. Android APKs are release
+builds signed with that key; the release certificate SHA-256 is pinned in
+`.github/workflows/mobile-client.yml` (`7d:fd:8b:48:…:65:2c`) and staging refuses any
+other signer on a tag. Builds without the secrets (forks, pull requests) sign release
+APKs with the debug key so they stay installable for acceptance.
 Retain and securely back up the keystore for every later release. Existing
 ephemeral debug-signed installations may require a one-time reinstall; the client
 refuses a mismatched signer and never uninstalls or deletes user data itself.
