@@ -353,15 +353,20 @@ pub(super) async fn claim(
         .await?
         .map(|link| link.chat_agent_id);
     let same_agent: Option<Vec<i64>> = match room_agent {
-        Some(agent) => Some(
-            crate::entities::ai_chat_turns::Entity::find()
-                .select_only()
-                .column(crate::entities::ai_chat_turns::Column::Id)
-                .filter(crate::entities::ai_chat_turns::Column::ChatAgentId.eq(agent))
-                .into_tuple()
-                .all(&tx)
-                .await?,
-        ),
+        Some(agent) => {
+            // Room Agents working in the same directory take turns too: the Runner
+            // allows one Agent per directory, so parallel turns there would fail.
+            let peers = sharing_directory(&tx, c.id, agent).await?;
+            Some(
+                crate::entities::ai_chat_turns::Entity::find()
+                    .select_only()
+                    .column(crate::entities::ai_chat_turns::Column::Id)
+                    .filter(crate::entities::ai_chat_turns::Column::ChatAgentId.is_in(peers))
+                    .into_tuple()
+                    .all(&tx)
+                    .await?,
+            )
+        }
         None => None,
     };
     let mut earlier = turns::Entity::find()
@@ -1164,4 +1169,31 @@ async fn sponsor_available(
         && available(tx, &scope, execution.agent_id.into())
             .await
             .is_ok()
+}
+
+/// The room Agent and the other room Agents configured with the same working directory.
+async fn sharing_directory(
+    conn: &impl ConnectionTrait,
+    conversation: i64,
+    agent: i64,
+) -> Result<Vec<i64>> {
+    let rows = crate::entities::ai_chat_agents::Entity::find()
+        .filter(crate::entities::ai_chat_agents::Column::ConversationId.eq(conversation))
+        .all(conn)
+        .await?;
+    let directory = |config: &str| {
+        serde_json::from_str::<Value>(config)
+            .ok()
+            .and_then(|value| value["cwd"].as_str().map(str::to_owned))
+            .filter(|cwd| !cwd.is_empty())
+    };
+    let mine = rows
+        .iter()
+        .find(|row| row.id == agent)
+        .and_then(|row| directory(&row.config));
+    Ok(rows
+        .iter()
+        .filter(|row| row.id == agent || (mine.is_some() && directory(&row.config) == mine))
+        .map(|row| row.id)
+        .collect())
 }

@@ -550,6 +550,12 @@ async fn groups_require_membership_only_mentioned_agents_reply_with_separate_nat
         .exec(&s.db)
         .await
         .unwrap();
+    // Different working directories, so the two Agents may run in parallel.
+    let elsewhere = {
+        let mut config: Value = serde_json::from_str(&c.config).unwrap();
+        config["cwd"] = json!(format!("{}-second", config["cwd"].as_str().unwrap_or("")));
+        config.to_string()
+    };
     for agent in [c.agent_id, second.id] {
         snapshots::Entity::insert(
             snapshots::Model {
@@ -558,7 +564,11 @@ async fn groups_require_membership_only_mentioned_agents_reply_with_separate_nat
                 conversation_id: id.into(),
                 agent_id: agent,
                 revision_id: c.revision_id,
-                config: c.config.clone(),
+                config: if agent == second.id {
+                    elsewhere.clone()
+                } else {
+                    c.config.clone()
+                },
                 binding: c.binding.clone(),
                 native_session_id: String::new(),
                 state: "active".into(),
@@ -2875,4 +2885,64 @@ async fn deleting_a_room_removes_threads_but_not_the_resources() {
         .unwrap();
     assert_eq!(thread_rows::Entity::find().count(&s.db).await.unwrap(), 0);
     assert_eq!(run_links::Entity::find().count(&s.db).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn room_agents_sharing_a_directory_take_turns() {
+    use super::room_agents;
+    let (_dir, s, id, owner, member) = sponsored_room().await;
+    // The member's copy uses the same directory as the owner's Agent.
+    let (_, Json(added)) = room_agents::add(
+        State(s.clone()),
+        member.clone(),
+        Path(("1".into(), id)),
+        Json(
+            serde_json::from_value(
+                json!({"agent_id":Id::from(find(&s.db, &owner, id).await.unwrap().agent_id)}),
+            )
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    let theirs: Id = serde_json::from_value(added["id"].clone()).unwrap();
+    let mine = crate::entities::ai_chat_agents::Entity::find()
+        .filter(crate::entities::ai_chat_agents::Column::ConversationId.eq(id))
+        .filter(crate::entities::ai_chat_agents::Column::AddedBy.eq(1))
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    turns::Entity::update_many()
+        .col_expr(
+            turns::Column::State,
+            sea_orm::sea_query::Expr::value("cancelled"),
+        )
+        .filter(turns::Column::ConversationId.eq(id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    groups::send_message(
+        State(s.clone()),
+        owner.clone(),
+        Path(("1".into(), id)),
+        message(
+            json!({"prompt":"both","client_id":"shared-dir","agents":[Id::from(mine.id), theirs]}),
+        ),
+    )
+    .await
+    .unwrap();
+    let queued = turns::Entity::find()
+        .filter(turns::Column::ConversationId.eq(id))
+        .filter(turns::Column::State.eq("queued"))
+        .order_by_asc(turns::Column::Id)
+        .all(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(queued.len(), 2);
+    assert!(run::claim(&s, queued[0].id.into()).await.unwrap().is_some());
+    assert!(
+        run::claim(&s, queued[1].id.into()).await.unwrap().is_none(),
+        "the second Agent waits instead of failing on the shared directory"
+    );
 }
