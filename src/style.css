@@ -287,6 +287,11 @@ input[type="checkbox"]:not([aria-hidden="true"]) {
     padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
   }
   [data-app-header] { padding-top: max(.5rem, env(safe-area-inset-top)); }
+  /* Group sidebars become a scrolling row of chips; the create button goes last. */
+  [data-group-sidebar] { flex-direction: row; align-items: center; gap: .5rem; max-height: none; overflow-x: auto; overflow-y: hidden; border-bottom: 0; padding-bottom: 0; }
+  [data-group-sidebar] > * { flex-shrink: 0; }
+  [data-group-sidebar] button { border-radius: 9999px; white-space: nowrap; }
+  [data-group-sidebar] > div:first-of-type { order: 99; margin: 0; background: transparent; }
   /* Long press opens a message's actions (copy included), not text selection. */
   [data-message-id] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   /* Touch scrolling needs no visible scrollbars, as in native apps. */

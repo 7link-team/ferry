@@ -49,6 +49,8 @@ ShieldCheck,
 Trash2,
 Users,
 X,
+  EllipsisVertical,
+  ListFilter,
 } from "lucide-react";
 import { useCallback,useEffect,useMemo,useRef,useState,type ReactNode } from "react";
 import { errorText } from "../../shared/api/api";
@@ -71,6 +73,9 @@ DropdownMenuContent,
 DropdownMenuTrigger,
 } from "../../shared/ui/dropdown-menu";
 import { Input } from "../../shared/ui/input";
+import { InlineAlert } from "../../shared/ui/inline-alert";
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
+import { usePhone } from "../../shared/ui/use-phone";
 import {
 Select,
 SelectContent,
@@ -325,120 +330,26 @@ export function ResourceTable<T>({
 
 
 
-  return (
-    <div className={config.minDataHeight !== undefined ? "grid min-h-min min-w-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(min-content,1fr)] gap-3" : config.summary ? "grid min-h-min min-w-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(16rem,1fr)] gap-3" : "grid min-h-min min-w-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(min-content,1fr)] gap-3"}>
-      {/* ---------------------------------------------------- 搜索过滤 + 工具栏 */}
-      {pendingAction&&<ResourceActionDialog action={pendingAction.action} row={pendingAction.row} workspace={workspace} permissions={permissions} onClose={()=>setPendingAction(undefined)} onDone={()=>{setPendingAction(undefined);reload();}} />}
-      {pendingDelete && <DeleteConfirmDialog action={configText(pendingDelete.action, pendingDelete.actionKey)} target={pendingDelete.target} onClose={() => setPendingDelete(undefined)} onConfirm={pendingDelete.run} />}
-      <div className="flex min-w-0 max-w-full max-h-[30dvh] flex-col gap-3 overflow-y-auto sm:max-h-none sm:overflow-visible">
-        {error && !!rows.length && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
-        {config.filterPresets?.map(group => <div key={group.label} role="group" aria-label={configText(group.label, group.labelKey)} className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-muted-foreground">{configText(group.label, group.labelKey)}</span>
-          {group.presets.map(preset => <Button key={preset.label} size="sm" variant="outline" onClick={() => {
-            const values = typeof preset.values === "function" ? preset.values() : preset.values;
-            const next = { ...committed, ...values };
-            setDraft(next); setCommitted(next); writeFilters(next, config.queryPrefix); setPage(1); setSelected(new Set());
-          }}>{configText(preset.label, preset.labelKey)}</Button>)}
-        </div>)}
-        <div data-list-toolbar className="flex min-w-0 max-w-full flex-wrap items-end gap-3 rounded-md border bg-muted/30 p-3 [&_[data-slot=button]]:h-auto [&_[data-slot=button]]:min-h-8 [&_[data-slot=button]]:max-w-full [&_[data-slot=button]]:whitespace-normal [&_[data-slot=button]]:py-1 [&_[data-slot=button]]:[overflow-wrap:anywhere]">
-          {!hideToolbar && config.grouping && <div role="group" aria-label={commonText("table.viewMode")} title={commonText("table.groupBy", { name: configText(config.grouping.label, config.grouping.labelKey) })} className="inline-flex rounded-md border p-0.5">
-            {([["list", commonText("table.list"), List], ["groups", commonText("table.groups"), FolderTree]] as const).map(([value, label, Icon]) => <Button key={value} size="sm" variant={tableView === value ? "secondary" : "ghost"} aria-pressed={tableView === value} onClick={() => { setTableView(value); setPage(1); }}><Icon className="size-4" />{label}</Button>)}
-          </div>}
-        {!!config.filters?.length && (
-          <AutoForm
-            className="flex min-w-0 max-w-full flex-wrap items-end gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              search();
-            }}
-          >
-            {config.filters.map((filter) => (
-              <FilterField
-                key={filter.key}
-                filter={filter}
-                value={draft[filter.key] ?? ""}
-                onChange={(value) => setDraft((d) => ({ ...d, [filter.key]: value }))}
-              />
-            ))}
-            <div className="flex max-w-full flex-wrap gap-2">
-              <Button type="submit" size="sm">
-                <Search /> {commonText("common.search")}</Button>
-              <Button type="button" size="sm" variant="outline" onClick={clear}>
-                <X /> {commonText("common.clear")}</Button>
-            </div>
-          </AutoForm>
-        )}
-
-        {!hideToolbar && <div className="ml-auto flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 sm:w-auto">
-          <RefreshControl loading={loading} interval={refresh} remaining={remaining} onRefresh={reload} onIntervalChange={seconds => {
-            setRefresh(seconds);
-            try { localStorage.setItem(REFRESH_KEY(config.resource), String(seconds)); } catch { /* private storage */ }
-          }} />
-
-          <span className="flex-1" />
-
-
-          <ResourceTransfer key={`${workspace}/${config.resource}`} workspace={workspace} resource={config.resource} params={params}
-            columns={config.columns.filter(column => !hiddenColumns.has(column.key)).map(column => ({ key: column.key, label: configText(column.label, column.labelKey) }))}
-            canImport={config.toolbar?.import === true && permissions.has(`${config.permissionResource ?? config.resource}.create`)}
-            canExport={config.toolbar?.export === true} onChanged={() => { void load(); }} />
-          {config.toolbar?.content && (!config.toolbar.content.permission || permissions.has(config.toolbar.content.permission)) && config.toolbar.content.render(reload)}
-          {canCreate && (
-            <Button
-              size="sm"
-              onClick={() => navigate({ ...route, mode: "new" }, {})}
-              asChild={false}
-            >
-              <Plus />
-              {typeof config.toolbar?.create === "object" ? configText(config.toolbar.create.label, config.toolbar.create.labelKey) : commonText("common.create")}
-            </Button>
-          )}
-          {!!config.columns.length && <DropdownMenu><DropdownMenuTrigger asChild><Button size="sm" variant="outline"><Columns3 />{commonText("table.columns")}</Button></DropdownMenuTrigger>
-            <DropdownMenuContent align="end">{config.columns.map(column => <DropdownMenuCheckboxItem key={column.key} checked={!hiddenColumns.has(column.key)} disabled={hiddenColumns.size === config.columns.length - 1 && !hiddenColumns.has(column.key)} onSelect={event => event.preventDefault()} onCheckedChange={() => setHiddenColumns(current => { const next = new Set(current); if (next.has(column.key)) next.delete(column.key); else next.add(column.key); return next; })}>{configText(column.label, column.labelKey)}</DropdownMenuCheckboxItem>)}</DropdownMenuContent>
-          </DropdownMenu>}
-        </div>}
-        </div>
-        {data && !loading && !error && config.summary?.(data)}
-      </div>
-
-      {grouped ? <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-        <nav aria-label={commonText("repository.path")} className="flex shrink-0 flex-wrap items-center gap-1 rounded-md border px-2 py-1">
-          <Button size="icon" variant="ghost" aria-label={commonText("repository.parent")} title={commonText("repository.parent")} disabled={!folder} onClick={() => enterFolder(folder.split('/').slice(0, -1).join('/'))}><ArrowUp className="size-4" /></Button>
-          <Button size="sm" variant="ghost" onClick={() => enterFolder("")}>{commonText("repository.all")}</Button>
-          {folder.split('/').filter(Boolean).map((name, index, parts) => <span key={index} className="inline-flex min-w-0 items-center"><ChevronRight className="size-3 shrink-0 text-muted-foreground" /><Button size="sm" variant="ghost" className="max-w-48 truncate" title={name} aria-current={index === parts.length - 1 ? "page" : undefined} onClick={() => enterFolder(parts.slice(0, index + 1).join('/'))}>{name}</Button></span>)}
-        </nav>
-        <AutoTable<(typeof directoryRows)[number]> fill layout="auto" rowKey={entry => entry.path}
-          state={{ rows: directoryRows.slice((page - 1) * pageSize, page * pageSize), total: directoryRows.length, query: { page, pageSize }, loading, error: error || undefined }}
-          columns={[
-            { field: 'name', name: commonText("common.name"), render: (_value, entry) => entry.row ? <span className="inline-flex items-center gap-2"><GitBranch className="size-4 shrink-0 text-muted-foreground" />{entry.name}</span> : <button type="button" className="inline-flex items-center gap-2 text-left hover:text-primary" onClick={() => enterFolder(entry.path)}><Folder className="size-4 shrink-0 text-primary" />{entry.name}</button> },
-            { field: 'count', name: commonText("common.content"), render: (_value, entry) => entry.row ? commonText("dashboard.repositories") : commonText("repository.count", { count: entry.count }) },
-            ...config.columns.filter(column => column.key !== 'full_name').map(column => ({ field: column.key, name: configText(column.label, column.labelKey), render: (_value: unknown, entry: (typeof directoryRows)[number]) => entry.row ? column.render ? column.render(entry.row) : String((entry.row as Record<string, unknown>)[column.key] ?? '') : '—' })),
-          ]}
-          sticky={{ header: true }} rowClickable={entry => !entry.row} onRowClick={entry => { if (!entry.row) enterFolder(entry.path); }}
-          onPageChange={setPage} onPageSizeChange={value => { setPageSize(value); setPage(1); }} pageSizeOptions={[...PAGE_SIZES]} onRetry={reload} empty={commonText("repository.emptyGroup")} />
-      </div> : <AutoTable<T> fill minDataHeight={config.minDataHeight ?? "actions"} layout="auto" scrollRef={scrollRef} rowKey={config.rowKey}
-        className="[&_[data-auto-table-footer]]:shadow-[0_-4px_10px_-4px_var(--sticky-shadow-color)]"
-        hiddenFields={hiddenColumns}
-        columns={config.columns.map(column => ({ field: column.key, name: configText(column.label, column.labelKey), width: column.width ? `${column.width}px` : undefined, align: column.align, sortable: column.sortable, render: (_value, row) => column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "") }))}
-        state={{ rows, total, query: { page, pageSize, filter: committed, sort: sort ? { field: sort.replace(/^-/, ""), direction: sort.startsWith("-") ? "desc" : "asc" } : undefined }, loading, error: rows.length ? undefined : error, selected }}
-        showSequence selectable={!!visibleBulk.length} pagination={config.pagination} hasMore={!error && data?.has_more}
-        sticky={{ header: true, left: 1, right: visibleActions.length ? 1 : 0, pagination: false }}
-        groupBy={grouped ? config.grouping!.key : undefined} empty={config.emptyKey ? commonText(config.emptyKey) : config.empty}
-        onPageChange={setPage}
-        onPageSizeChange={value => { setPageSize(value); setPage(1); }}
-        pageSizeOptions={[...PAGE_SIZES]} onSortChange={key => { setSort(sort === key ? `-${key}` : sort === `-${key}` ? "" : key); setPage(1); }}
-        onRetry={reload} onSelectAll={toggleAll}
-        onToggleSelect={row => setSelected(current => { const next = new Set(current); const key = config.rowKey(row); if (next.has(key)) next.delete(key); else next.add(key); return next; })}
-        rowClickable={row => !!config.onRowClick || !!detailAction(row)}
-        onRowClick={row => { if (config.onRowClick) { config.onRowClick(row); return; } const action = detailAction(row); if (action?.to) navigate({ ...route, ...action.to(row) }, action.query?.(row) ?? {}); }}
-        actionWidth={Math.max(80, ...rows.map(row => visibleActions.filter(action => !action.when || action.when(row)).reduce((width, action) => width + (action.showLabel ? 120 : 36), 24)))}
-        actionsContent={visibleActions.length ? row => { const key = config.rowKey(row); return <div className="inline-flex w-max max-w-[calc(100cqw-2rem)] flex-wrap items-center justify-end">                          {visibleActions
+  // Phones show a list instead of a table: search box, filters on demand, load more.
+  const phone = usePhone();
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const searchFilter = config.filters?.find(filter => filter.type === "text");
+  const otherFilters = (config.filters ?? []).filter(filter => filter !== searchFilter);
+  const cell = (row: T, column: (typeof config.columns)[number]) =>
+    column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "");
+  const openRow = (row: T) => {
+    if (config.onRowClick) { config.onRowClick(row); return; }
+    const action = detailAction(row);
+    if (action?.to) navigate({ ...route, ...action.to(row) }, action.query?.(row) ?? {});
+  };
+  // Row actions, shared by the desktop table and the phone list (where they show their names).
+  const renderActions = (row: T, labels = false) => { const key = config.rowKey(row); return <div className="inline-flex w-max max-w-[calc(100cqw-2rem)] flex-wrap items-center justify-end">                          {visibleActions
                             .filter((action) => !action.when || action.when(row))
                             .map((action) => (
                               <RowActionButton
                                 key={configText(action.label, action.labelKey)}
                                 label={configText(action.label, action.labelKey)}
-                                showLabel={action.showLabel}
+                                showLabel={labels || action.showLabel}
                                 icon={busyActions.has(JSON.stringify([config.resource, key, action.label])) ? <Loader2 className="size-4 animate-spin" /> : action.icon ?? actionIcon(action.label)}
                                 newTab={action.newTab}
                                 disabled={busy || busyActions.has(JSON.stringify([config.resource, key, action.label])) || action.disabled?.(row)}
@@ -480,7 +391,153 @@ export function ResourceTable<T>({
                                     }
                                   : {})}
                               />
-                            ))}</div>; } : undefined}
+                            ))}</div>; };
+
+  return (
+    <div className={config.minDataHeight !== undefined ? "grid min-h-min min-w-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(min-content,1fr)] gap-3" : config.summary ? "grid min-h-min min-w-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(16rem,1fr)] gap-3" : "grid min-h-min min-w-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(min-content,1fr)] gap-3"}>
+      {/* ---------------------------------------------------- 搜索过滤 + 工具栏 */}
+      {pendingAction&&<ResourceActionDialog action={pendingAction.action} row={pendingAction.row} workspace={workspace} permissions={permissions} onClose={()=>setPendingAction(undefined)} onDone={()=>{setPendingAction(undefined);reload();}} />}
+      {pendingDelete && <DeleteConfirmDialog action={configText(pendingDelete.action, pendingDelete.actionKey)} target={pendingDelete.target} onClose={() => setPendingDelete(undefined)} onConfirm={pendingDelete.run} />}
+      <div className="flex min-w-0 max-w-full max-h-[30dvh] flex-col gap-3 overflow-y-auto sm:max-h-none sm:overflow-visible">
+        {error && !!rows.length && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+        {config.filterPresets?.map(group => <div key={group.label} role="group" aria-label={configText(group.label, group.labelKey)} className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted-foreground">{configText(group.label, group.labelKey)}</span>
+          {group.presets.map(preset => <Button key={preset.label} size="sm" variant="outline" onClick={() => {
+            const values = typeof preset.values === "function" ? preset.values() : preset.values;
+            const next = { ...committed, ...values };
+            setDraft(next); setCommitted(next); writeFilters(next, config.queryPrefix); setPage(1); setSelected(new Set());
+          }}>{configText(preset.label, preset.labelKey)}</Button>)}
+        </div>)}
+        <div data-list-toolbar className="flex min-w-0 max-w-full flex-wrap items-end gap-3 rounded-md border bg-muted/30 p-3 max-md:border-0 max-md:bg-transparent max-md:p-0 [&_[data-slot=button]]:h-auto [&_[data-slot=button]]:min-h-8 [&_[data-slot=button]]:max-w-full [&_[data-slot=button]]:whitespace-normal [&_[data-slot=button]]:py-1 [&_[data-slot=button]]:[overflow-wrap:anywhere]">
+          {!hideToolbar && config.grouping && <div role="group" aria-label={commonText("table.viewMode")} title={commonText("table.groupBy", { name: configText(config.grouping.label, config.grouping.labelKey) })} className="inline-flex rounded-md border p-0.5">
+            {([["list", commonText("table.list"), List], ["groups", commonText("table.groups"), FolderTree]] as const).map(([value, label, Icon]) => <Button key={value} size="sm" variant={tableView === value ? "secondary" : "ghost"} aria-pressed={tableView === value} onClick={() => { setTableView(value); setPage(1); }}><Icon className="size-4" />{label}</Button>)}
+          </div>}
+        {phone && !!config.filters?.length && (
+          <div data-phone-search className="flex min-w-0 items-center gap-2">
+            {searchFilter && <Input type="search" enterKeyHint="search" className="min-h-11 min-w-0 flex-1" aria-label={configText(searchFilter.label, searchFilter.labelKey)}
+              placeholder={configText(searchFilter.label, searchFilter.labelKey)} value={draft[searchFilter.key] ?? ""}
+              onChange={event => setDraft(d => ({ ...d, [searchFilter.key]: event.target.value }))}
+              onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); search(); } }} onBlur={search} />}
+            {!!otherFilters.length && <Button type="button" variant="outline" className="min-h-11 shrink-0" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(open => !open)}>
+              <ListFilter /> {commonText("table.filters")}</Button>}
+          </div>
+        )}
+        {!!config.filters?.length && (!phone || (filtersOpen && !!otherFilters.length)) && (
+          <AutoForm
+            className="flex min-w-0 max-w-full flex-wrap items-end gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              search();
+            }}
+          >
+            {config.filters.map((filter) => (
+              <FilterField
+                key={filter.key}
+                filter={filter}
+                value={draft[filter.key] ?? ""}
+                onChange={(value) => setDraft((d) => ({ ...d, [filter.key]: value }))}
+              />
+            ))}
+            <div className="flex max-w-full flex-wrap gap-2">
+              <Button type="submit" size="sm">
+                <Search /> {commonText("common.search")}</Button>
+              <Button type="button" size="sm" variant="outline" onClick={clear}>
+                <X /> {commonText("common.clear")}</Button>
+            </div>
+          </AutoForm>
+        )}
+
+        {!hideToolbar && <div className="ml-auto flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 sm:w-auto">
+          {!phone && <RefreshControl loading={loading} interval={refresh} remaining={remaining} onRefresh={reload} onIntervalChange={seconds => {
+            setRefresh(seconds);
+            try { localStorage.setItem(REFRESH_KEY(config.resource), String(seconds)); } catch { /* private storage */ }
+          }} />}
+
+          <span className="flex-1" />
+
+
+          {!phone && <ResourceTransfer key={`${workspace}/${config.resource}`} workspace={workspace} resource={config.resource} params={params}
+            columns={config.columns.filter(column => !hiddenColumns.has(column.key)).map(column => ({ key: column.key, label: configText(column.label, column.labelKey) }))}
+            canImport={config.toolbar?.import === true && permissions.has(`${config.permissionResource ?? config.resource}.create`)}
+            canExport={config.toolbar?.export === true} onChanged={() => { void load(); }} />}
+          {config.toolbar?.content && (!config.toolbar.content.permission || permissions.has(config.toolbar.content.permission)) && config.toolbar.content.render(reload)}
+          {canCreate && (
+            <Button
+              size="sm"
+              onClick={() => navigate({ ...route, mode: "new" }, {})}
+              asChild={false}
+            >
+              <Plus />
+              {typeof config.toolbar?.create === "object" ? configText(config.toolbar.create.label, config.toolbar.create.labelKey) : commonText("common.create")}
+            </Button>
+          )}
+          {!phone && !!config.columns.length && <DropdownMenu><DropdownMenuTrigger asChild><Button size="sm" variant="outline"><Columns3 />{commonText("table.columns")}</Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end">{config.columns.map(column => <DropdownMenuCheckboxItem key={column.key} checked={!hiddenColumns.has(column.key)} disabled={hiddenColumns.size === config.columns.length - 1 && !hiddenColumns.has(column.key)} onSelect={event => event.preventDefault()} onCheckedChange={() => setHiddenColumns(current => { const next = new Set(current); if (next.has(column.key)) next.delete(column.key); else next.add(column.key); return next; })}>{configText(column.label, column.labelKey)}</DropdownMenuCheckboxItem>)}</DropdownMenuContent>
+          </DropdownMenu>}
+        </div>}
+        </div>
+        {data && !loading && !error && config.summary?.(data)}
+      </div>
+
+      {grouped ? <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+        <nav aria-label={commonText("repository.path")} className="flex shrink-0 flex-wrap items-center gap-1 rounded-md border px-2 py-1">
+          <Button size="icon" variant="ghost" aria-label={commonText("repository.parent")} title={commonText("repository.parent")} disabled={!folder} onClick={() => enterFolder(folder.split('/').slice(0, -1).join('/'))}><ArrowUp className="size-4" /></Button>
+          <Button size="sm" variant="ghost" onClick={() => enterFolder("")}>{commonText("repository.all")}</Button>
+          {folder.split('/').filter(Boolean).map((name, index, parts) => <span key={index} className="inline-flex min-w-0 items-center"><ChevronRight className="size-3 shrink-0 text-muted-foreground" /><Button size="sm" variant="ghost" className="max-w-48 truncate" title={name} aria-current={index === parts.length - 1 ? "page" : undefined} onClick={() => enterFolder(parts.slice(0, index + 1).join('/'))}>{name}</Button></span>)}
+        </nav>
+        <AutoTable<(typeof directoryRows)[number]> fill layout="auto" rowKey={entry => entry.path}
+          state={{ rows: directoryRows.slice((page - 1) * pageSize, page * pageSize), total: directoryRows.length, query: { page, pageSize }, loading, error: error || undefined }}
+          columns={[
+            { field: 'name', name: commonText("common.name"), render: (_value, entry) => entry.row ? <span className="inline-flex items-center gap-2"><GitBranch className="size-4 shrink-0 text-muted-foreground" />{entry.name}</span> : <button type="button" className="inline-flex items-center gap-2 text-left hover:text-primary" onClick={() => enterFolder(entry.path)}><Folder className="size-4 shrink-0 text-primary" />{entry.name}</button> },
+            { field: 'count', name: commonText("common.content"), render: (_value, entry) => entry.row ? commonText("dashboard.repositories") : commonText("repository.count", { count: entry.count }) },
+            ...config.columns.filter(column => column.key !== 'full_name').map(column => ({ field: column.key, name: configText(column.label, column.labelKey), render: (_value: unknown, entry: (typeof directoryRows)[number]) => entry.row ? column.render ? column.render(entry.row) : String((entry.row as Record<string, unknown>)[column.key] ?? '') : '—' })),
+          ]}
+          sticky={{ header: true }} rowClickable={entry => !entry.row} onRowClick={entry => { if (!entry.row) enterFolder(entry.path); }}
+          onPageChange={setPage} onPageSizeChange={value => { setPageSize(value); setPage(1); }} pageSizeOptions={[...PAGE_SIZES]} onRetry={reload} empty={commonText("repository.emptyGroup")} />
+      </div> : phone ? <div data-phone-list className="flex min-w-0 flex-col gap-3 pb-4">
+        {error && !rows.length && <InlineAlert>{error}</InlineAlert>}
+        {!rows.length && loading && <LoadingSkeleton variant="page" />}
+        {!rows.length && !loading && !error && <p role="status" className="py-10 text-center text-sm text-muted-foreground">{config.emptyKey ? commonText(config.emptyKey) : config.empty ?? commonText("table.empty")}</p>}
+        {!!rows.length && <ul className="divide-y overflow-hidden rounded-xl border bg-card">
+          {rows.map(row => {
+            const columns = config.columns.filter(column => !hiddenColumns.has(column.key));
+            const [first, ...rest] = columns;
+            const clickable = !!config.onRowClick || !!detailAction(row);
+            const actions = visibleActions.filter(action => !action.when || action.when(row));
+            return <li key={config.rowKey(row)} data-phone-row className="flex min-h-16 items-center gap-1 pe-1">
+              <button type="button" disabled={!clickable} onClick={() => openRow(row)} className="flex min-h-16 min-w-0 flex-1 flex-col justify-center gap-1 px-4 py-2 text-left disabled:cursor-default">
+                {first && <span className="block min-w-0 truncate font-medium">{cell(row, first)}</span>}
+                {!!rest.length && <span className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  {rest.slice(0, 2).map(column => <span key={column.key} className="min-w-0 max-w-full truncate">{cell(row, column)}</span>)}
+                </span>}
+              </button>
+              {!!actions.length && <DropdownMenu><DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="size-11 shrink-0" aria-label={commonText("table.actions")}><EllipsisVertical /></Button>
+              </DropdownMenuTrigger><DropdownMenuContent align="end" className="p-1 [&>div]:flex [&>div]:w-full [&>div]:flex-col [&>div]:items-stretch [&_[data-slot=button]]:justify-start">
+                {renderActions(row, true)}
+              </DropdownMenuContent></DropdownMenu>}
+            </li>;
+          })}
+        </ul>}
+        {rows.length < total && <Button variant="outline" className="min-h-11" disabled={loading} onClick={() => setPageSize(pageSize + 20)}>
+          {loading ? commonText("common.loading") : commonText("table.loadMore")}</Button>}
+      </div> : <AutoTable<T> fill minDataHeight={config.minDataHeight ?? "actions"} layout="auto" scrollRef={scrollRef} rowKey={config.rowKey}
+        className="[&_[data-auto-table-footer]]:shadow-[0_-4px_10px_-4px_var(--sticky-shadow-color)]"
+        hiddenFields={hiddenColumns}
+        columns={config.columns.map(column => ({ field: column.key, name: configText(column.label, column.labelKey), width: column.width ? `${column.width}px` : undefined, align: column.align, sortable: column.sortable, render: (_value, row) => column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "") }))}
+        state={{ rows, total, query: { page, pageSize, filter: committed, sort: sort ? { field: sort.replace(/^-/, ""), direction: sort.startsWith("-") ? "desc" : "asc" } : undefined }, loading, error: rows.length ? undefined : error, selected }}
+        showSequence selectable={!!visibleBulk.length} pagination={config.pagination} hasMore={!error && data?.has_more}
+        sticky={{ header: true, left: 1, right: visibleActions.length ? 1 : 0, pagination: false }}
+        groupBy={grouped ? config.grouping!.key : undefined} empty={config.emptyKey ? commonText(config.emptyKey) : config.empty}
+        onPageChange={setPage}
+        onPageSizeChange={value => { setPageSize(value); setPage(1); }}
+        pageSizeOptions={[...PAGE_SIZES]} onSortChange={key => { setSort(sort === key ? `-${key}` : sort === `-${key}` ? "" : key); setPage(1); }}
+        onRetry={reload} onSelectAll={toggleAll}
+        onToggleSelect={row => setSelected(current => { const next = new Set(current); const key = config.rowKey(row); if (next.has(key)) next.delete(key); else next.add(key); return next; })}
+        rowClickable={row => !!config.onRowClick || !!detailAction(row)}
+        onRowClick={row => { if (config.onRowClick) { config.onRowClick(row); return; } const action = detailAction(row); if (action?.to) navigate({ ...route, ...action.to(row) }, action.query?.(row) ?? {}); }}
+        actionWidth={Math.max(80, ...rows.map(row => visibleActions.filter(action => !action.when || action.when(row)).reduce((width, action) => width + (action.showLabel ? 120 : 36), 24)))}
+        actionsContent={visibleActions.length ? row => renderActions(row) : undefined}
         footerContent={<>{data && !loading && !error && config.footerSummary?.(data)}{!!selected.size && (
           <>
             <span className="text-muted-foreground">{commonText("table.selected", { count: selected.size })}</span>
