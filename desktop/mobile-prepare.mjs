@@ -99,5 +99,16 @@ writeFileSync(new URL('CertificateVerifier.kt', tlsDirectory),
   readFileSync(new URL('./android/CertificateVerifier.kt', import.meta.url), 'utf8'));
 const xml = new URL('./gen/android/app/src/main/res/xml/', import.meta.url);
 mkdirSync(xml, { recursive: true });
+// rustls-platform-verifier's manifest installs a network security config that forbids
+// cleartext everywhere, overriding usesCleartextTraffic. The connection page supports
+// HTTP servers, so the app's own resource of the same name takes precedence; HTTPS still
+// uses the system trust store.
+writeFileSync(new URL('network_security_config.xml', xml), `<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+  <base-config cleartextTrafficPermitted="true">
+    <trust-anchors><certificates src="system" /></trust-anchors>
+  </base-config>
+</network-security-config>
+`);
 writeFileSync(new URL('update_paths.xml', xml),
   '<?xml version="1.0" encoding="utf-8"?>\n<paths xmlns:android="http://schemas.android.com/apk/res/android"><cache-path name="updates" path="native-updates/" /></paths>\n');
