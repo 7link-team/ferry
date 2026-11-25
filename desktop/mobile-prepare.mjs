@@ -82,6 +82,9 @@ if (!kotlin.includes('override fun onConfigurationChanged')) {
 if (!kotlin.includes('    protectSystemBars()')) {
   kotlin = kotlin.replaceAll('    enableEdgeToEdge()', '    enableEdgeToEdge()\n    protectSystemBars()');
 }
+if (!kotlin.includes('override fun onWebViewCreate')) {
+  kotlin = kotlin.replace(/\n}\s*$/, '\n\n  override fun onWebViewCreate(webView: android.webkit.WebView) {\n    super.onWebViewCreate(webView)\n    followPageColors(webView)\n  }\n}\n');
+}
 if (!kotlin.includes('super.onCreate(savedInstanceState)\n    enableEdgeToEdge()') || !kotlin.includes('override fun onConfigurationChanged')) {
   throw new Error('Unexpected Android Activity; update the preparation generator against the installed template.');
 }
