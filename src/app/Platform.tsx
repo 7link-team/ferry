@@ -238,7 +238,7 @@ export function Platform({ identity, reload, headerActions }: { identity: Identi
       </nav>
     } actions={headerActions} />
     <div className="flex shrink-0 items-center justify-between gap-3 border-b px-5 py-3">
-      <nav aria-label={commonText("common-domain:shell.breadcrumbs")}><ol className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+      <nav aria-label={commonText("common-domain:shell.breadcrumbs")} className="max-sm:hidden"><ol className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         <li>{commonText("resource-domain:platform.management")}</li><li aria-hidden="true">/</li>
         <li><a className="hover:text-foreground" aria-current={!route.id?"page":undefined} href={href({workspace:"_platform",item,mode:item==="settings"?"edit":item==="monitor"?"view":"list",...(item==="settings"?{id:"1"}:item==="monitor"?{id:"server-nodes"}:{})},{})} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate({workspace:"_platform",item,mode:item==="settings"?"edit":item==="monitor"?"view":"list",...(item==="settings"?{id:"1"}:item==="monitor"?{id:"server-nodes"}:{})},{});}}>{commonText(labels[item]!)}</a></li>
         {(item==="monitor"||serverNodes||(route.id&&item!=="settings"))&&<><li aria-hidden="true">/</li><li aria-current="page" className="text-foreground">{serverNodes?commonText("resource-domain:platform.serverNodes"):item==="monitor"?commonText(`resource-domain:monitor.${route.id??"database"}`):commonText(`common-domain:common.${route.mode==="edit"?"edit":"details"}`)}</li></>}

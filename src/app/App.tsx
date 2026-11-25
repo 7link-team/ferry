@@ -258,6 +258,15 @@ function Workspace({ identity, reload, onSignedOut, conversationSessions }: { id
     }))
     .filter((g) => g.items.length);
 
+  // Bottom-navigation tabs replace the history entry: like app tabs, Back does not hop between them.
+  const tab = (groupKey: string, itemKey: string) => ({
+    href: href({ workspace: current.id, group: groupKey, item: itemKey, mode: "list" }, {}),
+    onClick: (event: React.MouseEvent) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      navigate({ workspace: current.id, group: groupKey, item: itemKey, mode: "list" }, {}, { replace: true });
+    },
+  });
   const to = (groupKey: string, itemKey: string, params?: Record<string, string>) => ({
     href: href({ workspace: current.id, group: groupKey, item: itemKey, mode: "list" }, params ?? {}),
     onClick: (event: React.MouseEvent) => {
@@ -353,7 +362,7 @@ function Workspace({ identity, reload, onSignedOut, conversationSessions }: { id
         <main className={cn("grid min-h-0 min-w-0 grid-cols-1 overflow-y-auto px-4 pt-3", route.mode === "list" ? "grid-rows-[auto_minmax(min-content,1fr)] overflow-x-hidden" : "grid-rows-[auto_minmax(0,1fr)]")}>
           <div>
           {route.mode === "list" && visibleMenu.length > 1 && <div className="mb-2 md:hidden"><DropdownMenu key={route.item}><DropdownMenuTrigger asChild><Button variant="outline" className="min-h-11 w-full justify-between"><span className="min-w-0 truncate">{group.label} · {parentItem.label}</span><ChevronDown className="size-4 shrink-0" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" collisionPadding={8} className="max-h-[60dvh] w-[min(24rem,calc(100vw-2rem))] overflow-y-auto">{visibleMenu.map(entry => <DropdownMenuItem asChild key={entry.key}><a {...to(group.key, menuTarget(group, entry).key, menuTarget(group, entry).params)} aria-current={entry.key === parentItem.key ? "page" : undefined} className="min-h-11 whitespace-normal break-words">{entry.section ? `${commonText(entry.section)} · ` : ""}{entry.label}</a></DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu></div>}
-          <nav aria-label={commonText("shell.breadcrumbs")}>
+          <nav aria-label={commonText("shell.breadcrumbs")} className="max-sm:hidden">
             <ol className="flex min-w-0 flex-wrap gap-1.5 text-sm break-words text-muted-foreground">
               <li>
                 <a className="hover:text-foreground" {...to(nav[0]!.key, nav[0]!.items[0]!.key)}>
@@ -398,7 +407,7 @@ function Workspace({ identity, reload, onSignedOut, conversationSessions }: { id
             {route.mode === "new" && (item.resource === "hosts" ? commonText("shell.addSuffix") : commonText("shell.createSuffix"))}
             {route.mode === "edit" && commonText("shell.editSuffix")}
             </h1>
-            {!current.timezone && permissions.has("settings.update") && <a className="text-sm font-normal text-muted-foreground underline" title={commonText("resource-domain:workspace.unconfirmedNotice")} aria-label={`${commonText("resource-domain:workspace.settings")}: ${commonText("resource-domain:workspace.unconfirmedNotice")}`} href={href({ workspace: current.id, group: "ops", item: "workspace-settings", id: "1", mode: "edit" }, {})}>{commonText("resource-domain:workspace.timezone")} · {commonText("resource-domain:workspace.unconfirmed")}</a>}
+            {!current.timezone && permissions.has("settings.update") && <a className="text-sm font-normal text-muted-foreground underline max-sm:hidden" title={commonText("resource-domain:workspace.unconfirmedNotice")} aria-label={`${commonText("resource-domain:workspace.settings")}: ${commonText("resource-domain:workspace.unconfirmedNotice")}`} href={href({ workspace: current.id, group: "ops", item: "workspace-settings", id: "1", mode: "edit" }, {})}>{commonText("resource-domain:workspace.timezone")} · {commonText("resource-domain:workspace.unconfirmed")}</a>}
           </div>
 
           {relatedItems.length > 1 && !["pipelines", "workflows", "credentials"].includes(parentItem.key) && <nav aria-label={commonText("shell.relatedPages", { name: notificationArea ? commonText("notifications:notification-channels") : parentItem.label })} className="mb-3 flex flex-wrap gap-3">
@@ -480,7 +489,7 @@ function Workspace({ identity, reload, onSignedOut, conversationSessions }: { id
           )}
         </main>
       </div>}
-      <MobileNavigation active={group.key} items={groups.map(entry => ({key:entry.key,label:entry.label,...to(entry.key,menuTarget(findGroup(entry.key)!,entry.items[0]!).key)}))} />
+      <MobileNavigation active={group.key} items={groups.map(entry => ({key:entry.key,label:entry.label,...tab(entry.key,menuTarget(findGroup(entry.key)!,entry.items[0]!).key)}))} />
     </div>
   );
 }
@@ -490,7 +499,7 @@ const UnavailablePage = ({ onBack }: { onBack: () => void }) => (
 );
 
 function AppearanceActions({ floating = false }: { floating?: boolean }) {
-  return <div className={floating ? "fixed end-3 top-2 z-40 flex items-center gap-1 rounded-md bg-card" : "flex shrink-0 items-center gap-1"}><LanguageSwitcher /><ThemeSwitcher /></div>;
+  return <div className={floating ? "fixed end-3 top-2 z-40 flex items-center gap-1 rounded-md bg-card" : "flex shrink-0 items-center gap-1 max-sm:hidden"}><LanguageSwitcher /><ThemeSwitcher /></div>;
 }
 
 function WorkspaceHeaderActions({ identity, onRefresh, onWorkspaces, onSignedOut }: { identity: Identity; onRefresh: () => void; onWorkspaces?: () => void; onSignedOut: () => void }) {
